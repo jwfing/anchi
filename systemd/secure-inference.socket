@@ -1,0 +1,14 @@
+[Unit]
+Description=Secure VM cell-facing inference socket
+After=systemd-tmpfiles-setup.service
+
+[Socket]
+ListenStream=/run/secure-inference/api.sock
+SocketUser=secure-inference
+SocketGroup=secure-cell-peer
+SocketMode=0660
+DirectoryMode=0750
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

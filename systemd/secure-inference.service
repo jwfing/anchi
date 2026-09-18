@@ -1,0 +1,29 @@
+[Unit]
+Description=Secure VM bounded inference gateway
+Requires=secure-inference.socket
+After=network-online.target
+
+[Service]
+User=secure-inference
+Group=secure-inference
+ExecStart=/usr/bin/python3 /opt/secure-vm/services/server.py inference
+StateDirectory=secure-inference
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm /run/secure-auth /run/secure-gmail
+MemoryMax=192M
+TasksMax=16
+LimitCORE=0
+Restart=on-failure

@@ -1,0 +1,22 @@
+#!/bin/bash
+# Trusted guest-admin entry point. Never expose this sudo command to the agent.
+set -euo pipefail
+[[ $(id -u) == 0 ]] || { echo 'Must run as guest root' >&2; exit 1; }
+[[ $# -gt 0 ]] || { echo 'Usage: secure-cell-run COMMAND [ARG...]' >&2; exit 2; }
+# Fixed unit name deliberately prevents concurrent access to this prototype cell.
+exec systemd-run --quiet --unit=secure-cell --collect --wait --pipe \
+  --service-type=exec \
+  --property=MemoryMax=1G --property=MemorySwapMax=0 \
+  --property=TasksMax=128 --property=CPUQuota=200% \
+  --property='RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
+  /usr/bin/systemd-nspawn --quiet --register=no --settings=no \
+  --machine=secure-cell --directory=/var/lib/secure-vm/rootfs \
+  --private-users=524288:65536 --private-users-ownership=off \
+  --private-network --read-only --user=agent --drop-capability=all \
+  --no-new-privileges=yes --console=pipe --chdir=/workspace \
+  --bind=/var/lib/secure-vm/workspace:/workspace \
+  --bind-ro=/run/secure-gmail:/run/secure-gmail \
+  --bind-ro=/run/secure-inference:/run/secure-inference \
+  --tmpfs=/tmp:mode=1777,size=64M --tmpfs=/var/tmp:mode=1777,size=64M \
+  --system-call-filter='~io_uring_setup io_uring_enter io_uring_register bpf perf_event_open' \
+  --setenv=HOME=/workspace --setenv=PATH=/usr/bin:/bin -- "$@"
