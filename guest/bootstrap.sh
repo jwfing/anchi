@@ -12,9 +12,14 @@ if [[ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]]; then
 fi
 if [[ ! -f "$base/rootfs-ready" ]]; then
   if [[ -e "$root" ]]; then
-    echo 'Incomplete rootfs exists; inspect it before rebuilding.' >&2
-    exit 1
+    if [[ ! -f "$base/rootfs-installing" ]]; then
+      echo 'Unmanaged incomplete rootfs; manual inspection required.' >&2
+      exit 1
+    fi
+    mv "$root" "$base/rootfs-incomplete-$(date +%s)-$$"
+    echo 'Preserved interrupted rootfs; retrying clean bootstrap.'
   fi
+  touch "$base/rootfs-installing"
   debootstrap --force-check-gpg --keyring=/usr/share/keyrings/debian-archive-keyring.gpg \
     --variant=minbase --include=python3,iproute2,ca-certificates bookworm "$root" https://deb.debian.org/debian
   chroot "$root" /usr/sbin/useradd --uid 1000 --user-group --home-dir /workspace --shell /bin/bash agent
@@ -24,6 +29,7 @@ if [[ ! -f "$base/rootfs-ready" ]]; then
     --private-users=524288:65536 --private-users-ownership=chown \
     --private-network /bin/true
   touch "$base/rootfs-ready"
+  rm -f "$base/rootfs-installing"
 fi
 install -d -o 525288 -g 525288 -m 0700 "$base/workspace"
 install -d -o 524288 -g 524288 -m 0755 "$root/opt/secure-vm"

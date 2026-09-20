@@ -1,7 +1,7 @@
 [Unit]
 Description=Secure VM bounded inference gateway
-Requires=secure-inference.socket
-After=network-online.target
+Requires=secure-inference.socket secure-auth.socket secure-policy.socket secure-egress.service secure-vault-memory.service
+After=network-online.target secure-egress.service secure-vault-memory.service
 
 [Service]
 User=secure-inference
@@ -22,8 +22,9 @@ ProtectControlGroups=true
 RestrictNamespaces=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm /run/secure-auth /run/secure-gmail
+InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm /run/secure-vault /run/secure-gmail
 MemoryMax=192M
+MemorySwapMax=0
 TasksMax=16
 LimitCORE=0
 Restart=on-failure

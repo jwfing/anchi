@@ -1,0 +1,14 @@
+[Unit]
+Description=Secure VM independent policy RPC
+After=systemd-tmpfiles-setup.service
+
+[Socket]
+ListenStream=/run/secure-policy/api.sock
+SocketUser=secure-policy
+SocketGroup=secure-policy-clients
+SocketMode=0660
+DirectoryMode=0750
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

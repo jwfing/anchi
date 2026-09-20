@@ -8,7 +8,9 @@ def check(name, condition):
     checks.append({'check': name, 'passed': bool(condition)})
 
 status = rpc('/run/secure-gmail/api.sock', {'op': 'status'})
-check('gateway_and_authd_reachable', set(status) == {'client_configured', 'connected', 'scope'})
+check('gateway_and_authd_reachable', set(status) == {'client_configured', 'connected', 'scope', 'vault_unlocked', 'revocation_pending'})
+check('policy_socket_not_visible', not Path('/run/secure-policy/api.sock').exists())
+check('vault_key_not_visible', not Path('/run/secure-vault/master.key').exists())
 check('auth_socket_not_visible', not Path('/run/secure-auth/token.sock').exists())
 check('credential_storage_not_visible', not Path('/var/lib/secure-auth').exists())
 for name, request in [

@@ -1,7 +1,7 @@
 [Unit]
 Description=Secure VM credential service
-Requires=secure-auth.socket
-After=network-online.target
+Requires=secure-auth.socket secure-egress.service secure-vault-memory.service
+After=network-online.target secure-egress.service secure-vault-memory.service
 
 [Service]
 User=secure-auth
@@ -24,6 +24,7 @@ RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 InaccessiblePaths=/var/lib/secure-vm
 MemoryMax=128M
+MemorySwapMax=0
 TasksMax=16
 LimitCORE=0
 Restart=on-failure

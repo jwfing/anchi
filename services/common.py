@@ -5,8 +5,11 @@ import json
 import socket
 import ssl
 import struct
+from pathlib import Path
+import time
 
 MAX_RPC = 65536
+TARGETS_FILE = Path('/run/secure-egress/targets.json')
 
 class Denied(Exception):
     pass
@@ -54,17 +57,29 @@ def fields(request, allowed, required=()):
     if set(request) - set(allowed) or not set(required) <= set(request):
         raise Denied('BAD_REQUEST')
 
+def target_ips(host):
+    try:
+        value = json.loads(TARGETS_FILE.read_text())[host]
+        addresses = value['addresses']
+        if value['expires_at'] <= time.time() or not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
+            raise ValueError()
+        return addresses
+    except (OSError, ValueError, KeyError, TypeError):
+        raise Denied('EGRESS_TARGETS_UNAVAILABLE') from None
+
 def google_json(host, method, path, body=None, token=None):
     if (host, method) not in {
         ('gmail.googleapis.com', 'GET'), ('oauth2.googleapis.com', 'POST')
     } or not path.startswith('/') or path.startswith('//'):
         raise Denied('DESTINATION_DENIED')
-    # Resolve once, reject non-public addresses, connect that exact IP with hostname TLS.
-    addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
+    if host == 'oauth2.googleapis.com' and path not in ('/token', '/revoke'):
         raise Denied('DESTINATION_DENIED')
+    if host == 'gmail.googleapis.com' and not path.startswith('/gmail/v1/users/me/messages'):
+        raise Denied('DESTINATION_DENIED')
+    # Services cannot use DNS. A root-maintained, expiring allowlist pins the address.
+    addresses = target_ips(host)
     conn = http.client.HTTPSConnection(host, timeout=10)
-    raw = socket.create_connection((addresses[0][4][0], 443), timeout=10)
+    raw = socket.create_connection((addresses[0], 443), timeout=10)
     try:
         conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
         headers = {'Accept': 'application/json'}
@@ -81,7 +96,7 @@ def google_json(host, method, path, body=None, token=None):
         payload = response.read(2 * 1024 * 1024 + 1)
         if len(payload) > 2 * 1024 * 1024:
             raise Denied('GOOGLE_RESPONSE_TOO_LARGE')
-        return json.loads(payload)
+        return json.loads(payload) if payload else {}
     finally:
         conn.close()
         raw.close()

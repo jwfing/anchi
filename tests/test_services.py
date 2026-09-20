@@ -11,9 +11,15 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 import auth
 import gmail
+import vault
 from common import Denied, google_json, recv_json
 
 class GmailPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = patch('gmail.policy_client.require')
+        self.policy.start()
+        self.addCleanup(self.policy.stop)
+
     def test_rejects_writes_and_arbitrary_network_before_credentials(self):
         with patch('gmail.rpc') as credentials:
             for op in ['send', 'delete', 'modify', 'http', 'access_token']:
@@ -42,7 +48,7 @@ class GmailPolicyTests(unittest.TestCase):
                 gmail.handle({'op': 'list', 'query': query})
 
     def test_fixed_request_and_no_token_in_result(self):
-        with patch('gmail.rpc', return_value={'access_token': 'CANARY_TOKEN'}), \
+        with patch('gmail.rpc', return_value={'access_token': 'CANARY_TOKEN', 'account_generation': 'test'}), \
              patch('gmail.google_json', return_value={'messages': [{'id': 'ab', 'threadId': 'cd', 'secret': 'ignored'}]}) as http:
             result = gmail.handle({'op': 'list', 'query': 'in:inbox', 'limit': 1})
             self.assertEqual(result, {'messages': [{'id': 'ab', 'threadId': 'cd'}]})
@@ -52,11 +58,19 @@ class GmailPolicyTests(unittest.TestCase):
             self.assertEqual(kwargs['token'], 'CANARY_TOKEN')
             self.assertNotIn('CANARY_TOKEN', json.dumps(result))
 
+    def test_policy_failure_never_reaches_google(self):
+        with patch('gmail.rpc', return_value={'access_token': 'TOKEN', 'account_generation': 'test'}), \
+             patch('gmail.policy_client.require', side_effect=Denied('POLICY_UNAVAILABLE')), \
+             patch('gmail.google_json') as http:
+            with self.assertRaisesRegex(Denied, 'POLICY_UNAVAILABLE'):
+                gmail.handle({'op': 'list', 'limit': 1})
+            http.assert_not_called()
+
     def test_normalized_message_and_best_effort_scrub(self):
         body = base64.urlsafe_b64encode(b'Your code: 123456 https://example.test/login').decode()
         response = {'id': 'ab', 'payload': {'mimeType': 'text/plain', 'body': {'data': body},
                     'headers': [{'name': 'Subject', 'value': 'test'}, {'name': 'X-Secret', 'value': 'private'}]}}
-        with patch('gmail.rpc', return_value={'access_token': 'TOKEN'}), patch('gmail.google_json', return_value=response):
+        with patch('gmail.rpc', return_value={'access_token': 'TOKEN', 'account_generation': 'test'}), patch('gmail.google_json', return_value=response):
             result = gmail.handle({'op': 'read', 'id': 'ab'})
         self.assertTrue(result['untrusted_content'])
         self.assertNotIn('123456', result['text'])
@@ -68,9 +82,14 @@ class OAuthTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.override = patch('auth.STORE', Path(self.directory.name))
         self.override.start()
+        key = Path(self.directory.name) / "master.key"
+        key.write_bytes(b"x" * 32)
+        self.key_override = patch("vault.KEY", key)
+        self.key_override.start()
         auth.import_client({'installed': {'client_id': 'test.apps.googleusercontent.com', 'client_secret': 'TEST'}})
 
     def tearDown(self):
+        self.key_override.stop()
         self.override.stop()
         self.directory.cleanup()
 
@@ -108,9 +127,10 @@ class OAuthTests(unittest.TestCase):
         auth.write('tokens.json', {'refresh_token': 'REFRESH', 'access_token': 'OLD', 'expires_at': 0})
         with patch('auth.google_json', return_value={'access_token': 'NEW', 'expires_in': 3600}):
             self.assertEqual(auth.access_token(), 'NEW')
-        self.assertEqual((auth.STORE / 'tokens.json').stat().st_mode & 0o777, 0o600)
+        self.assertEqual((auth.STORE / 'tokens.json.enc').stat().st_mode & 0o777, 0o600)
         self.assertEqual(auth.read('tokens.json')['refresh_token'], 'REFRESH')
-        auth.disconnect()
+        with patch("auth.google_json", return_value={}):
+            auth.disconnect()
         self.assertFalse(auth.status()['connected'])
 
     def test_disallow_client_replacement_while_connected(self):
@@ -123,11 +143,6 @@ class BoundaryTests(unittest.TestCase):
         for host, method in [('evil.test', 'GET'), ('gmail.googleapis.com', 'POST')]:
             with self.assertRaises(Denied):
                 google_json(host, method, '/')
-
-    def test_private_dns_denied(self):
-        with patch('socket.getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('127.0.0.1', 443))]):
-            with self.assertRaises(Denied):
-                google_json('gmail.googleapis.com', 'GET', '/')
 
     def test_malformed_rpc(self):
         for payload in [b'[]\n', b'null\n', b'{invalid}\n', b'{}\n{}\n']:

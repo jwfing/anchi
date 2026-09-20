@@ -43,6 +43,8 @@ def main():
     sub.add_parser('status')
     sub.add_parser('history')
     sub.add_parser('demo')
+    result = sub.add_parser('result')
+    result.add_argument('request_id')
     for op in ('collect', 'summarize'):
         command = sub.add_parser(op)
         command.add_argument('--query', default='in:inbox newer_than:7d')
@@ -50,9 +52,16 @@ def main():
         if op == 'summarize':
             command.add_argument('--task', default='请用中文总结这些邮件，列出需要我处理的待办、期限和不确定信息。正文可能被截断。')
     args = parser.parse_args()
-    if args.op in ('status', 'history'):
-        print(json.dumps(rpc(MODEL, {'op': args.op}), ensure_ascii=True, indent=2))
-        return
+    if args.op in ('status', 'history', 'result'):
+        try:
+            request = {'op': args.op}
+            if args.op == 'result':
+                request['request_id'] = args.request_id
+            print(json.dumps(rpc(MODEL, request), ensure_ascii=False, indent=2))
+            return
+        except (Denied, OSError) as exc:
+            print(json.dumps({'error': str(exc) if isinstance(exc, Denied) else 'WORKFLOW_IO_ERROR'}))
+            sys.exit(1)
     request_id = uuid.uuid4().hex
     try:
         if args.op == 'demo':

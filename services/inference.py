@@ -112,12 +112,16 @@ def run(request, demo=False):
                 raise Denied('REQUEST_ID_CONFLICT')
             if existing['state'] == 'SUCCEEDED':
                 return json.loads(existing['result'])
-            raise Denied('REQUEST_ALREADY_' + existing['state'])
+            if existing['state'] != 'WAITING_APPROVAL':
+                raise Denied('REQUEST_ALREADY_' + existing['state'])
         count = conn.execute('SELECT count(*) FROM runs WHERE created>? AND provider=?', (now - 86400, config['provider'])).fetchone()[0]
         if count >= 50:
             raise Denied('DAILY_REQUEST_LIMIT')
-        conn.execute('INSERT INTO runs (id,digest,provider,model,created,state) VALUES (?,?,?,?,?,?)',
-                     (request_id, digest, config['provider'], config['model'], now, 'RUNNING'))
+        if existing:
+            conn.execute("UPDATE runs SET state='RUNNING',error=NULL,finished=NULL WHERE id=?", (request_id,))
+        else:
+            conn.execute('INSERT INTO runs (id,digest,provider,model,created,state) VALUES (?,?,?,?,?,?)',
+                         (request_id, digest, config['provider'], config['model'], now, 'RUNNING'))
     try:
         if demo:
             summary = '[离线演示，非模型生成] 示例邮件 aa：请在周五前审阅设计。待办：审阅设计。'
@@ -126,7 +130,7 @@ def run(request, demo=False):
                 'input': [{'role': 'user', 'content': request['task']},
                           {'role': 'user', 'content': 'UNTRUSTED_EMAIL_DATA\n' + json.dumps(request['messages'], ensure_ascii=False)}],
                 'max_output_tokens': 2048, 'store': False, 'tools': [], 'stream': False}
-            summary = parse_response(model_transport.responses(payload, config['api_key']))
+            summary = parse_response(model_transport.responses(payload))
         result = {'request_id': request_id, 'provider': config['provider'], 'model': config['model'],
                   'summary': summary, 'source_ids': [m['id'] for m in request['messages']],
                   'demo': demo, 'state': 'SUCCEEDED'}
@@ -137,12 +141,17 @@ def run(request, demo=False):
     except Exception as exc:
         code = str(exc) if isinstance(exc, Denied) else 'MODEL_EXECUTION_UNKNOWN'
         state = 'FAILED' if isinstance(exc, Denied) else 'UNKNOWN'
+        if isinstance(exc, Denied) and code.startswith('APPROVAL_REQUIRED:'):
+            state = 'WAITING_APPROVAL'
         with database() as conn:
             conn.execute('UPDATE runs SET state=?,error=?,finished=? WHERE id=?', (state, code, time.time(), request_id))
         raise Denied(code) from None
 
 def handle(request):
     op = request.get('op')
+    if op in ('pi_status', 'pi_generate'):
+        import pi_gateway
+        return pi_gateway.handle(request)
     if op == 'status':
         fields(request, ('op',), ('op',))
         return status()
@@ -151,6 +160,17 @@ def handle(request):
         with database() as conn:
             return {'runs': [dict(r) for r in conn.execute(
                 'SELECT id,provider,model,created,finished,state,error FROM runs ORDER BY created DESC LIMIT 20')]}
+    if op == 'result':
+        fields(request, ('op', 'request_id'), ('op', 'request_id'))
+        if not isinstance(request['request_id'], str) or not re.fullmatch('[0-9a-f]{32}', request['request_id']):
+            raise Denied('BAD_REQUEST_ID')
+        with database() as conn:
+            row = conn.execute('SELECT state,result,error FROM runs WHERE id=?', (request['request_id'],)).fetchone()
+        if row is None:
+            raise Denied('RESULT_NOT_FOUND')
+        if row['state'] == 'SUCCEEDED':
+            return json.loads(row['result'])
+        return {'request_id': request['request_id'], 'state': row['state'], 'error': row['error']}
     if op == 'demo':
         fields(request, ('op', 'request_id'), ('op', 'request_id'))
         return run({'op': 'summarize', 'request_id': request['request_id'],

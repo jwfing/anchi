@@ -1,7 +1,7 @@
 [Unit]
 Description=Secure VM read-only Gmail gateway
-Requires=secure-gmail.socket secure-auth.socket
-After=network-online.target
+Requires=secure-gmail.socket secure-auth.socket secure-policy.socket secure-egress.service
+After=network-online.target secure-egress.service
 
 [Service]
 User=secure-gmail
@@ -20,8 +20,9 @@ ProtectControlGroups=true
 RestrictNamespaces=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm
+InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm /run/secure-vault
 MemoryMax=128M
+MemorySwapMax=0
 TasksMax=16
 LimitCORE=0
 Restart=on-failure

@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh short-lived provider IP allowlists
+Requires=secure-egress.service
+After=secure-egress.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/secure-vm/services/network_rules.py refresh

@@ -5,7 +5,7 @@ After=systemd-tmpfiles-setup.service
 [Socket]
 ListenStream=/run/secure-auth/token.sock
 SocketUser=secure-auth
-SocketGroup=secure-gmail
+SocketGroup=secure-auth-clients
 SocketMode=0660
 DirectoryMode=0750
 RemoveOnStop=true

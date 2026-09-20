@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep decrypted credentials out of guest swap
+After=swap.target
+Before=secure-auth.service secure-inference.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/sbin/swapoff -a
+
+[Install]
+WantedBy=multi-user.target

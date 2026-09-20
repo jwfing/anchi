@@ -1,6 +1,6 @@
 # Gmail 只读接入
 
-当前代码已经部署到 `secure-vm`，本地策略和服务边界测试通过。尚未取得 Google OAuth client 配置或完成用户授权，因此还没有真实 Gmail API 成功记录。
+当前代码已经部署到 `secure-vm`，本地策略和服务边界测试通过。用户已完成 Google OAuth 并读取 3 封邮件，后续 harness 也已实际采集到 3 封近期邮件。
 
 ## 1. 准备 Google OAuth 应用
 
@@ -21,7 +21,7 @@ External/Testing 应用请求 Gmail 等用户数据权限时，refresh token 通
 
 ## 2. 授权
 
-在项目根目录运行：
+先执行 `python3 scripts/vault.py init`；之后每次 VM 重启用 `python3 scripts/vault.py unlock` 解锁，再在项目根目录运行：
 
 ```bash
 python3 scripts/gmail-login.py --client /absolute/path/to/desktop-client.json
@@ -48,7 +48,9 @@ python3 scripts/gmail-login.py --status
 bash scripts/gmail.sh status
 ```
 
-`connected` 表示本地存有授权材料，不保证 token 尚未被 Google 撤销。实际读取才能验证外部授权有效。
+`vault_unlocked` 表示凭证库是否已解锁。`connected` 表示本地存有授权材料，不保证 token 尚未被 Google 撤销。实际读取才能验证外部授权有效。
+
+全新安装默认逐次审批；若希望沿用已授权的邮箱只读访问，在可信终端运行 `bash scripts/policy.sh gmail-read allow`。当前已有授权在迁移时保留此规则。
 
 ## 3. 从 cell 读取
 
@@ -70,22 +72,23 @@ cell UID 1000（guest host 视角 525288）
   → /run/secure-gmail/api.sock
   → secure-gmail：校验 SO_PEERCRED + 固定只读操作
   → /run/secure-auth/token.sock
-  → secure-auth：只接受 secure-gmail 的 UID，刷新并返回 access token
+  → secure-auth：仅向 secure-gmail 返回 Google access token 与账户 generation
+  → secure-policy：校验精确动作，签发并原子消费一次性授权
   → secure-gmail：只向固定 Google API 发起 HTTPS GET
 ```
 
-Cell 只挂载 Gmail socket 所在目录，且只读；不能看到 credential socket 或存储。修改 CLI 不会获得其他 RPC 权限。服务不接受任意 URL、账户、HTTP header 或客户端声称的角色。
+Cell 只读挂载 Gmail 与 inference socket 目录；不能看到 credential socket 或存储。修改 CLI 不会获得其他 RPC 权限。服务不接受任意 URL、账户、HTTP header 或客户端声称的角色。
 
-这版合并了 connector 业务逻辑和 Gmail 执行网关，还没有独立 Sentinel。只读白名单是确定性的服务端检查。没有发信函数，也没有“聊天批准后可发送”的隐藏路径。
+这版合并了 connector 业务逻辑和 Gmail 执行网关，由独立 secure-policy 做确定性授权。没有发信函数，也没有“聊天批准后可发送”的隐藏路径。
 
-固定目标 HTTPS 实现拒绝私网 DNS 结果、固定解析后的 IP、校验 TLS 主机名、不跟随重定向、不采用环境代理。两个可信服务目前仍具有通用网络系统调用能力，尚未做 provider 级内核出口 ACL；不能宣称服务自身被攻陷后仍无法外发。
+固定目标 HTTPS 实现拒绝私网 DNS 结果、固定解析后的 IP、校验 TLS 主机名、不跟随重定向、不采用环境代理。nftables 进一步按服务 UID 限制 provider IP/TCP443，其他出口拒绝。内核不能区分共享 IP 上的域名，HTTP 内容控制仍依赖可信网关。
 
 ## 5. 当前数据保护限制
 
-- `/var/lib/secure-auth` 为独立用户所有、0700 目录，token 文件为 0600。**尚未加密存储**；guest root、VM 管理员和磁盘备份仍可读取。不要把权限隔离称为磁盘加密。
+- `/var/lib/secure-auth` 为 0700，凭证为 AES-256-GCM 密文、0600；主密钥留在 macOS 管理端，解锁时只放入 guest tmpfs。不是整盘加密；运行中的 guest root 仍可信。详见 [安全基础](SECURITY_FOUNDATION.md)。
 - 邮件链接和 4–8 位数字仅做启发式遮盖，可能漏掉验证码、登录信息，也可能误删日期金额；不是完整 DLP。
-- 暂无模型推理接入。邮件只经工具返回，不会由本项目自动发给模型服务。
-- 未做账户级多租户隔离、完整 OAuth 端到端审计、自动远端撤销。
+- 已有可选推理网关，但默认关闭。`gmail.sh` 和 `agent.sh collect` 不调用模型；显式启用后的 `agent.sh summarize` 会向所选 provider 发送邮件摘录，见 [工作流说明](AGENT_WORKFLOW.md)。
+- 未做账户级多租户隔离、完整 OAuth 端到端审计。断开已加入远端撤销和失败后的显式重试。
 
 ## 6. 断开
 
@@ -93,12 +96,12 @@ Cell 只挂载 Gmail socket 所在目录，且只读；不能看到 credential s
 python3 scripts/gmail-login.py --disconnect
 ```
 
-删除 VM 内 token 和待完成授权，但保留 OAuth client 配置。它只停止后续本地取用，不保证取消已经在途的请求；远端授权需要在 Google 账户的第三方连接管理中移除。
+先停止本地 token 取用并清理待完成授权，再尝试 Google 远端撤销；保留 OAuth client 配置。失败返回 `revocation_pending:true`，再次运行同一命令重试。已经在途的请求不保证取消。
 
 ## 7. 已完成验证
 
-- 16 个单元测试：操作白名单、伪造身份字段、参数边界、固定目的地、私网 DNS 拒绝、PKCE/state/过期、scope 扩张拒绝、refresh 与文件权限。
-- 10 项真实 cell Gmail 边界检查全部通过。
+- 当前共有 43 项单元测试，覆盖 OAuth、凭证加密、精确授权、防重放和任务状态。
+- 12 项真实 cell Gmail 边界检查全部通过；另有 28 项 guest 安全基础集成检查。
 - 原 24 项 cell 隔离测试在新增 socket 后再次全部通过。
 - guest root 普通 RPC 连接分别被两个服务以 `CALLER_DENIED` 拒绝。这只验证 UID 检查，不表示能防可信管理员篡改服务或读取文件。
 - 未授权读取返回 `NOT_CONNECTED`，未偷偷使用其他凭证。
@@ -111,4 +114,4 @@ python3 -m unittest discover -s tests -v
 bash scripts/verify.sh
 ```
 
-尚未验证：真实 Google 同意页、token exchange/refresh 和邮箱读取。需要用户提供 client 文件路径并完成 Google 授权后继续。
+真实授权和邮箱读取已完成；尚未单独验证真实 token 过期后的刷新、远端撤销与长时间运行恢复。

@@ -1,13 +1,17 @@
 """Root-only model configuration, explicit cloud consent, stdin-only secrets."""
 import json
+import uuid
 import os
 from pathlib import Path
 import pwd
 import re
 import sys
 import tempfile
+import resource
 
 from common import Denied
+import auth
+import vault
 
 CONFIG = Path('/etc/secure-vm/model.json')
 
@@ -23,10 +27,13 @@ def validate(value):
     return value
 
 def main():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     if os.getuid() != 0:
         raise Denied('GUEST_ADMIN_REQUIRED')
     if sys.argv[1] == 'disable':
         CONFIG.unlink(missing_ok=True)
+        with auth.locked():
+            vault.remove(auth.STORE, 'model.json')
         print('{"enabled": false}')
         return
     if sys.argv[1] != 'configure':
@@ -35,6 +42,8 @@ def main():
     if len(raw) > 4096:
         raise Denied('INPUT_TOO_LARGE')
     value = validate(json.loads(raw))
+    with auth.locked():
+        auth.write('model.json', {'api_key': value.pop('api_key'), 'generation': uuid.uuid4().hex})
     CONFIG.parent.mkdir(mode=0o750, exist_ok=True)
     gid = pwd.getpwnam('secure-inference').pw_gid
     os.chown(CONFIG.parent, 0, gid)

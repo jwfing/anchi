@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep provider IP allowlists fresh; expiry remains fail-closed
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=5s
+Unit=secure-egress-refresh.service
+
+[Install]
+WantedBy=timers.target

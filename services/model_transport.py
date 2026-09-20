@@ -6,15 +6,17 @@ import socket
 import ssl
 import time
 
-from common import Denied
+from common import Denied, rpc, target_ips
+import policy_client
 
-def responses(payload, api_key):
+def responses(payload):
     host = 'api.openai.com'
-    addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
-        raise Denied('MODEL_DESTINATION_DENIED')
+    addresses = target_ips(host)
+    credential = rpc('/run/secure-auth/token.sock', {'op': 'model_key'})
+    policy_client.require({'operation': 'inference.openai', 'account': credential['generation'], 'params': payload})
+    api_key = credential['api_key']
     conn = http.client.HTTPSConnection(host, timeout=90)
-    raw = socket.create_connection((addresses[0][4][0], 443), timeout=10)
+    raw = socket.create_connection((addresses[0], 443), timeout=10)
     try:
         raw.settimeout(90)
         conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)

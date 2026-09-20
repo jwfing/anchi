@@ -8,9 +8,11 @@ from pathlib import Path
 import re
 import secrets
 import time
+import uuid
 from urllib.parse import urlencode
 
 from common import Denied, fields, google_json
+import vault
 
 STORE = Path('/var/lib/secure-auth')
 SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
@@ -18,31 +20,25 @@ SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 @contextmanager
 def locked():
     with (STORE / 'lock').open('a') as lock:
+        if os.getuid() == 0:
+            owner = STORE.stat()
+            os.fchown(lock.fileno(), owner.st_uid, owner.st_gid)
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
 
 def read(name):
-    try:
-        return json.loads((STORE / name).read_text())
-    except FileNotFoundError:
-        raise Denied('NOT_CONNECTED') from None
+    return vault.read(STORE, name)
 
 def write(name, value):
-    target = STORE / name
-    temporary = STORE / (name + '.new')
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'w') as file:
-        json.dump(value, file)
-        file.flush()
-        os.fsync(file.fileno())
-    temporary.replace(target)
+    vault.write(STORE, name, value)
 
 def status():
-    return {'client_configured': (STORE / 'client.json').exists(),
-            'connected': (STORE / 'tokens.json').exists(), 'scope': SCOPE}
+    return {'client_configured': vault.exists(STORE, 'client.json'),
+            'connected': vault.exists(STORE, 'tokens.json'), 'scope': SCOPE,
+            'vault_unlocked': vault.KEY.exists(), 'revocation_pending': vault.exists(STORE, 'revocation.json')}
 
 def import_client(value):
-    if (STORE / 'tokens.json').exists():
+    if vault.exists(STORE, 'tokens.json'):
         raise Denied('DISCONNECT_BEFORE_REPLACING_CLIENT')
     client = value.get('installed')
     if not isinstance(client, dict) or not isinstance(client.get('client_id'), str) or not client['client_id'].endswith('.apps.googleusercontent.com'):
@@ -50,7 +46,7 @@ def import_client(value):
     if not isinstance(client.get('client_secret'), str) or not client['client_secret']:
         raise Denied('CLIENT_SECRET_REQUIRED')
     write('client.json', {k: client[k] for k in ('client_id', 'client_secret')})
-    (STORE / 'pending.json').unlink(missing_ok=True)
+    vault.remove(STORE, 'pending.json')
     return status()
 
 def begin(redirect_uri):
@@ -75,7 +71,7 @@ def complete(value):
     if not isinstance(value['code'], str) or not 1 <= len(value['code']) <= 4096:
         raise Denied('BAD_REQUEST')
     # Consume before exchange: ambiguous failures require a new login.
-    (STORE / 'pending.json').unlink()
+    vault.remove(STORE, 'pending.json')
     client = read('client.json')
     result = google_json('oauth2.googleapis.com', 'POST', '/token', urlencode({
         **client, 'grant_type': 'authorization_code', 'code': value['code'],
@@ -83,6 +79,7 @@ def complete(value):
     if set(result.get('scope', '').split()) != {SCOPE} or not result.get('refresh_token'):
         raise Denied('EXPECTED_READONLY_SCOPE_AND_REFRESH_TOKEN')
     result['expires_at'] = time.time() + int(result['expires_in'])
+    result['generation'] = uuid.uuid4().hex
     write('tokens.json', result)
     return status()
 
@@ -99,10 +96,18 @@ def access_token():
     return tokens['access_token']
 
 def disconnect():
-    # Stop local use first. Remote revocation is also available in the Google account UI.
-    for name in ('tokens.json', 'pending.json'):
-        (STORE / name).unlink(missing_ok=True)
-    return {'connected': False, 'remote_revocation_required': True}
+    if vault.exists(STORE, 'tokens.json'):
+        tokens = read('tokens.json')
+        write('revocation.json', {'token': tokens.get('refresh_token', tokens['access_token'])})
+        vault.remove(STORE, 'tokens.json')
+    vault.remove(STORE, 'pending.json')
+    if vault.exists(STORE, 'revocation.json'):
+        try:
+            google_json('oauth2.googleapis.com', 'POST', '/revoke', urlencode(read('revocation.json')))
+            vault.remove(STORE, 'revocation.json')
+        except Exception:
+            return {'connected': False, 'remote_revoked': False, 'revocation_pending': True}
+    return {'connected': False, 'remote_revoked': True, 'revocation_pending': False}
 
 def handle(request):
     fields(request, ('op',), ('op',))
@@ -110,5 +115,13 @@ def handle(request):
         if request['op'] == 'status':
             return status()
         if request['op'] == 'access_token':
-            return {'access_token': access_token()}
+            token = access_token()
+            return {'access_token': token, 'account_generation': read('tokens.json')['generation']}
+        if request['op'] == 'codex_token':
+            credential = read('codex.json')
+            if credential['expires_at'] <= time.time() + 30:
+                raise Denied('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
+            return credential
+        if request['op'] == 'model_key':
+            return read('model.json')
         raise Denied('OPERATION_DENIED')

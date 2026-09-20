@@ -1,0 +1,31 @@
+[Unit]
+Description=Secure VM independent authorization authority
+Requires=secure-policy.socket secure-egress.service
+After=secure-egress.service
+
+[Service]
+User=secure-policy
+Group=secure-policy
+ExecStart=/usr/bin/python3 /opt/secure-vm/services/server.py policy
+StateDirectory=secure-policy
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm /run/secure-vault
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=16
+LimitCORE=0
+Restart=on-failure

@@ -3,11 +3,13 @@ import json
 import os
 import pwd
 import sys
+import resource
 
 import auth
 from common import Denied
 
 def main():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     if os.getuid() != 0:
         raise Denied('GUEST_ADMIN_REQUIRED')
     account = pwd.getpwnam('secure-auth')
@@ -29,6 +31,9 @@ def main():
             result = auth.begin(value['redirect_uri'])
         elif action == 'complete':
             result = auth.complete(value)
+        elif action == 'cancel':
+            auth.vault.remove(auth.STORE, 'pending.json')
+            result = {'cancelled': True}
         elif action == 'status':
             result = auth.status()
         elif action == 'disconnect':

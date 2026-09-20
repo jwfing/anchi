@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+    />
+    <title>安栖 · 本地 Agent</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="brand">◈ 安栖</div>
+        <p class="caption">本地 Agent 工作空间<br />桌面开发版 · 0.1.1</p>
+        <button data-page="setup">☷　首次设置</button><button data-page="agent">◫　Agent</button
+        ><button data-page="permissions">◎　连接与权限</button
+        ><button data-page="approvals">◇　独立审批</button
+        ><button data-page="activity">≋　活动记录</button>
+        <footer>
+          <p id="status" class="caption">正在加载…</p>
+          <button data-act="disconnect">停止并断开 Pi</button>
+        </footer>
+      </nav>
+      <section>
+        <header class="top">
+          <span>个人空间 / <span id="crumb">Agent</span></span
+          ><span class="pill">真实 Pi · 受控目录 · 隔离认证</span>
+        </header>
+        <main>
+          <div id="notice" class="notice error" role="status"></div>
+          <div id="app"></div>
+        </main>
+      </section>
+    </div>
+    <dialog id="modal" aria-labelledby="dialog-title"></dialog>
+    <script type="module" src="renderer.mjs"></script>
+  </body>
+</html>

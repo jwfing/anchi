@@ -3,6 +3,7 @@ import re
 from urllib.parse import urlencode
 
 from common import Denied, fields, google_json, rpc
+import policy_client
 
 AUTH_SOCKET = '/run/secure-auth/token.sock'
 
@@ -34,14 +35,18 @@ def handle(request):
         if type(limit) is not int or not 1 <= limit <= 10:
             raise Denied('BAD_LIMIT')
         path = '/gmail/v1/users/me/messages?' + urlencode({'q': query, 'maxResults': limit})
+        params = {'query': query, 'limit': limit}
     elif op == 'read':
         fields(request, ('op', 'id'), ('op', 'id'))
         if not isinstance(request['id'], str) or not re.fullmatch('[0-9a-fA-F]{1,128}', request['id']):
             raise Denied('BAD_MESSAGE_ID')
         path = '/gmail/v1/users/me/messages/' + request['id'] + '?format=full'
+        params = {'id': request['id']}
     else:
         raise Denied('OPERATION_DENIED')
-    token = rpc(AUTH_SOCKET, {'op': 'access_token'})['access_token']
+    credentials = rpc(AUTH_SOCKET, {'op': 'access_token'})
+    token = credentials['access_token']
+    policy_client.require({'operation': 'gmail.' + op, 'account': credentials['account_generation'], 'params': params})
     result = google_json('gmail.googleapis.com', 'GET', path, token=token)
     if op == 'list':
         return {'messages': [{k: m[k] for k in ('id', 'threadId') if k in m}
