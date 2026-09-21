@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { overlaps } = require('../shared/protocol.cjs');
+const { describe } = require('./platform.cjs');
 
 // v2 adds the directory identity (device, inode) recorded at consent so grants can be
 // restored on launch only when the same directory is still there. v1 entries load without it.
@@ -20,32 +21,11 @@ function validateIdentity(identity) {
 function validateMode(mode) {
   if (!['ro', 'rw'].includes(mode)) throw Error('INVALID_MODE');
 }
-function validateDirectory(chosen, home, entries) {
+function validateDirectory(chosen, home, entries, platform = describe()) {
   if (!path.isAbsolute(chosen) || path.normalize(chosen) !== chosen)
     throw Error('INVALID_DIRECTORY');
-  const system = [
-    '/',
-    '/System',
-    '/Library',
-    '/etc',
-    '/private',
-    '/usr',
-    '/bin',
-    '/sbin',
-    '/dev',
-    '/var',
-  ];
-  const secrets = [
-    '.ssh',
-    '.aws',
-    '.kube',
-    '.codex',
-    '.config',
-    '.lima',
-    '.hermes',
-    '.gnupg',
-    'Library',
-  ];
+  const system = platform.systemDirectories;
+  const secrets = platform.secretDirectories;
   if (
     chosen === home ||
     system.some((p) => chosen === p || (p !== '/' && chosen.startsWith(p + '/'))) ||
@@ -57,10 +37,11 @@ function validateDirectory(chosen, home, entries) {
 
 /** Stores plans only. No mount, filesystem capability or grant is created here. */
 class DirectoryStore {
-  constructor(file, home, io = fs) {
+  constructor(file, home, io = fs, platform = describe()) {
     this.file = file;
     this.home = home;
     this.io = io;
+    this.platform = platform;
     this.entries = [];
     this.tail = Promise.resolve();
     this.loadFailed = false;
@@ -91,7 +72,7 @@ class DirectoryStore {
         )
           throw Error('INVALID_SETTINGS');
         validateMode(d.mode);
-        validateDirectory(d.path, this.home, next);
+        validateDirectory(d.path, this.home, next, this.platform);
         const identity = validateIdentity(d.identity);
         ids.add(d.id);
         next.push({ id: d.id, path: d.path, mode: d.mode, ...(identity ? { identity } : {}) });
@@ -138,7 +119,7 @@ class DirectoryStore {
       if (next.length >= 100) throw Error('DIRECTORY_LIMIT');
       const chosen = await this.io.realpath(file);
       if (!(await this.io.stat(chosen)).isDirectory()) throw Error('INVALID_DIRECTORY');
-      validateDirectory(chosen, this.home, next);
+      validateDirectory(chosen, this.home, next, this.platform);
       next.push({ id: randomUUID(), path: chosen, mode });
       return next;
     });

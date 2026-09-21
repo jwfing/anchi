@@ -5,16 +5,20 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const exec = promisify(execFile);
 const { executable } = require('./host-tools.cjs');
+const { describe } = require('./platform.cjs');
 
 /** Only inherited values required by Lima/SSH; never forward provider credentials. */
-function childEnvironment() {
-  return {
-    HOME: os.homedir(),
+function childEnvironment(platform = describe()) {
+  const env = {
+    HOME: platform.home,
     USER: os.userInfo().username,
     LANG: 'en_US.UTF-8',
-    PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+    PATH: platform.childPath,
     TMPDIR: os.tmpdir(),
   };
+  for (const name of platform.extraEnvironment)
+    if (process.env[name]) env[name] = process.env[name];
+  return env;
 }
 
 async function resolveRuntime({ packaged, resourcesPath }) {
@@ -24,9 +28,10 @@ async function resolveRuntime({ packaged, resourcesPath }) {
 }
 
 class Runtime {
-  constructor(root) {
+  constructor(root, platform = describe()) {
     this.root = root;
-    this.env = childEnvironment();
+    this.platform = platform;
+    this.env = childEnvironment(platform);
   }
 
   async command(file, args, timeout = 30000) {
@@ -81,13 +86,13 @@ class Runtime {
   }
 
   async lima() {
-    const file = await executable('limactl');
+    const file = await executable('limactl', { platform: this.platform });
     if (!file) throw Error('LIMA_NOT_INSTALLED');
     return file;
   }
   /** Host Python for the file broker: the same interpreter first-run setup installs. */
   async python() {
-    const file = await executable('python');
+    const file = await executable('python', { platform: this.platform });
     if (!file) throw Error('PYTHON_NOT_INSTALLED');
     return file;
   }

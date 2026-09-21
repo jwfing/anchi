@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { DirectoryStore, validateDirectory } = require('../src/main/directory-store.cjs');
+const { describe } = require('../src/main/platform.cjs');
+const mac = (home) => describe({ platform: 'darwin', arch: 'arm64', home });
 async function fixture(t) {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-store-'));
   t.after(() => fs.rm(base, { recursive: true, force: true }));
@@ -18,7 +20,13 @@ async function fixture(t) {
   io.realpath = async (file) => (file === selected ? logicalHome + '/docs' : fs.realpath(file));
   io.stat = async (file) => (file === logicalHome + '/docs' ? fs.stat(selected) : fs.stat(file));
   const file = path.join(base, 'plans.json');
-  return { file, selected, io, store: new DirectoryStore(file, logicalHome, io), logicalHome };
+  return {
+    file,
+    selected,
+    io,
+    store: new DirectoryStore(file, logicalHome, io, mac(logicalHome)),
+    logicalHome,
+  };
 }
 test('plans persist with schema and private permissions; identity is recorded only by the broker', async (t) => {
   const { store, selected, file, logicalHome, io } = await fixture(t);
@@ -30,7 +38,7 @@ test('plans persist with schema and private permissions; identity is recorded on
   assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
   raw.directories[0].status = 'active';
   await fs.writeFile(file, JSON.stringify(raw));
-  const reopened = new DirectoryStore(file, logicalHome, io);
+  const reopened = new DirectoryStore(file, logicalHome, io, mac(logicalHome));
   await reopened.load();
   assert.equal(reopened.directories[0].status, undefined);
   await reopened.recordIdentity(reopened.directories[0].id, ['1', '2']);
@@ -53,7 +61,7 @@ test('schema v1 and unversioned files load without identity; bad identity is rej
     { schemaVersion: 1, directories: [{ ...entry, status: 'pending' }] },
   ]) {
     await fs.writeFile(file, JSON.stringify(value));
-    const store = new DirectoryStore(file, logicalHome, io);
+    const store = new DirectoryStore(file, logicalHome, io, mac(logicalHome));
     await store.load();
     assert.deepEqual(store.directories, [entry]);
   }
@@ -61,10 +69,13 @@ test('schema v1 and unversioned files load without identity; bad identity is rej
     file,
     JSON.stringify({ schemaVersion: 2, directories: [{ ...entry, identity: ['1'] }] }),
   );
-  await assert.rejects(new DirectoryStore(file, logicalHome, io).load(), /INVALID_SETTINGS/);
+  await assert.rejects(
+    new DirectoryStore(file, logicalHome, io, mac(logicalHome)).load(),
+    /INVALID_SETTINGS/,
+  );
   await fs.writeFile(file, JSON.stringify({ schemaVersion: 3, directories: [] }));
   await assert.rejects(
-    new DirectoryStore(file, logicalHome, io).load(),
+    new DirectoryStore(file, logicalHome, io, mac(logicalHome)).load(),
     /UNSUPPORTED_SETTINGS_VERSION/,
   );
 });
@@ -93,7 +104,8 @@ test('concurrent edits serialize and last committed plan wins', async (t) => {
   await Promise.all([store.update(id, 'rw'), store.update(id, 'ro')]);
   assert.equal(store.directories[0].mode, 'ro');
 });
-test('sensitive roots, ancestors and credential stores are rejected', () => {
+test('sensitive roots, ancestors and credential stores are rejected per platform', () => {
+  const home = '/Users/fixture';
   for (const dir of [
     '/',
     '/Users',
@@ -102,7 +114,18 @@ test('sensitive roots, ancestors and credential stores are rejected', () => {
     '/Users/fixture/.ssh/sub',
     '/System',
   ]) {
-    assert.throws(() => validateDirectory(dir, '/Users/fixture', []));
+    assert.throws(() => validateDirectory(dir, home, [], mac(home)));
   }
-  assert.doesNotThrow(() => validateDirectory('/Users/fixture/docs', '/Users/fixture', []));
+  assert.doesNotThrow(() => validateDirectory('/Users/fixture/docs', home, [], mac(home)));
+  const linux = describe({ platform: 'linux', arch: 'x64', home: '/home/fixture' });
+  for (const dir of [
+    '/proc',
+    '/sys/kernel',
+    '/root',
+    '/home/fixture/.local/share/anchi/tools',
+    '/home/fixture/.config',
+  ]) {
+    assert.throws(() => validateDirectory(dir, '/home/fixture', [], linux));
+  }
+  assert.doesNotThrow(() => validateDirectory('/home/fixture/docs', '/home/fixture', [], linux));
 });

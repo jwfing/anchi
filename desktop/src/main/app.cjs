@@ -11,6 +11,7 @@ const { PiClient } = require('./pi-client.cjs');
 const { Controller } = require('./controller.cjs');
 const { ActivityLog } = require('./activity-log.cjs');
 const { resolveUserData } = require('./user-data.cjs');
+const { describe } = require('./platform.cjs');
 const {
   APP_URL,
   trustedSender,
@@ -24,6 +25,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 app.setName('Anchi');
 // One-time move of the pre-rename profile; falls back to the old directory if that fails.
+const platform = describe();
 const userData = resolveUserData(app.getPath('appData'));
 app.setPath('userData', userData.path);
 let win,
@@ -35,10 +37,13 @@ let win,
 async function start() {
   const runtime = new Runtime(
     await resolveRuntime({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+    platform,
   );
   const directories = new DirectoryStore(
     path.join(app.getPath('userData'), 'directory-plans.json'),
     await fs.realpath(os.homedir()),
+    fs,
+    platform,
   );
   let settingsError = false;
   try {
