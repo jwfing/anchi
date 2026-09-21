@@ -22,6 +22,16 @@ The primary documentation is in Chinese ([README.md](README.md)). This page summ
 
 Content the agent reads can be sent to the cloud model. Credential isolation does not mean data stays on the machine. See [SECURITY.md](SECURITY.md).
 
+## Supported hosts
+
+| Host | Status | Isolation layer |
+|---|---|---|
+| macOS Apple Silicon | Supported | Lima + Virtualization.framework |
+| Linux x86_64 (Ubuntu 22.04+ / Debian 12+) | Experimental, validated by the `linux-live` workflow on a KVM runner | Lima + QEMU/KVM |
+| Others | Not supported | |
+
+On Linux, first-run setup downloads Lima and the Codex CLI at pinned versions with SHA-256 verification into `~/.local/share/anchi/tools`. QEMU and the kvm group need two commands the user runs in a terminal; the app never asks for an administrator password.
+
 ## Layout
 
 | Directory | Role |

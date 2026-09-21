@@ -12,7 +12,12 @@ desktop/                 宿主桌面应用，独立 npm 包
   src/main/directory-store.cjs 版本化目录计划（v2 含目录身份），事务式写入
   src/main/file-broker.cjs 进程内目录能力、启动恢复与串行撤销
   src/main/activity-log.cjs 只含元数据的活动记录落盘
-  src/main/host-tools.cjs 宿主可执行文件的固定查找路径（brew/python/codex/limactl）
+  src/main/host-tools.cjs 宿主可执行文件查找，路径表来自 platform
+  src/main/platform.cjs  唯一的平台差异来源：工具路径、系统目录黑名单、依赖策略、子进程 PATH、KVM 设备
+  src/main/downloader.cjs 按 host-tools.json 固定版本与 SHA-256 下载宿主工具（Linux）
+  host-tools.json        每个平台可下载工具的版本、URL 与 SHA-256
+  scripts/package-target.cjs 打包输出名按宿主平台
+  scripts/install-host-tool.cjs CI 与命令行用的单工具安装入口
   src/main/user-data.cjs 配置目录一次性迁移
   src/shared/            纯协议、校验函数与传输上限常量
   src/preload.cjs        最小 contextBridge
@@ -21,7 +26,7 @@ desktop/                 宿主桌面应用，独立 npm 包
   tests/                 Electron 无关的业务/边界测试
 pi/                      cell 内 agent 适配器，独立 npm 包；version.mjs / limits.mjs 为版本与上限来源
 services/                guest 上可信的 auth / policy / connectors
-guest/                   cell 构建、启动及真实隔离验收；cell.env 是 UID 映射与版本的唯一来源
+guest/                   cell 构建、启动及真实隔离验收；cell.env 是 UID 映射与版本的唯一来源，arch.sh 做架构与宿主驱动映射
 systemd/                 guest 服务身份、socket 和资源配置
 lima/                    外层 VM 声明
 scripts/                 宿主 CLI，保持现有用户入口
@@ -50,6 +55,7 @@ cell Pi → Unix socket → Gmail / inference → auth + policy → 上游。不
 7. 默认检查全离线，真实 VM、Google、模型请求永远显式触发。
 8. 跨组件常量只有一个来源：`guest/cell.env`（UID、Node、Pi 版本）与三处传输上限由测试保证一致；应用版本由主进程注入页面。
 9. 桌面只持久化事件元数据；聊天、审批正文和 RPC 结果不落盘。VM 审计通过 policy admin 读取。
+10. 平台差异只存在于 `platform.cjs` 与 `guest/arch.sh`；单一 Lima 模板列出双架构镜像，驱动由 `scripts/up.sh` 显式传入；宿主工具下载版本固定在 `host-tools.json`，只校验 SHA-256。
 
 ## 后续模块
 

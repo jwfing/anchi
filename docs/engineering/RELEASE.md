@@ -15,6 +15,12 @@ make package
 
 构建产物自带控制脚本和首次引导，可以安装 Lima 与 Pi、创建 secure-vm。Homebrew 系统安装及浏览器登录仍由用户完成。桌面配置在 macOS 的 `~/Library/Application Support/Anchi/`（含 `directory-plans.json` 与 `activity.jsonl`），不进入应用包。guest 安装脚本把运行资源版本写入 VM 的 `/opt/secure-vm/installed.json`，首次设置据此提示 VM 服务是否落后于应用。
 
+## Linux 产物
+
+在 x86_64 Linux 上运行 `npm --prefix desktop run package` 产出 `artifacts/releases/<version>/Anchi-linux-x64/` 与 `Anchi-linux-x64.tar.gz` 加 `.sha256`。Linux 没有签名流程，`ANCHI_RELEASE=1` 在 Linux 上直接报错。打包不跨平台：macOS 产物只在 macOS 上构建，Linux 产物只在 Linux 上构建；CI 的打包冒烟在两种 runner 上各跑一次。
+
+宿主工具的固定版本在 `desktop/host-tools.json`。升级步骤：改版本与 URL，下载新包并用 `shasum -a 256` 重算 SHA 写回，Lima 另与其发布页 `SHA256SUMS` 核对，然后手动触发 `linux-live` 工作流确认从零建 VM 仍通过。
+
 ## 发布门槛
 
 当前产物为未签名的开发版；下列项目未全部完成前不对外宣称正式产品：

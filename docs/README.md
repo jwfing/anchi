@@ -8,6 +8,7 @@
 | 构建产物与发布门槛 | [发布流程](engineering/RELEASE.md) |
 | 工程整理验收 | [2026-09-19](engineering/VALIDATION-2026-09-19.md) |
 | 差距修复验收 | [2026-09-20](engineering/VALIDATION-2026-09-20-GAPS.md) |
+| Linux 客户端设计与计划 | [设计](superpowers/specs/2026-09-20-linux-client-design.md)、[实施计划](superpowers/plans/2026-09-21-linux-client.md) |
 | 改名迁移 | [Qisuo → Anchi](engineering/RENAME_MIGRATION.md) |
 | 变更记录 | [CHANGELOG](../CHANGELOG.md) |
 | English summary | [README.en.md](../README.en.md) |

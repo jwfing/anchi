@@ -27,9 +27,19 @@ agent 读取的内容可以进入云模型；凭证隔离不意味着数据不�
 
 新用户入口见 [首次使用指南](docs/GETTING_STARTED.md)。English summary: [README.en.md](README.en.md)。无需先手工部署 VM；首次系统依赖安装和浏览器登录需要用户完成对应系统提示。
 
+## 支持的宿主
+
+| 宿主 | 状态 | 隔离层 |
+|---|---|---|
+| macOS Apple Silicon | 支持 | Lima + Virtualization.framework |
+| Linux x86_64（Ubuntu 22.04+ / Debian 12+） | 实验性，由 `linux-live` 工作流在 KVM runner 上验证 | Lima + QEMU/KVM |
+| 其他 | 不支持 | |
+
+Linux 上首次设置会把 Lima 与 Codex CLI 按固定版本和 SHA-256 下载到 `~/.local/share/anchi/tools`；QEMU 与 kvm 组权限需要你在终端执行两条命令，应用不请求管理员密码。详见 [首次使用指南](docs/GETTING_STARTED.md#linux)。
+
 ## 开发与运行
 
-需要 Node 22+、Python 3.11+；桌面/VM 目标为 macOS Apple Silicon。
+需要 Node 22+、Python 3.11+；桌面/VM 目标为 macOS Apple Silicon，Linux x86_64 为实验性支持。
 
 ```bash
 python3 -m venv .venv

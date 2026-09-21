@@ -29,3 +29,15 @@
 - 审批拒绝或超时：确认原因后重新开始任务，会生成新的审批，旧审批不自动复用。
 
 系统依赖来源：[Homebrew 官方安装说明](https://docs.brew.sh/Installation)。登录方式和凭证存储参照 [OpenAI 官方认证文档](https://developers.openai.com/zh-Hans/docs/auth)。组织管理策略限制登录或文件凭证缓存时，应用会失败并提示重新检查，不绕过组织策略。
+
+## Linux
+
+支持 x86_64 的 Ubuntu 22.04+ 与 Debian 12+，需要 CPU 虚拟化扩展与 `/dev/kvm`；虚拟机占用 4 GB 内存与最多 30 GB 动态磁盘，开始前至少留 8 GB 空间。
+
+1. 解压 `Anchi-linux-x64.tar.gz`，运行 `Anchi-linux-x64/Anchi`。若发行版禁用非特权用户命名空间，Electron 会提示沙箱错误，此时执行一次 `sudo chown root Anchi-linux-x64/chrome-sandbox && sudo chmod 4755 Anchi-linux-x64/chrome-sandbox`；不要用 `--no-sandbox` 绕过。
+2. 首次设置步骤 1 点击「下载 Lima 与 Codex」。应用按固定版本与 SHA-256 下载到 `~/.local/share/anchi/tools`，不需要管理员密码；校验失败不会安装任何文件。
+3. QEMU 与 KVM 权限需要你在终端执行页面上显示的两条命令：`sudo apt-get install -y qemu-system-x86 qemu-utils` 与 `sudo usermod -aG kvm "$USER"`。执行后退出登录并重新登录，再点「重新检查」。
+4. 之后的步骤与 macOS 相同。配置目录为 `~/.config/Anchi`，主密钥为 `~/.config/secure-vm/vault.key`，虚拟机在 `~/.lima/secure-vm`。
+5. Codex 登录会打开系统浏览器；Linux 上的 Codex 二进制由应用下载，版本固定，升级随应用发布。
+
+命令行部署同样可用：把 `~/.local/share/anchi/tools/lima/current/bin` 加入 PATH 后运行 `bash scripts/install-pi.sh`。

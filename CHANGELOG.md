@@ -16,6 +16,8 @@
 - `make lint`：Ruff、shellcheck、Prettier（含 `pi/`）；CI 增加 shellcheck、macOS 未签名打包冒烟任务和 Dependabot。
 - 新增测试：服务端 UID 与限速、`bridge.mjs` 审批等待与 UTF-8 分帧、`network_rules.refresh`、`setup_status`、多层 multipart 正文、目录恢复、活动日志、配置目录迁移等。
 
+- Linux x86_64 客户端（实验性）：Lima + QEMU/KVM，单一 VM 模板列出 arm64 与 amd64 镜像并由 `up.sh` 显式选择驱动；首次设置按固定版本与 SHA-256 下载 Lima 与 Codex 到用户目录，QEMU 与 kvm 组权限以命令文本交由用户执行；新增 `platform.cjs`、`downloader.cjs`、`host-tools.json`、`guest/arch.sh`；产物 `Anchi-linux-x64.tar.gz`；`linux-live` 工作流在 KVM runner 上从零建 VM 并运行全部验收脚本。
+
 ### 变更
 - 模型认证到期后可直接在首次设置重新登录或导入，不再要求先断开 Pi；只有重建环境仍需断开。
 - cell 与可信服务之间的 JSON 改为 UTF-8 传输，大小按 UTF-8 字节计，中文上下文容量约为之前的两倍。
