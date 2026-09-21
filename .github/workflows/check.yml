@@ -44,11 +44,14 @@ jobs:
       - run: make check PYTHON=python
 
   # Unsigned packaging smoke test: proves the runtime bundle and Electron packager still
-  # produce an app from a clean checkout. No signing, no upload, no VM.
+  # produce an app from a clean checkout on each supported host. No signing, no upload, no VM.
   package-smoke:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: offline
-    runs-on: macos-14
+    strategy:
+      matrix:
+        os: [macos-14, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -64,4 +67,12 @@ jobs:
       - run: npm ci --prefix desktop
       - run: npm ci --prefix pi --ignore-scripts
       - run: node desktop/scripts/package.cjs
-      - run: test -d "artifacts/releases/$(node -p "require('./desktop/package.json').version")/Anchi-darwin-arm64/Anchi.app"
+      - name: Verify artifact
+        shell: bash
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          case "$RUNNER_OS" in
+            macOS) test -d "artifacts/releases/$version/Anchi-darwin-arm64/Anchi.app" ;;
+            Linux) cd "artifacts/releases/$version" && sha256sum -c Anchi-linux-x64.tar.gz.sha256 ;;
+            *) exit 1 ;;
+          esac

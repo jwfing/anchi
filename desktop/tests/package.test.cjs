@@ -21,3 +21,20 @@ test('release runtime is self-contained, hashed and excludes credential files', 
   assert.equal(await resolveRuntime({ packaged: true, resourcesPath: base }), dest);
   assert.equal(await resolveRuntime({ packaged: false }), root);
 });
+test('packaging targets follow the host platform and refuse others', () => {
+  const { targetFor } = require('../scripts/package-target.cjs');
+  const { describe } = require('../src/main/platform.cjs');
+  assert.deepEqual(targetFor(describe({ platform: 'darwin', arch: 'arm64', home: '/h' })), {
+    platform: 'darwin',
+    arch: 'arm64',
+    directory: 'Anchi-darwin-arm64',
+    archive: 'Anchi-mac-arm64.zip',
+  });
+  assert.deepEqual(targetFor(describe({ platform: 'linux', arch: 'x64', home: '/h' })), {
+    platform: 'linux',
+    arch: 'x64',
+    directory: 'Anchi-linux-x64',
+    archive: 'Anchi-linux-x64.tar.gz',
+  });
+  assert.equal(targetFor(describe({ platform: 'win32', arch: 'x64', home: '/h' })), null);
+});
