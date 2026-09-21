@@ -1,4 +1,4 @@
 # Host-side isolated unit tests. Guest runtime uses Ubuntu's python3-cryptography.
-cryptography==46.0.5
+cryptography==50.0.1
 # Lint and formatting for make lint; not used at runtime.
 ruff==0.14.2
