@@ -99,3 +99,70 @@ test('permissions page explains restore failures and Gmail re-authentication', a
   assert(html.includes('已授权'));
   assert(html.includes('需要重新认证'));
 });
+
+test('setup step 1 shows Linux manual root commands and no Homebrew wording', async () => {
+  const { renderPage } = await import('../src/renderer/views.mjs');
+  const health = {
+    supported: true,
+    platform: 'linux-x64',
+    brew: false,
+    lima: false,
+    python: true,
+    codex: false,
+    qemu: false,
+    kvm: false,
+    freeGiB: 30,
+    vm: 'missing',
+    installed: false,
+    unlocked: false,
+    configured: false,
+    manualSteps: [
+      'sudo apt-get install -y qemu-system-x86 qemu-utils',
+      'sudo usermod -aG kvm "$USER"',
+    ],
+  };
+  const html = renderPage({
+    page: 'setup',
+    messages: [],
+    approvals: [],
+    state: { directories: [], events: [], setup: { health } },
+  });
+  assert(html.includes('qemu-system-x86'));
+  assert(html.includes('usermod -aG kvm &quot;$USER&quot;'));
+  assert(html.includes('下载 Lima 与 Codex'));
+  assert(!html.includes('Homebrew'));
+  assert(html.includes('QEMU：待完成'));
+  assert(html.includes('KVM：待完成'));
+  const ready = renderPage({
+    page: 'setup',
+    messages: [],
+    approvals: [],
+    state: {
+      directories: [],
+      events: [],
+      setup: { health: { ...health, qemu: true, kvm: true, manualSteps: [] } },
+    },
+  });
+  assert(!ready.includes('<pre>'));
+  const mac = renderPage({
+    page: 'setup',
+    messages: [],
+    approvals: [],
+    state: {
+      directories: [],
+      events: [],
+      setup: {
+        health: { ...health, platform: 'darwin-arm64', qemu: null, kvm: null, manualSteps: [] },
+      },
+    },
+  });
+  assert(mac.includes('Homebrew'));
+  assert(!mac.includes('KVM'));
+  const unsupported = renderPage({
+    page: 'setup',
+    messages: [],
+    approvals: [],
+    state: { directories: [], events: [], setup: { health: { supported: false } } },
+  });
+  assert(unsupported.includes('x86_64 Linux'));
+});

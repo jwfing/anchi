@@ -40,6 +40,12 @@ const errors = {
   PYTHON_NOT_INSTALLED: '未找到宿主 Python。请在首次设置步骤 1 安装依赖。',
   TRUSTED_HELPER_FAILED: '无法连接可信服务。请检查 VM 是否运行，必要时在首次设置中修复 Pi。',
   DIRECTORY_CHANGED: '目录已被移动或替换，请在「连接与权限」重新确认后再访问。',
+  PLATFORM_UNSUPPORTED: '此版本支持 Apple Silicon Mac 和 x86_64 Linux。',
+  DOWNLOAD_CHECKSUM_MISMATCH: '下载内容校验失败，未安装任何文件。请检查网络后重试。',
+  DOWNLOAD_HOST_NOT_ALLOWED: '下载被重定向到未知主机，已拒绝，未安装任何文件。',
+  DOWNLOAD_TOO_LARGE: '下载内容超过大小上限，已中止，未安装任何文件。',
+  DOWNLOAD_TOO_MANY_REDIRECTS: '下载重定向次数过多，已中止，未安装任何文件。',
+  DOWNLOAD_FAILED: '下载失败，未安装任何文件。请检查网络后重试。',
 };
 function notice(text) {
   for (const [code, message] of Object.entries(errors))

@@ -85,6 +85,20 @@ export function renderPage({
       h?.runtime_version && state.version && h.runtime_version !== state.version
         ? `<p class="warn">VM 内服务版本 ${esc(h.runtime_version)} 与应用版本 ${esc(state.version)} 不同，建议点击「修复 / 更新 Pi」同步。</p>`
         : '';
+    const linux = h?.platform === 'linux-x64';
+    const disk = `当前可用磁盘 ${esc(h?.freeGiB)} GB；安装至少需要 8 GB。`;
+    const stepOne = !h
+      ? ''
+      : linux
+        ? `<div class="card"><h2>1 · 准备系统环境</h2><p>Lima：${label(h.lima)} · Codex：${label(h.codex)} · Python：${label(h.python)} · QEMU：${label(h.qemu)} · KVM：${label(h.kvm)}</p>
+      <p class="muted">Lima 与 Codex 由应用按固定版本和 SHA-256 下载到 ~/.local/share/anchi/tools，不需要管理员密码。${disk}</p>
+      ${h.manualSteps?.length ? `<p>QEMU 与 KVM 权限需要你在终端执行：</p><pre>${esc(h.manualSteps.join('\n'))}</pre><p class="caption">执行后退出登录并重新登录，再点「重新检查」。</p>` : ''}
+      <div class="actions">${stepButton('下载 Lima 与 Codex', 'setup-dependencies')}${button('查看 Linux 安装说明', 'setup-homebrew')}</div>
+      </div>`
+        : `<div class="card"><h2>1 · 准备系统环境</h2><p>Lima：${label(h.lima)} · Python：${label(h.python)} · Codex：${label(h.codex)}</p>
+      <p class="muted">${disk}首次安装可能需要数分钟。</p>
+      ${!h.brew ? `<p>先下载 Homebrew 的 .pkg 安装包，在系统安装器完成安装，再回到这里重新检查。</p>${button('打开 Homebrew 安装包下载页', 'setup-homebrew')}` : stepButton('安装或补齐依赖', 'setup-dependencies')}
+      </div>`;
     return `<div class="eyebrow">WELCOME / PI</div><h1>从这里开始使用 Pi</h1>
       <p class="muted">完成环境、模型登录和一次示例任务。Gmail 和本地目录可以稍后连接。</p>
       <div class="actions">${button('重新检查', 'setup-status')}${button('进入对话', 'go-agent')}</div>
@@ -93,12 +107,9 @@ export function renderPage({
         !h
           ? '<div class="card">正在检查本机环境…</div>'
           : !h.supported
-            ? '<div class="card">此版本支持 Apple Silicon Mac。请在支持的设备上运行。</div>'
+            ? '<div class="card">此版本支持 Apple Silicon Mac 和 x86_64 Linux。请在支持的设备上运行。</div>'
             : `
-      <div class="card"><h2>1 · 准备系统环境</h2><p>Lima：${label(h.lima)} · Python：${label(h.python)} · Codex：${label(h.codex)}</p>
-      <p class="muted">当前可用磁盘 ${esc(h.freeGiB)} GB；安装至少需要 8 GB。首次安装可能需要数分钟。</p>
-      ${!h.brew ? `<p>先下载 Homebrew 的 .pkg 安装包，在系统安装器完成安装，再回到这里重新检查。</p>${button('打开 Homebrew 安装包下载页', 'setup-homebrew')}` : stepButton('安装或补齐依赖', 'setup-dependencies')}
-      </div>
+      ${stepOne}
       <div class="card"><h2>2 · 安装 Pi 安全环境</h2><p>环境：${esc(h.vm)} · Pi：${label(h.installed)}${h.runtime_version ? ' · 服务版本 ' + esc(h.runtime_version) : ''}</p>
       <p class="muted">独立 Linux 环境使用 4 GB 内存、最多 30 GB 虚拟磁盘；保留已有账户和工作区。</p>${versionNote}
       ${stepButton(h.installed ? '修复 / 更新 Pi' : '安装 Pi', 'setup-install', h.lima && h.python)}${h.vm === 'Stopped' ? button('启动环境', 'vm-start') : ''}

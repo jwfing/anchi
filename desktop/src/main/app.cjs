@@ -88,7 +88,11 @@ async function start() {
     notify,
     dialogs: {
       async openDependencyInstaller() {
-        await shell.openExternal('https://github.com/Homebrew/brew/releases/latest');
+        await shell.openExternal(
+          platform.id === 'linux-x64'
+            ? 'https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md#linux'
+            : 'https://github.com/Homebrew/brew/releases/latest',
+        );
       },
       async confirmSetup(action) {
         const details = {
