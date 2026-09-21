@@ -10,6 +10,7 @@ The primary documentation is in Chinese ([README.md](README.md)). This page summ
 |---|---|
 | Lima/VZ VM, nspawn cell and per-service identities | Implemented and verified with live isolation checks |
 | Independent auth, policy, Gmail and inference services | Implemented; Gmail is read-only |
+| Google Drive / Notion / Slack connectors | Implemented: reads under standing consent or per-request approval; creates, updates, appends and posts are approved one by one and bound to the target revision; real-account validation pending |
 | Pi agent inside the cell, Codex subscription auth, JSONL RPC | Implemented; credentials never enter the cell |
 | Desktop chat, session resume, cancel, independent approval | Implemented |
 | Host directory grants with read-only / read-write modes | Implemented; grants persist and are restored only for the identical directory |

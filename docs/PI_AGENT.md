@@ -56,7 +56,7 @@ runtime cell UID 1000：pi SDK + bash/read/write/edit + Gmail 工具
 
 Pi 安装目录在只读 rootfs `/opt/secure-pi`，Node 在 `/opt/node`。工作目录 `/workspace`，会话保存在 `/workspace/.pi-secure/sessions/`，属于可读写的非可信工作数据。默认禁用扩展、skills、提示模板和 AGENTS.md 自动发现，避免意外加载工作区配置。模型只能声明本地 function tools，不允许 provider 托管浏览器、搜索、图片或文件 URL。
 
-本地工具执行由真实 pi 完成，不经过模型网关“代做”。bash 可以在 cell 内运行普通程序；它仍无 capabilities、无外网路由、不能访问管理 SSH、policy socket 或凭证库。Gmail 工具包括 status/list/read，发送与修改仍不支持。`gmail_list` 默认约束最多 3 条；直接 connector 的可信上限仍为 10 条。
+连接器工具（Gmail、Drive、Notion、Slack 的读与写）在会话创建时按各 connector 的连接状态动态注册，见 [连接器](CONNECTORS.md)。本地工具执行由真实 pi 完成，不经过模型网关“代做”。bash 可以在 cell 内运行普通程序；它仍无 capabilities、无外网路由、不能访问管理 SSH、policy socket 或凭证库。Gmail 工具包括 status/list/read，发送与修改仍不支持。`gmail_list` 默认约束最多 3 条；直接 connector 的可信上限仍为 10 条。
 
 ## 凭证生命周期
 

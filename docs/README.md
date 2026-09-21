@@ -19,6 +19,7 @@
 | Pi 安装与认证 | [Pi agent](PI_AGENT.md) |
 | Pi 聊天与 RPC v1 | [通信接口](PI_CHAT.md) |
 | Gmail 只读接入 | [Gmail 配置](GMAIL_SETUP.md) |
+| Drive / Notion / Slack 连接器 | [连接器](CONNECTORS.md)、[设计](superpowers/specs/2026-09-21-connectors-design.md)、[实施计划](superpowers/plans/2026-09-21-connectors.md) |
 | 早期工作流（历史） | [旧受限工作流](AGENT_WORKFLOW.md) |
 | 历史验收证据 | [2026-09-18](VALIDATION-2026-09-18.md) |
 

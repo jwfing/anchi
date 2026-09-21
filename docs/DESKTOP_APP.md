@@ -38,6 +38,10 @@ Pi 使用 `host_files` 工具，先调用 `op=grants` 获得目录 ID，再以�
 
 `scripts/host-files.py` 在宿主执行，使用首次设置安装的 Homebrew Python，找不到时回退系统 Python。Pi 适配器升级运行 `bash scripts/install-pi.sh`，需先退出占用 cell 的会话。
 
+## 连接器卡片
+
+「连接与权限」按 `desktop/src/shared/connectors.cjs` 的描述为 Gmail、Google Drive、Notion、Slack 各渲染一张卡片：状态与账户标签、连接或输入令牌、断开、允许与撤销持续读取。令牌粘贴窗口是主进程单独创建的模态窗口，令牌不经过主页面。审批页对写入请求显示横幅、目标与正文全文。详见 [连接器](CONNECTORS.md)。
+
 ## 桌面 Gmail OAuth
 
 1. 启动 VM，解锁既有凭证库，进入「连接与权限」刷新账户状态。

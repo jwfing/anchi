@@ -20,6 +20,8 @@
 
 Linux 宿主与 macOS 使用相同的信任边界：可信服务与 cell 仍在 Lima 管理的虚拟机内，只是驱动换成 QEMU/KVM，网络为 QEMU 用户态 NAT。`/dev/kvm` 的访问权限由宿主管理员决定，应用只展示需要 root 的命令，不代为执行。应用下载的 Lima 与 Codex 只按 `desktop/host-tools.json` 中固定的 SHA-256 校验，不校验 Lima 的 GPG 签名或 Codex 的 sigstore 签名；下载只接受 GitHub 发布域名的 HTTPS。
 
+Google Drive、Notion、Slack 连接器与 Gmail 同构：每个是独立 UID、独立 socket、只允许各自主机的 TCP 443；操作在 `services/connectors.py` 登记并标明读或写。读取可被按 connector 的持续许可自动放行；写入（新建、更新、追加、发消息）永远逐条审批，审批对象是冻结的完整内容，更新类操作还绑定目标当前修订并在执行前再次核对，结果不明不重试，每个 connector 每天最多 200 次写入。Notion 与 Slack 的静态令牌只经主进程独立窗口进入 VM 凭证库；Notion 没有远端撤销接口。cell 内 Pi 只为已连接的 connector 注册工具。
+
 桌面活动记录落盘到应用配置目录，只保存事件类型、时间、工具名和审批 ID，不保存聊天、审批正文或 RPC 结果；完整策略审计仍在 VM 的 policy 数据库中，可通过可信管理入口读取。cell 与可信服务之间的 JSON 以 UTF-8 传输，长度上限按 UTF-8 字节计。
 
 VM 管理员与宿主管理员可以访问可信组件。nspawn 共享 guest 内核；测试通过不是逃逸不可能的证明。已允许的模型/connector 通道也不等于防止所有内容外泄。

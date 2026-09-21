@@ -1,5 +1,7 @@
 # Gmail 只读接入
 
+> Gmail 现在是注册表中的一个 connector；Drive、Notion、Slack 的接入与共同的读写规则见 [连接器](CONNECTORS.md)。
+
 > 本文中的测试数量与验证结果为当日记录；当前以 `make check` 的输出为准。
 
 当前代码已经部署到 `secure-vm`，本地策略和服务边界测试通过。用户已完成 Google OAuth 并读取 3 封邮件，后续 harness 也已实际采集到 3 封近期邮件。

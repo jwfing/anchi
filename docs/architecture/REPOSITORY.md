@@ -19,13 +19,16 @@ desktop/                 宿主桌面应用，独立 npm 包
   scripts/package-target.cjs 打包输出名按宿主平台
   scripts/install-host-tool.cjs CI 与命令行用的单工具安装入口
   src/main/user-data.cjs 配置目录一次性迁移
+  src/main/token-window.cjs 静态令牌输入的独立模态窗口
+  src/shared/connectors.cjs connector 描述表（标签、授权方式、scope 与令牌格式）
+  src/renderer/token.html / token.mjs 令牌输入页，不渲染 agent 内容
   src/shared/            纯协议、校验函数与传输上限常量
   src/preload.cjs        最小 contextBridge
   src/renderer/          ES module 展示与交互；views 为纯函数，无 OS / token 访问
   scripts/               语法检查、白名单资源打包
   tests/                 Electron 无关的业务/边界测试
 pi/                      cell 内 agent 适配器，独立 npm 包；version.mjs / limits.mjs 为版本与上限来源
-services/                guest 上可信的 auth / policy / connectors
+services/                guest 上可信的 auth / policy / connectors；connectors.py 是注册表，ledger.py 与 connector_base.py 是读写执行公共层，drive.py / notion.py / slack.py / gmail.py 是 handler，connector_admin.py 做账户探测与断开
 guest/                   cell 构建、启动及真实隔离验收；cell.env 是 UID 映射与版本的唯一来源，arch.sh 做架构与宿主驱动映射
 systemd/                 guest 服务身份、socket 和资源配置
 lima/                    外层 VM 声明
@@ -55,6 +58,7 @@ cell Pi → Unix socket → Gmail / inference → auth + policy → 上游。不
 7. 默认检查全离线，真实 VM、Google、模型请求永远显式触发。
 8. 跨组件常量只有一个来源：`guest/cell.env`（UID、Node、Pi 版本）与三处传输上限由测试保证一致；应用版本由主进程注入页面。
 9. 桌面只持久化事件元数据；聊天、审批正文和 RPC 结果不落盘。VM 审计通过 policy admin 读取。
+11. connector 只在 `services/connectors.py` 登记一次，服务模式、出口角色、凭证范围、策略校验、guest 安装与 Pi 工具都由它派生或由一致性测试锁定；写操作复用 policy 的一次性授权并记入各自账本。
 10. 平台差异只存在于 `platform.cjs` 与 `guest/arch.sh`；单一 Lima 模板列出双架构镜像，驱动由 `scripts/up.sh` 显式传入；宿主工具下载版本固定在 `host-tools.json`，只校验 SHA-256。
 
 ## 后续模块
