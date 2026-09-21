@@ -121,3 +121,104 @@ test('cancelling browser login cannot continue into credential import', async (t
   assert.equal(calls.length, 1);
   assert(calls[0].includes('login'));
 });
+
+test('Linux refuses to build the VM until qemu and kvm are present, and downloads instead of brewing', async (t) => {
+  const { describe } = require('../src/main/platform.cjs');
+  const linux = describe({ platform: 'linux', arch: 'x64', home: '/home/x' });
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-setup-linux-'));
+  t.after(() => fs.rm(userData, { recursive: true, force: true }));
+  const installed = [];
+  const setup = new Setup({
+    runtime: { root: '/runtime', env: {} },
+    userData,
+    notify() {},
+    platform: linux,
+    install: async (name, entry, options) => {
+      installed.push([name, entry.version, options.toolsDirectory]);
+      return '/tools/' + name;
+    },
+  });
+  const health = {
+    supported: true,
+    platform: 'linux-x64',
+    brew: false,
+    lima: false,
+    python: true,
+    codex: false,
+    qemu: false,
+    kvm: false,
+    freeGiB: 20,
+    installed: false,
+    unlocked: false,
+    configured: false,
+    manualSteps: [
+      'sudo apt-get install -y qemu-system-x86 qemu-utils',
+      'sudo usermod -aG kvm "$USER"',
+    ],
+  };
+  setup.inspect = async () => {
+    setup.health = { ...health };
+    return { health: setup.health, job: setup.job };
+  };
+  setup.executable = async (name) => (name === 'python' ? '/usr/bin/python3' : null);
+  setup.run = async () => {
+    throw Error('BREW_MUST_NOT_RUN');
+  };
+  await assert.rejects(setup.start('install'), /INSTALL_DEPENDENCIES_FIRST/);
+  await setup.start('dependencies');
+  await setup.work;
+  assert.equal(setup.job.state, 'succeeded');
+  assert.deepEqual(installed, [
+    ['lima', '2.2.0', '/home/x/.local/share/anchi/tools'],
+    ['codex', 'rust-v0.155.1', '/home/x/.local/share/anchi/tools'],
+  ]);
+  health.lima = true;
+  health.codex = true;
+  await assert.rejects(setup.start('install'), /INSTALL_DEPENDENCIES_FIRST/);
+  health.qemu = true;
+  await assert.rejects(setup.start('install'), /INSTALL_DEPENDENCIES_FIRST/);
+  health.kvm = true;
+  setup.execute = async () => {};
+  await setup.start('install');
+  await setup.work;
+  assert.equal(setup.job.state, 'succeeded');
+});
+
+test('already present tools are not downloaded again', async (t) => {
+  const { describe } = require('../src/main/platform.cjs');
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-setup-linux2-'));
+  t.after(() => fs.rm(userData, { recursive: true, force: true }));
+  const installed = [];
+  const setup = new Setup({
+    runtime: { root: '/runtime', env: {} },
+    userData,
+    notify() {},
+    platform: describe({ platform: 'linux', arch: 'x64', home: '/home/x' }),
+    install: async (name) => installed.push(name),
+  });
+  setup.inspect = async () => {
+    setup.health = { supported: true, platform: 'linux-x64', freeGiB: 20 };
+    return { health: setup.health, job: setup.job };
+  };
+  setup.executable = async (name) => (name === 'limactl' ? '/usr/bin/limactl' : null);
+  await setup.start('dependencies');
+  await setup.work;
+  assert.deepEqual(installed, ['codex']);
+});
+
+test('unsupported hosts fail closed with a platform error', async (t) => {
+  const { describe } = require('../src/main/platform.cjs');
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-setup-unsupported-'));
+  t.after(() => fs.rm(userData, { recursive: true, force: true }));
+  const setup = new Setup({
+    runtime: { root: '/runtime', env: {} },
+    userData,
+    notify() {},
+    platform: describe({ platform: 'win32', arch: 'x64', home: '/h' }),
+  });
+  setup.inspect = async () => {
+    setup.health = { supported: false };
+    return { health: setup.health, job: null };
+  };
+  await assert.rejects(setup.start('dependencies'), /PLATFORM_UNSUPPORTED/);
+});

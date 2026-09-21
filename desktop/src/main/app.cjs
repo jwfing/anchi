@@ -59,6 +59,7 @@ async function start() {
   let controller;
   setup = new Setup({
     runtime,
+    platform,
     userData: app.getPath('userData'),
     notify: (event) => controller.emit(event),
   });

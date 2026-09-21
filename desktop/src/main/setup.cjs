@@ -3,16 +3,25 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { executable } = require('./host-tools.cjs');
+const { describe, kvmAvailable, manualSteps } = require('./platform.cjs');
+const downloader = require('./downloader.cjs');
 const REMEDIATION = {
-  dependencies: '安装失败。请检查网络及 Homebrew 的系统安装提示，然后重试。',
+  dependencies: '安装失败。请检查网络；macOS 上另查看 Homebrew 的系统安装提示，然后重试。',
   install: '安装未完成。检查网络和可用磁盘后重试；已有凭证和工作区会保留。',
   unlock: '解锁失败。已有加密凭证时必须使用原来的主密钥，不能生成替代密钥。',
   login: '登录未完成或已过期，请重新登录；浏览器授权需由你完成。',
   import: '未找到可用的 Codex 订阅登录，或令牌即将到期。请点击登录后再导入。',
 };
 class Setup {
-  constructor({ runtime, notify, userData, spawnProcess = spawn }) {
-    Object.assign(this, { runtime, notify, userData, spawnProcess });
+  constructor({
+    runtime,
+    notify,
+    userData,
+    spawnProcess = spawn,
+    platform = describe(),
+    install = downloader.install,
+  }) {
+    Object.assign(this, { runtime, notify, userData, spawnProcess, platform, install });
     this.job = null;
     this.active = false;
     this.child = null;
@@ -64,21 +73,28 @@ class Setup {
     return this.active;
   }
   executable(name) {
-    return executable(name);
+    return executable(name, { platform: this.platform });
   }
   async inspect() {
-    const [brew, python, codex, lima] = await Promise.all([
+    const info = this.platform;
+    const [brew, python, codex, lima, qemu, kvm] = await Promise.all([
       this.executable('brew'),
       this.executable('python'),
       this.executable('codex'),
       this.runtime.lima().catch(() => null),
+      this.executable('qemu'),
+      kvmAvailable(info),
     ]);
     const health = {
-      supported: process.platform === 'darwin' && process.arch === 'arm64',
+      platform: info.id,
+      supported: info.supported,
       brew: !!brew,
       python: !!python,
       codex: !!codex,
       lima: !!lima,
+      // null means "not applicable on this host"; false means the user has a manual step to do.
+      qemu: info.id === 'linux-x64' ? !!qemu : null,
+      kvm,
       vm: 'missing',
       freeGiB: Math.floor(
         await fs
@@ -90,6 +106,7 @@ class Setup {
       unlocked: false,
       configured: false,
     };
+    health.manualSteps = manualSteps(info, health);
     if (lima) {
       try {
         const info = await this.runtime.inspect();
@@ -163,10 +180,14 @@ class Setup {
     if (this.busy) throw Error('SETUP_IN_PROGRESS');
     const health = (await this.inspect()).health;
     if (this.busy) throw Error('SETUP_IN_PROGRESS');
-    if (!health.supported) throw Error('MAC_ARM64_REQUIRED');
+    if (!health.supported) throw Error('PLATFORM_UNSUPPORTED');
     if (action === 'install' && health.freeGiB < 8) throw Error('DISK_SPACE_REQUIRED');
-    if (action === 'dependencies' && !health.brew) throw Error('HOMEBREW_REQUIRED');
-    if (action !== 'dependencies' && (!health.lima || !health.python))
+    if (action === 'dependencies' && this.platform.dependencies.kind === 'brew' && !health.brew)
+      throw Error('HOMEBREW_REQUIRED');
+    if (
+      action !== 'dependencies' &&
+      (!health.lima || !health.python || health.qemu === false || health.kvm === false)
+    )
       throw Error('INSTALL_DEPENDENCIES_FIRST');
     if (['unlock', 'login', 'import'].includes(action) && !health.installed)
       throw Error('INSTALL_PI_FIRST');
@@ -210,9 +231,19 @@ class Setup {
   }
   async execute(action) {
     if (action === 'dependencies') {
-      const brew = await this.executable('brew');
-      await this.run(brew, ['install', 'lima', 'python@3.13']);
-      if (!(await this.executable('codex'))) await this.run(brew, ['install', '--cask', 'codex']);
+      const plan = this.platform.dependencies;
+      if (plan.kind === 'brew') {
+        const brew = await this.executable('brew');
+        await this.run(brew, ['install', 'lima', 'python@3.13']);
+        if (!(await this.executable('codex'))) await this.run(brew, ['install', '--cask', 'codex']);
+      } else if (plan.kind === 'download') {
+        // Pinned, checksum-verified downloads into the user directory; root steps stay manual.
+        const entries = downloader.entriesFor(this.platform.id);
+        for (const name of plan.tools) {
+          if (await this.executable(name === 'lima' ? 'limactl' : name)) continue;
+          await this.install(name, entries[name], { toolsDirectory: this.platform.toolsDirectory });
+        }
+      } else throw Error('PLATFORM_UNSUPPORTED');
     } else if (action === 'install') {
       await this.run(
         '/bin/bash',
