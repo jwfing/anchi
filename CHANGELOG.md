@@ -20,6 +20,9 @@
 
 - Google Drive、Notion、Slack 连接器：声明式注册表（Gmail 一并迁入）、按 connector 的持续只读规则、逐条审批且绑定目标修订的写入（新建、更新、追加、发消息）、独立写账本与每日上限、Notion/Slack 静态令牌经独立窗口导入、Pi 只为已连接 connector 注册工具、桌面按描述表渲染卡片、审批页写入横幅。
 
+### 修复
+- 模型网关不再拒绝带 `content` 字段的 reasoning 项。Codex 返回的推理项含 `content: []`，Pi 原样回放到下一轮，此前会在授权前被 `codex_schema` 以 BAD_REQUEST 拒绝，导致会话内第一次出现推理摘要后所有后续模型调用失败。
+
 ### 变更
 - 审批机制改为按主体的授权模式：Gmail、Drive、Notion、Slack 与模型调用（`inference`）各有 `auto`/`ask` 模式，默认 `auto`（连接即持续授权，读写与模型调用由策略自动签发一次性授权并审计），`ask` 逐次审批。新增 `policy.sh rules` 与 `mode <主体> auto|ask`（`read`/`gmail-read` 保留为别名）；桌面卡片改为模式开关，恢复持续授权时弹出提示注入风险确认；首次设置页可切换模型调用模式。切换模式撤销所有未消费授权。
 - 模型认证到期后可直接在首次设置重新登录或导入，不再要求先断开 Pi；只有重建环境仍需断开。

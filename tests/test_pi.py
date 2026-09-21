@@ -136,6 +136,26 @@ class PiTests(unittest.TestCase):
                 'test', self.request['input'], self.request['tools'] + [self.request['tools'][0]]
             )
 
+    def test_replayed_reasoning_items_keep_their_content_field(self):
+        # Regression: the first reasoning summary in a session made every later turn fail with BAD_REQUEST.
+        item = {
+            'type': 'reasoning',
+            'id': 'rs_1',
+            'summary': [{'type': 'summary_text', 'text': 'why'}],
+            'content': [],
+            'encrypted_content': 'opaque',
+        }
+        codex_schema.validate_parts('t', [item], [])
+        codex_schema.validate_parts('t', [{**item, 'content': [{'type': 'reasoning_text', 'text': 'why'}]}], [])
+        for bad in (
+            {**item, 'content': 'why'},
+            {**item, 'content': [{'type': 'output_text', 'text': 'why'}]},
+            {**item, 'content': [{'type': 'reasoning_text', 'text': 'why', 'url': 'https://x'}]},
+            {**item, 'content': [{'type': 'reasoning_text', 'text': 1}]},
+        ):
+            with self.assertRaises(Denied):
+                codex_schema.validate_parts('t', [bad], [])
+
     def test_cjk_context_is_measured_in_utf8_bytes(self):
         message = lambda text: [{'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}]
         codex_schema.validate_parts('t', message('你' * 14000), [])  # 42000 bytes; escaped ASCII would be 84000
