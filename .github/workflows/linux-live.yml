@@ -68,7 +68,7 @@ jobs:
         run: |
           mkdir -p logs
           cp "$HOME/.lima/$ANCHI_INSTALL_VM"/*.log logs/ 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: lima-logs
