@@ -34,7 +34,7 @@
 - Produces: `connectors.READ = 'read'`、`connectors.WRITE = 'write'`、`Connector(id, user, hosts, credential, module, ops, paths)`、`CONNECTORS: dict[str, Connector]`、`SERVICE_USERS: tuple[str]`、`by_user(username) -> Connector|None`、`by_op(operation) -> Connector`（未知抛 `Denied('OPERATION_DENIED')`）、`kind(operation) -> 'read'|'write'`。
 - Produces: `Ledger(path, scope)`：`begin(request_id, digest, *, model='', daily_limit=None) -> dict|None`（缓存命中返回结果 dict，否则 None；抛 `REQUEST_ID_CONFLICT`、`REQUEST_ALREADY_<STATE>`、`daily_limit` 触发时抛 `scope_limit_code`）、`mark(request_id, state, *, result=None, error=None)`、`waiting(request_id)`（置 WAITING_APPROVAL）、`recover()`、`history(limit=20) -> list[dict]`、`get(request_id) -> dict|None`。构造参数 `limit_code`（默认 `DAILY_REQUEST_LIMIT`）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tests/test_connectors.py`：
 
@@ -113,12 +113,12 @@ if __name__ == '__main__':
     unittest.main()
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors -v`
 Expected: `ModuleNotFoundError: No module named 'connectors'`。
 
-- [ ] **Step 3: 实现注册表**
+- [x] **Step 3: 实现注册表**
 
 `services/connectors.py`：
 
@@ -201,7 +201,7 @@ def kind(operation):
     return by_op(operation).ops[operation]
 ```
 
-- [ ] **Step 4: 实现账本**
+- [x] **Step 4: 实现账本**
 
 `services/ledger.py`：
 
@@ -299,18 +299,18 @@ class Ledger:
         return value
 ```
 
-- [ ] **Step 5: inference 与 pi_gateway 改用 Ledger**
+- [x] **Step 5: inference 与 pi_gateway 改用 Ledger**
 
 `services/inference.py`：删除 `database()`、`recover()` 的 sqlite 代码，改为 `from ledger import Ledger`，并按下面的方式使用：`run()` 里 `book = Ledger(DATABASE, config['provider'])`，`cached = book.begin(request_id, digest, model=config['model'], daily_limit=50)`；命中缓存直接返回；成功 `book.mark(request_id, 'SUCCEEDED', result=result)`；异常时 `book.mark(request_id, state, error=code)`，其中 `APPROVAL_REQUIRED:` 前缀对应 `book.waiting(request_id)`。`recover()` 变为 `Ledger(DATABASE, 'any').recover()`；`history` 操作返回 `Ledger(DATABASE, 'any').history(20)`；`result` 操作用 `Ledger(DATABASE, 'any').get()`，SUCCEEDED 返回 `result`，否则返回 `{'request_id', 'state', 'error'}`。测试 `test_inference.py` 直接操作 `inference.database()` 的两处（`test_restart_marks_running_unknown`、`test_daily_budget_persists`）改为 `Ledger(inference.DATABASE, 'openai').database()`。
 
 `services/pi_gateway.py`：同样用 `Ledger(inference.DATABASE, 'openai-codex')`：`begin(..., model=config['model'], daily_limit=50)` 后立即 `waiting()`；policy 未批准时保持 WAITING_APPROVAL；批准后 `mark(RUNNING)` 由 `begin` 隐含（begin 已置 RUNNING，所以顺序为：begin → require → 成功 mark SUCCEEDED / 失败 mark FAILED 或 UNKNOWN，未批准 waiting）。`test_pi.py` 里直接写 runs 表的用例改用 `Ledger(inference.DATABASE, 'openai-codex').database()`。
 
-- [ ] **Step 6: 运行确认通过**
+- [x] **Step 6: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors tests.test_inference tests.test_pi -v 2>&1 | tail -5`
 Expected: 全部 PASS。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add services/connectors.py services/ledger.py services/inference.py services/pi_gateway.py tests/test_connectors.py tests/test_inference.py tests/test_pi.py
@@ -329,7 +329,7 @@ git commit -m "Add connector registry and shared execution ledger"
 - Consumes: `connectors.CONNECTORS`、`by_user`、`kind`。
 - Produces: `server.MODES = ('auth', 'inference', 'policy', *CONNECTORS)`；`server.Service(mode, service_uids, ...)` 中 `service_uids` 为 `{uid: caller}`，caller 为 connector id 或 `'inference'`；auth handler 签名改为 `auth.handle(request, caller)`；`server.credential_ops(caller) -> tuple`。`policy.set_read(connector, allow)`；`policy.read_allowed(conn, connector) -> bool`；`policy_admin.py read <connector> allow|deny`。每个 connector 模块暴露 `validate(op, params)`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tests/test_server.py` 新增：
 
@@ -387,12 +387,12 @@ git commit -m "Add connector registry and shared execution ledger"
         self.assertEqual(network_rules.ROLES['codex'], ('secure-inference', 'chatgpt.com'))
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_server tests.test_security tests.test_pi 2>&1 | tail -3`
 Expected: 新用例失败（`server.MODES` 无 drive；`policy.set_read` 不接受 connector 参数；`ROLES` 无 drive）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `services/server.py`：
 
@@ -490,12 +490,12 @@ def validate(op, params):
 
 现有 `test_security.test_auto_read_does_not_allow_write_or_model` 与 `test_expired_revoked_and_boot_invalid` 中的 `policy.set_read(True/False)` 改为 `policy.set_read('gmail', ...)`；`check-security.py` 与 `install-gmail.sh` 里的 `gmail-read allow` 保持可用。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest discover -s tests -q 2>&1 | tail -2`
 Expected: OK。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add services/server.py services/network_rules.py services/policy.py services/policy_admin.py services/gmail.py tests/test_server.py tests/test_security.py tests/test_pi.py tests/test_services.py
@@ -515,7 +515,7 @@ git commit -m "Derive service modes, egress roles and read rules from the connec
 - Produces: `common.provider_request(connector, method, path, *, token=None, headers=None, body=None, content_type=None, raw=False, max_bytes=2*1024*1024) -> dict|bytes`。非 200 映射：401/403 → `Denied('PROVIDER_AUTH_REQUIRED')`，429 → `Denied('PROVIDER_RATE_LIMITED')`，其他 → `Denied('PROVIDER_REQUEST_FAILED')`；路径不匹配 `connector.paths` → `Denied('DESTINATION_DENIED')`。可注入 `common.TRANSPORT`（默认真实 HTTPS）便于测试：`TRANSPORT(host, method, path, headers, body) -> (status, bytes)`。
 - Produces: `connector_base.read(connector, op, params, account, execute)`：`policy_client.require({'operation': op, 'account': account, 'params': params})` 后返回 `execute()`。`connector_base.write(connector, op, params, account, request_id, prepare, execute)`：`prepare(params) -> params`（可补充修订字段），`Ledger.begin`，`require`，`execute(params) -> dict`，状态转移与错误码按规范。`connector_base.text_limit(text, limit=40000) -> (text, truncated)`。`connector_base.credential(connector) -> dict`（经 auth socket 取令牌与 generation）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class TransportTests(unittest.TestCase):
@@ -607,12 +607,12 @@ class FlowTests(unittest.TestCase):
 
 在文件顶部补 `import common`、`import connector_base`、`from unittest.mock import patch`。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors 2>&1 | tail -3`
 Expected: `ModuleNotFoundError: connector_base` 与 `AttributeError: TRANSPORT`。
 
-- [ ] **Step 3: 实现 common.provider_request**
+- [x] **Step 3: 实现 common.provider_request**
 
 在 `services/common.py` 中新增（`google_json` 保留给 auth 的 token 端点，gmail handler 在 Task 6 之前仍可继续用它）：
 
@@ -660,7 +660,7 @@ def provider_request(connector, method, path, *, token=None, headers=None, body=
         raise Denied('PROVIDER_RESPONSE_INVALID') from None
 ```
 
-- [ ] **Step 4: 实现 connector_base**
+- [x] **Step 4: 实现 connector_base**
 
 ```python
 """Shared read/write execution for connector handlers: policy first, one upstream call, durable ledger."""
@@ -731,12 +731,12 @@ def write(connector, op, params, account, request_id, prepare, execute):
     return result
 ```
 
-- [ ] **Step 5: 运行确认通过**
+- [x] **Step 5: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors -v 2>&1 | tail -3`
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add services/common.py services/connector_base.py tests/test_connectors.py
@@ -755,7 +755,7 @@ git commit -m "Add allowlisted provider transport and shared connector read/writ
 - Produces: `auth.GOOGLE = {'gmail': {...}, 'drive': {...}}`（键 `scopes`、`tokens`、`pending`、`revocation`）、`auth.TOKENS = {'notion': {...}, 'slack': {...}}`（键 `file`、`pattern`）；`auth.begin(connector, redirect_uri)`、`auth.complete(connector, value)`、`auth.access_token(connector) -> str`、`auth.disconnect(connector)`、`auth.import_token(connector, value)`、`auth.set_account(connector, label)`、`auth.remove_token(connector)`、`auth.status(connector=None)`；`auth.handle(request, caller)`：`status` 返回全部；`access_token`（caller 为 Google connector）返回 `{'access_token', 'account_generation'}`；`token`（caller 为 token connector）返回 `{'token', 'account_generation'}`；`codex_token`、`model_key` 不变。
 - Produces: `admin.py` 动作：`import-client`、`begin <connector>`、`complete <connector>`、`cancel <connector>`、`status`、`disconnect <connector>`、`import-token <connector>`、`set-account <connector>`；connector 缺省为 `gmail`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/test_services.py` 的 `OAuthTests` 中新增：
 
@@ -802,12 +802,12 @@ git commit -m "Add allowlisted provider transport and shared connector read/writ
 
 将现有 `OAuthTests` 中调用 `auth.begin(...)`、`auth.complete(...)`、`auth.access_token()`、`auth.disconnect()` 的地方改为带 `'gmail'` 参数；`test_security.test_revoke_locally_first_and_retry` 同样改为 `auth.disconnect('gmail')`。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_services tests.test_security 2>&1 | tail -3`
 Expected: `TypeError: begin() takes 1 positional argument`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `services/vault.py`：`NAMES` 增加 `'drive-tokens.json', 'drive-pending.json', 'drive-revocation.json', 'notion.json', 'slack.json'`。
 
@@ -918,12 +918,12 @@ def handle(request, caller):
 
 `services/gmail.py`：`credentials = rpc(AUTH_SOCKET, {'op': 'access_token'})` 不变（server 现在按 caller 路由）。`services/setup_status.py` 与 `check-gmail.py` 的状态键集合断言按新 `status()` 更新（顶层多了四个 connector 键）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest discover -s tests -q 2>&1 | tail -2`
 Expected: OK。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add services/auth.py services/vault.py services/admin.py services/gmail.py guest/check-gmail.py tests/test_services.py tests/test_security.py
@@ -942,7 +942,7 @@ git commit -m "Store credentials per connector and import static tokens"
 - Consumes: 每个 connector 模块的 `probe(token) -> str`（账户标签）与可选 `revoke(token)`；`auth.set_account`、`auth.remove_token`、`auth.disconnect`。
 - Produces: CLI `connector_admin.py <connector> probe|disconnect`，输出 JSON `{connector, account}` 或 `{connector, connected: false, remote_revoked, manual_step}`。内部 `run_as(user, function) -> value`：fork 子进程降权执行并经 pipe 返回 JSON。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class ConnectorAdminTests(unittest.TestCase):
@@ -976,12 +976,12 @@ class ConnectorAdminTests(unittest.TestCase):
             connector_admin.disconnect('bogus')
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors.ConnectorAdminTests 2>&1 | tail -3`
 Expected: `ModuleNotFoundError: connector_admin`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 """Root entry point: probe a connector's account label or disconnect it, as the right identities."""
@@ -1100,12 +1100,12 @@ if __name__ == '__main__':
 
 注意：测试里 `patch('connector_admin.run_as', side_effect=lambda user, fn: fn())` 让 `as_auth` 与 `run_as` 直接执行；`auth.locked()` 在测试中需要 `auth.STORE` 可写，`ConnectorAdminTests.setUp` 用 `patch('auth.STORE', tempdir)`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors -v 2>&1 | tail -3`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add services/connector_admin.py tests/test_connectors.py
@@ -1124,7 +1124,7 @@ git commit -m "Add connector admin for account probing and disconnect"
 - Consumes: `connector_base.read/write/credential/text_limit`、`common.provider_request`。
 - Produces: `drive.validate(op, params)`、`drive.handle(request)`、`drive.probe(token) -> str`。请求形如 `{'op': 'search', 'query': ..., 'limit': ...}`、`{'op': 'read', 'file_id'}`、`{'op': 'create', 'request_id', 'parent_id', 'name', 'mime_type', 'text'}`、`{'op': 'update', 'request_id', 'file_id', 'text'}`、`{'op': 'status'}`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `tests/test_drive.py`：
 
@@ -1206,12 +1206,12 @@ class DriveTests(unittest.TestCase):
         self.assertEqual(drive.probe('T'), 'me@example.com')
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_drive 2>&1 | tail -3`
 Expected: `ModuleNotFoundError: drive`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 """Google Drive connector: search and read text, create files, update files this app created."""
@@ -1369,12 +1369,12 @@ def handle(request):
     return connector_base.write(SELF, operation, params, cred['generation'], request_id, prepare, lambda p: update(token, p))
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_drive -v 2>&1 | tail -3`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add services/drive.py tests/test_drive.py
@@ -1392,7 +1392,7 @@ git commit -m "Add Google Drive connector with revision-bound updates"
 **Interfaces:**
 - Produces: `notion.validate(op, params)`、`notion.handle(request)`、`notion.probe(token) -> str`；无 `revoke`。请求：`{'op': 'search', 'query', 'limit'}`、`{'op': 'read', 'page_id'}`、`{'op': 'create_page', 'request_id', 'parent_page_id', 'title', 'paragraphs'}`、`{'op': 'append', 'request_id', 'page_id', 'paragraphs'}`、`{'op': 'status'}`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class NotionTests(unittest.TestCase):
@@ -1451,12 +1451,12 @@ class NotionTests(unittest.TestCase):
         self.assertEqual(notion.probe('ntn_x'), 'Acme')
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_notion 2>&1 | tail -3`
 Expected: `ModuleNotFoundError: notion`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 """Notion connector: search, read pages as text, create pages, append paragraphs."""
@@ -1622,12 +1622,12 @@ def handle(request):
     return connector_base.write(SELF, operation, params, cred['generation'], request_id, prepare, lambda p: append(token, p))
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_notion -v 2>&1 | tail -3`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add services/notion.py tests/test_notion.py
@@ -1645,7 +1645,7 @@ git commit -m "Add Notion connector with edit-time-bound appends"
 **Interfaces:**
 - Produces: `slack.validate(op, params)`、`slack.handle(request)`、`slack.probe(token) -> str`、`slack.revoke(token) -> bool`。请求：`{'op': 'channels', 'limit'}`、`{'op': 'history', 'channel', 'limit', 'oldest'?}`、`{'op': 'post', 'request_id', 'channel', 'text', 'thread_ts'?}`、`{'op': 'status'}`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class SlackTests(unittest.TestCase):
@@ -1693,12 +1693,12 @@ class SlackTests(unittest.TestCase):
         self.assertTrue(slack.revoke('xoxb-x'))
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_slack 2>&1 | tail -3`
 Expected: `ModuleNotFoundError: slack`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 """Slack connector (bot token): list joined channels, read history, post messages."""
@@ -1814,12 +1814,12 @@ def handle(request):
     return connector_base.write(SELF, operation, params, cred['generation'], request_id, lambda p: p, lambda p: post(token, p))
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_slack -v 2>&1 | tail -3`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add services/slack.py tests/test_slack.py
@@ -1838,7 +1838,7 @@ git commit -m "Add Slack connector with approval-bound posting"
 **Interfaces:**
 - Produces: 对每个 connector `c`：`/run/secure-<c>/api.sock`（组 `secure-cell-peer`，0660）、`/var/lib/secure-<c>`；cell 内可见 `/run/secure-<c>`。
 
-- [ ] **Step 1: 写一致性测试**
+- [x] **Step 1: 写一致性测试**
 
 ```python
 class DeploymentConsistencyTests(unittest.TestCase):
@@ -1861,12 +1861,12 @@ class DeploymentConsistencyTests(unittest.TestCase):
         self.assertIn('check-connectors.py', (self.ROOT / 'scripts/verify.sh').read_text())
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors.DeploymentConsistencyTests 2>&1 | tail -3`
 Expected: `FileNotFoundError: systemd/secure-drive.socket`。
 
-- [ ] **Step 3: 单元文件**
+- [x] **Step 3: 单元文件**
 
 `systemd/secure-drive.socket`（notion、slack 同形，替换名字）：
 
@@ -1922,7 +1922,7 @@ LimitCORE=0
 Restart=on-failure
 ```
 
-- [ ] **Step 4: 安装脚本与 cell-run**
+- [x] **Step 4: 安装脚本与 cell-run**
 
 `guest/install-gmail.sh` 把手写的用户循环、组成员、tmpfiles、systemctl 列表改为从注册表生成：
 
@@ -1961,7 +1961,7 @@ systemctl enable --now "${units[@]/%/.socket}"
   --bind-ro=/run/secure-slack:/run/secure-slack \
 ```
 
-- [ ] **Step 5: 检查脚本**
+- [x] **Step 5: 检查脚本**
 
 `guest/check-connectors.py`（在 cell 内运行，不需要账户）：
 
@@ -1997,12 +1997,12 @@ raise SystemExit(0 if all(c['passed'] for c in checks) else 1)
 
 `guest/check-security.py`：egress 循环的用户列表与 TLS 探测列表从 `connectors.CONNECTORS` 生成（`for c in connectors.CONNECTORS.values(): probes.append((c.user, c.hosts[0]))`）。`guest/check-gmail.py` 的 status 键集合改为 `{'connected','reauth_required','account','scope_text','revocation_pending','auth'}`（gmail handler 的 `status` 也改为返回 `auth.status()['gmail']`）。`scripts/up.sh` 复制列表加 `guest/check-connectors.py`，`install-gmail.sh` 把它装进 rootfs `/opt/secure-vm/`；`scripts/verify.sh` 的循环加入 `check-connectors.py`。
 
-- [ ] **Step 6: 运行确认通过**
+- [x] **Step 6: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_connectors -v 2>&1 | tail -3 && shellcheck -S warning -x guest/*.sh guest/cell-run scripts/*.sh && .venv/bin/python scripts/check-source.py`
 Expected: PASS，shellcheck 无输出。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add systemd guest scripts/up.sh scripts/verify.sh tests/test_connectors.py
@@ -2021,7 +2021,7 @@ git commit -m "Deploy connector services from the registry and expose their sock
 **Interfaces:**
 - Produces: `pi/connectors.mjs` 导出 `CONNECTOR_TOOLS: { [connector]: Array<{ name, description, parameters, request(params) }> }` 与 `async function connectedConnectors(rpc) -> string[]`（对每个 socket 调 `status`，返回 `connected: true` 的 id）。`agent.mjs` 只为返回的 connector 注册工具。`codex_schema.TOOL_NAMES` 包含所有工具名。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `pi/tests/connectors.test.mjs`：
 
@@ -2072,12 +2072,12 @@ test('only connected connectors are registered', async () => {
         self.assertTrue(set(names) <= codex_schema.TOOL_NAMES)
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `node --test pi/tests/connectors.test.mjs 2>&1 | grep -E "Cannot find|fail"`
 Expected: `Cannot find module '../connectors.mjs'`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `pi/connectors.mjs`：
 
@@ -2156,12 +2156,12 @@ const customTools = connected.flatMap((connector) => CONNECTOR_TOOLS[connector].
 
 `services/codex_schema.py`：`TOOL_NAMES = {'read','bash','write','edit','host_files', 'gmail_status','gmail_list','gmail_read', 'drive_search','drive_read','drive_create','drive_update', 'notion_search','notion_read','notion_create_page','notion_append', 'slack_channels','slack_history','slack_post'}`；`validate_parts` 里 `len(tools) > len(TOOL_NAMES)` 不变。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `node --test pi/tests/*.test.mjs 2>&1 | grep -E "^ℹ (pass|fail)" && .venv/bin/python -m unittest tests.test_pi -q 2>&1 | tail -1 && node --check pi/agent.mjs`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add pi/connectors.mjs pi/agent.mjs pi/tests/connectors.test.mjs services/codex_schema.py tests/test_pi.py
@@ -2183,7 +2183,7 @@ git commit -m "Register connector tools in Pi only for connected connectors"
 - Produces: controller 操作 `connector-status {connector}`、`connector-connect {connector}`、`connector-cancel {connector}`、`connector-import-token {connector}`、`connector-disconnect {connector}`、`connector-read {connector, mode}`；旧 `gmail-*` 操作映射到新实现。`TokenWindow.prompt(connector) -> Promise<string|null>`（主进程窗口；令牌只在主进程内存中经过）。
 - Produces: `views.approvalSummary` 对 `write` 操作输出 `['类型', '写入']`、目标与正文行；`views.connectorCard(descriptor, status, oauthPending)`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `desktop/tests/connectors.test.cjs`：
 
@@ -2259,12 +2259,12 @@ test('write approvals are marked and show the target and full text; connector ca
 
 `desktop/tests/oauth.test.cjs`：`validateAuthorization(value, redirect, scopes)` 第三参数为期望 scope 集合；用 drive 的两个 scope 构造 URL 并断言通过，缺一个 scope 则抛错。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && npm test 2>&1 | grep -E "^ℹ (pass|fail)"`
 Expected: 新用例失败（缺模块、缺操作）。
 
-- [ ] **Step 3: 实现共享描述表**
+- [x] **Step 3: 实现共享描述表**
 
 `desktop/src/shared/connectors.cjs`：
 
@@ -2281,7 +2281,7 @@ const isConnector = (id) => byId(id) !== null;
 module.exports = { CONNECTORS, byId, isConnector };
 ```
 
-- [ ] **Step 4: 主进程**
+- [x] **Step 4: 主进程**
 
 `runtime.cjs`：
 
@@ -2360,7 +2360,7 @@ module.exports = { TokenWindow };
 
 `gmail-status`/`gmail-connect`/`gmail-cancel`/`gmail-disconnect`/`gmail-read` 改为调用上述实现并固定 `connector: 'gmail'`。`app.cjs` 创建 `new TokenWindow({ parent: win, preload })` 传给 controller（`tokens`），并实现 `confirmConnectorRead(descriptor)`（消息含 `descriptor.scopeText` 与 `dataText`）与 `confirmDisconnect(descriptor)` 对话框。
 
-- [ ] **Step 5: 渲染器**
+- [x] **Step 5: 渲染器**
 
 `views.mjs`：`approvalSummary` 增加
 
@@ -2379,12 +2379,12 @@ module.exports = { TokenWindow };
 
 `renderer.mjs`：`acts['gmail-status']` 改为 `connectors-status`（写入 `state.connectors`），点击处理增加 `b.dataset.connector && b.dataset.cact` 分派到 `connector-*` 操作；错误映射增加 `TARGET_CHANGED`、`TARGET_NOT_WRITABLE`、`NOT_IN_CHANNEL`、`REAUTH_REQUIRED`、`DAILY_WRITE_LIMIT`、`BAD_TOKEN_FORMAT`、`PROVIDER_RATE_LIMITED`。
 
-- [ ] **Step 6: 运行确认通过**
+- [x] **Step 6: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write src tests && node scripts/check.cjs && npm test 2>&1 | grep -E "^✖|^ℹ (tests|pass|fail)"`
 Expected: 全部 PASS。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add desktop
@@ -2399,15 +2399,15 @@ git commit -m "Render connector cards, collect static tokens in a separate windo
 - Create: `docs/CONNECTORS.md`
 - Modify: `README.md`、`README.en.md`、`SECURITY.md`、`docs/README.md`、`docs/GMAIL_SETUP.md`（顶部指向 CONNECTORS.md）、`docs/DESKTOP_APP.md`、`docs/architecture/REPOSITORY.md`、`CHANGELOG.md`、`docs/PI_AGENT.md`（工具列表）
 
-- [ ] **Step 1: 写 `docs/CONNECTORS.md`**
+- [x] **Step 1: 写 `docs/CONNECTORS.md`**
 
 内容：每个 connector 的授权准备（Drive：同一 Google Cloud 项目启用 Drive API 并加入 scope；Notion：创建内部集成、勾选三项能力、共享页面给集成；Slack：创建应用、五个 bot scope、安装到工作区、邀请 bot 进频道）、桌面操作顺序、读写操作表（引用规范 §5）、审批页如何核对写入、断开语义（Notion 需手动删除集成）、数据去向声明、限制（drive.file 更新范围、修订窗口、每日 200 次写）。
 
-- [ ] **Step 2: 其余文档**
+- [x] **Step 2: 其余文档**
 
 README 能力表新增三行（Drive/Notion/Slack 读写，写需逐条审批）；SECURITY.md「当前边界」加一段：写操作冻结内容并逐条审批、更新绑定修订、每个 connector 独立 UID 与出口、静态令牌只经主进程独立窗口、Notion 令牌无远端撤销。REPOSITORY.md 目录树加 `connectors.py`、`ledger.py`、`connector_base.py`、`connector_admin.py`、三个 handler、`pi/connectors.mjs`、`shared/connectors.cjs`、`token-window.cjs`；关键决定加「11. connector 只在注册表登记一次；写操作复用 policy 一次性授权与账本」。CHANGELOG Unreleased 新增条目。PI_AGENT.md 的工具列表改为「按已连接 connector 动态注册」。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add docs README.md README.en.md SECURITY.md CHANGELOG.md
@@ -2420,26 +2420,26 @@ git commit -m "Document Drive, Notion and Slack connectors"
 
 **Files:** 修正 CI 或真机暴露的问题时按对应任务的文件提交；新增 `docs/engineering/VALIDATION-<日期>-CONNECTORS.md`。
 
-- [ ] **Step 1: 全量离线检查**
+- [x] **Step 1: 全量离线检查**
 
 Run: `make check PYTHON=.venv/bin/python`
 Expected: lint 与三套测试全部通过。
 
-- [ ] **Step 2: 部署到现有 macOS VM**
+- [x] **Step 2: 部署到现有 macOS VM**
 
 Run: `bash scripts/install-pi.sh`（含 up.sh：新用户、单元、tmpfiles、cell-run 绑定、Pi 适配器）。
 Expected: `systemctl is-active secure-drive.socket secure-notion.socket secure-slack.socket` 均 active。
 
-- [ ] **Step 3: 真机检查**
+- [x] **Step 3: 真机检查**
 
 Run: `make verify-vm`（现在含 check-connectors.py）；`python3 scripts/check-pi-rpc.py`（Pi 启动时只注册 Gmail 工具，因为其他 connector 未连接）；`node desktop/scripts/verify-files.cjs`。
 Expected: 全部通过；`check-connectors.py` 报告三个 socket 可见、伪造操作被拒。
 
-- [ ] **Step 4: 推送并观察 CI**
+- [x] **Step 4: 推送并观察 CI**
 
 Run: `git push -u origin feat/connectors`；`linux-live` 因触及 `services/**` 自动运行；`gh run watch`。
 Expected: linux-live 与 Source checks 通过。
 
-- [ ] **Step 5: 验证记录**
+- [x] **Step 5: 验证记录**
 
 写 `docs/engineering/VALIDATION-<日期>-CONNECTORS.md`：离线数量、部署结果、真机检查、CI 运行 ID；明确列出「真实账户读写验证待维护者完成」的步骤清单（每个 connector：连接、搜索、读取、新建、更新或追加或发送、审批核对、断开）。提交。
