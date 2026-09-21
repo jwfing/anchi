@@ -4,17 +4,20 @@ set -euo pipefail
 src=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=guest/cell.env
 source "$src/cell.env"
+# shellcheck source=guest/arch.sh
+source "$src/arch.sh"
+node_arch=$(node_arch "$(uname -m)")
 node_version=$SECURE_NODE_VERSION
-node_sha=$SECURE_NODE_SHA256
-node_dir=/opt/secure-vm/node-v${node_version}-linux-arm64
+node_sha=$(node_sha256 "$node_arch")
+node_dir=/opt/secure-vm/node-v${node_version}-linux-${node_arch}
 if [[ ! -x "$node_dir/bin/node" ]]; then
-  python3 - "$node_version" "$node_sha" <<'PY'
+  python3 - "$node_version" "$node_sha" "$node_arch" <<'PY'
 import hashlib,sys,urllib.request
 from pathlib import Path
-version,expected=sys.argv[1:]
+version,expected,arch=sys.argv[1:]
 path=Path('/tmp/secure-node.tar.xz')
-with urllib.request.urlopen('https://nodejs.org/dist/v'+version+'/node-v'+version+'-linux-arm64.tar.xz',timeout=60) as source:
-    data=source.read(50*1024*1024)
+with urllib.request.urlopen('https://nodejs.org/dist/v'+version+'/node-v'+version+'-linux-'+arch+'.tar.xz',timeout=60) as source:
+    data=source.read(60*1024*1024)
 if hashlib.sha256(data).hexdigest()!=expected:
     raise SystemExit('Node distribution checksum mismatch')
 path.write_bytes(data)

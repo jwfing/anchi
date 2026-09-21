@@ -7,5 +7,5 @@ export QISUO_INSTALL_VM="$vm_name"
 bash scripts/up.sh
 limactl shell "$vm_name" -- mkdir -p /tmp/secure-vm-bootstrap/pi
 limactl copy pi/package.json pi/package-lock.json pi/*.mjs "$vm_name":/tmp/secure-vm-bootstrap/pi/
-limactl copy guest/cell.env guest/install-pi.sh guest/check-pi.py "$vm_name":/tmp/secure-vm-bootstrap/
+limactl copy guest/cell.env guest/arch.sh guest/install-pi.sh guest/check-pi.py "$vm_name":/tmp/secure-vm-bootstrap/
 limactl shell "$vm_name" -- sudo bash /tmp/secure-vm-bootstrap/install-pi.sh
