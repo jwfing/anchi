@@ -209,5 +209,62 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(connector_base.text_limit('short'), ('short', False))
 
 
+class ConnectorAdminTests(unittest.TestCase):
+    def setUp(self):
+        import auth
+        import os
+
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        key = Path(self.temp.name) / 'master.key'
+        key.write_bytes(os.urandom(32))
+        for p in (patch('auth.STORE', Path(self.temp.name)), patch('vault.KEY', key)):
+            p.start()
+            self.addCleanup(p.stop)
+        self.auth = auth
+
+    def test_probe_runs_as_connector_and_records_label(self):
+        import connector_admin
+
+        self.auth.import_token('slack', {'token': 'xoxb-' + '1' * 40})
+        with (
+            patch('connector_admin.run_as', side_effect=lambda user, fn: fn()),
+            patch('connector_admin.credential_for', return_value='xoxb-token'),
+            patch('connector_admin.module_for') as module,
+        ):
+            module.return_value.probe.return_value = 'Acme'
+            self.assertEqual(connector_admin.probe('slack')['account'], 'Acme')
+        module.return_value.probe.assert_called_once_with('xoxb-token')
+        self.assertEqual(self.auth.status()['slack']['account'], 'Acme')
+
+    def test_disconnect_paths(self):
+        import connector_admin
+
+        self.auth.import_token('slack', {'token': 'xoxb-' + '1' * 40})
+        self.auth.import_token('notion', {'token': 'ntn_' + 'a' * 40})
+        with (
+            patch('connector_admin.run_as', side_effect=lambda user, fn: fn()),
+            patch('connector_admin.credential_for', return_value='xoxb-token'),
+            patch('connector_admin.module_for') as module,
+            patch(
+                'connector_admin.auth.disconnect', return_value={'connected': False, 'remote_revoked': True}
+            ) as google,
+        ):
+            module.return_value.revoke.return_value = True
+            self.assertEqual(
+                connector_admin.disconnect('slack'), {'connector': 'slack', 'connected': False, 'remote_revoked': True}
+            )
+            module.return_value.revoke = None
+            self.assertEqual(
+                connector_admin.disconnect('notion')['manual_step'], 'remove the integration in Notion settings'
+            )
+            connector_admin.disconnect('drive')
+            google.assert_called_once_with('drive')
+        self.assertFalse(self.auth.status()['slack']['connected'])
+        self.assertFalse(self.auth.status()['notion']['connected'])
+        with self.assertRaises(Denied):
+            connector_admin.disconnect('bogus')
+
+
 if __name__ == '__main__':
     unittest.main()
