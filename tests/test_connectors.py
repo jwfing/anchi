@@ -4,6 +4,10 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
+from unittest.mock import patch
+
+import common
+import connector_base
 import connectors
 from common import Denied
 from ledger import Ledger
@@ -68,6 +72,141 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(
             set(self.ledger.history(1)[0]), {'id', 'provider', 'model', 'created', 'finished', 'state', 'error'}
         )
+
+
+class TransportTests(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+
+        def transport(host, method, path, headers, body):
+            self.calls.append((host, method, path, headers, body))
+            return self.response
+
+        self.patch = patch('common.TRANSPORT', transport)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.response = (200, b'{"ok": true}')
+
+    def test_paths_are_allowlisted_per_connector(self):
+        drive = connectors.CONNECTORS['drive']
+        common.provider_request(drive, 'GET', '/drive/v3/files?q=x', token='T')
+        self.assertEqual(self.calls[0][0], 'www.googleapis.com')
+        self.assertEqual(self.calls[0][3]['Authorization'], 'Bearer T')
+        for path in (
+            '/drive/v3/files/../about',
+            '/gmail/v1/users/me/messages',
+            '//evil',
+            '/drive/v3/files/x/permissions',
+        ):
+            with self.assertRaisesRegex(Denied, 'DESTINATION_DENIED'):
+                common.provider_request(drive, 'GET', path, token='T')
+        with self.assertRaisesRegex(Denied, 'DESTINATION_DENIED'):
+            common.provider_request(drive, 'DELETE', '/drive/v3/files/x', token='T')
+        self.assertEqual(len(self.calls), 1)
+
+    def test_status_mapping_never_reflects_body(self):
+        slack = connectors.CONNECTORS['slack']
+        for status, code in (
+            (401, 'PROVIDER_AUTH_REQUIRED'),
+            (403, 'PROVIDER_AUTH_REQUIRED'),
+            (429, 'PROVIDER_RATE_LIMITED'),
+            (500, 'PROVIDER_REQUEST_FAILED'),
+        ):
+            self.response = (status, b'{"error":"SECRET_DETAIL"}')
+            with self.assertRaises(Denied) as caught:
+                common.provider_request(slack, 'GET', '/api/auth.test', token='T')
+            self.assertEqual(str(caught.exception), code)
+        self.response = (200, b'x' * (2 * 1024 * 1024 + 1))
+        with self.assertRaisesRegex(Denied, 'PROVIDER_RESPONSE_TOO_LARGE'):
+            common.provider_request(slack, 'GET', '/api/auth.test', token='T', raw=True)
+        self.response = (200, b'not json')
+        with self.assertRaisesRegex(Denied, 'PROVIDER_RESPONSE_INVALID'):
+            common.provider_request(slack, 'GET', '/api/auth.test', token='T')
+
+
+class FlowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = patch('connector_base.LEDGER_ROOT', Path(self.temp.name))
+        require = patch('connector_base.policy_client.require')
+        root.start()
+        self.require = require.start()
+        self.addCleanup(root.stop)
+        self.addCleanup(require.stop)
+        self.slack = connectors.CONNECTORS['slack']
+
+    def test_read_requires_policy_before_execute(self):
+        self.require.side_effect = Denied('APPROVAL_REQUIRED:x')
+        executed = []
+        with self.assertRaisesRegex(Denied, 'APPROVAL_REQUIRED'):
+            connector_base.read(self.slack, 'slack.channels', {'limit': 5}, 'gen', lambda: executed.append(1))
+        self.assertEqual(executed, [])
+        self.assertEqual(
+            self.require.call_args.args[0], {'operation': 'slack.channels', 'account': 'gen', 'params': {'limit': 5}}
+        )
+
+    def test_write_waits_then_executes_once_and_never_replays_unknown(self):
+        params = {'channel': 'C1', 'text': 'hi'}
+        executed = []
+
+        def execute(p):
+            executed.append(p)
+            return {'ts': '1'}
+
+        self.require.side_effect = Denied('APPROVAL_REQUIRED:a')
+        with self.assertRaisesRegex(Denied, 'APPROVAL_REQUIRED:a'):
+            connector_base.write(self.slack, 'slack.post', params, 'gen', 'a' * 32, lambda p: p, execute)
+        self.assertEqual(connector_base.ledger(self.slack).get('a' * 32)['state'], 'WAITING_APPROVAL')
+        self.require.side_effect = None
+        self.assertEqual(
+            connector_base.write(self.slack, 'slack.post', params, 'gen', 'a' * 32, lambda p: p, execute), {'ts': '1'}
+        )
+        self.assertEqual(len(executed), 1)
+        self.assertEqual(
+            connector_base.write(self.slack, 'slack.post', params, 'gen', 'a' * 32, lambda p: p, execute), {'ts': '1'}
+        )
+        self.assertEqual(len(executed), 1)
+        with self.assertRaisesRegex(Denied, 'REQUEST_ID_CONFLICT'):
+            connector_base.write(
+                self.slack, 'slack.post', {**params, 'text': 'changed'}, 'gen', 'a' * 32, lambda p: p, lambda p: {}
+            )
+
+        def boom(p):
+            raise TimeoutError()
+
+        with self.assertRaisesRegex(Denied, 'WRITE_EXECUTION_UNKNOWN'):
+            connector_base.write(self.slack, 'slack.post', params, 'gen', 'b' * 32, lambda p: p, boom)
+        with self.assertRaisesRegex(Denied, 'REQUEST_ALREADY_UNKNOWN'):
+            connector_base.write(self.slack, 'slack.post', params, 'gen', 'b' * 32, lambda p: p, lambda p: {})
+        with self.assertRaisesRegex(Denied, 'BAD_REQUEST_ID'):
+            connector_base.write(self.slack, 'slack.post', params, 'gen', 'short', lambda p: p, lambda p: {})
+
+    def test_prepare_output_is_what_gets_approved_and_denied_writes_fail(self):
+        self.require.side_effect = Denied('APPROVAL_REQUIRED:z')
+        with self.assertRaises(Denied):
+            connector_base.write(
+                self.slack,
+                'slack.post',
+                {'channel': 'C1', 'text': 'x'},
+                'gen',
+                'c' * 32,
+                lambda p: {**p, 'expected': 'r1'},
+                lambda p: {},
+            )
+        self.assertEqual(self.require.call_args.args[0]['params']['expected'], 'r1')
+        self.require.side_effect = Denied('POLICY_DENIED')
+        with self.assertRaisesRegex(Denied, 'POLICY_DENIED'):
+            connector_base.write(
+                self.slack, 'slack.post', {'channel': 'C1', 'text': 'x'}, 'gen', 'd' * 32, lambda p: p, lambda p: {}
+            )
+        self.assertEqual(connector_base.ledger(self.slack).get('d' * 32)['state'], 'FAILED')
+
+    def test_text_limit(self):
+        text, truncated = connector_base.text_limit('中' * 20000, 40000)
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(text.encode()), 40000)
+        self.assertEqual(connector_base.text_limit('short'), ('short', False))
 
 
 if __name__ == '__main__':

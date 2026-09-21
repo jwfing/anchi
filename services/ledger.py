@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import json
+from pathlib import Path
 import sqlite3
 import time
 
@@ -14,6 +15,11 @@ class Ledger:
 
     @contextmanager
     def database(self):
+        try:
+            # systemd's StateDirectory normally creates this; tests and first runs may not have it yet.
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        except OSError:
+            pass
         conn = sqlite3.connect(self.path, timeout=5)
         conn.row_factory = sqlite3.Row
         try:
