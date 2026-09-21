@@ -129,8 +129,24 @@ action = {
     },
 }
 sock = '/run/secure-policy/api.sock'
+
+
+def admin(*arguments):
+    return json.loads(
+        subprocess.run(
+            ['python3', '/opt/secure-vm/services/policy_admin.py', *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+
+
+# Standing authorization is the default; the approval path is exercised in ask mode and the rule restored.
+previous_mode = admin('rules')['rules']['inference']
+admin('mode', 'inference', 'ask')
 pending = rpc_as('secure-inference', sock, {'op': 'authorize', 'action': action})
-check('independent_approval_required', pending.get('decision') == 'ask')
+check('ask_mode_requires_independent_approval', pending.get('decision') == 'ask')
 # Use the actual external admin CLI, preserving database ownership.
 subprocess.run(
     [
@@ -148,5 +164,9 @@ grant = rpc_as('secure-inference', sock, {'op': 'authorize', 'action': action})
 consume = {'op': 'consume', 'action': action, 'grant_id': grant['grant_id'], 'ticket': grant['ticket']}
 check('approved_grant_consumed', rpc_as('secure-inference', sock, consume).get('allowed') is True)
 check('grant_replay_denied', rpc_as('secure-inference', sock, consume).get('error') == 'INVALID_OR_CONSUMED_GRANT')
+admin('mode', 'inference', previous_mode)
+check('rule_restored', admin('rules')['rules']['inference'] == previous_mode)
+auto_grant = rpc_as('secure-inference', sock, {'op': 'authorize', 'action': action})
+check('auto_mode_issues_grant_without_human', (auto_grant.get('decision') == 'allow') == (previous_mode == 'auto'))
 print(json.dumps({'checks': checks, 'passed': all(c['passed'] for c in checks)}, indent=2))
 raise SystemExit(0 if all(c['passed'] for c in checks) else 1)

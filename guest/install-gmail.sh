@@ -49,11 +49,6 @@ systemctl stop "${units[@]/%/.service}" 2>/dev/null || true
 systemctl stop "${units[@]/%/.socket}" 2>/dev/null || true
 systemctl enable --now secure-vault-memory.service secure-egress.service secure-egress-refresh.timer
 systemctl restart secure-egress.service
-# Preserve the user's already-established Gmail read consent only on first migration.
-if [[ ! -f /var/lib/secure-policy/policy.sqlite3 ]] && \
-   { [[ -f /var/lib/secure-auth/tokens.json ]] || [[ -f /var/lib/secure-auth/tokens.json.enc ]]; }; then
-  python3 /opt/secure-vm/services/policy_admin.py read gmail allow
-fi
 systemctl enable --now "${units[@]/%/.socket}"
 root=/var/lib/secure-vm/rootfs
 install -o "$SECURE_CELL_UID_BASE" -g "$SECURE_CELL_UID_BASE" -m 0644 "$src/services/common.py" "$src/gmail-cli.py" "$src/check-gmail.py" "$src/check-connectors.py" "$root/opt/secure-vm/"

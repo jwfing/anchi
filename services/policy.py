@@ -32,7 +32,7 @@ def database():
             epoch INTEGER NOT NULL, boot TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL,
             expires REAL NOT NULL, ticket_hash TEXT, decided REAL, consumed REAL);
           CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at REAL NOT NULL, event TEXT NOT NULL, grant_id TEXT, digest TEXT);
-          CREATE TABLE IF NOT EXISTS read_rules (connector TEXT PRIMARY KEY, allowed INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS rules (principal TEXT PRIMARY KEY, mode TEXT NOT NULL);
         ''')
         with conn:
             yield conn
@@ -87,14 +87,19 @@ def normalize(action, principal):
     return encoded, hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def read_allowed(conn, connector):
-    row = conn.execute('SELECT allowed FROM read_rules WHERE connector=?', (connector,)).fetchone()
-    if row is None and connector == 'gmail':
-        # One-time migration of the pre-registry column; the column stays for old backups.
-        legacy = conn.execute('SELECT gmail_read FROM config WHERE id=1').fetchone()[0]
-        conn.execute('INSERT OR IGNORE INTO read_rules VALUES(?,?)', ('gmail', int(legacy)))
-        return bool(legacy)
-    return bool(row and row['allowed'])
+PRINCIPALS = (*connectors.CONNECTORS, 'inference')
+MODES = ('auto', 'ask')
+
+
+def mode(conn, principal):
+    """'auto' (default): standing authorization issues grants without a human; 'ask': per-request approval."""
+    row = conn.execute('SELECT mode FROM rules WHERE principal=?', (principal,)).fetchone()
+    return row['mode'] if row else 'auto'
+
+
+def inspect_rules():
+    with database() as conn:
+        return {'rules': {principal: mode(conn, principal) for principal in PRINCIPALS}}
 
 
 def audit(conn, event, grant_id=None, digest=None):
@@ -120,11 +125,8 @@ def authorize(action, principal):
         ).fetchone()
         if grant and grant['state'] in ('DENIED', 'REVOKED'):
             raise Denied('POLICY_DENIED')
-        auto = (
-            principal != 'inference'
-            and connectors.kind(action['operation']) == connectors.READ
-            and read_allowed(conn, principal)
-        )
+        # Standing authorization covers reads and writes alike; 'ask' falls back to human approval.
+        auto = mode(conn, principal) == 'auto'
         if grant and grant['state'] == 'APPROVED':
             grant_id = grant['id']
         elif auto:
@@ -243,21 +245,25 @@ def decide(grant_id, decision, digest=None):
     return {'approval_id': grant_id, 'state': decision}
 
 
-def set_read(connector, allow):
-    if connector not in connectors.CONNECTORS:
-        raise Denied('UNKNOWN_CONNECTOR')
+def set_mode(principal, value):
+    if principal not in PRINCIPALS:
+        raise Denied('UNKNOWN_PRINCIPAL')
+    if value not in MODES:
+        raise Denied('BAD_MODE')
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         conn.execute(
-            'INSERT INTO read_rules VALUES(?,?) ON CONFLICT(connector) DO UPDATE SET allowed=excluded.allowed',
-            (connector, int(allow)),
+            'INSERT INTO rules VALUES(?,?) ON CONFLICT(principal) DO UPDATE SET mode=excluded.mode', (principal, value)
         )
-        if connector == 'gmail':
-            conn.execute('UPDATE config SET gmail_read=? WHERE id=1', (int(allow),))
-        # Any rule change invalidates every outstanding grant, exactly like before.
+        if principal == 'gmail':
+            conn.execute('UPDATE config SET gmail_read=? WHERE id=1', (int(value == 'auto'),))
+        # Any rule change invalidates every outstanding grant.
         conn.execute('UPDATE config SET epoch=epoch+1 WHERE id=1')
         conn.execute("UPDATE grants SET state='REVOKED' WHERE state IN ('PENDING','APPROVED','ISSUED')")
-        audit(
-            conn, f'{connector.upper()}_READ_ENABLED' if allow else f'{connector.upper()}_READ_DISABLED_GRANTS_REVOKED'
-        )
-    return {'connector': connector, 'read': allow, 'outstanding_grants_revoked': True}
+        audit(conn, f'RULE_{principal.upper()}_{value.upper()}')
+    return {'principal': principal, 'mode': value, 'outstanding_grants_revoked': True}
+
+
+def set_read(connector, allow):
+    """Legacy alias kept for one release: allow -> standing authorization, deny -> per-request approval."""
+    return set_mode(connector, 'auto' if allow else 'ask')
