@@ -19,6 +19,9 @@ exec systemd-run --quiet --unit=secure-cell --collect --wait --pipe \
   --bind=/var/lib/secure-vm/workspace:/workspace \
   --bind-ro=/run/secure-gmail:/run/secure-gmail \
   --bind-ro=/run/secure-inference:/run/secure-inference \
+  --bind-ro=/run/secure-drive:/run/secure-drive \
+  --bind-ro=/run/secure-notion:/run/secure-notion \
+  --bind-ro=/run/secure-slack:/run/secure-slack \
   --tmpfs=/tmp:mode=1777,size=64M --tmpfs=/var/tmp:mode=1777,size=64M \
   --system-call-filter='~io_uring_setup io_uring_enter io_uring_register bpf perf_event_open' \
   --setenv=HOME=/workspace --setenv=PATH=/usr/bin:/bin -- "$@"

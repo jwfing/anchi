@@ -266,5 +266,26 @@ class ConnectorAdminTests(unittest.TestCase):
             connector_admin.disconnect('bogus')
 
 
+class DeploymentConsistencyTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_every_connector_has_units_bind_and_checks(self):
+        cell_run = (self.ROOT / 'guest/cell-run').read_text()
+        install = (self.ROOT / 'guest/install-gmail.sh').read_text()
+        for connector in connectors.CONNECTORS.values():
+            socket_unit = (self.ROOT / f'systemd/{connector.user}.socket').read_text()
+            service_unit = (self.ROOT / f'systemd/{connector.user}.service').read_text()
+            self.assertIn(f'ListenStream=/run/secure-{connector.id}/api.sock', socket_unit)
+            self.assertIn('SocketGroup=secure-cell-peer', socket_unit)
+            self.assertIn(f'server.py {connector.id}', service_unit)
+            self.assertIn(f'User={connector.user}', service_unit)
+            self.assertIn('InaccessiblePaths=/var/lib/secure-auth', service_unit)
+            self.assertIn(f'--bind-ro=/run/secure-{connector.id}:/run/secure-{connector.id}', cell_run)
+        # Users, groups and tmpfiles lines are generated from the registry, not typed by hand.
+        self.assertIn('connectors.SERVICE_USERS', install)
+        self.assertIn('check-connectors.py', (self.ROOT / 'scripts/up.sh').read_text())
+        self.assertIn('check-connectors.py', (self.ROOT / 'scripts/verify.sh').read_text())
+
+
 if __name__ == '__main__':
     unittest.main()

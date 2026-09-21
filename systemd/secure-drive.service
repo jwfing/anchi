@@ -1,0 +1,30 @@
+[Unit]
+Description=Secure VM Google Drive connector
+Requires=secure-drive.socket secure-auth.socket secure-policy.socket secure-egress.service
+After=network-online.target secure-egress.service
+
+[Service]
+User=secure-drive
+Group=secure-drive
+ExecStart=/usr/bin/python3 /opt/secure-vm/services/server.py drive
+StateDirectory=secure-drive
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=/var/lib/secure-auth /var/lib/secure-vm /run/secure-vault /run/secure-gmail /run/secure-inference
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=16
+LimitCORE=0
+Restart=on-failure

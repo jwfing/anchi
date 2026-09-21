@@ -56,7 +56,9 @@ check(
     'vault_key_tmpfs',
     subprocess.check_output(['findmnt', '-n', '-o', 'FSTYPE', '-T', '/run/secure-vault'], text=True).strip() == 'tmpfs',
 )
-for user in ('secure-auth', 'secure-gmail', 'secure-inference', 'secure-policy'):
+import connectors
+
+for user in ('secure-auth', 'secure-inference', 'secure-policy', *connectors.SERVICE_USERS):
     probe = '''import socket, json
 results=[]
 for host, port, family, kind in [('1.1.1.1',443,socket.AF_INET,socket.SOCK_STREAM), ('192.168.5.2',443,socket.AF_INET,socket.SOCK_STREAM), ('1.1.1.1',53,socket.AF_INET,socket.SOCK_DGRAM), ('2606:4700:4700::1111',443,socket.AF_INET6,socket.SOCK_STREAM)]:
@@ -73,9 +75,9 @@ print(json.dumps(results))'''
 # A TLS handshake proves the allow rule works without transmitting any credential.
 for user, host in [
     ('secure-auth', 'oauth2.googleapis.com'),
-    ('secure-gmail', 'gmail.googleapis.com'),
     ('secure-inference', 'api.openai.com'),
     ('secure-inference', 'chatgpt.com'),
+    *((c.user, c.hosts[0]) for c in connectors.CONNECTORS.values()),
 ]:
     probe = (
         "from common import target_ips; import socket, ssl, json; host="
@@ -83,6 +85,16 @@ for user, host in [
         + "; raw=socket.create_connection((target_ips(host)[0],443),timeout=5); tls=ssl.create_default_context().wrap_socket(raw,server_hostname=host); print(json.dumps(bool(tls.version()))); tls.close()"
     )
     check(user + '_' + host + '_tls_allowed', as_user(user, probe))
+# Each connector identity can only fetch its own credential kind.
+check(
+    'drive_cannot_get_static_token',
+    rpc_as('secure-drive', '/run/secure-auth/token.sock', {'op': 'token'}).get('error') == 'CREDENTIAL_SCOPE_DENIED',
+)
+check(
+    'notion_cannot_get_google_token',
+    rpc_as('secure-notion', '/run/secure-auth/token.sock', {'op': 'access_token'}).get('error')
+    == 'CREDENTIAL_SCOPE_DENIED',
+)
 check(
     'gmail_cannot_get_codex_token',
     rpc_as('secure-gmail', '/run/secure-auth/token.sock', {'op': 'codex_token'}).get('error')

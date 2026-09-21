@@ -28,7 +28,7 @@ fi
 # Explicit copy, never a host-home or project filesystem mount.
 limactl shell "$vm_name" -- mkdir -p /tmp/secure-vm-bootstrap
 limactl copy guest/cell.env guest/arch.sh guest/bootstrap.sh guest/cell-run guest/check-cell.py guest/check-gmail.py guest/gmail-cli.py guest/install-gmail.sh "$vm_name":/tmp/secure-vm-bootstrap/
-limactl copy guest/agent.py guest/check-inference.py guest/check-security.py "$vm_name":/tmp/secure-vm-bootstrap/
+limactl copy guest/agent.py guest/check-inference.py guest/check-security.py guest/check-connectors.py "$vm_name":/tmp/secure-vm-bootstrap/
 limactl copy -r services systemd "$vm_name":/tmp/secure-vm-bootstrap/
 limactl shell "$vm_name" -- sudo bash /tmp/secure-vm-bootstrap/bootstrap.sh
 limactl shell "$vm_name" -- sudo env SECURE_VM_RUNTIME_VERSION="$runtime_version" bash /tmp/secure-vm-bootstrap/install-gmail.sh
