@@ -7,6 +7,20 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 3 * * 1'
+  # Pushes that can change what runs inside the guest also run the live check on their branch.
+  push:
+    paths:
+      - '.github/workflows/linux-live.yml'
+      - 'lima/**'
+      - 'guest/**'
+      - 'scripts/**'
+      - 'services/**'
+      - 'systemd/**'
+      - 'pi/**'
+      - 'desktop/host-tools.json'
+      - 'desktop/src/main/downloader.cjs'
+      - 'desktop/src/main/platform.cjs'
+      - 'desktop/scripts/install-host-tool.cjs'
 
 permissions:
   contents: read
