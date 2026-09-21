@@ -4,7 +4,27 @@ import json
 import re
 from common import Denied, fields
 
-TOOL_NAMES = {'read', 'bash', 'write', 'edit', 'gmail_status', 'gmail_list', 'gmail_read', 'host_files'}
+TOOL_NAMES = {
+    'read',
+    'bash',
+    'write',
+    'edit',
+    'host_files',
+    'gmail_status',
+    'gmail_list',
+    'gmail_read',
+    'drive_search',
+    'drive_read',
+    'drive_create',
+    'drive_update',
+    'notion_search',
+    'notion_read',
+    'notion_create_page',
+    'notion_append',
+    'slack_channels',
+    'slack_history',
+    'slack_post',
+}
 
 
 def validate_parts(instructions, inputs, tools):

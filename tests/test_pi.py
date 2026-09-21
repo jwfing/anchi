@@ -118,7 +118,7 @@ class PiTests(unittest.TestCase):
             {'type': 'function', 'name': name, 'parameters': {'type': 'object'}}
             for name in sorted(codex_schema.TOOL_NAMES)
         ]
-        self.assertEqual(len(self.request['tools']), 8)
+        self.assertEqual(len(self.request['tools']), 19)
         with (
             patch('policy_client.require', side_effect=Denied('APPROVAL_REQUIRED:id')),
             patch('codex_transport.responses') as network,
@@ -238,6 +238,22 @@ class PiTests(unittest.TestCase):
         for connector in connectors.CONNECTORS.values():
             self.assertEqual(network_rules.ROLES[connector.id], (connector.user, connector.hosts[0]))
         self.assertEqual(network_rules.ROLES['codex'], ('secure-inference', 'chatgpt.com'))
+
+    def test_tool_names_cover_connector_tools(self):
+        import subprocess
+
+        script = "import {ALL_TOOL_NAMES} from './pi/connectors.mjs'; console.log(JSON.stringify(ALL_TOOL_NAMES))"
+        names = json.loads(
+            subprocess.run(
+                ['node', '--input-type=module', '-e', script],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        self.assertTrue(set(names) <= codex_schema.TOOL_NAMES)
+        self.assertEqual(len(names), 14)
 
     def test_multiple_provider_allow_rules_precede_reject(self):
         class User:
