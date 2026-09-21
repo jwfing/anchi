@@ -32,7 +32,7 @@
 **Interfaces:**
 - Produces: `node_arch <uname -m>` → `arm64|x64`；`node_sha256 <node_arch>` → 读取 `SECURE_NODE_SHA256_ARM64|X64`；`host_vm_type <uname -s>` → `vz|qemu`。Task 2 的 `up.sh` 依赖 `host_vm_type`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/test_constants.py` 的 `CellEnvTests` 中新增：
 
@@ -61,12 +61,12 @@
 
 并在文件顶部 `import subprocess`。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_constants -v`
 Expected: `test_node_sha_per_architecture` 因 `KeyError: 'SECURE_NODE_SHA256_ARM64'` 失败；`test_arch_helpers` 因 `guest/arch.sh` 不存在失败。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `guest/cell.env` 把 `SECURE_NODE_SHA256=...` 一行替换为：
 
@@ -131,12 +131,12 @@ fi
 
 `scripts/install-pi.sh` 的复制命令加入 `guest/arch.sh`；`scripts/up.sh` 第一条 `limactl copy guest/...` 加入 `guest/arch.sh`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_constants -v && shellcheck -S warning -x guest/*.sh scripts/*.sh`
 Expected: 全部 PASS，shellcheck 无输出。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add guest/arch.sh guest/cell.env guest/install-pi.sh scripts/install-pi.sh scripts/up.sh tests/test_constants.py
@@ -155,7 +155,7 @@ git commit -m "Select cell Node build by guest architecture"
 - Consumes: `host_vm_type` from `guest/arch.sh`。
 - Produces: 环境变量 `ANCHI_INSTALL_VM` 可控制 `verify.sh` 与 `verify-onboarding.py` 的实例名（Task 9 的 CI 依赖）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 class LimaTemplateTests(unittest.TestCase):
@@ -177,12 +177,12 @@ class LimaTemplateTests(unittest.TestCase):
         self.assertIn('ANCHI_INSTALL_VM', (ROOT / 'scripts/verify.sh').read_text())
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `.venv/bin/python -m unittest tests.test_constants -v`
 Expected: 两个新用例失败（`vmType` 仍在顶层；`up.sh` 无 `host_vm_type`）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `lima/secure-vm.yaml`：
 
@@ -239,12 +239,12 @@ if not re.fullmatch(r'secure-vm(-[a-z0-9-]+)?', INSTANCE):
     raise SystemExit('ANCHI_INSTALL_VM must look like secure-vm-<suffix>')
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `.venv/bin/python -m unittest tests.test_constants -v && shellcheck -S warning -x scripts/*.sh && limactl validate lima/secure-vm.yaml`
 Expected: PASS；`limactl validate` 输出模板有效。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add lima/secure-vm.yaml scripts/up.sh scripts/verify.sh scripts/verify-onboarding.py tests/test_constants.py
@@ -262,7 +262,7 @@ git commit -m "Use one Lima template for arm64 and x86_64 hosts"
 **Interfaces:**
 - Produces: `describe({ platform, arch, home, env })` → `{ id, supported, home, toolsDirectory, nvmDirectory, tools: { brew, python, codex, limactl, qemu }, childPath, dependencies: { kind: 'brew' | 'download' | 'none', tools? }, kvmDevice, extraEnvironment, systemDirectories, secretDirectories }`；`kvmAvailable(info, access?)` → `true | false | null`；`manualSteps(info, health)` → `string[]`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `desktop/tests/platform.test.cjs`：
 
@@ -324,12 +324,12 @@ test('manual steps name exactly the root actions the app refuses to run', () => 
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && node --test tests/platform.test.cjs`
 Expected: `Cannot find module '../src/main/platform.cjs'`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```js
 const path = require('node:path');
@@ -388,12 +388,12 @@ function manualSteps(info, health) {
 module.exports = { describe, kvmAvailable, manualSteps, SYSTEM_DIRECTORIES, SECRET_DIRECTORIES };
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write src/main/platform.cjs tests/platform.test.cjs && node --test tests/platform.test.cjs`
 Expected: 5 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add desktop/src/main/platform.cjs desktop/tests/platform.test.cjs
@@ -412,7 +412,7 @@ git commit -m "Add host platform description for macOS and Linux"
 - Consumes: `describe()` from Task 3。
 - Produces: `executable(name, { access, readdir, platform })`；`new Runtime(root, platform)`；`new DirectoryStore(file, home, io, platform)`；`validateDirectory(chosen, home, entries, platform)`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `desktop/tests/host-tools.test.cjs`：
 
@@ -452,12 +452,12 @@ test('sensitive roots, ancestors and credential stores are rejected per platform
 
 并让 `fixture()` 里的 `new DirectoryStore(file, logicalHome, io)` 改为 `new DirectoryStore(file, logicalHome, io, describe({ platform: 'darwin', arch: 'arm64', home: logicalHome }))`（两处）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && node --test tests/host-tools.test.cjs tests/directory-store.test.cjs`
 Expected: host-tools 用例失败（`platform` 选项被忽略，Linux 表返回 macOS 路径）；directory-store 的 Linux 断言失败。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `host-tools.cjs`：
 
@@ -500,12 +500,12 @@ class Runtime {
 
 `app.cjs`：`const platform = describe();` 传给 `new Runtime(root, platform)`、`new DirectoryStore(file, home, fs, platform)`，并保留在闭包中供 Task 6、7 使用。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write src tests && npm test`
 Expected: 全部 PASS（此时 46 个用例）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add desktop/src/main/host-tools.cjs desktop/src/main/runtime.cjs desktop/src/main/directory-store.cjs desktop/src/main/app.cjs desktop/tests/host-tools.test.cjs desktop/tests/directory-store.test.cjs
@@ -523,7 +523,7 @@ git commit -m "Route host paths and directory policy through platform"
 **Interfaces:**
 - Produces: `entriesFor(platformId)` → `{ [name]: entry }`；`install(name, entry, { toolsDirectory, fetch, tar, chmod })` → 可执行文件绝对路径；`checkUrl(href)` 抛 `DOWNLOAD_HOST_NOT_ALLOWED`。错误码：`DOWNLOAD_CHECKSUM_MISMATCH`、`DOWNLOAD_TOO_LARGE`、`DOWNLOAD_TOO_MANY_REDIRECTS`、`DOWNLOAD_FAILED`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```js
 const { test } = require('node:test');
@@ -598,12 +598,12 @@ test('redirects to unknown hosts, too many hops and oversized bodies are refused
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && node --test tests/downloader.test.cjs`
 Expected: `Cannot find module '../src/main/downloader.cjs'`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `desktop/host-tools.json`：
 
@@ -712,12 +712,12 @@ async function install(name, entry, { toolsDirectory, fetch: fetchImpl = globalT
 module.exports = { install, entriesFor, checkUrl, ALLOWED_HOSTS, MAX_BYTES };
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write src/main/downloader.cjs tests/downloader.test.cjs host-tools.json && node --test tests/downloader.test.cjs`
 Expected: 4 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add desktop/host-tools.json desktop/src/main/downloader.cjs desktop/tests/downloader.test.cjs
@@ -736,7 +736,7 @@ git commit -m "Add checksum-pinned host tool downloader"
 - Consumes: `describe`、`kvmAvailable`、`manualSteps`（Task 3）；`entriesFor`、`install`（Task 5）；`executable(name, { platform })`（Task 4）。
 - Produces: `health` 新字段 `platform`、`supported`、`qemu`、`kvm`、`manualSteps`；错误码 `PLATFORM_UNSUPPORTED` 取代 `MAC_ARM64_REQUIRED`；`new Setup({ ..., platform, install })`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `desktop/tests/setup.test.cjs` 末尾新增：
 
@@ -777,12 +777,12 @@ test('unsupported hosts fail closed with a platform error', async (t) => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && node --test tests/setup.test.cjs`
 Expected: 新用例失败（构造函数忽略 `platform`/`install`；`dependencies` 尝试 brew；错误码为 `MAC_ARM64_REQUIRED`）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `setup.cjs`：
 
@@ -841,12 +841,12 @@ class Setup {
 
 其余不变。`app.cjs` 的 `new Setup({...})` 传 `platform`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write src tests && npm test`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add desktop/src/main/setup.cjs desktop/src/main/app.cjs desktop/tests/setup.test.cjs
@@ -865,7 +865,7 @@ git commit -m "Gate Linux setup on QEMU and KVM and download tools without root"
 - Consumes: `health.platform`、`health.qemu`、`health.kvm`、`health.manualSteps`（Task 6）。
 - Produces: 动作 `setup-homebrew` 在 Linux 上打开 `https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md#linux`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```js
 test('setup step 1 shows Linux manual root commands and no Homebrew wording', async () => {
@@ -884,12 +884,12 @@ test('setup step 1 shows Linux manual root commands and no Homebrew wording', as
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && node --test tests/views.test.cjs`
 Expected: 新用例失败（页面仍显示 Homebrew 文案）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `views.mjs` 的步骤一卡片：
 
@@ -917,12 +917,12 @@ async openDependencyInstaller() {
 },
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write src tests && npm test`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add desktop/src/renderer/views.mjs desktop/src/renderer/renderer.mjs desktop/src/main/app.cjs desktop/tests/views.test.cjs
@@ -941,7 +941,7 @@ git commit -m "Show Linux setup steps in the first-run page"
 **Interfaces:**
 - Produces: `targetFor(info)` → `{ platform, arch, directory, archive } | null`，其中 `directory` 为 `Anchi-darwin-arm64` 或 `Anchi-linux-x64`，`archive` 为 `Anchi-mac-arm64.zip` 或 `Anchi-linux-x64.tar.gz`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```js
 test('packaging targets follow the host platform and refuse others', () => {
@@ -953,12 +953,12 @@ test('packaging targets follow the host platform and refuse others', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd desktop && node --test tests/package.test.cjs`
 Expected: `Cannot find module '../scripts/package-target.cjs'`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `package-target.cjs`：
 
@@ -1021,12 +1021,12 @@ else if (target.platform === 'linux') {
           esac
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd desktop && npx prettier --write scripts tests && npm test && node scripts/check.cjs`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add desktop/scripts/package-target.cjs desktop/scripts/package.cjs desktop/tests/package.test.cjs .github/workflows/check.yml
@@ -1045,7 +1045,7 @@ git commit -m "Package a Linux x64 tarball and smoke it in CI"
 - Consumes: `describe`、`entriesFor`、`install`。
 - Produces: `node desktop/scripts/install-host-tool.cjs <name>` 输出安装后的可执行文件路径，退出码非零表示失败。
 
-- [ ] **Step 1: 实现脚本**
+- [x] **Step 1: 实现脚本**
 
 ```js
 // Install one pinned host tool from desktop/host-tools.json for the current platform.
@@ -1062,7 +1062,7 @@ async function main() {
 main().catch((error) => { console.error(error.message); process.exitCode = 1; });
 ```
 
-- [ ] **Step 2: 写工作流**
+- [x] **Step 2: 写工作流**
 
 `.github/workflows/linux-live.yml`：
 
@@ -1131,12 +1131,12 @@ jobs:
         run: limactl delete -f "$ANCHI_INSTALL_VM" || true
 ```
 
-- [ ] **Step 3: 本地检查**
+- [x] **Step 3: 本地检查**
 
 Run: `cd desktop && npx prettier --write scripts/install-host-tool.cjs && node scripts/check.cjs && node -e "require('./scripts/install-host-tool.cjs')" ; echo`
 Expected: 语法通过；在 macOS 上直接运行脚本输出 `No pinned download for undefined on darwin-arm64` 并退出码 1（预期行为）。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add desktop/scripts/install-host-tool.cjs .github/workflows/linux-live.yml
@@ -1150,7 +1150,7 @@ git commit -m "Add KVM-backed Linux live validation workflow"
 **Files:**
 - Modify: `README.md`、`README.en.md`、`docs/GETTING_STARTED.md`、`SECURITY.md`、`docs/engineering/RELEASE.md`、`docs/architecture/REPOSITORY.md`、`CHANGELOG.md`、`docs/README.md`
 
-- [ ] **Step 1: README 支持矩阵**
+- [x] **Step 1: README 支持矩阵**
 
 在 `README.md`「开发与运行」段落前加入：
 
@@ -1166,7 +1166,7 @@ git commit -m "Add KVM-backed Linux live validation workflow"
 
 `README.en.md` 加同样的表（英文）。
 
-- [ ] **Step 2: GETTING_STARTED Linux 段**
+- [x] **Step 2: GETTING_STARTED Linux 段**
 
 在文末新增 `## Linux`（锚点 `#linux`）：
 
@@ -1182,7 +1182,7 @@ git commit -m "Add KVM-backed Linux live validation workflow"
 5. Codex 登录会打开系统浏览器；Linux 上的 Codex 二进制由应用下载，版本固定，升级随应用发布。
 ```
 
-- [ ] **Step 3: SECURITY / RELEASE / REPOSITORY / CHANGELOG**
+- [x] **Step 3: SECURITY / RELEASE / REPOSITORY / CHANGELOG**
 
 `SECURITY.md`「当前边界」末尾加一段：
 
@@ -1202,7 +1202,7 @@ Linux 宿主与 macOS 使用相同的信任边界：可信服务与 cell 仍在 
 
 `docs/README.md` 加入设计与计划文档链接。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add README.md README.en.md docs/GETTING_STARTED.md SECURITY.md docs/engineering/RELEASE.md docs/architecture/REPOSITORY.md CHANGELOG.md docs/README.md
@@ -1215,12 +1215,12 @@ git commit -m "Document the Linux client and its trust boundary"
 
 **Files:** 无新增；修正 CI 暴露的问题时按对应任务的文件提交。
 
-- [ ] **Step 1: 全量离线检查**
+- [x] **Step 1: 全量离线检查**
 
 Run: `make check PYTHON=.venv/bin/python`
 Expected: lint 通过；桌面、Pi、Python 三套测试全部通过。
 
-- [ ] **Step 2: macOS 真机回归**
+- [x] **Step 2: macOS 真机回归**
 
 Run:
 ```bash
@@ -1231,7 +1231,7 @@ node desktop/scripts/verify-files.cjs
 ```
 Expected: 模板有效；77 项检查通过；文件代理往返通过。
 
-- [ ] **Step 3: 推送分支并触发 linux-live**
+- [x] **Step 3: 推送分支并触发 linux-live**
 
 Run:
 ```bash
@@ -1241,10 +1241,10 @@ gh run list --workflow linux-live.yml --branch feat/linux-client --limit 1
 ```
 Expected: 工作流排队；用 `gh run watch <id> --exit-status` 等待结果。
 
-- [ ] **Step 4: 处理失败**
+- [x] **Step 4: 处理失败**
 
 若某步失败：`gh run view <id> --log-failed`，下载 `lima-logs` artifact；按失败所在任务修改代码，补充或修正测试，重跑 `make check`，提交，再次 `gh workflow run`。直到 linux-live 全部步骤通过。
 
-- [ ] **Step 5: 记录**
+- [x] **Step 5: 记录**
 
 新增 `docs/engineering/VALIDATION-<日期>-LINUX.md`：linux-live 运行 ID、耗时、通过的检查数、未覆盖项（图形界面走查、Codex 真实登录）。提交。
