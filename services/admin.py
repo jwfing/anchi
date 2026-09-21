@@ -1,4 +1,5 @@
 """Trusted guest-root CLI. Inputs carrying secrets arrive only through stdin."""
+
 import json
 import os
 import pwd
@@ -7,6 +8,7 @@ import resource
 
 import auth
 from common import Denied
+
 
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -41,6 +43,7 @@ def main():
         else:
             raise Denied('UNKNOWN_ADMIN_ACTION')
     print(json.dumps(result))
+
 
 if __name__ == '__main__':
     try:

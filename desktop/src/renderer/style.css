@@ -403,3 +403,39 @@ pre {
   font-size: 12px;
   color: #896324;
 }
+.badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: #b8552f;
+  color: white;
+  font-size: 11px;
+  text-align: center;
+}
+.badge:empty {
+  display: none;
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
+  font-size: 13px;
+  margin: 12px 0;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 10px 0;
+}
+.warn {
+  color: #8d672f;
+}

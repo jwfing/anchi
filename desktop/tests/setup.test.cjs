@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { Setup } = require('../src/main/setup.cjs');
 async function fixture(t) {
-  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'qisuo-setup-'));
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-setup-'));
   t.after(() => fs.rm(userData, { recursive: true, force: true }));
   const events = [];
   const setup = new Setup({

@@ -4,6 +4,7 @@ const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const exec = promisify(execFile);
+const { executable } = require('./host-tools.cjs');
 
 /** Only inherited values required by Lima/SSH; never forward provider credentials. */
 function childEnvironment() {
@@ -80,14 +81,15 @@ class Runtime {
   }
 
   async lima() {
-    // Known installation paths only: renderer cannot supply executable paths.
-    for (const file of ['/opt/homebrew/bin/limactl', '/usr/local/bin/limactl']) {
-      try {
-        await fs.access(file, fs.constants.X_OK);
-        return file;
-      } catch {}
-    }
-    throw Error('LIMA_NOT_INSTALLED');
+    const file = await executable('limactl');
+    if (!file) throw Error('LIMA_NOT_INSTALLED');
+    return file;
+  }
+  /** Host Python for the file broker: the same interpreter first-run setup installs. */
+  async python() {
+    const file = await executable('python');
+    if (!file) throw Error('PYTHON_NOT_INSTALLED');
+    return file;
   }
 
   async inspect() {

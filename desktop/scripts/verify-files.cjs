@@ -29,10 +29,17 @@ async function main() {
         await request({op:'write',grant,path:'report.txt',text:'synthetic cell round trip'});
         const read=await request({op:'read',grant,path:'report.txt'});
         if(read.text!=='synthetic cell round trip') throw Error('MISMATCH');
-        for(const path of ['../escape','.env']) {
+        for(const path of ['../escape','.env','.anchi-trash']) {
           let denied=false;try{await request({op:'read',grant,path});}catch{denied=true;}
           if(!denied) throw Error('ESCAPE_ALLOWED');
         }
+        const replaced=await request({op:'write',grant,path:'report.txt',text:'second version'});
+        if(!replaced.previous) throw Error('NO_PREVIOUS');
+        const removed=await request({op:'delete',grant,path:'report.txt'});
+        if(!removed.trashed_as) throw Error('NO_TRASH');
+        const listing=await request({op:'list',grant});
+        if(listing.entries.some(e=>e.name.startsWith('.'))) throw Error('TRASH_VISIBLE');
+        await request({op:'write',grant,path:'report.txt',text:'synthetic cell round trip'});
         console.log(JSON.stringify({type:'verified'}));
       } finally {lines.close();process.stdin.destroy();}
     `;
@@ -84,6 +91,13 @@ async function main() {
       await fs.readFile(path.join(base, 'report.txt'), 'utf8'),
       'synthetic cell round trip',
     );
+    // Overwritten and deleted versions are recoverable by the user, invisible to the agent.
+    const trashed = (await fs.readdir(path.join(base, '.anchi-trash'))).sort();
+    assert.equal(trashed.length, 2);
+    const contents = await Promise.all(
+      trashed.map((name) => fs.readFile(path.join(base, '.anchi-trash', name), 'utf8')),
+    );
+    assert.deepEqual(contents.sort(), ['second version', 'synthetic cell round trip']);
     await broker.revoke(id);
     directories.directories[0].mode = 'ro';
     await broker.activate(id);
@@ -97,7 +111,7 @@ async function main() {
       /DIRECTORY_NOT_AUTHORIZED/,
     );
     console.log(
-      'PASS: cell ↔ host bridge, text write/read, traversal/hidden-file denial, read-only and revocation.',
+      'PASS: cell ↔ host bridge, text write/read, traversal/hidden-file denial, recoverable overwrite/delete, read-only and revocation.',
     );
   } finally {
     proc?.kill();

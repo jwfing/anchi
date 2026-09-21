@@ -1,6 +1,6 @@
 """Root-only unlock, migration and lock; no key or plaintext on stdout."""
+
 import base64
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -13,15 +13,22 @@ import auth
 import vault
 from common import Denied
 
+
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     if os.getuid() != 0:
         raise Denied('GUEST_ADMIN_REQUIRED')
     action = sys.argv[1]
     if action == 'status':
-        print(json.dumps({'unlocked': vault.KEY.exists(),
-            'encrypted_files': len(list(auth.STORE.glob('*.enc'))),
-            'legacy_files': sum((auth.STORE / name).exists() for name in vault.NAMES)}))
+        print(
+            json.dumps(
+                {
+                    'unlocked': vault.KEY.exists(),
+                    'encrypted_files': len(list(auth.STORE.glob('*.enc'))),
+                    'legacy_files': sum((auth.STORE / name).exists() for name in vault.NAMES),
+                }
+            )
+        )
         return
     # Serialize against OAuth exchanges, refresh and revocation.
     with auth.locked():
@@ -76,7 +83,9 @@ def main():
         if model_file.exists():
             config = json.loads(model_file.read_text())
             if 'api_key' in config:
-                vault.write(auth.STORE, 'model.json', {'api_key': config.pop('api_key'), 'generation': uuid.uuid4().hex})
+                vault.write(
+                    auth.STORE, 'model.json', {'api_key': config.pop('api_key'), 'generation': uuid.uuid4().hex}
+                )
                 fd = os.open(model_file, os.O_WRONLY | os.O_TRUNC)
                 with os.fdopen(fd, 'w') as file:
                     json.dump(config, file)
@@ -84,6 +93,7 @@ def main():
                     os.fsync(file.fileno())
                 migrated.append('model-key')
         print(json.dumps({'unlocked': True, 'migrated': migrated}))
+
 
 if __name__ == '__main__':
     try:

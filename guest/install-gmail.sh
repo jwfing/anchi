@@ -5,6 +5,9 @@ if ! python3 -c 'import cryptography' 2>/dev/null || ! command -v nft >/dev/null
   apt-get install -y --no-install-recommends python3-cryptography nftables
 fi
 src=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=guest/cell.env
+source "$src/cell.env"
+agent_host_uid=$((SECURE_CELL_UID_BASE + SECURE_CELL_AGENT_UID))
 for user in secure-auth secure-gmail secure-inference secure-policy; do
   if ! id "$user" >/dev/null 2>&1; then
     useradd --system --user-group --no-create-home --shell /usr/sbin/nologin "$user"
@@ -16,21 +19,22 @@ for group in secure-auth-clients secure-policy-clients; do
   usermod -a -G "$group" secure-inference
 done
 if ! getent group secure-cell-peer >/dev/null; then
-  groupadd --gid 525288 secure-cell-peer
+  groupadd --gid "$agent_host_uid" secure-cell-peer
 fi
-[[ $(getent group secure-cell-peer | cut -d: -f3) == 525288 ]]
+[[ $(getent group secure-cell-peer | cut -d: -f3) == "$agent_host_uid" ]]
 install -d -m 0755 /opt/secure-vm/services
+install -m 0644 "$src/cell.env" /opt/secure-vm/cell.env
 install -m 0644 "$src"/services/*.py /opt/secure-vm/services/
 install -d -o secure-auth -g secure-auth -m 0700 /var/lib/secure-auth
 install -d -o secure-inference -g secure-inference -m 0700 /var/lib/secure-inference
 install -d -o secure-policy -g secure-policy -m 0700 /var/lib/secure-policy
-cat > /etc/tmpfiles.d/secure-vm.conf <<'EOF'
+cat > /etc/tmpfiles.d/secure-vm.conf <<'TMPFILES'
 d /run/secure-auth 0750 secure-auth secure-auth-clients -
 d /run/secure-gmail 0750 secure-gmail secure-cell-peer -
 d /run/secure-inference 0750 secure-inference secure-cell-peer -
 d /run/secure-policy 0750 secure-policy secure-policy-clients -
 d /run/secure-vault 0750 root secure-auth -
-EOF
+TMPFILES
 systemd-tmpfiles --create /etc/tmpfiles.d/secure-vm.conf
 install -m 0644 "$src"/systemd/* /etc/systemd/system/
 systemctl daemon-reload
@@ -45,7 +49,11 @@ if [[ ! -f /var/lib/secure-policy/policy.sqlite3 ]] && \
 fi
 systemctl enable --now secure-auth.socket secure-gmail.socket secure-inference.socket secure-policy.socket
 root=/var/lib/secure-vm/rootfs
-install -o 524288 -g 524288 -m 0644 "$src/services/common.py" "$src/gmail-cli.py" "$src/check-gmail.py" "$root/opt/secure-vm/"
-install -o 524288 -g 524288 -m 0644 "$src/agent.py" "$src/check-inference.py" "$root/opt/secure-vm/"
+install -o "$SECURE_CELL_UID_BASE" -g "$SECURE_CELL_UID_BASE" -m 0644 "$src/services/common.py" "$src/gmail-cli.py" "$src/check-gmail.py" "$root/opt/secure-vm/"
+install -o "$SECURE_CELL_UID_BASE" -g "$SECURE_CELL_UID_BASE" -m 0644 "$src/agent.py" "$src/check-inference.py" "$root/opt/secure-vm/"
 install -m 0644 "$src/check-security.py" /opt/secure-vm/check-security.py
+# Version manifest lets the trusted desktop detect guest services older than the app.
+printf '{"runtime_version":"%s","installed_at":"%s"}\n' \
+  "${SECURE_VM_RUNTIME_VERSION:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /opt/secure-vm/installed.json
+chmod 0644 /opt/secure-vm/installed.json
 echo 'Read-only Gmail and inference services installed; existing credentials/configuration preserved.'

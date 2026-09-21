@@ -12,19 +12,46 @@ class FileBroker {
     this.tail = task.catch(() => {});
     return task;
   }
-  activate(id) {
+  /**
+   * confirmed=true follows a native consent dialog and pins the directory identity.
+   * confirmed=false restores a persisted grant only when the identity still matches.
+   */
+  activate(id, { confirmed = true } = {}) {
     return this.serial(async () => {
       const item = this.directories.directories.find((d) => d.id === id);
       if (!item) throw Error('DIRECTORY_NOT_FOUND');
       if ((await fs.realpath(item.path)) !== item.path) throw Error('DIRECTORY_CHANGED');
       const stat = await fs.stat(item.path, { bigint: true });
       if (!stat.isDirectory()) throw Error('INVALID_DIRECTORY');
-      this.grants.set(id, { ...item, identity: [String(stat.dev), String(stat.ino)] });
+      const identity = [String(stat.dev), String(stat.ino)];
+      if (confirmed) {
+        if (!item.identity || item.identity.join() !== identity.join())
+          await this.directories.recordIdentity?.(id, identity);
+      } else if (!item.identity) throw Error('CONSENT_REQUIRED');
+      else if (item.identity.join() !== identity.join()) throw Error('DIRECTORY_CHANGED');
+      this.restoreErrors?.delete(id);
+      this.grants.set(id, { ...item, identity });
     });
+  }
+  /** Restore persisted grants at launch; failures stay pending with a reason for the UI. */
+  async restore() {
+    this.restoreErrors = new Map();
+    for (const item of this.directories.directories) {
+      try {
+        await this.activate(item.id, { confirmed: false });
+      } catch (error) {
+        this.restoreErrors.set(
+          item.id,
+          /^[A-Z_]+$/.test(error.message) ? error.message : 'DIRECTORY_UNAVAILABLE',
+        );
+      }
+    }
+    return this.restoreErrors;
   }
   revoke(id) {
     // Disable new requests immediately; wait for the bounded in-flight operation.
     this.grants.delete(id);
+    this.restoreErrors?.delete(id);
     return this.serial(() => {
       this.grants.delete(id);
     });
@@ -52,13 +79,14 @@ class FileBroker {
         const grant = this.grants.get(request.grant);
         if (!grant) throw Error('DIRECTORY_NOT_AUTHORIZED');
         const result = await this.runtime.input(
-          '/usr/bin/python3',
+          await this.runtime.python(),
           [path.join(this.runtime.root, 'scripts/host-files.py')],
           { grant, request },
         );
+        const target = typeof request.path === 'string' ? request.path : '';
         this.notify({
           type: 'activity',
-          text: `文件访问 ${request.op} · ${grant.id} · ${result.ok ? '完成' : '拒绝'}`,
+          text: `文件访问 ${request.op} · ${path.basename(grant.path)}/${target} · ${result.ok ? '完成' : '拒绝'}`,
         });
         if (!result.ok) throw Error(result.error);
         if (Buffer.byteLength(JSON.stringify(result.result)) > 48000)

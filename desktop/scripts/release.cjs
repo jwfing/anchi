@@ -4,12 +4,14 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const exec = promisify(execFile);
+/** ANCHI_* is canonical; QISUO_* remains accepted for existing release environments. */
 function releaseConfiguration(env) {
-  if (env.QISUO_RELEASE !== '1') return null;
-  const identity = env.QISUO_SIGN_IDENTITY;
-  const team = env.QISUO_APPLE_TEAM;
-  const profile = env.QISUO_NOTARY_PROFILE;
-  const bundleId = env.QISUO_BUNDLE_ID;
+  const get = (name) => env['ANCHI_' + name] ?? env['QISUO_' + name];
+  if (get('RELEASE') !== '1') return null;
+  const identity = get('SIGN_IDENTITY');
+  const team = get('APPLE_TEAM');
+  const profile = get('NOTARY_PROFILE');
+  const bundleId = get('BUNDLE_ID');
   if (
     !team ||
     !/^[A-Z0-9]{10}$/.test(team) ||

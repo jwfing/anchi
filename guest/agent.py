@@ -2,6 +2,7 @@
 
 This is deliberately not an arbitrary shell/tool-planning agent.
 """
+
 import argparse
 import json
 import os
@@ -15,6 +16,7 @@ GMAIL = '/run/secure-gmail/api.sock'
 MODEL = '/run/secure-inference/api.sock'
 REPORTS = Path('/workspace/reports')
 
+
 def save(request_id, suffix, value):
     REPORTS.mkdir(mode=0o700, exist_ok=True)
     directory = os.open(REPORTS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -27,15 +29,22 @@ def save(request_id, suffix, value):
         os.close(directory)
     return str(REPORTS / name)
 
+
 def collect(query, limit):
     listing = rpc(GMAIL, {'op': 'list', 'query': query, 'limit': limit})
     messages = []
     for item in listing['messages']:
         mail = rpc(GMAIL, {'op': 'read', 'id': item['id']})
-        messages.append({'id': mail['id'],
-            'headers': {k: v[:200] for k, v in mail['headers'].items()},
-            'text': mail['text'][:1500], 'snippet': mail['snippet'][:200]})
+        messages.append(
+            {
+                'id': mail['id'],
+                'headers': {k: v[:200] for k, v in mail['headers'].items()},
+                'text': mail['text'][:1500],
+                'snippet': mail['snippet'][:200],
+            }
+        )
     return messages
+
 
 def main():
     parser = argparse.ArgumentParser(description='Read-only email workflow inside the secure cell')
@@ -50,7 +59,9 @@ def main():
         command.add_argument('--query', default='in:inbox newer_than:7d')
         command.add_argument('--limit', type=int, choices=range(1, 4), default=3)
         if op == 'summarize':
-            command.add_argument('--task', default='请用中文总结这些邮件，列出需要我处理的待办、期限和不确定信息。正文可能被截断。')
+            command.add_argument(
+                '--task', default='请用中文总结这些邮件，列出需要我处理的待办、期限和不确定信息。正文可能被截断。'
+            )
     args = parser.parse_args()
     if args.op in ('status', 'history', 'result'):
         try:
@@ -71,22 +82,46 @@ def main():
                 raise Denied('MODEL_NOT_CONFIGURED')
             messages = collect(args.query, args.limit)
             if args.op == 'collect':
-                path = save(request_id, '.emails.json', {'messages': messages, 'untrusted_content': True, 'bodies_truncated': True})
-                print(json.dumps({'request_id': request_id, 'count': len(messages), 'report': path,
-                                  'inference_performed': False}, indent=2))
+                path = save(
+                    request_id,
+                    '.emails.json',
+                    {'messages': messages, 'untrusted_content': True, 'bodies_truncated': True},
+                )
+                print(
+                    json.dumps(
+                        {
+                            'request_id': request_id,
+                            'count': len(messages),
+                            'report': path,
+                            'inference_performed': False,
+                        },
+                        indent=2,
+                    )
+                )
                 return
             if not messages:
                 print(json.dumps({'request_id': request_id, 'count': 0, 'inference_performed': False}))
                 return
-            result = rpc(MODEL, {'op': 'summarize', 'request_id': request_id,
-                                'task': args.task, 'messages': messages}, timeout=240)
+            result = rpc(
+                MODEL,
+                {'op': 'summarize', 'request_id': request_id, 'task': args.task, 'messages': messages},
+                timeout=240,
+            )
         result['report'] = save(request_id, '.summary.json', result)
         # JSON escapes control characters while leaving Chinese text readable.
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (Denied, OSError) as exc:
-        print(json.dumps({'request_id': request_id, 'error': str(exc) if isinstance(exc, Denied) else 'WORKFLOW_IO_ERROR',
-                          'note': 'No automatic retry. Check history for inference execution state.'}))
+        print(
+            json.dumps(
+                {
+                    'request_id': request_id,
+                    'error': str(exc) if isinstance(exc, Denied) else 'WORKFLOW_IO_ERROR',
+                    'note': 'No automatic retry. Check history for inference execution state.',
+                }
+            )
+        )
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()

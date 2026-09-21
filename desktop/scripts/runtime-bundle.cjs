@@ -5,7 +5,7 @@ const { createHash } = require('node:crypto');
 const SOURCES = {
   scripts: (name) => /\.(sh|py)$/.test(name),
   services: (name) => name.endsWith('.py'),
-  guest: (name) => /\.(sh|py)$/.test(name) || name === 'cell-run',
+  guest: (name) => /\.(sh|py)$/.test(name) || ['cell-run', 'cell.env'].includes(name),
   systemd: (name) => /\.(service|socket|timer)$/.test(name),
   lima: (name) => name === 'secure-vm.yaml',
   pi: (name) => name.endsWith('.mjs') || ['package.json', 'package-lock.json'].includes(name),

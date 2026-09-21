@@ -3,7 +3,20 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { overlaps } = require('../shared/protocol.cjs');
 
-const SCHEMA_VERSION = 1;
+// v2 adds the directory identity (device, inode) recorded at consent so grants can be
+// restored on launch only when the same directory is still there. v1 entries load without it.
+const SCHEMA_VERSION = 2;
+const KNOWN_VERSIONS = new Set([undefined, 1, 2]);
+function validateIdentity(identity) {
+  if (identity === undefined) return undefined;
+  if (
+    !Array.isArray(identity) ||
+    identity.length !== 2 ||
+    !identity.every((v) => /^\d{1,20}$/.test(v))
+  )
+    throw Error('INVALID_SETTINGS');
+  return [identity[0], identity[1]];
+}
 function validateMode(mode) {
   if (!['ro', 'rw'].includes(mode)) throw Error('INVALID_MODE');
 }
@@ -62,9 +75,8 @@ class DirectoryStore {
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024)
         throw Error('INVALID_SETTINGS');
       const value = JSON.parse(await this.io.readFile(this.file, 'utf8'));
-      // Migrate the unversioned desktop prototype in memory; commit on the next edit.
-      if (value.schemaVersion !== undefined && value.schemaVersion !== SCHEMA_VERSION)
-        throw Error('UNSUPPORTED_SETTINGS_VERSION');
+      // Older files migrate in memory; commit happens on the next edit.
+      if (!KNOWN_VERSIONS.has(value.schemaVersion)) throw Error('UNSUPPORTED_SETTINGS_VERSION');
       if (!Array.isArray(value.directories) || value.directories.length > 100)
         throw Error('INVALID_SETTINGS');
       const next = [],
@@ -80,8 +92,9 @@ class DirectoryStore {
           throw Error('INVALID_SETTINGS');
         validateMode(d.mode);
         validateDirectory(d.path, this.home, next);
+        const identity = validateIdentity(d.identity);
         ids.add(d.id);
-        next.push({ id: d.id, path: d.path, mode: d.mode, status: 'pending' });
+        next.push({ id: d.id, path: d.path, mode: d.mode, ...(identity ? { identity } : {}) });
       }
       this.entries = next;
     } catch (error) {
@@ -126,7 +139,7 @@ class DirectoryStore {
       const chosen = await this.io.realpath(file);
       if (!(await this.io.stat(chosen)).isDirectory()) throw Error('INVALID_DIRECTORY');
       validateDirectory(chosen, this.home, next);
-      next.push({ id: randomUUID(), path: chosen, mode, status: 'pending' });
+      next.push({ id: randomUUID(), path: chosen, mode });
       return next;
     });
   }
@@ -137,6 +150,18 @@ class DirectoryStore {
       const item = next.find((d) => d.id === id);
       if (!item) throw Error('DIRECTORY_NOT_FOUND');
       item.mode = mode;
+      return next;
+    });
+  }
+
+  /** Called by the file broker after explicit user consent; restores compare against it. */
+  recordIdentity(id, identity) {
+    return this.mutate((next) => {
+      const value = validateIdentity(identity);
+      if (!value) throw Error('INVALID_SETTINGS');
+      const item = next.find((d) => d.id === id);
+      if (!item) throw Error('DIRECTORY_NOT_FOUND');
+      item.identity = value;
       return next;
     });
   }

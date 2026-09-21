@@ -4,15 +4,14 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 import auth
 import gmail
-import vault
 from common import Denied, google_json, recv_json
+
 
 class GmailPolicyTests(unittest.TestCase):
     def setUp(self):
@@ -48,8 +47,12 @@ class GmailPolicyTests(unittest.TestCase):
                 gmail.handle({'op': 'list', 'query': query})
 
     def test_fixed_request_and_no_token_in_result(self):
-        with patch('gmail.rpc', return_value={'access_token': 'CANARY_TOKEN', 'account_generation': 'test'}), \
-             patch('gmail.google_json', return_value={'messages': [{'id': 'ab', 'threadId': 'cd', 'secret': 'ignored'}]}) as http:
+        with (
+            patch('gmail.rpc', return_value={'access_token': 'CANARY_TOKEN', 'account_generation': 'test'}),
+            patch(
+                'gmail.google_json', return_value={'messages': [{'id': 'ab', 'threadId': 'cd', 'secret': 'ignored'}]}
+            ) as http,
+        ):
             result = gmail.handle({'op': 'list', 'query': 'in:inbox', 'limit': 1})
             self.assertEqual(result, {'messages': [{'id': 'ab', 'threadId': 'cd'}]})
             args, kwargs = http.call_args
@@ -59,23 +62,56 @@ class GmailPolicyTests(unittest.TestCase):
             self.assertNotIn('CANARY_TOKEN', json.dumps(result))
 
     def test_policy_failure_never_reaches_google(self):
-        with patch('gmail.rpc', return_value={'access_token': 'TOKEN', 'account_generation': 'test'}), \
-             patch('gmail.policy_client.require', side_effect=Denied('POLICY_UNAVAILABLE')), \
-             patch('gmail.google_json') as http:
+        with (
+            patch('gmail.rpc', return_value={'access_token': 'TOKEN', 'account_generation': 'test'}),
+            patch('gmail.policy_client.require', side_effect=Denied('POLICY_UNAVAILABLE')),
+            patch('gmail.google_json') as http,
+        ):
             with self.assertRaisesRegex(Denied, 'POLICY_UNAVAILABLE'):
                 gmail.handle({'op': 'list', 'limit': 1})
             http.assert_not_called()
 
+    def test_nested_multipart_prefers_plain_text_and_bounds_depth(self):
+        encode = lambda text: base64.urlsafe_b64encode(text.encode()).decode()
+        payload = {
+            'mimeType': 'multipart/mixed',
+            'parts': [
+                {
+                    'mimeType': 'multipart/alternative',
+                    'parts': [
+                        {'mimeType': 'text/plain', 'body': {'data': encode('plain body')}},
+                        {'mimeType': 'text/html', 'body': {'data': encode('<b>html</b>')}},
+                    ],
+                },
+                {'mimeType': 'application/pdf', 'body': {'attachmentId': 'x'}},
+            ],
+        }
+        self.assertEqual(gmail.body_text(payload).strip(), 'plain body')
+        deep = {'mimeType': 'text/plain', 'body': {'data': encode('too deep')}}
+        for _ in range(12):
+            deep = {'mimeType': 'multipart/mixed', 'parts': [deep]}
+        self.assertEqual(gmail.body_text(deep).strip(), '')
+
     def test_normalized_message_and_best_effort_scrub(self):
         body = base64.urlsafe_b64encode(b'Your code: 123456 https://example.test/login').decode()
-        response = {'id': 'ab', 'payload': {'mimeType': 'text/plain', 'body': {'data': body},
-                    'headers': [{'name': 'Subject', 'value': 'test'}, {'name': 'X-Secret', 'value': 'private'}]}}
-        with patch('gmail.rpc', return_value={'access_token': 'TOKEN', 'account_generation': 'test'}), patch('gmail.google_json', return_value=response):
+        response = {
+            'id': 'ab',
+            'payload': {
+                'mimeType': 'text/plain',
+                'body': {'data': body},
+                'headers': [{'name': 'Subject', 'value': 'test'}, {'name': 'X-Secret', 'value': 'private'}],
+            },
+        }
+        with (
+            patch('gmail.rpc', return_value={'access_token': 'TOKEN', 'account_generation': 'test'}),
+            patch('gmail.google_json', return_value=response),
+        ):
             result = gmail.handle({'op': 'read', 'id': 'ab'})
         self.assertTrue(result['untrusted_content'])
         self.assertNotIn('123456', result['text'])
         self.assertNotIn('https://', result['text'])
         self.assertNotIn('x-secret', result['headers'])
+
 
 class OAuthTests(unittest.TestCase):
     def setUp(self):
@@ -95,6 +131,7 @@ class OAuthTests(unittest.TestCase):
 
     def test_pkce_and_readonly_scope(self):
         from urllib.parse import parse_qs, urlsplit
+
         flow = auth.begin('http://127.0.0.1:12345/callback')
         q = parse_qs(urlsplit(flow['url']).query)
         self.assertEqual(q['code_challenge_method'], ['S256'])
@@ -133,12 +170,76 @@ class OAuthTests(unittest.TestCase):
             auth.disconnect()
         self.assertFalse(auth.status()['connected'])
 
+    def test_dead_refresh_token_requires_reconnect_without_hammering_google(self):
+        auth.write('tokens.json', {'refresh_token': 'DEAD', 'access_token': 'OLD', 'expires_at': 0})
+        with patch('auth.google_json', side_effect=Denied('GOOGLE_AUTH_REQUIRED')) as http:
+            with self.assertRaisesRegex(Denied, 'GMAIL_REAUTH_REQUIRED'):
+                auth.access_token()
+            self.assertEqual(http.call_count, 1)
+        self.assertTrue(auth.status()['reauth_required'])
+        self.assertTrue(auth.status()['connected'])
+        with patch('auth.google_json') as http:
+            with self.assertRaisesRegex(Denied, 'GMAIL_REAUTH_REQUIRED'):
+                auth.access_token()
+            http.assert_not_called()
+        # Transient provider failures do not flip the flag.
+        auth.write('tokens.json', {'refresh_token': 'OK', 'access_token': 'OLD', 'expires_at': 0})
+        with patch('auth.google_json', side_effect=Denied('GOOGLE_REQUEST_FAILED')):
+            with self.assertRaisesRegex(Denied, 'GOOGLE_REQUEST_FAILED'):
+                auth.access_token()
+        self.assertFalse(auth.status()['reauth_required'])
+        # A fresh authorization clears the state.
+        flow = auth.begin('http://127.0.0.1:12345/callback')
+        auth.write(
+            'tokens.json', {'refresh_token': 'DEAD', 'access_token': 'OLD', 'expires_at': 0, 'reauth_required': True}
+        )
+        with patch(
+            'auth.google_json',
+            return_value={'scope': auth.SCOPE, 'refresh_token': 'NEW', 'access_token': 'A', 'expires_in': 3600},
+        ):
+            auth.complete({'state': flow['state'], 'code': 'test'})
+        self.assertFalse(auth.status()['reauth_required'])
+
     def test_disallow_client_replacement_while_connected(self):
         auth.write('tokens.json', {'access_token': 'x'})
         with self.assertRaises(Denied):
             auth.import_client({'installed': {'client_id': 'other.apps.googleusercontent.com', 'client_secret': 'x'}})
 
+
 class BoundaryTests(unittest.TestCase):
+    def test_token_endpoint_400_is_an_authorization_failure(self):
+        from unittest.mock import MagicMock
+
+        class Response:
+            status = 400
+
+            def read(self, size=-1):
+                return b'{"error":"invalid_grant","secret":"NEVER_REFLECTED"}'
+
+        class Connection:
+            def __init__(self, *args, **kwargs):
+                self.sock = None
+
+            def request(self, *args, **kwargs):
+                pass
+
+            def getresponse(self):
+                return Response()
+
+            def close(self):
+                pass
+
+        with (
+            patch('common.target_ips', return_value=['1.1.1.1']),
+            patch('common.socket.create_connection', return_value=MagicMock()),
+            patch('common.ssl.create_default_context', return_value=MagicMock()),
+            patch('common.http.client.HTTPSConnection', Connection),
+        ):
+            with self.assertRaisesRegex(Denied, '^GOOGLE_AUTH_REQUIRED$'):
+                google_json('oauth2.googleapis.com', 'POST', '/token', 'grant_type=refresh_token')
+            with self.assertRaisesRegex(Denied, '^GOOGLE_REQUEST_FAILED$'):
+                google_json('gmail.googleapis.com', 'GET', '/gmail/v1/users/me/messages')
+
     def test_non_google_destination_denied(self):
         for host, method in [('evil.test', 'GET'), ('gmail.googleapis.com', 'POST')]:
             with self.assertRaises(Denied):
@@ -151,6 +252,7 @@ class BoundaryTests(unittest.TestCase):
                 a.sendall(payload)
                 with self.assertRaises(Denied):
                     recv_json(b)
+
 
 if __name__ == '__main__':
     unittest.main()

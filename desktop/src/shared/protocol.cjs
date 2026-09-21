@@ -1,5 +1,7 @@
 const path = require('node:path');
 const { StringDecoder } = require('node:string_decoder');
+// Shared with pi/limits.mjs and services/common.py LIMITS; a test keeps the copies identical.
+const LIMITS = Object.freeze({ rpc_bytes: 65536, prompt_chars: 8000, host_file_text_bytes: 24000 });
 function validateCommand(op, args = {}) {
   if (typeof op !== 'string') throw Error('INVALID_COMMAND');
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw Error('INVALID_ARGUMENTS');
@@ -16,7 +18,7 @@ function validateCommand(op, args = {}) {
     throw Error('INVALID_COMMAND');
   if (
     op === 'prompt' &&
-    (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 8000)
+    (typeof args.text !== 'string' || !args.text.trim() || args.text.length > LIMITS.prompt_chars)
   )
     throw Error('INVALID_PROMPT');
   if (
@@ -51,7 +53,7 @@ class Lines {
     while ((n = this.buffer.indexOf('\n')) >= 0) {
       const line = this.buffer.slice(0, n);
       this.buffer = this.buffer.slice(n + 1);
-      if (Buffer.byteLength(line) > 65536) return this.fail();
+      if (Buffer.byteLength(line) > LIMITS.rpc_bytes) return this.fail();
       if (!line.trim()) continue;
       try {
         const value = JSON.parse(line);
@@ -61,7 +63,7 @@ class Lines {
         return this.fail();
       }
     }
-    if (Buffer.byteLength(this.buffer) > 65536) this.fail();
+    if (Buffer.byteLength(this.buffer) > LIMITS.rpc_bytes) this.fail();
   }
   fail() {
     this.failed = true;
@@ -69,4 +71,4 @@ class Lines {
     this.onError(Error('INVALID_AGENT_STREAM'));
   }
 }
-module.exports = { validateCommand, overlaps, Lines };
+module.exports = { validateCommand, overlaps, Lines, LIMITS };

@@ -1,4 +1,5 @@
 """Trusted macOS OAuth helper: code to VM over SSH; tokens never return to macOS."""
+
 import argparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
@@ -10,10 +11,14 @@ import time
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
+
 def admin(action, data=None):
-    proc = subprocess.run(['limactl', 'shell', 'secure-vm', '--', 'sudo',
-        '/usr/bin/python3', '/opt/secure-vm/services/admin.py', action],
-        input=json.dumps(data) if data is not None else '', text=True, capture_output=True)
+    proc = subprocess.run(
+        ['limactl', 'shell', 'secure-vm', '--', 'sudo', '/usr/bin/python3', '/opt/secure-vm/services/admin.py', action],
+        input=json.dumps(data) if data is not None else '',
+        text=True,
+        capture_output=True,
+    )
     if proc.returncode:
         # Only expose our static error codes, never arbitrary SSH/provider output.
         try:
@@ -24,6 +29,7 @@ def admin(action, data=None):
             reason = 'CHECK_VM_AND_SERVICE_STATUS'
         raise RuntimeError('Guest admin operation failed: ' + reason)
     return json.loads(proc.stdout)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -41,18 +47,24 @@ def main():
     if not admin('status')['client_configured']:
         raise RuntimeError('Provide --client /absolute/path/to/desktop-client.json first.')
     expected, callback = {}, {}
+
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
             self.connection.settimeout(5)
+
         def log_message(self, *args):
             pass  # Never log the authorization code in a callback URL.
+
         def do_GET(self):
             parsed = urlsplit(self.path)
             query = parse_qs(parsed.query)
-            valid = (parsed.path == '/callback' and self.headers.get('Host') == expected['host']
-                     and len(query.get('state', [])) == 1
-                     and secrets.compare_digest(query['state'][0], expected['state']))
+            valid = (
+                parsed.path == '/callback'
+                and self.headers.get('Host') == expected['host']
+                and len(query.get('state', [])) == 1
+                and secrets.compare_digest(query['state'][0], expected['state'])
+            )
             if not valid:
                 self.send_response(400)
                 self.end_headers()
@@ -71,6 +83,7 @@ def main():
             self.send_header('Referrer-Policy', 'no-referrer')
             self.end_headers()
             self.wfile.write(b'Authorization response received. Return to your terminal for the connection result.')
+
     with HTTPServer(('127.0.0.1', 0), Handler) as server:
         server.timeout = 1
         expected['host'] = f'127.0.0.1:{server.server_port}'
@@ -85,6 +98,7 @@ def main():
     if not callback or callback.get('error'):
         raise RuntimeError('Authorization cancelled or timed out. Run login again.')
     print(json.dumps(admin('complete', callback), indent=2))
+
 
 if __name__ == '__main__':
     try:

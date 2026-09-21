@@ -1,4 +1,4 @@
-const { validateCommand } = require('../shared/protocol.cjs');
+const { validateCommand, LIMITS } = require('../shared/protocol.cjs');
 
 const OPERATIONS = Object.freeze({
   snapshot: [],
@@ -23,6 +23,7 @@ const OPERATIONS = Object.freeze({
   'gmail-disconnect': [],
   'gmail-read': ['mode'],
   approvals: [],
+  audit: [],
   'approval-show': ['id'],
   'approval-decide': ['id', 'digest', 'decision'],
 });
@@ -61,9 +62,31 @@ function approvalId(id) {
 
 /** Application use cases. Native dialogs and external services are injected for testing. */
 class Controller {
-  constructor({ runtime, directories, pi, dialogs, notify, files, oauth, setup }) {
-    Object.assign(this, { runtime, directories, pi, dialogs, notify, files, oauth, setup });
-    this.events = [];
+  constructor({
+    runtime,
+    directories,
+    pi,
+    dialogs,
+    notify,
+    files,
+    oauth,
+    setup,
+    version = '',
+    log,
+  }) {
+    Object.assign(this, {
+      runtime,
+      directories,
+      pi,
+      dialogs,
+      notify,
+      files,
+      oauth,
+      setup,
+      version,
+      log,
+    });
+    this.events = log ? log.recent(200) : [];
     this.mutating = false;
     this.firstTask = null;
   }
@@ -83,6 +106,7 @@ class Controller {
     }
     this.events.push(event);
     if (this.events.length > 200) this.events.shift();
+    void this.log?.append(event).catch(() => {});
     this.notify(event);
   }
   activity(text) {
@@ -91,12 +115,15 @@ class Controller {
   snapshot() {
     return {
       root: this.runtime.root,
+      version: this.version,
+      limits: LIMITS,
       setup: this.setup
         ? { health: this.setup.health, job: this.setup.job, completedAt: this.setup.completedAt }
         : null,
       directories: this.directories.directories.map((d) => ({
         ...d,
         status: this.files?.grants.has(d.id) ? 'active' : 'pending',
+        reason: this.files?.restoreErrors?.get(d.id) ?? null,
       })),
       firstTask: this.firstTask,
       oauth: this.oauth?.state,
@@ -151,7 +178,9 @@ class Controller {
       case 'setup-start':
         if (!['dependencies', 'install', 'unlock', 'login', 'import'].includes(args.action))
           throw Error('INVALID_SETUP_ACTION');
-        if (this.pi.child) throw Error('DISCONNECT_PI_FIRST');
+        // Rebuilding the environment needs the cell idle; credential refresh does not.
+        if (this.pi.child && ['dependencies', 'install'].includes(args.action))
+          throw Error('DISCONNECT_PI_FIRST');
         if (!(await this.dialogs.confirmSetup(args.action))) return { cancelled: true };
         return this.setup.start(args.action);
       case 'snapshot':
@@ -231,6 +260,8 @@ class Controller {
         return this.runtime.auth('disconnect');
       case 'approvals':
         return this.runtime.policy('pending');
+      case 'audit':
+        return this.runtime.policy('audit', '--limit', '200');
       case 'approval-show':
         return this.runtime.policy('show', approvalId(args.id));
       case 'approval-decide':

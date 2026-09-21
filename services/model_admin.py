@@ -1,4 +1,5 @@
 """Root-only model configuration, explicit cloud consent, stdin-only secrets."""
+
 import json
 import uuid
 import os
@@ -15,6 +16,7 @@ import vault
 
 CONFIG = Path('/etc/secure-vm/model.json')
 
+
 def validate(value):
     if not isinstance(value, dict) or set(value) != {'provider', 'model', 'api_key', 'allow_cloud_mail'}:
         raise Denied('BAD_MODEL_CONFIG')
@@ -25,6 +27,7 @@ def validate(value):
     if not isinstance(value['api_key'], str) or not re.fullmatch('[!-~]{20,512}', value['api_key']):
         raise Denied('BAD_API_KEY')
     return value
+
 
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -59,6 +62,7 @@ def main():
     finally:
         Path(path).unlink(missing_ok=True)
     print(json.dumps({'enabled': True, 'provider': value['provider'], 'model': value['model']}))
+
 
 if __name__ == '__main__':
     try:

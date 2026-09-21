@@ -1,6 +1,6 @@
 """One fixed OpenAI route; no caller-selected URL, headers, tools, or callbacks."""
+
 import http.client
-import ipaddress
 import json
 import socket
 import ssl
@@ -8,6 +8,7 @@ import time
 
 from common import Denied, rpc, target_ips
 import policy_client
+
 
 def responses(payload):
     host = 'api.openai.com'
@@ -20,9 +21,16 @@ def responses(payload):
     try:
         raw.settimeout(90)
         conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
-        conn.request('POST', '/v1/responses', body=json.dumps(payload).encode(), headers={
-            'Content-Type': 'application/json', 'Authorization': 'Bearer ' + api_key,
-            'Accept': 'application/json'})
+        conn.request(
+            'POST',
+            '/v1/responses',
+            body=json.dumps(payload).encode(),
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + api_key,
+                'Accept': 'application/json',
+            },
+        )
         response = conn.getresponse()
         if response.status != 200:
             raise Denied('MODEL_REQUEST_FAILED')

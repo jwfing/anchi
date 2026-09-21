@@ -1,4 +1,5 @@
 """Root-only nftables owner rules and short-lived, public-only provider IP sets."""
+
 import fcntl
 import ipaddress
 import json
@@ -10,6 +11,8 @@ import subprocess
 import sys
 import time
 
+from common import CELL_AGENT_HOST_UID
+
 TARGETS = Path('/run/secure-egress/targets.json')
 ROLES = {
     'gmail': ('secure-gmail', 'gmail.googleapis.com'),
@@ -18,11 +21,15 @@ ROLES = {
     'codex': ('secure-inference', 'chatgpt.com'),
 }
 
+
 def nft(text):
     subprocess.run(['/usr/sbin/nft', '-f', '-'], input=text, text=True, check=True, capture_output=True)
 
+
 def initialize():
-    present = subprocess.run(['/usr/sbin/nft', 'list', 'table', 'inet', 'secure_vm'], capture_output=True).returncode == 0
+    present = (
+        subprocess.run(['/usr/sbin/nft', 'list', 'table', 'inet', 'secure_vm'], capture_output=True).returncode == 0
+    )
     lines = ['delete table inet secure_vm'] if present else []
     lines += ['table inet secure_vm {']
     for role in ROLES:
@@ -41,9 +48,10 @@ def initialize():
         lines.append(f'  meta skuid {uid} counter reject')
     # The policy engine must never create IP traffic, even outside its service unit.
     lines.append(f'  meta skuid {pwd.getpwnam("secure-policy").pw_uid} counter reject')
-    lines.append('  meta skuid 525288 counter reject')
+    lines.append(f'  meta skuid {CELL_AGENT_HOST_UID} counter reject')
     lines += [' }', '}']
     nft('\n'.join(lines))
+
 
 def refresh():
     result, commands = {}, []
@@ -56,7 +64,11 @@ def refresh():
             values = [a for a in addresses if ipaddress.ip_address(a).version == version]
             commands.append(f'flush set inet secure_vm {role}{version}')
             if values:
-                commands.append(f'add element inet secure_vm {role}{version} {{ ' + ', '.join(a + ' timeout 5m' for a in values) + ' }')
+                commands.append(
+                    f'add element inet secure_vm {role}{version} {{ '
+                    + ', '.join(a + ' timeout 5m' for a in values)
+                    + ' }'
+                )
     # One atomic nft transaction; failed resolution does not install partial broad rules.
     nft('\n'.join(commands))
     temporary = TARGETS.with_suffix('.new')
@@ -64,6 +76,7 @@ def refresh():
     with os.fdopen(fd, 'w') as file:
         json.dump(result, file)
     os.replace(temporary, TARGETS)
+
 
 def main():
     if os.getuid() != 0:
@@ -77,6 +90,7 @@ def main():
             raise SystemExit('Unknown action')
         refresh()
     print('Provider address sets updated; service DNS/direct destinations remain restricted.')
+
 
 if __name__ == '__main__':
     main()

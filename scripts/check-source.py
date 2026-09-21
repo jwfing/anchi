@@ -1,4 +1,5 @@
 """Offline syntax checks. Does not import services or contact the VM."""
+
 import ast
 from pathlib import Path
 import subprocess

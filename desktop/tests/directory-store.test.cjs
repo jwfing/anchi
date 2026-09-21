@@ -5,7 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { DirectoryStore, validateDirectory } = require('../src/main/directory-store.cjs');
 async function fixture(t) {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'qisuo-store-'));
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-store-'));
   t.after(() => fs.rm(base, { recursive: true, force: true }));
   const home = path.join(base, 'home');
   await fs.mkdir(home);
@@ -20,20 +20,53 @@ async function fixture(t) {
   const file = path.join(base, 'plans.json');
   return { file, selected, io, store: new DirectoryStore(file, logicalHome, io), logicalHome };
 }
-test('plans persist with schema and private permissions, never become active', async (t) => {
+test('plans persist with schema and private permissions; identity is recorded only by the broker', async (t) => {
   const { store, selected, file, logicalHome, io } = await fixture(t);
   await store.load();
   await store.add(selected, 'ro');
   const raw = JSON.parse(await fs.readFile(file));
-  assert.equal(raw.schemaVersion, 1);
-  assert.equal(raw.directories[0].status, 'pending');
+  assert.equal(raw.schemaVersion, 2);
+  assert.equal(raw.directories[0].identity, undefined);
   assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
   raw.directories[0].status = 'active';
   await fs.writeFile(file, JSON.stringify(raw));
   const reopened = new DirectoryStore(file, logicalHome, io);
   await reopened.load();
-  assert.equal(reopened.directories[0].status, 'pending');
+  assert.equal(reopened.directories[0].status, undefined);
+  await reopened.recordIdentity(reopened.directories[0].id, ['1', '2']);
+  assert.deepEqual(JSON.parse(await fs.readFile(file)).directories[0].identity, ['1', '2']);
+  await assert.rejects(
+    reopened.recordIdentity(reopened.directories[0].id, ['x', '2']),
+    /INVALID_SETTINGS/,
+  );
   await assert.rejects(store.add(selected, 'rw'), /DIRECTORY_OVERLAPS/);
+});
+test('schema v1 and unversioned files load without identity; bad identity is rejected', async (t) => {
+  const { file, logicalHome, io } = await fixture(t);
+  const entry = {
+    id: '11111111-1111-4111-8111-111111111111',
+    path: logicalHome + '/docs',
+    mode: 'ro',
+  };
+  for (const value of [
+    { directories: [entry] },
+    { schemaVersion: 1, directories: [{ ...entry, status: 'pending' }] },
+  ]) {
+    await fs.writeFile(file, JSON.stringify(value));
+    const store = new DirectoryStore(file, logicalHome, io);
+    await store.load();
+    assert.deepEqual(store.directories, [entry]);
+  }
+  await fs.writeFile(
+    file,
+    JSON.stringify({ schemaVersion: 2, directories: [{ ...entry, identity: ['1'] }] }),
+  );
+  await assert.rejects(new DirectoryStore(file, logicalHome, io).load(), /INVALID_SETTINGS/);
+  await fs.writeFile(file, JSON.stringify({ schemaVersion: 3, directories: [] }));
+  await assert.rejects(
+    new DirectoryStore(file, logicalHome, io).load(),
+    /UNSUPPORTED_SETTINGS_VERSION/,
+  );
 });
 test('failed atomic rename leaves disk and memory unchanged', async (t) => {
   const { store, selected, file, io } = await fixture(t);

@@ -15,6 +15,7 @@ import policy
 import vault
 from common import Denied, target_ips
 
+
 class SecurityTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -23,9 +24,13 @@ class SecurityTests(unittest.TestCase):
         self.key.write_bytes(os.urandom(32))
         boot = self.root / 'boot'
         boot.write_text('test-boot')
-        self.patches = [patch('vault.KEY', self.key), patch('auth.STORE', self.root),
-                        patch('policy.DATABASE', self.root / 'policy.sqlite3'), patch('policy.BOOT_ID', boot),
-                        patch('common.TARGETS_FILE', self.root / 'targets.json')]
+        self.patches = [
+            patch('vault.KEY', self.key),
+            patch('auth.STORE', self.root),
+            patch('policy.DATABASE', self.root / 'policy.sqlite3'),
+            patch('policy.BOOT_ID', boot),
+            patch('common.TARGETS_FILE', self.root / 'targets.json'),
+        ]
         for p in self.patches:
             p.start()
         self.action = {'operation': 'gmail.list', 'account': 'generation1', 'params': {'query': 'in:inbox', 'limit': 1}}
@@ -80,9 +85,11 @@ class SecurityTests(unittest.TestCase):
 
     def test_revoke_locally_first_and_retry(self):
         auth.write('tokens.json', {'access_token': 'ACCESS', 'refresh_token': 'REFRESH'})
+
         def fail(*args):
             self.assertFalse(vault.exists(self.root, 'tokens.json'))
             raise TimeoutError()
+
         with patch('auth.google_json', side_effect=fail):
             self.assertTrue(auth.disconnect()['revocation_pending'])
         with patch('auth.google_json', return_value={}) as revoke:
@@ -136,11 +143,13 @@ class SecurityTests(unittest.TestCase):
 
     def test_concurrent_consumption_only_one_wins(self):
         grant = self.issued()
+
         def attempt(_):
             try:
                 return self.consume(grant)['allowed']
             except Denied:
                 return False
+
         with ThreadPoolExecutor(max_workers=4) as pool:
             self.assertEqual(sum(pool.map(attempt, range(4))), 1)
 
@@ -152,11 +161,23 @@ class SecurityTests(unittest.TestCase):
         with self.assertRaises(Denied):
             policy.authorize(self.action, 'inference')
 
+    def test_audit_readout_is_bounded_metadata(self):
+        grant = self.issued()
+        self.consume(grant)
+        rows = policy.inspect_audit(10)['audit']
+        self.assertEqual([r['event'] for r in reversed(rows)], ['REQUESTED', 'APPROVED', 'ISSUED_APPROVED', 'CONSUMED'])
+        self.assertEqual(set(rows[0]), {'id', 'at', 'event', 'grant_id', 'digest'})
+        self.assertNotIn('in:inbox', json.dumps(rows))
+        self.assertEqual(len(policy.inspect_audit(2)['audit']), 2)
+        for limit in (0, 501, '10', True):
+            with self.assertRaisesRegex(Denied, 'BAD_LIMIT'):
+                policy.inspect_audit(limit)
+
     def test_target_file_expiry_and_private_addresses(self):
         target = self.root / 'targets.json'
-        for address, expires in [('127.0.0.1', time.time()+60), ('::1', time.time()+60), ('1.1.1.1', 0)]:
+        for address, expires in [('127.0.0.1', time.time() + 60), ('::1', time.time() + 60), ('1.1.1.1', 0)]:
             target.write_text(json.dumps({'test': {'addresses': [address], 'expires_at': expires}}))
             with self.assertRaisesRegex(Denied, 'EGRESS_TARGETS_UNAVAILABLE'):
                 target_ips('test')
-        target.write_text(json.dumps({'test': {'addresses': ['1.1.1.1'], 'expires_at': time.time()+60}}))
+        target.write_text(json.dumps({'test': {'addresses': ['1.1.1.1'], 'expires_at': time.time() + 60}}))
         self.assertEqual(target_ips('test'), ['1.1.1.1'])

@@ -7,10 +7,12 @@ import policy_client
 
 AUTH_SOCKET = '/run/secure-auth/token.sock'
 
+
 def scrub(text):
     # Best effort only; not a complete DLP or prompt-injection detector.
     text = re.sub(r'https?://\S+', '[link omitted]', text, flags=re.I)
     return re.sub(r'(?<!\d)\d{4,8}(?!\d)', '[number omitted]', text)
+
 
 def body_text(part, depth=0):
     if depth > 10:
@@ -21,6 +23,7 @@ def body_text(part, depth=0):
             return ''
         return base64.urlsafe_b64decode(data + '=' * (-len(data) % 4)).decode('utf-8', 'replace')[:12000]
     return '\n'.join(body_text(p, depth + 1) for p in part.get('parts', [])[:30])[:12000]
+
 
 def handle(request):
     op = request.get('op')
@@ -49,12 +52,21 @@ def handle(request):
     policy_client.require({'operation': 'gmail.' + op, 'account': credentials['account_generation'], 'params': params})
     result = google_json('gmail.googleapis.com', 'GET', path, token=token)
     if op == 'list':
-        return {'messages': [{k: m[k] for k in ('id', 'threadId') if k in m}
-                             for m in result.get('messages', [])[:limit]]}
+        return {
+            'messages': [{k: m[k] for k in ('id', 'threadId') if k in m} for m in result.get('messages', [])[:limit]]
+        }
     payload = result.get('payload', {})
-    headers = {h['name'].lower(): scrub(h['value'])[:2000] for h in payload.get('headers', [])
-               if h.get('name', '').lower() in ('from', 'to', 'subject', 'date')}
-    return {'id': result.get('id'), 'headers': headers,
-            'text': scrub(body_text(payload)), 'snippet': scrub(result.get('snippet', ''))[:1000],
-            'untrusted_content': True, 'attachments_omitted': True,
-            'notice': 'Best-effort redaction; HTML-only bodies and attachments are not retrieved.'}
+    headers = {
+        h['name'].lower(): scrub(h['value'])[:2000]
+        for h in payload.get('headers', [])
+        if h.get('name', '').lower() in ('from', 'to', 'subject', 'date')
+    }
+    return {
+        'id': result.get('id'),
+        'headers': headers,
+        'text': scrub(body_text(payload)),
+        'snippet': scrub(result.get('snippet', ''))[:1000],
+        'untrusted_content': True,
+        'attachments_omitted': True,
+        'notice': 'Best-effort redaction; HTML-only bodies and attachments are not retrieved.',
+    }

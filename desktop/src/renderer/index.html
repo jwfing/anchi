@@ -14,10 +14,11 @@
     <div class="shell">
       <nav>
         <div class="brand">◈ 安栖</div>
-        <p class="caption">本地 Agent 工作空间<br />桌面开发版 · 0.1.1</p>
+        <p class="caption">本地 Agent 工作空间<br /><span id="version">桌面开发版</span></p>
         <button data-page="setup">☷　首次设置</button><button data-page="agent">◫　Agent</button
         ><button data-page="permissions">◎　连接与权限</button
-        ><button data-page="approvals">◇　独立审批</button
+        ><button data-page="approvals">
+          ◇　独立审批 <span id="approvals-badge" class="badge"></span></button
         ><button data-page="activity">≋　活动记录</button>
         <footer>
           <p id="status" class="caption">正在加载…</p>

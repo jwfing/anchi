@@ -5,6 +5,52 @@ export const esc = (s) =>
   );
 export const button = (text, act, cls = '') =>
   `<button class="${cls}" data-act="${act}">${text}</button>`;
+const clock = (seconds) =>
+  Number.isFinite(seconds) ? new Date(seconds * 1000).toLocaleString() : '未知';
+
+/** Structured, escaped summary of a trusted policy action; the raw JSON stays available below it. */
+export function approvalSummary(action) {
+  if (!action || typeof action !== 'object') return [];
+  const params = action.params && typeof action.params === 'object' ? action.params : {};
+  const rows = [
+    ['操作', action.operation],
+    ['账户 generation', action.account],
+  ];
+  if (typeof params.model === 'string') rows.push(['模型', params.model]);
+  if (Array.isArray(params.input)) {
+    rows.push(['上下文条目', `${params.input.length} 条`]);
+    const last = [...params.input]
+      .reverse()
+      .find(
+        (item) =>
+          item && (item.type === 'message' || item.type === undefined) && item.role === 'user',
+      );
+    const text = Array.isArray(last?.content)
+      ? last.content.map((c) => (typeof c?.text === 'string' ? c.text : '')).join('')
+      : typeof last?.content === 'string'
+        ? last.content
+        : '';
+    if (text) rows.push(['最近用户输入', text.length > 300 ? text.slice(0, 300) + '…' : text]);
+  }
+  if (Array.isArray(params.tools))
+    rows.push([
+      '模型可调用工具',
+      params.tools.length ? params.tools.map((t) => t?.name ?? '?').join(', ') : '无',
+    ]);
+  if (typeof params.instructions === 'string')
+    rows.push(['系统指令长度', `${params.instructions.length} 字符`]);
+  if (typeof params.query === 'string') rows.push(['Gmail 查询', params.query]);
+  if (params.limit !== undefined) rows.push(['数量上限', String(params.limit)]);
+  if (typeof params.id === 'string') rows.push(['邮件 ID', params.id]);
+  return rows;
+}
+
+const directoryStatus = (d) => {
+  if (d.status === 'active') return '已授权';
+  if (d.reason === 'DIRECTORY_CHANGED') return '目录已变化，需重新确认';
+  if (d.reason && d.reason !== 'CONSENT_REQUIRED') return '目录不可访问，需重新确认';
+  return '未启用';
+};
 
 export function renderPage({
   page,
@@ -15,6 +61,7 @@ export function renderPage({
   approvals,
   detail,
   approvalsLoaded,
+  audit,
 }) {
   if (page === 'setup') {
     const h = state.setup?.health;
@@ -25,6 +72,19 @@ export function renderPage({
         '<button ',
         '<button ' + (enabled && job?.state !== 'running' ? '' : 'disabled '),
       );
+    const expiresAt = Number(h?.expires_at);
+    const remaining = Number.isFinite(expiresAt) ? expiresAt * 1000 - Date.now() : NaN;
+    const expiry = !Number.isFinite(remaining)
+      ? ''
+      : remaining <= 0
+        ? '<p class="error">模型认证已过期。点击「使用已有 Codex 登录」或「登录 / 重新认证」更新，不需要断开 Pi。</p>'
+        : remaining < 30 * 60 * 1000
+          ? `<p class="warn">模型认证将于 ${esc(clock(expiresAt))} 到期，建议现在重新导入。</p>`
+          : `<p class="caption">模型认证有效至 ${esc(clock(expiresAt))}。</p>`;
+    const versionNote =
+      h?.runtime_version && state.version && h.runtime_version !== state.version
+        ? `<p class="warn">VM 内服务版本 ${esc(h.runtime_version)} 与应用版本 ${esc(state.version)} 不同，建议点击「修复 / 更新 Pi」同步。</p>`
+        : '';
     return `<div class="eyebrow">WELCOME / PI</div><h1>从这里开始使用 Pi</h1>
       <p class="muted">完成环境、模型登录和一次示例任务。Gmail 和本地目录可以稍后连接。</p>
       <div class="actions">${button('重新检查', 'setup-status')}${button('进入对话', 'go-agent')}</div>
@@ -39,13 +99,13 @@ export function renderPage({
       <p class="muted">当前可用磁盘 ${esc(h.freeGiB)} GB；安装至少需要 8 GB。首次安装可能需要数分钟。</p>
       ${!h.brew ? `<p>先下载 Homebrew 的 .pkg 安装包，在系统安装器完成安装，再回到这里重新检查。</p>${button('打开 Homebrew 安装包下载页', 'setup-homebrew')}` : stepButton('安装或补齐依赖', 'setup-dependencies')}
       </div>
-      <div class="card"><h2>2 · 安装 Pi 安全环境</h2><p>环境：${esc(h.vm)} · Pi：${label(h.installed)}</p>
-      <p class="muted">独立 Linux 环境使用 4 GB 内存、最多 30 GB 虚拟磁盘；保留已有账户和工作区。</p>
+      <div class="card"><h2>2 · 安装 Pi 安全环境</h2><p>环境：${esc(h.vm)} · Pi：${label(h.installed)}${h.runtime_version ? ' · 服务版本 ' + esc(h.runtime_version) : ''}</p>
+      <p class="muted">独立 Linux 环境使用 4 GB 内存、最多 30 GB 虚拟磁盘；保留已有账户和工作区。</p>${versionNote}
       ${stepButton(h.installed ? '修复 / 更新 Pi' : '安装 Pi', 'setup-install', h.lima && h.python)}${h.vm === 'Stopped' ? button('启动环境', 'vm-start') : ''}
       </div>
-      <div class="card"><h2>3 · 连接模型</h2><p>凭证库：${h.unlocked ? '已解锁' : '未解锁'} · 模型认证：${label(h.configured)}${h.model ? ' · ' + esc(h.model) : ''}</p>
+      <div class="card"><h2>3 · 连接模型</h2><p>凭证库：${h.unlocked ? '已解锁' : '未解锁'} · 模型认证：${label(h.configured)}${h.model ? ' · ' + esc(h.model) : ''}</p>${expiry}
       <div class="actions">${stepButton('初始化 / 解锁', 'setup-unlock', h.installed)}${stepButton('使用已有 Codex 登录', 'setup-import', h.unlocked)}${stepButton('登录 / 重新认证', 'setup-login', h.unlocked && h.codex)}</div>
-      <p class="muted">登录会打开系统浏览器。使用你的 ChatGPT 订阅，短期访问令牌保存在隔离认证层。到期后从这里重新认证。请备份本机主密钥；详情见使用说明。</p>
+      <p class="muted">登录会打开系统浏览器。使用你的 ChatGPT 订阅，短期访问令牌保存在隔离认证层。到期后从这里重新认证，已连接的 Pi 不需要断开。请备份本机主密钥；详情见使用说明。</p>
       </div>
       <div class="card"><h2>4 · 完成第一个任务</h2><p>示例：把一段虚构项目计划整理为三条待办。不需要连接邮箱或授权目录。</p>
       ${state.firstTask?.state === 'succeeded' || state.setup?.completedAt ? '<div class="note">首个任务已返回结果。你可以继续对话，或到「连接与权限」添加自己的资源。</div>' : state.firstTask?.state === 'failed' ? '<p class="error">任务未完成。检查模型认证和审批状态后重试。</p>' : ''}
@@ -74,7 +134,7 @@ export function renderPage({
           </div>
         </div>
         <p class="caption path">
-          模型认证由隔离认证层托管。认证过期或环境未就绪时，请前往「首次设置」。
+          模型认证由隔离认证层托管。认证过期时在「首次设置」重新导入即可，不需要断开 Pi。
         </p>
       </div>
       <div class="actions toolbar">
@@ -89,7 +149,7 @@ export function renderPage({
         <textarea
           id="prompt"
           aria-label="发送给 Pi 的需求"
-          maxlength="8000"
+          maxlength="${Number(state.limits?.prompt_chars) || 8000}"
           placeholder="描述你希望完成的任务…"
           ${!state.connected || state.busy ? 'disabled' : ''}
         >
@@ -101,9 +161,18 @@ ${esc(draft)}</textarea
         为只读，模型调用仍需独立审批。
       </p>`;
   } else if (page === 'permissions') {
+    const gmail = state.gmail;
+    const gmailState = !gmail
+      ? '尚未检查账户状态'
+      : gmail.reauth_required
+        ? '账户需要重新认证：Google 授权已失效，请重新点击「连接 Google」'
+        : (gmail.connected ? '账户已连接' : '账户未连接') +
+          (gmail.vault_unlocked ? ' · 凭证库已解锁' : ' · 凭证库已锁定');
     return /* HTML */ `<div class="eyebrow">PERMISSIONS</div>
       <h1>明确每一项访问范围</h1>
-      <p class="muted">本次应用运行期间授权有效；重启后需要重新启用。</p>
+      <p class="muted">
+        目录授权持续至撤销；重新打开应用时会先核对目录身份，只有同一目录才自动恢复。
+      </p>
       <div class="card">
         <div class="row">
           <h2>本地目录</h2>
@@ -114,19 +183,18 @@ ${esc(draft)}</textarea
         <div class="note">
           目录由宿主文件代理逐次校验权限，不直接挂载到 VM。撤销会等待已开始的操作结束。
         </div>
-        ${state.directories.map((d) => `<div class="resource row"><div><strong>${esc(d.path.split('/').pop())}</strong> <span class="tag">${d.status === 'active' ? '已授权' : '未启用'} · ${d.mode === 'ro' ? '只读' : '读写'}</span><div class="caption path">${esc(d.path)}</div></div><div class="actions">${d.status !== 'active' ? `<button data-activate="${esc(d.id)}">启用授权</button>` : ''}<button data-mode="${esc(d.id)}" data-value="${d.mode === 'ro' ? 'rw' : 'ro'}">改为${d.mode === 'ro' ? '读写' : '只读'}</button><button data-remove="${esc(d.id)}">撤销并移除</button></div></div>`).join('') || '<p class="muted">尚未选择目录。建议原始资料只读、结果目录读写。</p>'}
+        ${state.directories.map((d) => `<div class="resource row"><div><strong>${esc(d.path.split('/').pop())}</strong> <span class="tag">${esc(directoryStatus(d))} · ${d.mode === 'ro' ? '只读' : '读写'}</span><div class="caption path">${esc(d.path)}</div></div><div class="actions">${d.status !== 'active' ? `<button data-activate="${esc(d.id)}">${d.reason && d.reason !== 'CONSENT_REQUIRED' ? '重新确认' : '启用授权'}</button>` : ''}<button data-mode="${esc(d.id)}" data-value="${d.mode === 'ro' ? 'rw' : 'ro'}">改为${d.mode === 'ro' ? '读写' : '只读'}</button><button data-remove="${esc(d.id)}">撤销并移除</button></div></div>`).join('') || '<p class="muted">尚未选择目录。建议原始资料只读、结果目录读写。</p>'}
         <p class="caption">
-          支持最多 24 KB 的 UTF-8 文本读写、创建子目录和删除普通文件。列表最多 100
-          项。拒绝隐藏路径、符号链接、硬链接和常见凭证目录。
+          支持最多 24 KB 的 UTF-8
+          文本读写、创建子目录和删除普通文件。覆盖或删除的文件会移入该目录下隐藏的 .anchi-trash
+          供你找回，Agent 看不到它。列表最多 100 项。拒绝隐藏路径、符号链接、硬链接和常见凭证目录。
         </p>
       </div>
       <div class="card">
         <h2>Gmail · 只读连接</h2>
-        <p>
-          ${esc(state.gmail ? (state.gmail.connected ? '账户已连接' : '账户未连接') + (state.gmail.vault_unlocked ? ' · 凭证库已解锁' : ' · 凭证库已锁定') : '尚未检查账户状态')}
-        </p>
+        <p class="${gmail?.reauth_required ? 'error' : ''}">${esc(gmailState)}</p>
         <p class="caption">
-          ${state.gmail?.revocation_pending ? 'Google 远端撤销待重试，请再次点击断开账户。' : ''}${state.oauth?.pending ? '正在等待浏览器授权…' : ''}
+          ${gmail?.revocation_pending ? 'Google 远端撤销待重试，请再次点击断开账户。' : ''}${state.oauth?.pending ? '正在等待浏览器授权…' : ''}
         </p>
         <div class="actions">
           ${button('刷新账户状态', 'gmail-status')}${button('导入客户端 JSON', 'gmail-import')}${button('连接 Google', 'gmail-connect')}${button('取消授权流程', 'gmail-cancel')}
@@ -141,6 +209,7 @@ ${esc(draft)}</textarea
         </p>
       </div>`;
   } else if (page === 'approvals') {
+    const summary = detail ? approvalSummary(detail.action) : [];
     return /* HTML */ `<div class="row">
         <div>
           <div class="eyebrow">TRUSTED CONTROL PLANE</div>
@@ -152,11 +221,22 @@ ${esc(draft)}</textarea
       <div class="card">
         ${approvals.length ? approvals.map((a) => `<div class="resource row"><div><strong>${esc(a.principal)}</strong><div class="caption">${esc(a.id)} · 到期 ${esc(new Date(a.expires * 1000).toLocaleTimeString())}</div></div><button data-inspect="${esc(a.id)}">查看完整请求</button></div>`).join('') : approvalsLoaded ? '已刷新，当前没有待审批请求。' : '尚未载入。点击刷新获取最新状态。'}
       </div>
-      ${detail ? `<div class="card"><h2>请求 ${esc(detail.id)}</h2><span class="tag">${esc(detail.state)}</span><p class="caption path">SHA-256：${esc(detail.digest)}</p><p class="muted">下方为完整动作内容，可能包含将发送到模型的文件或邮件正文。请核对后决定。</p><pre>${esc(JSON.stringify(detail.action, null, 2))}</pre><div class="actions">${detail.state === 'PENDING' ? button('批准这份请求', 'approve', 'primary') + button('拒绝', 'deny') : ''}${button('撤销', 'revoke')}</div></div>` : ''}`;
+      ${
+        detail
+          ? `<div class="card"><h2>请求 ${esc(detail.id)}</h2><span class="tag">${esc(detail.state)}</span><p class="caption path">SHA-256：${esc(detail.digest)}</p>
+        <dl class="kv">${summary.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}<dt>到期</dt><dd>${esc(clock(detail.expires))}</dd></dl>
+        <p class="muted">下方为完整动作内容，可能包含将发送到模型的文件或邮件正文。请核对后决定。</p>
+        <details><summary>完整 JSON</summary><pre>${esc(JSON.stringify(detail.action, null, 2))}</pre></details>
+        <div class="actions">${detail.state === 'PENDING' ? button('批准这份请求', 'approve', 'primary') + button('拒绝', 'deny') : ''}${button('撤销', 'revoke')}</div></div>`
+          : ''
+      }`;
   } else {
+    const rows = Array.isArray(audit) ? audit : null;
     return /* HTML */ `<div class="eyebrow">ACTIVITY</div>
-      <h1>本次应用运行记录</h1>
-      <p class="muted">事件仅保留最近 200 条于内存；完整策略审计仍在 VM。这里不复制聊天正文。</p>
+      <h1>活动记录</h1>
+      <p class="muted">
+        桌面只保存事件类型、时间和标识，不保存聊天与审批正文；完整策略审计存于 VM，可在下方读取。
+      </p>
       <div class="card">
         ${
           state.events
@@ -165,9 +245,27 @@ ${esc(draft)}</textarea
             .reverse()
             .map(
               (e) =>
-                `<div class="resource"><span class="tag">${esc(e.type)}</span> ${esc(e.text || e.error || e.tool || e.approval_id || '')} ${e.type === 'finished' ? esc(e.success ? '任务成功' : e.cancelled ? '任务取消' : '任务失败') : ''}</div>`,
+                `<div class="resource"><span class="tag">${esc(e.type)}</span> <span class="caption">${esc(e.time ? new Date(e.time).toLocaleString() : '')}</span> ${esc(e.text || e.error || e.tool || e.approval_id || '')} ${e.type === 'finished' ? esc(e.success ? '任务成功' : e.cancelled ? '任务取消' : '任务失败') : ''}</div>`,
             )
             .join('') || '尚无活动。'
+        }
+      </div>
+      <div class="card">
+        <div class="row">
+          <h2>策略审计（VM）</h2>
+          ${button('读取最近审计', 'audit')}
+        </div>
+        ${
+          rows === null
+            ? '<p class="muted">尚未读取。审计只含事件、时间、请求 ID 和内容摘要哈希。</p>'
+            : rows.length
+              ? rows
+                  .map(
+                    (r) =>
+                      `<div class="resource"><span class="tag">${esc(r.event)}</span> <span class="caption">${esc(clock(r.at))}</span> ${esc(r.grant_id ? r.grant_id.slice(0, 12) : '')} <span class="caption path">${esc(r.digest ? r.digest.slice(0, 16) : '')}</span></div>`,
+                  )
+                  .join('')
+              : '<p class="muted">VM 中还没有审计记录。</p>'
         }
       </div>`;
   }

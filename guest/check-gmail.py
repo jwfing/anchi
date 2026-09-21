@@ -1,14 +1,22 @@
 """Live service boundary checks; never reads mailbox contents."""
+
 import json
 from pathlib import Path
 from common import Denied, rpc
 
 checks = []
+
+
 def check(name, condition):
     checks.append({'check': name, 'passed': bool(condition)})
 
+
 status = rpc('/run/secure-gmail/api.sock', {'op': 'status'})
-check('gateway_and_authd_reachable', set(status) == {'client_configured', 'connected', 'scope', 'vault_unlocked', 'revocation_pending'})
+check(
+    'gateway_and_authd_reachable',
+    set(status)
+    == {'client_configured', 'connected', 'scope', 'reauth_required', 'vault_unlocked', 'revocation_pending'},
+)
 check('policy_socket_not_visible', not Path('/run/secure-policy/api.sock').exists())
 check('vault_key_not_visible', not Path('/run/secure-vault/master.key').exists())
 check('auth_socket_not_visible', not Path('/run/secure-auth/token.sock').exists())

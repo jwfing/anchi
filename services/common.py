@@ -1,4 +1,5 @@
 """Bounded local RPC and fixed-destination HTTPS; no third-party dependencies."""
+
 import http.client
 import ipaddress
 import json
@@ -8,11 +9,43 @@ import struct
 from pathlib import Path
 import time
 
-MAX_RPC = 65536
+# Shared with pi/limits.mjs and desktop/src/shared/protocol.cjs; a test keeps them identical.
+LIMITS = {'rpc_bytes': 65536, 'prompt_chars': 8000, 'host_file_text_bytes': 24000}
+MAX_RPC = LIMITS['rpc_bytes']
 TARGETS_FILE = Path('/run/secure-egress/targets.json')
+CELL_ENV_PATHS = (Path('/opt/secure-vm/cell.env'), Path(__file__).resolve().parents[1] / 'guest/cell.env')
+
+
+def load_cell_env(paths=CELL_ENV_PATHS):
+    """KEY=VALUE file shared with the guest shell scripts; fail closed when absent."""
+    for path in paths:
+        try:
+            text = path.read_text()
+        except OSError:
+            continue
+        values = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            key, separator, value = line.partition('=')
+            if separator and key.strip():
+                values[key.strip()] = value.strip()
+        return values
+    raise RuntimeError('cell.env not installed; run guest/bootstrap.sh')
+
+
+CELL = load_cell_env()
+CELL_UID_BASE = int(CELL['SECURE_CELL_UID_BASE'])
+CELL_UID_COUNT = int(CELL['SECURE_CELL_UID_COUNT'])
+CELL_AGENT_UID = int(CELL['SECURE_CELL_AGENT_UID'])
+CELL_AGENT_HOST_UID = CELL_UID_BASE + CELL_AGENT_UID
+PI_VERSION = CELL['SECURE_PI_VERSION']
+
 
 class Denied(Exception):
     pass
+
 
 def recv_json(conn):
     data = bytearray()
@@ -34,11 +67,13 @@ def recv_json(conn):
         raise Denied('BAD_REQUEST')
     return value
 
+
 def send_json(conn, value):
-    data = json.dumps(value, ensure_ascii=True, separators=(',', ':')).encode() + b'\n'
+    data = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode() + b'\n'
     if len(data) > MAX_RPC:
         raise Denied('RESPONSE_TOO_LARGE')
     conn.sendall(data)
+
 
 def rpc(path, request, timeout=30):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
@@ -50,27 +85,37 @@ def rpc(path, request, timeout=30):
         raise Denied(response.get('error', 'SERVICE_ERROR'))
     return response['result']
 
+
 def peer_uid(conn):
     return struct.unpack('3i', conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
+
 
 def fields(request, allowed, required=()):
     if set(request) - set(allowed) or not set(required) <= set(request):
         raise Denied('BAD_REQUEST')
 
+
 def target_ips(host):
     try:
         value = json.loads(TARGETS_FILE.read_text())[host]
         addresses = value['addresses']
-        if value['expires_at'] <= time.time() or not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
+        if (
+            value['expires_at'] <= time.time()
+            or not addresses
+            or any(not ipaddress.ip_address(a).is_global for a in addresses)
+        ):
             raise ValueError()
         return addresses
     except (OSError, ValueError, KeyError, TypeError):
         raise Denied('EGRESS_TARGETS_UNAVAILABLE') from None
 
+
 def google_json(host, method, path, body=None, token=None):
-    if (host, method) not in {
-        ('gmail.googleapis.com', 'GET'), ('oauth2.googleapis.com', 'POST')
-    } or not path.startswith('/') or path.startswith('//'):
+    if (
+        (host, method) not in {('gmail.googleapis.com', 'GET'), ('oauth2.googleapis.com', 'POST')}
+        or not path.startswith('/')
+        or path.startswith('//')
+    ):
         raise Denied('DESTINATION_DENIED')
     if host == 'oauth2.googleapis.com' and path not in ('/token', '/revoke'):
         raise Denied('DESTINATION_DENIED')
@@ -91,7 +136,9 @@ def google_json(host, method, path, body=None, token=None):
         response = conn.getresponse()
         if response.status != 200:
             # Never reflect provider error bodies, request URLs, or tokens to logs/cell.
-            code = 'GOOGLE_AUTH_REQUIRED' if response.status in (401, 403) else 'GOOGLE_REQUEST_FAILED'
+            # Token-endpoint 400 means invalid_grant/invalid_client: the user must re-authorize.
+            auth_failure = response.status in (401, 403) or (host == 'oauth2.googleapis.com' and response.status == 400)
+            code = 'GOOGLE_AUTH_REQUIRED' if auth_failure else 'GOOGLE_REQUEST_FAILED'
             raise Denied(code)
         payload = response.read(2 * 1024 * 1024 + 1)
         if len(payload) > 2 * 1024 * 1024:

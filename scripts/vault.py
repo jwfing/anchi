@@ -1,4 +1,5 @@
 """Keep the master key outside the VM; only send it via SSH stdin to tmpfs."""
+
 import argparse
 import base64
 import json
@@ -8,10 +9,23 @@ import stat
 import resource
 import subprocess
 
+
 def remote(action, value=None):
-    result = subprocess.run(['limactl', 'shell', 'secure-vm', '--', 'sudo', '/usr/bin/python3',
-        '/opt/secure-vm/services/vault_admin.py', action],
-        input=json.dumps(value) if value is not None else '', text=True, capture_output=True)
+    result = subprocess.run(
+        [
+            'limactl',
+            'shell',
+            'secure-vm',
+            '--',
+            'sudo',
+            '/usr/bin/python3',
+            '/opt/secure-vm/services/vault_admin.py',
+            action,
+        ],
+        input=json.dumps(value) if value is not None else '',
+        text=True,
+        capture_output=True,
+    )
     try:
         response = json.loads(result.stdout)
     except ValueError:
@@ -19,6 +33,7 @@ def remote(action, value=None):
     if result.returncode:
         raise SystemExit(response.get('error', 'VAULT_OPERATION_FAILED'))
     return response
+
 
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -31,7 +46,9 @@ def main():
         return
     if args.action == 'init' and not args.key_file.exists():
         if remote('status')['encrypted_files']:
-            raise SystemExit('Encrypted credentials exist. Restore the original master key; do not generate a replacement.')
+            raise SystemExit(
+                'Encrypted credentials exist. Restore the original master key; do not generate a replacement.'
+            )
         args.key_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(args.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as file:
@@ -47,6 +64,7 @@ def main():
     if len(master) != 32:
         raise SystemExit('Invalid master key file.')
     print(json.dumps(remote('unlock', {'key': base64.b64encode(master).decode()}), indent=2))
+
 
 if __name__ == '__main__':
     main()

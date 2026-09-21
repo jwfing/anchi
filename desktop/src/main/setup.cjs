@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const { executable } = require('./host-tools.cjs');
 const REMEDIATION = {
   dependencies: '安装失败。请检查网络及 Homebrew 的系统安装提示，然后重试。',
   install: '安装未完成。检查网络和可用磁盘后重试；已有凭证和工作区会保留。',
@@ -62,30 +63,8 @@ class Setup {
   get busy() {
     return this.active;
   }
-  async executable(name) {
-    const paths = {
-      brew: ['/opt/homebrew/bin/brew'],
-      python: ['/opt/homebrew/bin/python3.13', '/opt/homebrew/bin/python3', '/usr/bin/python3'],
-      codex: ['/opt/homebrew/bin/codex', '/usr/local/bin/codex'],
-    };
-    if (name === 'codex') {
-      const base = path.join(os.homedir(), '.nvm/versions/node');
-      const versions = await fs.readdir(base).catch(() => []);
-      paths.codex.push(
-        ...versions
-          .filter((v) => /^v\d+\.\d+\.\d+$/.test(v))
-          .sort()
-          .reverse()
-          .map((v) => path.join(base, v, 'bin/codex')),
-      );
-    }
-    for (const file of paths[name] || []) {
-      try {
-        await fs.access(file, fs.constants.X_OK);
-        return file;
-      } catch {}
-    }
-    return null;
+  executable(name) {
+    return executable(name);
   }
   async inspect() {
     const [brew, python, codex, lima] = await Promise.all([

@@ -1,4 +1,5 @@
 """Independent human/admin entry point, never exposed to the runtime cell."""
+
 import argparse
 import json
 import os
@@ -7,6 +8,7 @@ import sys
 
 from common import Denied
 import policy
+
 
 def main():
     if os.getuid() != 0:
@@ -19,6 +21,8 @@ def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='op', required=True)
     sub.add_parser('pending')
+    audit = sub.add_parser('audit')
+    audit.add_argument('--limit', type=int, default=100)
     for op in ('show', 'deny', 'revoke'):
         sub.add_parser(op).add_argument('id')
     approve = sub.add_parser('approve')
@@ -29,13 +33,20 @@ def main():
     args = parser.parse_args()
     if args.op == 'pending':
         value = policy.inspect()
+    elif args.op == 'audit':
+        value = policy.inspect_audit(args.limit)
     elif args.op == 'show':
         value = policy.inspect(args.id)
     elif args.op == 'gmail-read':
         value = policy.set_read(args.mode == 'allow')
     else:
-        value = policy.decide(args.id, {'approve': 'APPROVED', 'deny': 'DENIED', 'revoke': 'REVOKED'}[args.op], getattr(args, 'digest', None))
+        value = policy.decide(
+            args.id,
+            {'approve': 'APPROVED', 'deny': 'DENIED', 'revoke': 'REVOKED'}[args.op],
+            getattr(args, 'digest', None),
+        )
     print(json.dumps(value, ensure_ascii=True, indent=2))
+
 
 if __name__ == '__main__':
     try:

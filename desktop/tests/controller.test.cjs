@@ -108,6 +108,28 @@ test('first task completion requires reply and finish from the same recorded tur
   assert.equal(completed, 1);
   assert(!calls.some((c) => c.op === 'approve'));
 });
+test('credential refresh is allowed while Pi stays connected; rebuilds are not', async () => {
+  const { controller } = fixture();
+  const started = [];
+  controller.pi = { state: {}, child: {} };
+  controller.setup = { busy: false, start: async (action) => started.push(action) };
+  controller.dialogs.confirmSetup = async () => true;
+  for (const action of ['import', 'login', 'unlock'])
+    await controller.dispatch('setup-start', { action });
+  for (const action of ['install', 'dependencies'])
+    await assert.rejects(controller.dispatch('setup-start', { action }), /DISCONNECT_PI_FIRST/);
+  assert.deepEqual(started, ['import', 'login', 'unlock']);
+});
+test('audit passes through to the trusted policy admin and snapshot exposes restore reasons', async () => {
+  const { controller, calls } = fixture();
+  await controller.dispatch('audit');
+  assert.deepEqual(calls.at(-1), ['audit', '--limit', '200']);
+  controller.directories = { directories: [{ id: 'a', path: '/x', mode: 'ro' }] };
+  controller.files = { grants: new Map(), restoreErrors: new Map([['a', 'DIRECTORY_CHANGED']]) };
+  assert.equal(controller.snapshot().directories[0].reason, 'DIRECTORY_CHANGED');
+  assert.equal(controller.snapshot().directories[0].status, 'pending');
+  assert.equal(controller.snapshot().limits.prompt_chars, 8000);
+});
 test('setup blocks guest mutations and native decline never runs installers', async () => {
   const { controller } = fixture();
   controller.setup = { busy: true };

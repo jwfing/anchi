@@ -20,4 +20,12 @@ test('release refuses missing identity, team, profile or owned bundle ID', () =>
   ])
     assert.throws(() => releaseConfiguration({ ...valid, [key]: '' }));
   assert.throws(() => releaseConfiguration({ ...valid, QISUO_BUNDLE_ID: 'local.securevm.qisuo' }));
+  const renamed = Object.fromEntries(
+    Object.entries(valid).map(([k, v]) => [k.replace('QISUO_', 'ANCHI_'), v]),
+  );
+  assert.equal(releaseConfiguration(renamed).team, 'ABCDEFGHIJ');
+  assert.equal(
+    releaseConfiguration({ ...renamed, ANCHI_BUNDLE_ID: 'com.example.anchi' }).bundleId,
+    'com.example.anchi',
+  );
 });

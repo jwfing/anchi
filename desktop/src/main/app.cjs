@@ -9,6 +9,8 @@ const { FileBroker } = require('./file-broker.cjs');
 const { DesktopOAuth } = require('./oauth.cjs');
 const { PiClient } = require('./pi-client.cjs');
 const { Controller } = require('./controller.cjs');
+const { ActivityLog } = require('./activity-log.cjs');
+const { resolveUserData } = require('./user-data.cjs');
 const {
   APP_URL,
   trustedSender,
@@ -21,8 +23,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'anchi', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 app.setName('Anchi');
-// Keep the existing profile and single-instance lock across the product rename.
-app.setPath('userData', path.join(app.getPath('appData'), 'Qisuo'));
+// One-time move of the pre-rename profile; falls back to the old directory if that fails.
+const userData = resolveUserData(app.getPath('appData'));
+app.setPath('userData', userData.path);
 let win,
   pi,
   setup,
@@ -46,6 +49,8 @@ async function start() {
   const notify = (event) => {
     if (win && !win.isDestroyed()) win.webContents.send('desktop:event', event);
   };
+  const log = new ActivityLog(path.join(app.getPath('userData'), 'activity.jsonl'));
+  await log.load().catch(() => {});
   let controller;
   setup = new Setup({
     runtime,
@@ -54,6 +59,8 @@ async function start() {
   });
   await setup.load();
   const files = new FileBroker({ directories, runtime, notify: (event) => controller.emit(event) });
+  // Persisted grants come back only when the directory identity recorded at consent still matches.
+  const restoreErrors = settingsError ? new Map() : await files.restore();
   const oauth = new DesktopOAuth({
     runtime,
     openExternal: (url) => shell.openExternal(url),
@@ -66,6 +73,8 @@ async function start() {
   controller = new Controller({
     runtime,
     setup,
+    version: app.getVersion(),
+    log,
     directories,
     files,
     oauth,
@@ -83,8 +92,9 @@ async function start() {
           unlock:
             '在本机创建或使用已有主密钥，解锁 VM 内凭证库。请保留 ~/.config/secure-vm/vault.key；丢失后需重新连接账户。',
           login:
-            '打开 Codex 的浏览器登录，使用本机 Codex 账户缓存。短期访问令牌加密导入 VM，刷新令牌不会交给 Pi。',
-          import: '读取本机已有 Codex 订阅登录，仅将短期访问令牌导入 VM。',
+            '打开 Codex 的浏览器登录，使用本机 Codex 账户缓存。短期访问令牌加密导入 VM，刷新令牌不会交给 Pi。已连接的 Pi 可以保持连接。',
+          import:
+            '读取本机已有 Codex 订阅登录，仅将短期访问令牌导入 VM。已连接的 Pi 可以保持连接。',
         };
         if (!Object.hasOwn(details, action)) throw Error('INVALID_SETUP_ACTION');
         const result = await dialog.showMessageBox(win, {
@@ -168,6 +178,13 @@ async function start() {
   });
   if (settingsError)
     controller.activity('目录配置损坏或版本不兼容，已保留原文件且禁用配置写入。请备份并恢复配置。');
+  if (userData.migrated) controller.activity('已将配置目录从 Qisuo 迁移到 Anchi。');
+  for (const [id, reason] of restoreErrors) {
+    const item = directories.directories.find((d) => d.id === id);
+    controller.activity(
+      `目录授权未恢复：${item ? path.basename(item.path) : id} · ${reason}。请在「连接与权限」重新确认。`,
+    );
+  }
 
   protocol.handle('anchi', (request) => serveAsset(request, path.join(__dirname, '../renderer')));
   hardenSession(session.defaultSession);

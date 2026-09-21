@@ -1,4 +1,5 @@
 """P1 negative tests: run inside the actual unprivileged runtime cell."""
+
 import errno
 import json
 import os
@@ -8,12 +9,23 @@ import subprocess
 
 checks = []
 
+
 def check(name, condition):
     checks.append({"check": name, "passed": bool(condition)})
 
-check("agent_uid_gid", os.getuid() == 1000 and os.getgid() == 1000)
+
+# The same cell.env drives bootstrap and cell-run; the cell sees its own copy in the read-only rootfs.
+env = dict(
+    line.split('=', 1)
+    for line in Path('/opt/secure-vm/cell.env').read_text().splitlines()
+    if line and not line.startswith('#')
+)
+uid_base, uid_count, agent_uid = (
+    int(env[k]) for k in ('SECURE_CELL_UID_BASE', 'SECURE_CELL_UID_COUNT', 'SECURE_CELL_AGENT_UID')
+)
+check("agent_uid_gid", os.getuid() == agent_uid and os.getgid() == agent_uid)
 mapping = Path('/proc/self/uid_map').read_text().split()
-check("uid_namespace_mapping", mapping == ['0', '524288', '65536'])
+check("uid_namespace_mapping", mapping == ['0', str(uid_base), str(uid_count)])
 status = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
 check("no_effective_capabilities", int(status['CapEff'].strip(), 16) == 0)
 check("no_bounding_capabilities", int(status['CapBnd'].strip(), 16) == 0)

@@ -6,12 +6,14 @@ const os = require('node:os');
 const { bundleRuntime } = require('../scripts/runtime-bundle.cjs');
 const { resolveRuntime } = require('../src/main/runtime.cjs');
 test('release runtime is self-contained, hashed and excludes credential files', async (t) => {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'qisuo-bundle-'));
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-bundle-'));
   t.after(() => fs.rm(base, { recursive: true, force: true }));
   const root = path.resolve(__dirname, '../..'),
     dest = path.join(base, 'runtime');
   const manifest = await bundleRuntime(root, dest, 'test');
   assert(manifest.files.some((f) => f.path === 'scripts/pi.sh'));
+  assert(manifest.files.some((f) => f.path === 'guest/cell.env'));
+  assert(manifest.files.some((f) => f.path === 'pi/version.mjs'));
   assert(
     !manifest.files.some((f) => /node_modules|token\.json|client_secret|auth\.json/.test(f.path)),
   );

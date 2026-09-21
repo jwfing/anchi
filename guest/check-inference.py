@@ -1,4 +1,5 @@
 """Live inference boundary checks using only a fixed synthetic fixture."""
+
 import json
 from pathlib import Path
 import uuid
@@ -7,8 +8,11 @@ from common import Denied, rpc
 
 SOCKET = '/run/secure-inference/api.sock'
 checks = []
+
+
 def check(name, condition):
     checks.append({'check': name, 'passed': bool(condition)})
+
 
 status = rpc(SOCKET, {'op': 'status'})
 check('status_has_no_credentials', set(status) == {'enabled', 'provider', 'model', 'cloud_mail_enabled'})
@@ -32,6 +36,8 @@ first = rpc(SOCKET, request)
 check('offline_demo', first['demo'] is True and first['provider'] == 'fixture')
 check('idempotent_result', rpc(SOCKET, request) == first)
 history = rpc(SOCKET, {'op': 'history'})
-check('persistent_history', any(r['id'] == request['request_id'] and r['state'] == 'SUCCEEDED' for r in history['runs']))
+check(
+    'persistent_history', any(r['id'] == request['request_id'] and r['state'] == 'SUCCEEDED' for r in history['runs'])
+)
 print(json.dumps({'checks': checks, 'passed': all(c['passed'] for c in checks)}, indent=2))
 raise SystemExit(0 if all(c['passed'] for c in checks) else 1)

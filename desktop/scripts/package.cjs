@@ -36,7 +36,7 @@ async function main() {
       out,
       overwrite: true,
       asar: true,
-      appBundleId: config?.bundleId || 'local.securevm.qisuo',
+      appBundleId: config?.bundleId || 'local.anchi.desktop',
       ...(config
         ? {
             osxSign: {

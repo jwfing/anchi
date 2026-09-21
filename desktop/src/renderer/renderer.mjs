@@ -7,17 +7,29 @@ let state = { directories: [], events: [], connected: false, busy: false },
   messages = [],
   approvals = [],
   approvalsLoaded = false,
+  audit = null,
   detail = null,
   draft = '',
-  locked = false;
+  locked = false,
+  refreshTimer = null;
 async function call(op, args) {
   return window.desktop.invoke(op, args);
 }
 const errors = {
-  CODEX_TOKEN_EXPIRED_RELOGIN_ON_HOST: '模型认证已过期。请断开 Pi，进入首次设置重新登录。',
+  CODEX_TOKEN_EXPIRED_RELOGIN_ON_HOST:
+    '模型认证已过期。进入首次设置点击「使用已有 Codex 登录」或「登录 / 重新认证」，不需要断开 Pi。',
+  CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST:
+    '模型认证已过期。进入首次设置点击「使用已有 Codex 登录」重新导入，不需要断开 Pi。',
+  CODEX_AUTH_REQUIRED: '模型服务拒绝了当前认证。请在首次设置重新登录后再试。',
+  CODEX_CONTEXT_TOO_LARGE: '会话上下文已达网关上限。请点击「新会话」继续，或拆分任务。',
+  CODEX_USAGE_LIMIT: '订阅用量已达上限，请稍后再试。',
+  DAILY_REQUEST_LIMIT: '已达到本 VM 每日模型请求上限，明天再试或调整任务。',
+  PI_TURN_LIMIT: '本轮工具循环已达上限。请把任务拆小后再发送。',
+  APPROVAL_WAIT_TIMEOUT: '等待审批超时，任务已停止。需要时重新发送，会生成新的审批。',
+  GMAIL_REAUTH_REQUIRED: 'Gmail 授权已失效。请在「连接与权限」重新点击「连接 Google」。',
   VAULT_LOCKED: '凭证库已锁定，请进入首次设置解锁后重试。',
   SETUP_IN_PROGRESS: '设置正在进行，请等待完成。',
-  DISCONNECT_PI_FIRST: '请先点击左下角「停止并断开 Pi」，再修改运行环境。',
+  DISCONNECT_PI_FIRST: '请先点击左下角「停止并断开 Pi」，再重建运行环境。',
   INSTALL_DEPENDENCIES_FIRST: '请先在步骤 1 安装系统依赖。',
   INSTALL_PI_FIRST: '请先完成步骤 2 的 Pi 安装；环境停止时先启动。',
   UNLOCK_VAULT_FIRST: '请先初始化或解锁凭证库。',
@@ -25,7 +37,9 @@ const errors = {
   PI_NOT_READY: '请先连接 Pi，并等待当前任务结束。',
   PI_NOT_CONNECTED: 'Pi 尚未连接。请完成首次设置后连接。',
   HOMEBREW_REQUIRED: '请先从步骤 1 的链接安装 Homebrew，再重新检查。',
+  PYTHON_NOT_INSTALLED: '未找到宿主 Python。请在首次设置步骤 1 安装依赖。',
   TRUSTED_HELPER_FAILED: '无法连接可信服务。请检查 VM 是否运行，必要时在首次设置中修复 Pi。',
+  DIRECTORY_CHANGED: '目录已被移动或替换，请在「连接与权限」重新确认后再访问。',
 };
 function notice(text) {
   for (const [code, message] of Object.entries(errors))
@@ -39,12 +53,28 @@ async function refresh() {
   state = { ...(await call('snapshot')), gmail: state.gmail };
   render();
 }
+/** Bursts of agent events collapse into one snapshot round trip. */
+function scheduleRefresh() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void refresh().catch((e) => notice(e.message));
+  }, 50);
+}
 function modal(title, body) {
   $('#modal').innerHTML =
     `<h2 id="dialog-title">${title}</h2>${body}<div class="dialogfoot">${button('关闭', 'close')}</div>`;
   $('#modal').showModal();
 }
 function render() {
+  // Re-rendering replaces the DOM; keep the caret where the user was typing.
+  const active = document.activeElement;
+  const focusId = active?.id || null;
+  const selection =
+    focusId && typeof active.selectionStart === 'number'
+      ? [active.selectionStart, active.selectionEnd]
+      : null;
+  $('#version').textContent = '桌面开发版' + (state.version ? ' · ' + state.version : '');
   $('#status').textContent = state.connected
     ? state.busy
       ? '● Pi 任务执行中'
@@ -52,6 +82,7 @@ function render() {
     : state.starting
       ? '◌ 正在连接 Pi'
       : '○ Pi 未连接';
+  $('#approvals-badge').textContent = approvals.length ? String(approvals.length) : '';
   $('#crumb').textContent = {
     setup: '首次设置',
     agent: 'Agent',
@@ -71,13 +102,22 @@ function render() {
     approvals,
     detail,
     approvalsLoaded,
+    audit,
   });
+  if (focusId) {
+    const element = document.getElementById(focusId);
+    if (element && !element.disabled) {
+      element.focus({ preventScroll: true });
+      if (selection && typeof element.setSelectionRange === 'function')
+        element.setSelectionRange(selection[0], selection[1]);
+    }
+  }
 }
-async function loadApprovals() {
+async function loadApprovals({ show = true } = {}) {
   const value = await call('approvals');
   approvals = value.pending;
   approvalsLoaded = true;
-  page = 'approvals';
+  if (show) page = 'approvals';
   render();
 }
 const acts = {
@@ -197,6 +237,10 @@ const acts = {
     notice('持续读取已撤销；待处理审批已撤销。');
   },
   approvals: loadApprovals,
+  audit: async () => {
+    audit = (await call('audit')).audit;
+    render();
+  },
   approve: async () => decide('approve'),
   deny: async () => decide('deny'),
   revoke: async () => decide('revoke'),
@@ -219,18 +263,24 @@ async function perform(fn) {
     locked = false;
   }
 }
+function navigate(next) {
+  page = next;
+  render();
+  if (next === 'approvals') void perform(() => loadApprovals());
+  if (next === 'permissions' && !state.gmail) void perform(acts['gmail-status']);
+}
 document.addEventListener('input', (e) => {
   if (e.target.id === 'prompt') draft = e.target.value;
 });
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
+  // Navigation never waits behind a long-running action such as starting the VM.
+  if (b.dataset.page) {
+    navigate(b.dataset.page);
+    return;
+  }
   void perform(async () => {
-    if (b.dataset.page) {
-      page = b.dataset.page;
-      render();
-      return;
-    }
     if (b.dataset.act) {
       await acts[b.dataset.act]?.();
       return;
@@ -284,12 +334,14 @@ window.desktop.onEvent((event) => {
   if (event.type === 'assistant' && event.text)
     messages.push({ role: 'assistant', text: event.text });
   if (event.type === 'user') messages.push({ role: 'user', text: event.text });
-  if (event.type === 'approval_required')
+  if (event.type === 'approval_required') {
     notice('Pi 提示需要审批。请进入独立审批页，从策略服务读取详情。');
+    void loadApprovals({ show: false }).catch(() => {});
+  }
   if (event.type === 'turn_error' || event.type === 'protocol_error')
     notice('Pi 错误：' + event.error);
   if (event.type === 'assistant' && event.error) notice('模型调用失败：' + event.error);
-  void refresh().catch((e) => notice(e.message));
+  scheduleRefresh();
 });
 void refresh()
   .then(() => acts['setup-status']())
