@@ -14,8 +14,7 @@ def check(name, condition):
 status = rpc('/run/secure-gmail/api.sock', {'op': 'status'})
 check(
     'gateway_and_authd_reachable',
-    set(status)
-    == {'client_configured', 'connected', 'scope', 'reauth_required', 'vault_unlocked', 'revocation_pending'},
+    set(status) == {'connected', 'reauth_required', 'account', 'scope_text', 'revocation_pending', 'auth'},
 )
 check('policy_socket_not_visible', not Path('/run/secure-policy/api.sock').exists())
 check('vault_key_not_visible', not Path('/run/secure-vault/master.key').exists())

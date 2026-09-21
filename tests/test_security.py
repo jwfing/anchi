@@ -91,9 +91,9 @@ class SecurityTests(unittest.TestCase):
             raise TimeoutError()
 
         with patch('auth.google_json', side_effect=fail):
-            self.assertTrue(auth.disconnect()['revocation_pending'])
+            self.assertTrue(auth.disconnect('gmail')['revocation_pending'])
         with patch('auth.google_json', return_value={}) as revoke:
-            self.assertTrue(auth.disconnect()['remote_revoked'])
+            self.assertTrue(auth.disconnect('gmail')['remote_revoked'])
             self.assertEqual(revoke.call_args.args[2], '/revoke')
         self.assertFalse(vault.exists(self.root, 'revocation.json'))
 

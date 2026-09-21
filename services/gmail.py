@@ -51,7 +51,7 @@ def handle(request):
     op = request.get('op')
     if op == 'status':
         fields(request, ('op',), ('op',))
-        return rpc(AUTH_SOCKET, {'op': 'status'})
+        return rpc(AUTH_SOCKET, {'op': 'status'})['gmail']
     if op == 'list':
         fields(request, ('op', 'query', 'limit'), ('op',))
         query, limit = request.get('query', 'in:inbox'), request.get('limit', 5)
