@@ -46,7 +46,7 @@ async function main() {
           }
         : {}),
       appVersion: pkg.version,
-      extraResource: [runtime],
+      extraResource: [runtime, path.join(root, 'license.md')],
       ignore: [/^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/workspace\.json$/, /^\/\.prettier/],
     });
     const release = config

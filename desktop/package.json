@@ -20,5 +20,6 @@
     "@electron/packager": "20.3.0",
     "electron": "44.4.3",
     "prettier": "3.9.8"
-  }
+  },
+  "license": "Apache-2.0"
 }

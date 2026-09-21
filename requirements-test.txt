@@ -1,0 +1,2 @@
+# Host-side isolated unit tests. Guest runtime uses Ubuntu's python3-cryptography.
+cryptography==46.0.5

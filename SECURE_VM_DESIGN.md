@@ -1,6 +1,6 @@
 # 本地 Personal Agent Secure VM：设计与模块讨论稿
 
-状态：架构讨论稿；M1/M2 隔离原型和 M3 Unix socket 身份验证已运行；M4/M5 已实现只读 Gmail/桌面 OAuth 原型，尚待真实 Google 授权验证。原型合并 connector 与执行网关，未实现独立 Sentinel、发送、加密凭证存储或模型接入。详见 README.md、docs/VALIDATION-2026-09-18.md 与 docs/GMAIL_SETUP.md。日期：2026-09-18。
+状态：架构提案与实现对照。M1–M4 的只读 Gmail 链路已运行；M5/M6/M7 的当前 MVP 已补齐凭证加密、独立审批与内核出口控制，见 [安全基础实现](docs/SECURITY_FOUNDATION.md)。下文仍包含尚未实现的目标设计，不应视为完整验收。M8 已部署真实 pi SDK agent 并通过 Codex 订阅模型及本地工具循环测试，见 [Pi 接入](docs/PI_AGENT.md)；发送与完整恢复暂缓。日期：2026-09-18。
 
 ## 1. 目标与难度判断
 

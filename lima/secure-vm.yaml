@@ -28,4 +28,4 @@ provision:
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y --no-install-recommends systemd-container debootstrap debian-archive-keyring python3
+      apt-get install -y --no-install-recommends systemd-container debootstrap debian-archive-keyring python3 python3-cryptography nftables
