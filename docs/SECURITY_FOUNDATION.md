@@ -34,8 +34,8 @@ cell 请求
  → gateway 验证操作与参数
  → auth 取得对应凭证与 account generation
  → policy 对规范化 operation/account/params 做决定
-   → 已有 Gmail 只读规则：签发短期授权
-   → 需要人工批准：返回 APPROVAL_REQUIRED:<id>，暂停
+   → 主体处于 auto（默认）：签发短期一次性授权
+   → 主体处于 ask：返回 APPROVAL_REQUIRED:<id>，暂停
  → gateway 原子消费一次性授权
  → 固定 provider HTTPS 请求
 ```
@@ -52,14 +52,15 @@ bash scripts/policy.sh revoke APPROVAL_ID
 
 `show` 显示真实 operation/account/params，包括即将发送给模型的完整输入；应审查内容后使用对应 digest 批准。终端 JSON 转义控制字符，邮件内容只作为数据。批准后重试原始请求；推理记录使用 `WAITING_APPROVAL`，支持相同 request ID 继续；外部调用结果不确定仍为 `UNKNOWN`，不会自动重试。
 
-已有 Gmail OAuth 只读同意在首次迁移时保存为显式自动读取规则。新的全新安装默认需要逐次批准；可信管理端可以选择：
+每个主体（`gmail`、`drive`、`notion`、`slack`、`inference`）有一个模式，缺省为 `auto`：策略按白名单自动签发一次性授权，读写与模型调用都不需要人工批准；`ask` 则每个操作都进入上面的审批流程。可信管理端可以切换：
 
 ```bash
-bash scripts/policy.sh gmail-read allow  # 自动允许已连接账户的只读操作
-bash scripts/policy.sh gmail-read deny   # 关闭自动允许；读取改为逐次审批
+bash scripts/policy.sh rules                  # 查看全部主体的模式
+bash scripts/policy.sh mode gmail ask         # Gmail 改为逐次审批
+bash scripts/policy.sh mode inference auto    # 模型调用恢复持续授权
 ```
 
-更改规则也会撤销所有未消费 grant。这里的 `deny` 是关闭自动读取，不是永久禁止人工批准。每条请求仍受固定操作/参数白名单约束。没有 gmail.send 授权路径。
+更改模式会递增 epoch 并撤销所有未消费 grant。`ask` 不是永久禁止，而是把决定交回给人。每条请求在两种模式下都受固定操作/参数白名单、修订绑定与每日次数上限约束。`read <connector> allow|deny` 与 `gmail-read` 仍作为别名保留一个版本。没有 gmail.send 授权路径。
 
 数据库 `/var/lib/secure-policy/policy.sqlite3` 存储 grant 和审计元数据；每次 authorize 清理 7 天前请求正文和 30 天前审计。无流量时不会定时清理。当前没有细分任务/会话权限、多租户、Web 审批或发送对象/MIME 冻结。boot ID 防止正常冷重启恢复旧 grant，不解决同一启动内数据库回滚或完整内存快照回滚；这些仍属后续恢复设计。
 

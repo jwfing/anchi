@@ -159,6 +159,7 @@ test('connector operations route to the right trusted CLI with the connector arg
   };
   controller.runtime.policy = async (...args) => {
     calls.push(['policy', ...args]);
+    if (args[0] === 'rules') return { rules: { slack: 'ask' } };
     return {};
   };
   controller.oauth = {
@@ -170,7 +171,7 @@ test('connector operations route to the right trusted CLI with the connector arg
     cancel: async () => {},
   };
   controller.tokens = { prompt: async (d) => (d.id === 'slack' ? 'xoxb-' + '1'.repeat(40) : null) };
-  controller.dialogs.confirmConnectorRead = async () => true;
+  controller.dialogs.confirmStanding = async () => true;
   controller.dialogs.confirmDisconnect = async () => true;
   controller.pi = { state: {}, disconnect: async () => {} };
   await controller.dispatch('connector-connect', { connector: 'drive' });
@@ -179,15 +180,32 @@ test('connector operations route to the right trusted CLI with the connector arg
     cancelled: true,
   });
   await controller.dispatch('connector-read', { connector: 'notion', mode: 'allow' });
+  await controller.dispatch('connector-mode', { connector: 'notion', mode: 'ask' });
+  await controller.dispatch('model-mode', { mode: 'ask' });
+  await controller.dispatch('rules');
   await controller.dispatch('connector-disconnect', { connector: 'slack' });
   assert.deepEqual(calls, [
     ['begin', 'drive'],
     ['auth', 'import-token', 'slack'],
     ['admin', 'slack', 'probe'],
-    ['policy', 'read', 'notion', 'allow'],
-    ['policy', 'read', 'slack', 'deny'],
+    ['policy', 'mode', 'notion', 'auto'],
+    ['policy', 'mode', 'notion', 'ask'],
+    ['policy', 'mode', 'inference', 'ask'],
+    ['policy', 'rules'],
+    ['policy', 'rules'],
+    ['policy', 'mode', 'slack', 'ask'],
     ['admin', 'slack', 'disconnect'],
   ]);
+  // Restoring standing authorization always goes through the explicit warning dialog.
+  controller.dialogs.confirmStanding = async () => false;
+  assert.deepEqual(await controller.dispatch('model-mode', { mode: 'auto' }), { cancelled: true });
+  assert.deepEqual(
+    await controller.dispatch('connector-mode', { connector: 'drive', mode: 'auto' }),
+    {
+      cancelled: true,
+    },
+  );
+  controller.dialogs.confirmStanding = async () => true;
   await assert.rejects(
     controller.dispatch('connector-import-token', { connector: 'drive' }),
     /TOKEN_NOT_APPLICABLE/,
@@ -199,6 +217,6 @@ test('connector operations route to the right trusted CLI with the connector arg
   // The Gmail aliases keep working and the imported token never reaches the activity log.
   calls.length = 0;
   await controller.dispatch('gmail-read', { mode: 'deny' });
-  assert.deepEqual(calls, [['policy', 'read', 'gmail', 'deny']]);
+  assert.deepEqual(calls, [['policy', 'mode', 'gmail', 'ask']]);
   assert(!JSON.stringify(controller.events).includes('xoxb-'));
 });

@@ -42,4 +42,13 @@ test('connector operations only accept known connector ids and modes', () => {
   assert.doesNotThrow(() =>
     validateHostCommand('connector-read', { connector: 'slack', mode: 'deny' }),
   );
+  assert.doesNotThrow(() =>
+    validateHostCommand('connector-mode', { connector: 'slack', mode: 'ask' }),
+  );
+  assert.throws(
+    () => validateHostCommand('connector-mode', { connector: 'slack', mode: 'allow' }),
+    /INVALID_MODE/,
+  );
+  assert.throws(() => validateHostCommand('model-mode', { mode: 'deny' }), /INVALID_MODE/);
+  assert.doesNotThrow(() => validateHostCommand('rules', {}));
 });

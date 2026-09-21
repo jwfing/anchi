@@ -33,7 +33,7 @@ bash scripts/policy.sh approve APPROVAL_ID --digest EXACT_DIGEST
 # 或 bash scripts/policy.sh deny APPROVAL_ID
 ```
 
-审批页展示将发送的真实模型输入、工具 schema、模型及账户 generation。每个模型回合单独批准，包括工具返回结果后的下一回合。Pi 每 3 秒检查原请求是否被批准；批准后自动继续，不需要重新输入 prompt。cell 和模型都无权批准。
+模型调用默认持续授权，每个回合由策略自动签发授权并记入审计。改为逐轮审批（`policy.sh mode inference ask`）后，审批页展示将发送的真实模型输入、工具 schema、模型及账户 generation，每个模型回合单独批准，包括工具返回结果后的下一回合。Pi 每 3 秒检查原请求是否被批准；批准后自动继续，不需要重新输入 prompt。cell 和模型都无权批准。
 
 当前提供 SDK + JSONL 单次/RPC 入口及简易终端聊天，尚未接入官方 pi 交互 TUI。官方 CLI 同时安装在 cell 镜像中，但直接启动它不会自动拥有安全网关适配与凭证；使用 `scripts/pi.sh`。
 

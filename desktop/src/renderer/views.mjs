@@ -78,7 +78,12 @@ const connectorStatusText = (status) => {
 };
 
 /** One card per connector; buttons carry data-connector + data-cact and are dispatched by the renderer. */
-export function connectorCard(descriptor, status, pending) {
+const modeText = (mode) =>
+  mode === 'ask'
+    ? '逐次审批：每个操作都进入独立审批'
+    : '持续授权：读写与模型调用由策略自动放行（默认）';
+
+export function connectorCard(descriptor, status, pending, mode = 'auto') {
   const act = (label, action, cls = '') =>
     `<button class="${cls}" data-connector="${esc(descriptor.id)}" data-cact="${action}">${label}</button>`;
   const authButtons =
@@ -96,9 +101,10 @@ export function connectorCard(descriptor, status, pending) {
       <p class="caption">${esc(descriptor.scopeText)}</p>
       <p class="caption">${status?.revocation_pending ? '远端撤销待重试，请再次点击断开。' : ''}${pending ? '正在等待浏览器授权…' : ''}</p>
       <div class="actions">${authButtons}${act('断开', 'disconnect')}</div>
-      <div class="actions">${act('允许 Agent 持续读取', 'read-allow')}${act('撤销持续读取许可', 'read-deny')}</div>
+      <p class="caption">${esc(modeText(mode))}</p>
+      <div class="actions">${mode === 'ask' ? act('恢复持续授权', 'mode-auto') : act('改为逐次审批', 'mode-ask')}</div>
       ${descriptor.tokenHint ? `<p class="muted">${esc(descriptor.tokenHint)}</p>` : ''}
-      <p class="muted">${esc(descriptor.dataText)} 连接账户与允许 Agent 读取是两个独立动作。</p>
+      <p class="muted">${esc(descriptor.dataText)} 连接即授权：连接后 Agent 可持续读写；改为逐次审批后每个操作都需你确认。</p>
     </div>`;
 }
 
@@ -176,9 +182,11 @@ export function renderPage({
       <p class="muted">登录会打开系统浏览器。使用你的 ChatGPT 订阅，短期访问令牌保存在隔离认证层。到期后从这里重新认证，已连接的 Pi 不需要断开。请备份本机主密钥；详情见使用说明。</p>
       </div>
       <div class="card"><h2>4 · 完成第一个任务</h2><p>示例：把一段虚构项目计划整理为三条待办。不需要连接邮箱或授权目录。</p>
+      <p class="caption">模型调用 · ${esc(modeText(state.rules?.inference))}</p>
+      <div class="actions">${state.rules?.inference === 'ask' ? button('恢复模型调用持续授权', 'model-auto') : button('模型调用改为逐轮审批', 'model-ask')}</div>
       ${state.firstTask?.state === 'succeeded' || state.setup?.completedAt ? '<div class="note">首个任务已返回结果。你可以继续对话，或到「连接与权限」添加自己的资源。</div>' : state.firstTask?.state === 'failed' ? '<p class="error">任务未完成。检查模型认证和审批状态后重试。</p>' : ''}
       <div class="actions">${stepButton(state.connected ? 'Pi 已连接' : '连接 Pi', 'connect', h.configured && !state.connected)}${stepButton('开始示例任务', 'first-task', state.connected && !state.busy)}${button('查看待审批请求', 'approvals')}${button('查看结果', 'go-agent')}</div>
-      <p class="muted">先连接 Pi，再开始任务。模型请求会等待你在「独立审批」中查看完整内容并确认。未批准不会调用模型。</p>
+      <p class="muted">先连接 Pi，再开始任务。持续授权下模型请求自动放行并记入审计；改为逐轮审批后才会进入「独立审批」等待确认。</p>
       </div>`
       }`;
   }
@@ -225,15 +233,21 @@ ${esc(draft)}</textarea
         ><button class="primary" ${!state.connected || state.busy ? 'disabled' : ''}>发送</button>
       </form>
       <p class="caption">
-        本地目录通过 host_files 工具访问；shell 仅能访问 cell 工作区。Gmail
-        为只读，模型调用仍需独立审批。
+        本地目录通过 host_files 工具访问；shell 仅能访问 cell 工作区。默认持续授权：
+        读写与模型调用由策略自动放行并记入审计；可在「权限」中改为逐次审批。
       </p>`;
   } else if (page === 'permissions') {
     const catalog = Array.isArray(state.connectorCatalog) ? state.connectorCatalog : [];
     const statuses = state.connectors || {};
+    const rules = state.rules || {};
     const cards = catalog
       .map((d) =>
-        connectorCard(d, statuses[d.id], state.oauth?.pending && state.oauth?.connector === d.id),
+        connectorCard(
+          d,
+          statuses[d.id],
+          state.oauth?.pending && state.oauth?.connector === d.id,
+          rules[d.id],
+        ),
       )
       .join('');
     return /* HTML */ `<div class="eyebrow">PERMISSIONS</div>
@@ -261,7 +275,8 @@ ${esc(draft)}</textarea
       ${cards || '<div class="card"><p class="muted">正在载入连接器…</p></div>'}
       <p class="caption">
         凭证只由 VM
-        认证层保存。读取由持续许可或逐次审批控制；新建、更新、追加与发送永远逐条审批。${statuses.vault_unlocked === false ? ' 凭证库已锁定，请先在首次设置解锁。' : ''}
+        认证层保存。默认连接即持续授权：读取、写入与模型调用由策略自动放行并记入审计；任一 connector
+        可改为逐次审批。写入始终绑定目标修订并受每日次数上限。${statuses.vault_unlocked === false ? ' 凭证库已锁定，请先在首次设置解锁。' : ''}
       </p>`;
   } else if (page === 'approvals') {
     const summary = detail ? approvalSummary(detail.action) : [];

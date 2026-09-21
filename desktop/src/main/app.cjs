@@ -159,19 +159,14 @@ async function start() {
           await handle.close();
         }
       },
-      async confirmGmail() {
-        return this.confirmConnectorRead({
-          label: 'Gmail',
-          scopeText: '只读邮件',
-          dataText: '邮件内容可能被加入模型请求，模型调用仍需审批。',
-        });
-      },
-      async confirmConnectorRead(descriptor) {
+      async confirmStanding(descriptor) {
         const result = await dialog.showMessageBox(win, {
-          type: 'question',
-          message: `允许 Agent 持续读取 ${descriptor.label}？`,
-          detail: `${descriptor.scopeText}。${descriptor.dataText} 写入操作不受此许可影响，仍需逐条审批。`,
-          buttons: ['取消', '允许持续读取'],
+          type: 'warning',
+          message: `恢复 ${descriptor.label} 的持续授权？`,
+          detail:
+            (descriptor.scopeText ? descriptor.scopeText + '。' : '') +
+            '此后 Agent 的操作由策略自动放行，不再逐条审批。读取到的内容若含有提示注入，可能直接触发写入或模型调用；仍有修订核对、内容与次数上限和完整审计。',
+          buttons: ['取消', '恢复持续授权'],
           defaultId: 0,
           cancelId: 0,
         });

@@ -15,6 +15,10 @@
 - `check-pi-rpc.py`：Pi 启动时只为已连接的 Gmail 注册工具，取消、恢复、跨进程恢复通过；合成待审批已拒绝，未调用模型。
 - `verify-files.cjs`：通过。
 
+## 授权模式变更后的复验（同日）
+
+默认改为持续授权后重新部署并复验：`make check` 桌面 65、Pi 14、Python 115 项通过；`make verify-vm` 116 项通过（`check-security.py` 现在先把 `inference` 切到 `ask` 验证审批路径，再恢复并确认 `auto` 直接签发授权）；`check-pi-rpc.py` 在运行期间临时把 `inference` 切到 `ask`，结束后恢复，`policy.sh rules` 五个主体均为 `auto`，未调用真实模型。
+
 ## GitHub Actions
 
 - `linux-live` [35649586100](https://github.com/jwfing/anchi/actions/runs/35649586100)：x86_64 KVM runner 从零建 VM，安装含三个新 connector 的可信服务与 Pi，引导检查、重试保留、114 项隔离与服务检查全部通过，耗时约 3 分钟。

@@ -29,6 +29,9 @@ const OPERATIONS = Object.freeze({
   'connector-import-token': ['connector'],
   'connector-disconnect': ['connector'],
   'connector-read': ['connector', 'mode'],
+  'connector-mode': ['connector', 'mode'],
+  'model-mode': ['mode'],
+  rules: [],
   approvals: [],
   audit: [],
   'approval-show': ['id'],
@@ -49,6 +52,8 @@ const EXCLUSIVE = new Set([
   'connector-import-token',
   'connector-disconnect',
   'connector-read',
+  'connector-mode',
+  'model-mode',
   'directories-add',
   'directories-remove',
   'directories-mode',
@@ -66,7 +71,9 @@ function validateHostCommand(op, args = {}) {
   )
     throw Error('INVALID_ARGUMENTS');
   if ('connector' in args && !isConnector(args.connector)) throw Error('INVALID_CONNECTOR');
-  if ('mode' in args && op.startsWith('connector-') && !['allow', 'deny'].includes(args.mode))
+  if (op === 'connector-read' && !['allow', 'deny'].includes(args.mode))
+    throw Error('INVALID_MODE');
+  if (['connector-mode', 'model-mode'].includes(op) && !['auto', 'ask'].includes(args.mode))
     throw Error('INVALID_MODE');
   return args;
 }
@@ -278,7 +285,14 @@ class Controller {
       case 'connector-import-token':
       case 'connector-disconnect':
       case 'connector-read':
+      case 'connector-mode':
         return this.connector(op.slice('connector-'.length), args);
+      case 'model-mode':
+        if (args.mode === 'auto' && !(await this.dialogs.confirmStanding({ label: '模型调用' })))
+          return { cancelled: true };
+        return this.runtime.policy('mode', 'inference', args.mode);
+      case 'rules':
+        return this.runtime.policy('rules');
       case 'approvals':
         return this.runtime.policy('pending');
       case 'audit':
@@ -318,13 +332,21 @@ class Controller {
         return this.oauth.status();
       }
       case 'read':
-        if (args.mode === 'allow' && !(await this.dialogs.confirmConnectorRead(descriptor)))
+        // Legacy alias: allow -> standing authorization, deny -> per-request approval.
+        return this.connector('mode', {
+          connector: args.connector,
+          mode: args.mode === 'allow' ? 'auto' : 'ask',
+        });
+      case 'mode':
+        if (args.mode === 'auto' && !(await this.dialogs.confirmStanding(descriptor)))
           return { cancelled: true };
-        return this.runtime.policy('read', args.connector, args.mode);
+        return this.runtime.policy('mode', args.connector, args.mode);
       case 'disconnect': {
         if (!(await this.dialogs.confirmDisconnect(descriptor))) return { cancelled: true };
         await this.oauth.cancel().catch(() => {});
-        await this.runtime.policy('read', args.connector, 'deny');
+        // Re-applying the current mode bumps the policy epoch and revokes every outstanding grant.
+        const rules = (await this.runtime.policy('rules')).rules || {};
+        await this.runtime.policy('mode', args.connector, rules[args.connector] || 'auto');
         if (args.connector === 'gmail') {
           await this.pi.disconnect();
           return this.runtime.auth('disconnect', {}, 'gmail');

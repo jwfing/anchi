@@ -65,7 +65,12 @@ function notice(text) {
   $('#notice').textContent = text;
 }
 async function refresh() {
-  state = { ...(await call('snapshot')), gmail: state.gmail, connectors: state.connectors };
+  state = {
+    ...(await call('snapshot')),
+    gmail: state.gmail,
+    connectors: state.connectors,
+    rules: state.rules,
+  };
   render();
 }
 /** Bursts of agent events collapse into one snapshot round trip. */
@@ -228,7 +233,21 @@ const acts = {
     state.connectors = status;
     render();
   },
-  'connectors-status': async () => acts['gmail-status'](),
+  'connectors-status': async () => {
+    await acts['gmail-status']();
+    state.rules = (await call('rules')).rules;
+    render();
+  },
+  'model-auto': async () => {
+    const result = await call('model-mode', { mode: 'auto' });
+    notice(result.cancelled ? '已取消。' : '模型调用已恢复持续授权。');
+    await acts['connectors-status']();
+  },
+  'model-ask': async () => {
+    await call('model-mode', { mode: 'ask' });
+    notice('模型调用改为逐轮审批；待消费的授权已作废。');
+    await acts['connectors-status']();
+  },
   'gmail-import': async () => {
     await call('gmail-import');
     await acts['gmail-status']();
@@ -307,14 +326,12 @@ document.addEventListener('click', (e) => {
       const connector = b.dataset.connector;
       const action = b.dataset.cact;
       if (action === 'import-client') await call('gmail-import');
-      else if (action === 'read-allow') {
-        const result = await call('connector-read', { connector, mode: 'allow' });
-        notice(
-          result.cancelled ? '已取消，现有权限未改变。' : '已允许持续读取。写入仍需逐条审批。',
-        );
-      } else if (action === 'read-deny') {
-        await call('connector-read', { connector, mode: 'deny' });
-        notice('持续读取已撤销；待处理审批已撤销。');
+      else if (action === 'mode-auto') {
+        const result = await call('connector-mode', { connector, mode: 'auto' });
+        notice(result.cancelled ? '已取消，现有设置未改变。' : '已恢复持续授权。');
+      } else if (action === 'mode-ask') {
+        await call('connector-mode', { connector, mode: 'ask' });
+        notice('已改为逐次审批；待消费的授权已作废。');
       } else {
         const result = await call('connector-' + action, { connector });
         if (result?.cancelled) notice('已取消。');
@@ -386,4 +403,9 @@ window.desktop.onEvent((event) => {
 });
 void refresh()
   .then(() => acts['setup-status']())
+  .then(() => call('rules'))
+  .then((value) => {
+    state.rules = value.rules;
+    render();
+  })
   .catch((e) => notice(e.message));

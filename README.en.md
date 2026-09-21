@@ -10,12 +10,12 @@ The primary documentation is in Chinese ([README.md](README.md)). This page summ
 |---|---|
 | Lima/VZ VM, nspawn cell and per-service identities | Implemented and verified with live isolation checks |
 | Independent auth, policy, Gmail and inference services | Implemented; Gmail is read-only |
-| Google Drive / Notion / Slack connectors | Implemented: reads under standing consent or per-request approval; creates, updates, appends and posts are approved one by one and bound to the target revision; real-account validation pending |
+| Google Drive / Notion / Slack connectors | Implemented: connecting grants standing authorization (reads and writes auto-issued); any connector can be switched to per-request approval; updates are bound to the target revision; real-account validation pending |
 | Pi agent inside the cell, Codex subscription auth, JSONL RPC | Implemented; credentials never enter the cell |
 | Desktop chat, session resume, cancel, independent approval | Implemented |
 | Host directory grants with read-only / read-write modes | Implemented; grants persist and are restored only for the identical directory |
 | Recoverable file deletes and overwrites (hidden trash inside the granted directory) | Implemented |
-| Desktop Gmail OAuth, disconnect, standing read consent, re-authentication state | Implemented |
+| Desktop Gmail OAuth, disconnect, authorization mode switch, re-authentication state | Implemented |
 | First-run setup, dependency install, VM/Pi install, vault unlock, model login | Implemented |
 | Activity log on disk (metadata only) and VM policy audit read-out | Implemented |
 | Task-scoped grants, multiple agents, Gmail send | Not implemented |

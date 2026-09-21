@@ -37,7 +37,7 @@ bash scripts/policy.sh show APPROVAL_ID
 bash scripts/policy.sh approve APPROVAL_ID --digest EXACT_DIGEST
 ```
 
-每次模型请求仍逐次审批，聊天协议没有 approve 或 token 接口。取消会停止 pi 等待和本地后续执行；已经发出的远端请求可能继续计费或写入网关执行记录，已经完成的工具动作不会回滚。待审批记录不会因本地取消而自动撤销，需要时使用 `policy.sh deny/revoke`，否则按原规则过期。
+模型请求默认由策略自动放行；只有把 `inference` 改为 `ask` 时才需要按上面的命令逐次审批。聊天协议没有 approve 或 token 接口。取消会停止 pi 等待和本地后续执行；已经发出的远端请求可能继续计费或写入网关执行记录，已经完成的工具动作不会回滚。待审批记录不会因本地取消而自动撤销，需要时使用 `policy.sh deny/revoke`，否则按原规则过期。
 
 ## 程序通信接口
 
@@ -85,7 +85,7 @@ bash scripts/pi.sh --rpc
 node --test pi/tests/*.test.mjs
 python3 -m unittest discover -s tests -q
 python3 scripts/check-pi-rpc.py
-# 实际模型测试，需要为脚本输出的合成请求逐次批准：
+# 实际模型测试；脚本会临时把 inference 切到 ask，需要为其输出的合成请求逐次批准：
 python3 scripts/check-pi-rpc.py --live
 ```
 

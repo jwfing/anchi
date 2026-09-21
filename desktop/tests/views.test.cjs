@@ -225,6 +225,21 @@ test('write approvals are marked and show the target and full text; connector ca
   assert(html.includes('Acme'));
   assert(html.includes('输入 Slack Bot 令牌'));
   assert(!html.includes('xoxb-1111'));
+  assert(html.includes('改为逐次审批'));
+  const strict = renderPage({
+    page: 'permissions',
+    messages: [],
+    approvals: [],
+    state: {
+      directories: [],
+      events: [],
+      connectorCatalog: CONNECTORS,
+      connectors: {},
+      rules: { drive: 'ask' },
+    },
+  });
+  assert(strict.includes('恢复持续授权'));
+  assert(strict.includes('逐次审批：每个操作都进入独立审批'));
   assert((html.match(/data-connector-card=/g) || []).length === 4);
   const detail = renderPage({
     page: 'approvals',
