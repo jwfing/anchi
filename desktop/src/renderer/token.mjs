@@ -3,7 +3,7 @@
 const HINTS = {
   notion: {
     label: 'Notion',
-    hint: '在 Notion 设置 → 连接 → 开发或管理集成 中创建内部集成，勾选读取、插入、更新内容，复制以 ntn_ 开头的密钥。',
+    hint: '打开 app.notion.com/developers/connections（需为工作区 Owner），在 Internal connections 新建连接，Configuration 里勾选读取、插入、更新内容并复制 Installation access token（ntn_ 开头），再把测试页面共享给该连接。',
     pattern: '^(ntn_|secret_)[A-Za-z0-9_-]{30,190}$',
   },
   slack: {

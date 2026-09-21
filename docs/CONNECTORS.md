@@ -8,7 +8,7 @@
 |---|---|---|
 | Gmail | 与之前相同：Google Cloud 项目启用 Gmail API，导入 Desktop OAuth 客户端 JSON | 「连接 Google」，scope 只读 |
 | Google Drive | 同一 Google Cloud 项目启用 Drive API；OAuth 同意屏幕加入 `drive.readonly` 与 `drive.file` | 「连接 Google」，单独一次授权，令牌与 Gmail 分开存 |
-| Notion | Notion 设置 → 连接 → 开发或管理集成，创建内部集成，勾选读取、插入、更新内容；把要开放的页面通过页面菜单「连接」共享给该集成 | 「输入 Notion 令牌」，在独立小窗口粘贴以 `ntn_` 开头的密钥 |
+| Notion | 打开 [app.notion.com/developers/connections](https://app.notion.com/developers/connections)（需为工作区 Owner）→ Internal connections → Create a new connection；在 Configuration 勾选读取、插入、更新内容并复制 Installation access token；在 Content access 或页面菜单「Connections」把测试页面共享给该连接 | 「输入 Notion 令牌」，在独立小窗口粘贴以 `ntn_` 开头的密钥 |
 | Slack | api.slack.com 创建应用，Bot Token Scopes 加入 `channels:read`、`channels:history`、`groups:read`、`groups:history`、`chat:write`，安装到工作区，把 bot 邀请进需要访问的频道 | 「输入 Slack Bot 令牌」，粘贴以 `xoxb-` 开头的令牌 |
 
 令牌粘贴窗口由主进程单独创建，只有一个密码框；令牌经 IPC 直达主进程，再经 stdin 进入 VM 加密库，不经过展示 agent 内容的页面，也不写入活动记录。导入后应用会以该 connector 自己的身份调用 `auth.test`、`users/me` 或 `about` 取回账户标签显示在卡片上；探测失败只影响标签。
