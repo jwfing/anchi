@@ -1,19 +1,25 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const APP_URL = 'anchi://app/index.html';
+const TOKEN_URL = 'anchi://app/token.html';
 const ASSETS = Object.freeze({
   '/': 'index.html',
   '/index.html': 'index.html',
   '/style.css': 'style.css',
   '/renderer.mjs': 'renderer.mjs',
   '/views.mjs': 'views.mjs',
+  '/token.html': 'token.html',
+  '/token.mjs': 'token.mjs',
 });
-function trustedSender(event, window) {
+/** Only the exact top-level frame of the given window, at the expected page, may call privileged IPC. */
+function trustedSender(event, window, url = APP_URL) {
+  const frameUrl = event.senderFrame?.url;
   return (
     !window.isDestroyed() &&
     event.sender === window.webContents &&
     event.senderFrame === window.webContents.mainFrame &&
-    event.senderFrame?.url === APP_URL
+    typeof frameUrl === 'string' &&
+    frameUrl.split('?')[0] === url
   );
 }
 async function serveAsset(request, directory) {
@@ -48,4 +54,4 @@ function hardenWindow(window) {
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
 }
-module.exports = { APP_URL, trustedSender, serveAsset, hardenSession, hardenWindow };
+module.exports = { APP_URL, TOKEN_URL, trustedSender, serveAsset, hardenSession, hardenWindow };

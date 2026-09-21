@@ -145,3 +145,60 @@ test('setup blocks guest mutations and native decline never runs installers', as
     cancelled: true,
   });
 });
+
+test('connector operations route to the right trusted CLI with the connector argument', async () => {
+  const { controller } = fixture();
+  const calls = [];
+  controller.runtime.auth = async (action, value, connector) => {
+    calls.push(['auth', action, connector]);
+    return { drive: { connected: true } };
+  };
+  controller.runtime.connectorAdmin = async (connector, action) => {
+    calls.push(['admin', connector, action]);
+    return { connector, connected: false, remote_revoked: true };
+  };
+  controller.runtime.policy = async (...args) => {
+    calls.push(['policy', ...args]);
+    return {};
+  };
+  controller.oauth = {
+    status: async () => ({}),
+    begin: async (c) => {
+      calls.push(['begin', c]);
+      return { pending: true };
+    },
+    cancel: async () => {},
+  };
+  controller.tokens = { prompt: async (d) => (d.id === 'slack' ? 'xoxb-' + '1'.repeat(40) : null) };
+  controller.dialogs.confirmConnectorRead = async () => true;
+  controller.dialogs.confirmDisconnect = async () => true;
+  controller.pi = { state: {}, disconnect: async () => {} };
+  await controller.dispatch('connector-connect', { connector: 'drive' });
+  await controller.dispatch('connector-import-token', { connector: 'slack' });
+  assert.deepEqual(await controller.dispatch('connector-import-token', { connector: 'notion' }), {
+    cancelled: true,
+  });
+  await controller.dispatch('connector-read', { connector: 'notion', mode: 'allow' });
+  await controller.dispatch('connector-disconnect', { connector: 'slack' });
+  assert.deepEqual(calls, [
+    ['begin', 'drive'],
+    ['auth', 'import-token', 'slack'],
+    ['admin', 'slack', 'probe'],
+    ['policy', 'read', 'notion', 'allow'],
+    ['policy', 'read', 'slack', 'deny'],
+    ['admin', 'slack', 'disconnect'],
+  ]);
+  await assert.rejects(
+    controller.dispatch('connector-import-token', { connector: 'drive' }),
+    /TOKEN_NOT_APPLICABLE/,
+  );
+  await assert.rejects(
+    controller.dispatch('connector-connect', { connector: 'slack' }),
+    /OAUTH_NOT_APPLICABLE/,
+  );
+  // The Gmail aliases keep working and the imported token never reaches the activity log.
+  calls.length = 0;
+  await controller.dispatch('gmail-read', { mode: 'deny' });
+  assert.deepEqual(calls, [['policy', 'read', 'gmail', 'deny']]);
+  assert(!JSON.stringify(controller.events).includes('xoxb-'));
+});

@@ -28,6 +28,18 @@ test('authorization only opens exact Google endpoint and readonly PKCE flow', ()
   const redirect = 'http://127.0.0.1:1234/callback';
   const value = authorization(redirect);
   assert.equal(validateAuthorization(value, redirect), value.url);
+  const drive = [
+    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/drive.file',
+  ];
+  const driveUrl = new URL(value.url);
+  driveUrl.searchParams.set('scope', drive.join(' '));
+  assert.equal(
+    validateAuthorization({ ...value, url: driveUrl.href }, redirect, drive),
+    driveUrl.href,
+  );
+  driveUrl.searchParams.set('scope', drive[0]);
+  assert.throws(() => validateAuthorization({ ...value, url: driveUrl.href }, redirect, drive));
   for (const url of [
     value.url.replace('accounts.google.com', 'evil.example'),
     value.url.replace('S256', 'plain'),

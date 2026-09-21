@@ -6,6 +6,7 @@ const { promisify } = require('node:util');
 const exec = promisify(execFile);
 const { executable } = require('./host-tools.cjs');
 const { describe } = require('./platform.cjs');
+const { isConnector } = require('../shared/connectors.cjs');
 
 /** Only inherited values required by Lima/SSH; never forward provider credentials. */
 function childEnvironment(platform = describe()) {
@@ -67,9 +68,19 @@ class Runtime {
       child.stdin.end(JSON.stringify(value));
     });
   }
-  async auth(action, value = {}) {
-    if (!['status', 'import-client', 'begin', 'complete', 'cancel', 'disconnect'].includes(action))
-      throw Error('INVALID_AUTH_ACTION');
+  async auth(action, value = {}, connector = 'gmail') {
+    const actions = [
+      'status',
+      'import-client',
+      'begin',
+      'complete',
+      'cancel',
+      'disconnect',
+      'import-token',
+      'set-account',
+    ];
+    if (!actions.includes(action)) throw Error('INVALID_AUTH_ACTION');
+    if (!isConnector(connector)) throw Error('INVALID_CONNECTOR');
     return this.input(
       await this.lima(),
       [
@@ -80,8 +91,28 @@ class Runtime {
         '/usr/bin/python3',
         '/opt/secure-vm/services/admin.py',
         action,
+        connector,
       ],
       value,
+    );
+  }
+  /** Probe the provider as the connector's own identity, or disconnect it; root entry in the guest. */
+  async connectorAdmin(connector, action) {
+    if (!isConnector(connector) || !['probe', 'disconnect'].includes(action))
+      throw Error('INVALID_CONNECTOR_ACTION');
+    return this.input(
+      await this.lima(),
+      [
+        'shell',
+        'secure-vm',
+        '--',
+        'sudo',
+        '/usr/bin/python3',
+        '/opt/secure-vm/services/connector_admin.py',
+        connector,
+        action,
+      ],
+      {},
     );
   }
 

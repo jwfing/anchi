@@ -42,7 +42,64 @@ export function approvalSummary(action) {
   if (typeof params.query === 'string') rows.push(['Gmail 查询', params.query]);
   if (params.limit !== undefined) rows.push(['数量上限', String(params.limit)]);
   if (typeof params.id === 'string') rows.push(['邮件 ID', params.id]);
+  if (isWrite(action.operation)) {
+    rows.unshift(['类型', '写入']);
+    const target =
+      params.expected_revision !== undefined
+        ? `${params.name ?? ''} (${params.file_id}) 修订 ${params.expected_revision}`
+        : params.expected_last_edited !== undefined
+          ? `${params.title ?? ''} (${params.page_id}) 编辑于 ${params.expected_last_edited}`
+          : params.parent_page_id
+            ? `父页面 ${params.parent_page_id} · 新页面《${params.title ?? ''}》`
+            : params.parent_id
+              ? `文件夹 ${params.parent_id} / ${params.name ?? ''}`
+              : params.channel
+                ? `频道 ${params.channel}${params.thread_ts ? ' 线程 ' + params.thread_ts : ''}`
+                : '';
+    if (target) rows.push(['目标', target]);
+    const body =
+      typeof params.text === 'string'
+        ? params.text
+        : Array.isArray(params.paragraphs)
+          ? params.paragraphs.join('\n')
+          : '';
+    if (body) rows.push(['正文', body]);
+  }
   return rows;
+}
+export const isWrite = (operation) =>
+  /\.(create|update|create_page|append|post)$/.test(operation || '');
+
+const connectorStatusText = (status) => {
+  if (!status) return '尚未检查';
+  if (status.reauth_required) return '需要重新认证：上游授权已失效，请重新连接';
+  if (!status.connected) return '未连接';
+  return '已连接' + (status.account ? ' · ' + status.account : '');
+};
+
+/** One card per connector; buttons carry data-connector + data-cact and are dispatched by the renderer. */
+export function connectorCard(descriptor, status, pending) {
+  const act = (label, action, cls = '') =>
+    `<button class="${cls}" data-connector="${esc(descriptor.id)}" data-cact="${action}">${label}</button>`;
+  const authButtons =
+    descriptor.auth === 'google'
+      ? act('导入客户端 JSON', 'import-client') +
+        act('连接 Google', 'connect') +
+        act('取消授权流程', 'cancel')
+      : act(
+          `输入 ${descriptor.label} ${descriptor.id === 'slack' ? 'Bot ' : ''}令牌`,
+          'import-token',
+        );
+  return `<div class="card" data-connector-card="${esc(descriptor.id)}">
+      <h2>${esc(descriptor.label)}</h2>
+      <p class="${status?.reauth_required ? 'error' : ''}">${esc(connectorStatusText(status))}</p>
+      <p class="caption">${esc(descriptor.scopeText)}</p>
+      <p class="caption">${status?.revocation_pending ? '远端撤销待重试，请再次点击断开。' : ''}${pending ? '正在等待浏览器授权…' : ''}</p>
+      <div class="actions">${authButtons}${act('断开', 'disconnect')}</div>
+      <div class="actions">${act('允许 Agent 持续读取', 'read-allow')}${act('撤销持续读取许可', 'read-deny')}</div>
+      ${descriptor.tokenHint ? `<p class="muted">${esc(descriptor.tokenHint)}</p>` : ''}
+      <p class="muted">${esc(descriptor.dataText)} 连接账户与允许 Agent 读取是两个独立动作。</p>
+    </div>`;
 }
 
 const directoryStatus = (d) => {
@@ -172,13 +229,13 @@ ${esc(draft)}</textarea
         为只读，模型调用仍需独立审批。
       </p>`;
   } else if (page === 'permissions') {
-    const gmail = state.gmail;
-    const gmailState = !gmail
-      ? '尚未检查账户状态'
-      : gmail.reauth_required
-        ? '账户需要重新认证：Google 授权已失效，请重新点击「连接 Google」'
-        : (gmail.connected ? '账户已连接' : '账户未连接') +
-          (gmail.vault_unlocked ? ' · 凭证库已解锁' : ' · 凭证库已锁定');
+    const catalog = Array.isArray(state.connectorCatalog) ? state.connectorCatalog : [];
+    const statuses = state.connectors || {};
+    const cards = catalog
+      .map((d) =>
+        connectorCard(d, statuses[d.id], state.oauth?.pending && state.oauth?.connector === d.id),
+      )
+      .join('');
     return /* HTML */ `<div class="eyebrow">PERMISSIONS</div>
       <h1>明确每一项访问范围</h1>
       <p class="muted">
@@ -201,24 +258,11 @@ ${esc(draft)}</textarea
           供你找回，Agent 看不到它。列表最多 100 项。拒绝隐藏路径、符号链接、硬链接和常见凭证目录。
         </p>
       </div>
-      <div class="card">
-        <h2>Gmail · 只读连接</h2>
-        <p class="${gmail?.reauth_required ? 'error' : ''}">${esc(gmailState)}</p>
-        <p class="caption">
-          ${gmail?.revocation_pending ? 'Google 远端撤销待重试，请再次点击断开账户。' : ''}${state.oauth?.pending ? '正在等待浏览器授权…' : ''}
-        </p>
-        <div class="actions">
-          ${button('刷新账户状态', 'gmail-status')}${button('导入客户端 JSON', 'gmail-import')}${button('连接 Google', 'gmail-connect')}${button('取消授权流程', 'gmail-cancel')}
-        </div>
-        <div class="actions">
-          ${button('允许 Agent 持续只读', 'gmail-allow')}${button('撤销持续读取许可', 'gmail-deny')}${button('断开账户', 'gmail-disconnect')}
-        </div>
-        <p class="muted">
-          OAuth 凭证只由 VM 认证层保存。连接账户与允许 Agent
-          读取是两个独立动作。撤销持续许可后，新请求需逐次审批；断开账户将停止
-          Pi、撤销待处理审批并撤销 Google 令牌，在途远端操作无法回滚。
-        </p>
-      </div>`;
+      ${cards || '<div class="card"><p class="muted">正在载入连接器…</p></div>'}
+      <p class="caption">
+        凭证只由 VM
+        认证层保存。读取由持续许可或逐次审批控制；新建、更新、追加与发送永远逐条审批。${statuses.vault_unlocked === false ? ' 凭证库已锁定，请先在首次设置解锁。' : ''}
+      </p>`;
   } else if (page === 'approvals') {
     const summary = detail ? approvalSummary(detail.action) : [];
     return /* HTML */ `<div class="row">
@@ -234,7 +278,7 @@ ${esc(draft)}</textarea
       </div>
       ${
         detail
-          ? `<div class="card"><h2>请求 ${esc(detail.id)}</h2><span class="tag">${esc(detail.state)}</span><p class="caption path">SHA-256：${esc(detail.digest)}</p>
+          ? `<div class="card"><h2>请求 ${esc(detail.id)}</h2><span class="tag">${esc(detail.state)}</span>${isWrite(detail.action?.operation) ? '<div class="write-banner">这是一次写入：批准后立即向外部服务写入下方内容。</div>' : ''}<p class="caption path">SHA-256：${esc(detail.digest)}</p>
         <dl class="kv">${summary.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}<dt>到期</dt><dd>${esc(clock(detail.expires))}</dd></dl>
         <p class="muted">下方为完整动作内容，可能包含将发送到模型的文件或邮件正文。请核对后决定。</p>
         <details><summary>完整 JSON</summary><pre>${esc(JSON.stringify(detail.action, null, 2))}</pre></details>
