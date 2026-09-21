@@ -23,18 +23,20 @@ npm test
 
 - 首次设置检测依赖和真实 VM/Pi/认证状态；原生确认后安装或修复环境。失败和中断可重试，保留既有工作区和凭证。
 - 连接真实 Pi JSONL RPC；聊天、取消、新会话、会话列表、恢复与历史。
-- 系统原生目录选择器；只读/读写目录选择采用 schema v1 在本机持久保存，拒绝重复、重叠及常见敏感目录。兼容旧无版本配置；损坏或未知版本配置保留原文件并禁止覆盖。配置文件为 `~/Library/Application Support/Qisuo/directory-plans.json`。
+- 系统原生目录选择器；只读/读写目录选择采用 schema v2 在本机持久保存（含授权时记录的设备号与 inode），拒绝重复、重叠及常见敏感目录。兼容 v1 和旧无版本配置；损坏或未知版本配置保留原文件并禁止覆盖。配置文件为 `~/Library/Application Support/Anchi/directory-plans.json`；旧 `Qisuo` 目录在首次启动时自动迁移。
 - 直接从独立策略服务读取 pending 和完整动作；批准时绑定 digest，重新核对状态并由原生确认框确认，再调用既有 policy admin。
 - 拒绝或撤销策略记录；关闭应用时先询问，再结束本地 Pi 连接。VM 保持运行。
-- 应用内展示最近 200 条运行事件；不将聊天和审批正文另存为桌面日志。
+- 活动记录落盘到 `activity.jsonl`，只含事件类型、时间、工具名和审批 ID，不含聊天和审批正文；活动页可读取 VM 内策略审计。
+- 审批页切换时自动载入，导航显示待审批数量；请求详情先展示结构化摘要，完整 JSON 折叠可查。
+- 模型认证到期时在首次设置直接重新登录或导入，不需要断开 Pi；首次设置显示认证到期时间和 VM 服务版本。
 
 ## 真实目录授权
 
-在「连接与权限」选择目录及只读/读写模式，再确认原生授权框。成功后显示「已授权」。历史计划和重启后的目录默认「未启用」，需要再次确认。改权限会先撤销旧能力，再激活新能力；移除先阻止新请求，等待在途操作结束后删除配置。
+在「连接与权限」选择目录及只读/读写模式，再确认原生授权框。成功后显示「已授权」，并记录目录身份。重新打开应用时，身份未变的目录自动恢复；被移动、替换或不可访问的目录显示原因并要求「重新确认」。改权限会先撤销旧能力，再激活新能力；移除先阻止新请求，等待在途操作结束后删除配置。
 
-Pi 使用 `host_files` 工具，先调用 `op=grants` 获得目录 ID，再以该 ID 和相对路径调用 `list/read/write/mkdir/delete`。shell 不能直接打开宿主路径；VM 继续不挂载宿主目录。文本限制为 24000 UTF-8 字节，列表最多 100 项；不支持二进制、隐藏文件、符号链接、硬链接或递归删除。读写权限允许覆盖和删除普通文件，写入采用临时文件原子替换。撤销不会收回已读到的内容。
+Pi 使用 `host_files` 工具，先调用 `op=grants` 获得目录 ID，再以该 ID 和相对路径调用 `list/read/write/mkdir/delete`。shell 不能直接打开宿主路径；VM 继续不挂载宿主目录。文本限制为 24000 UTF-8 字节，列表最多 100 项；不支持二进制、隐藏文件、符号链接、硬链接或递归删除。读写权限允许覆盖和删除普通文件：被覆盖的旧版本和被删除的文件移入该目录下隐藏的 `.anchi-trash`，供用户找回，Agent 无法访问；写入采用临时文件原子替换。撤销不会收回已读到的内容。
 
-新增 `scripts/host-files.py` 在宿主执行，因此宿主需要 Python 3；系统依赖可通过首次设置安装。Pi 适配器升级运行 `bash scripts/install-pi.sh`，需先退出占用 cell 的会话。
+`scripts/host-files.py` 在宿主执行，使用首次设置安装的 Homebrew Python，找不到时回退系统 Python。Pi 适配器升级运行 `bash scripts/install-pi.sh`，需先退出占用 cell 的会话。
 
 ## 桌面 Gmail OAuth
 
@@ -80,4 +82,4 @@ preload 只暴露固定 IPC，主进程校验窗口、顶层 frame、来源和�
 
 主进程模块见 [仓库结构](architecture/REPOSITORY.md)。统一 `make check` 包含桌面 controller、存储事务、进程生命周期、IPC 来源及打包资源测试，以及原有 Pi/Python 回归。新的产物和发布门槛见 [发布流程](engineering/RELEASE.md)。历史手工验收不等于重构后全部流程已经再次验证。
 
-产品名称为 **Anchi（安栖）**。为兼容既有安装，用户配置仍保存在 `~/Library/Application Support/Qisuo/`，开发版 Bundle ID 和 `QISUO_*` 构建变量继续沿用；不会因改名重新创建账户或凭证库。
+产品名称为 **Anchi（安栖）**。用户配置目录为 `~/Library/Application Support/Anchi/`，旧 `Qisuo` 目录在首次启动时迁移；开发版 Bundle ID 为 `local.anchi.desktop`，构建变量以 `ANCHI_*` 为准并兼容 `QISUO_*`。不会因改名重新创建账户或凭证库。详见 [改名迁移](engineering/RENAME_MIGRATION.md)。

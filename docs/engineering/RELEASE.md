@@ -13,7 +13,7 @@ make package
 
 资源只收录 scripts/services/guest/systemd/lima/pi 的允许文件类型，不复制 node_modules、密钥、用户工作区或会话。资源 manifest 记录文件尺寸与 SHA-256；构建 manifest 记录版本、平台、Electron 和资源 manifest 摘要。摘要用于追踪构建内容，不替代代码签名或供应链验证。
 
-构建产物自带控制脚本和首次引导，可以安装 Lima 与 Pi、创建 secure-vm。Homebrew 系统安装及浏览器登录仍由用户完成。桌面目录配置在 macOS 的 `~/Library/Application Support/Qisuo/directory-plans.json`，不进入应用包。
+构建产物自带控制脚本和首次引导，可以安装 Lima 与 Pi、创建 secure-vm。Homebrew 系统安装及浏览器登录仍由用户完成。桌面配置在 macOS 的 `~/Library/Application Support/Anchi/`（含 `directory-plans.json` 与 `activity.jsonl`），不进入应用包。guest 安装脚本把运行资源版本写入 VM 的 `/opt/secure-vm/installed.json`，首次设置据此提示 VM 服务是否落后于应用。
 
 ## 发布门槛
 
@@ -28,7 +28,7 @@ make package
 
 ## 每次变更验证
 
-`make check` 通过后，按改动范围运行打包和桌面验收。涉及 guest 部署再显式运行真实隔离测试。CI 不保存凭证、不连接账户、不自动批准模型，也不发布产物。
+`make check` 通过后，按改动范围运行打包和桌面验收。涉及 guest 部署再显式运行真实隔离测试。CI 在 Linux 与 macOS 运行离线检查；推送到 main 或手动触发时另在 macOS 做一次未签名打包冒烟。CI 不保存凭证、不连接账户、不自动批准模型，也不发布产物。
 
 打包后的手工检查：从 Finder 启动 → 检查 VM → 连接 Pi → 新建/恢复会话 → 原生目录选择与取消 → 可信审批详情核对 → 退出连接。模型真实请求必须由用户确认，不能为证明 UI 正常自动批准。
 
@@ -39,13 +39,15 @@ make package
 安装自己的 Developer ID Application 证书（含私钥），并用 Apple `notarytool store-credentials` 交互式将公证凭据保存在 Keychain。不要把密码、私钥或 API key 写入仓库或发到聊天中。随后配置以下非秘密值：
 
 ```bash
-export QISUO_RELEASE=1
-export QISUO_SIGN_IDENTITY='Developer ID Application: Your Company (TEAMID1234)'
-export QISUO_APPLE_TEAM='TEAMID1234'
-export QISUO_NOTARY_PROFILE='anchi-notary'
-export QISUO_BUNDLE_ID='com.yourcompany.anchi'
+export ANCHI_RELEASE=1
+export ANCHI_SIGN_IDENTITY='Developer ID Application: Your Company (TEAMID1234)'
+export ANCHI_APPLE_TEAM='TEAMID1234'
+export ANCHI_NOTARY_PROFILE='anchi-notary'
+export ANCHI_BUNDLE_ID='com.yourcompany.anchi'
 npm --prefix desktop run package
 ```
+
+旧的 `QISUO_*` 变量仍被接受，见 [改名迁移](RENAME_MIGRATION.md)。
 
 签名产物单独写入 `artifacts/releases/<version>/signed/`；失败构建不保留之前的成功 manifest 或分发 ZIP。发布模式先检查证书和 Keychain profile，再以 hardened runtime 及 Electron osx-sign 默认 entitlements 签名所有组件。随后 codesign 严格验证 → ZIP 提交 notarytool 并等待 Accepted → staple → staple validate → Gatekeeper assess → 重新生成携带票据的分发 ZIP 和 SHA-256。只有全部成功才写入 `signed: true, notarized: true` 的 build manifest；Apple 返回的 receipt 保存在 notarization.json。应用只能依赖可信内置资源，不能把外部下载内容注入签名包。
 
@@ -53,6 +55,6 @@ npm --prefix desktop run package
 
 ## 文件代理实测
 
-`node desktop/scripts/verify-files.cjs` 使用现有 VM 和合成临时目录，验证 cell JSONL 工具到宿主的真实往返、读写、路径拒绝、只读和撤销；不调用模型或读取 Gmail。执行前退出 Pi，会占用固定 secure-cell unit。
+`node desktop/scripts/verify-files.cjs` 使用现有 VM 和合成临时目录，验证 cell JSONL 工具到宿主的真实往返、读写、路径拒绝、覆盖与删除进入 `.anchi-trash`、只读和撤销；不调用模型或读取 Gmail。执行前退出 Pi，会占用固定 secure-cell unit。
 
-产品名称为 **Anchi（安栖）**。为兼容既有安装，用户配置仍保存在 `~/Library/Application Support/Qisuo/`，开发版 Bundle ID 和 `QISUO_*` 构建变量继续沿用；不会因改名重新创建账户或凭证库。
+产品名称为 **Anchi（安栖）**。开发版 Bundle ID 为 `local.anchi.desktop`；用户配置目录迁移和兼容变量见 [改名迁移](RENAME_MIGRATION.md)。

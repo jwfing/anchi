@@ -33,11 +33,12 @@ make desktop
 
 ## 日常工作
 
-- `make check` 是提交前入口：语法、桌面格式和所有离线单元测试。不操作 VM、不访问账户、不批准模型。
-- `make format` 格式化桌面代码；Python 遵循四空格及现有服务接口约定。避免在安全修改中混入全库无关重排。
+- `make check` 是提交前入口：Ruff、shellcheck（本机已安装时）、Prettier、语法检查和所有离线单元测试。不操作 VM、不访问账户、不批准模型。
+- `make format` 用 Ruff 格式化 Python，用 Prettier 格式化 `desktop/` 与 `pi/`；配置见 `ruff.toml` 和各目录的 `.prettierrc.json`。避免在安全修改中混入全库无关重排。
+- cell UID 映射、Node 与 Pi 版本只写在 `guest/cell.env`；跨语言传输上限写在 `services/common.py`、`pi/limits.mjs`、`desktop/src/shared/protocol.cjs` 三处并由测试保证一致。不要在脚本或服务里再写这些字面量。
 - `make verify-vm` 是显式 live 检查。模型/Gmail live 测试另按相应文档执行，不进入默认 CI。
 - 添加权限相关 IPC 时同时更新 controller 操作白名单、边界测试、文档与 renderer；禁止通用 shell/文件读写代理。
-- 系统选择器返回路径仍需主进程校验。保存的目录配置不等于有效授权；只有文件代理激活成功后才能显示已授权，并需覆盖只读、越界拒绝和撤销行为。
+- 系统选择器返回路径仍需主进程校验。保存的目录配置不等于有效授权；只有文件代理激活成功后才能显示已授权。启动时的自动恢复只接受设备号与 inode 都未变的目录，其余保持未启用。改动需覆盖只读、越界拒绝、撤销和恢复失败行为。
 - 新配置必须有 schema、验证与迁移规则。未知版本/损坏文件应保留原数据，不能静默覆盖。
 - 功能变更要更新能力表；原型、已实现能力和未来计划分别记录。
 

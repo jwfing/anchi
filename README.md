@@ -10,17 +10,22 @@
 | auth/policy/Gmail/inference 独立服务 | 已实现，Gmail 只读 |
 | Pi、Codex 订阅认证、JSONL 多轮通信 | 已实现；凭证不进入 cell |
 | 桌面聊天、会话恢复、取消与独立审批 | 已接入现有运行环境 |
-| 原生目录授权、只读/读写与撤销 | 已接入宿主文件代理；真实 cell 合成文件往返验证通过 |
-| 桌面 Gmail OAuth、账户断开、持续只读许可 | 已实现；浏览器交互式授权需用户完成 |
-| 首次引导、依赖安装、VM/Pi 安装、解锁与订阅认证 | 已接入桌面；全新 VM 安装与重试通过 |
+| 原生目录授权、只读/读写与撤销 | 已接入宿主文件代理；授权持续至撤销，重启时校验目录身份后恢复；真实 cell 合成文件往返验证通过 |
+| 文件删除与覆盖可找回 | 已实现；移入被授权目录下隐藏的 `.anchi-trash`，Agent 不可见 |
+| 桌面 Gmail OAuth、账户断开、持续只读许可、需要重新认证状态 | 已实现；浏览器交互式授权需用户完成 |
+| 首次引导、依赖安装、VM/Pi 安装、解锁与订阅认证 | 已接入桌面；认证到期可直接重新导入，不必断开 Pi；全新 VM 安装与重试通过 |
 | 首个示例任务与审批引导 | 已实现，真实模型请求需用户审批 |
-| 任务级资源授权 | 尚未实现 |
+| 审批摘要、待审批徽标、活动记录落盘、VM 策略审计读取 | 已实现；活动记录只含元数据 |
+| 任务级资源授权 | 尚未实现，需先完成授权模型设计 |
+| 多 agent 实例、会话自动压缩 | 尚未实现 |
+| Gmail 发送 | 未实现，属设计稿 P4，当前暂缓 |
+| API-key 模型路径（`inference.openai`） | 仅服务旧受限工作流 `guest/agent.py`；是否接入 Pi 或移除待决 |
 | Developer ID 签名、公证 | 发布流水线已实现；本机缺少证书，尚无正式签名产物 |
 | 自动更新、公开分发 | 尚未完成 |
 
 agent 读取的内容可以进入云模型；凭证隔离不意味着数据不离开本机。完整限制见 [安全声明](SECURITY.md)。
 
-新用户入口见 [首次使用指南](docs/GETTING_STARTED.md)。无需先手工部署 VM；首次系统依赖安装和浏览器登录需要用户完成对应系统提示。
+新用户入口见 [首次使用指南](docs/GETTING_STARTED.md)。English summary: [README.en.md](README.en.md)。无需先手工部署 VM；首次系统依赖安装和浏览器登录需要用户完成对应系统提示。
 
 ## 开发与运行
 
@@ -34,6 +39,8 @@ npm ci --prefix pi
 make check PYTHON=.venv/bin/python
 make desktop
 ```
+
+`make check` 现在包含 Ruff、shellcheck（已安装时）和 Prettier（含 `pi/`）。
 
 桌面首次设置可以安装或连接 `secure-vm`。命令行部署仍可按 [Pi 安装与认证](docs/PI_AGENT.md) 操作；首次基础 VM 入口仍为 `bash scripts/up.sh`。这些部署动作有系统副作用，不属于默认检查。
 
@@ -58,12 +65,13 @@ make desktop
 
 ```bash
 make help        # 所有入口
-make check       # 离线语法、格式、单元测试；不访问 VM 或账户
-make format      # 桌面代码格式化
+make check       # 离线 lint、格式、单元测试；不访问 VM 或账户
+make lint        # 只跑 Ruff、shellcheck、Prettier 检查
+make format      # Ruff + Prettier 格式化 Python、桌面和 Pi 代码
 make verify-vm   # 显式运行真实 VM 隔离检查
 ```
 
-开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，完整文档见 [文档导航](docs/README.md)。历史 PoC 记录归档于 [运行记录](docs/archive/POC_RUNBOOK.md)。
+开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)，完整文档见 [文档导航](docs/README.md)，变更见 [CHANGELOG.md](CHANGELOG.md)。历史 PoC 记录归档于 [运行记录](docs/archive/POC_RUNBOOK.md)。
 
 ## How to contribute
 

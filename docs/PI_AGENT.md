@@ -1,5 +1,7 @@
 # Pi agent：Codex 订阅认证与安全网关
 
+> 本文中的测试数量与验证结果为当日记录；当前以 `make check` 的输出为准。
+
 2026-09-18：已安装真实 pi 0.85.1，使用 pi 的 `createAgentSession` SDK 驱动模型与工具循环。Node.js 为官方 Linux arm64 22.23.2，安装包 SHA-256 已校验。运行模型为宿主 Codex 当前使用的 `gpt-6-astra`。本次以实际订阅 token 成功调用，不使用 Platform API key。
 
 多轮对话现已支持：`python3 scripts/pi-chat.py`，详见 [聊天与 RPC 协议](PI_CHAT.md)。

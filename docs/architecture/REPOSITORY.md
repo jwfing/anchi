@@ -9,15 +9,19 @@ desktop/                 宿主桌面应用，独立 npm 包
   src/main/controller.cjs 业务用例、审批与操作白名单
   src/main/runtime.cjs   固定 Lima / 管理脚本调用
   src/main/pi-client.cjs Pi 连接、请求关联、超时与断开
-  src/main/directory-store.cjs 版本化目录计划，事务式写入
-  src/shared/            纯协议与校验函数
+  src/main/directory-store.cjs 版本化目录计划（v2 含目录身份），事务式写入
+  src/main/file-broker.cjs 进程内目录能力、启动恢复与串行撤销
+  src/main/activity-log.cjs 只含元数据的活动记录落盘
+  src/main/host-tools.cjs 宿主可执行文件的固定查找路径（brew/python/codex/limactl）
+  src/main/user-data.cjs 配置目录一次性迁移
+  src/shared/            纯协议、校验函数与传输上限常量
   src/preload.cjs        最小 contextBridge
   src/renderer/          ES module 展示与交互；views 为纯函数，无 OS / token 访问
   scripts/               语法检查、白名单资源打包
   tests/                 Electron 无关的业务/边界测试
-pi/                      cell 内 agent 适配器，独立 npm 包
+pi/                      cell 内 agent 适配器，独立 npm 包；version.mjs / limits.mjs 为版本与上限来源
 services/                guest 上可信的 auth / policy / connectors
-guest/                   cell 构建、启动及真实隔离验收
+guest/                   cell 构建、启动及真实隔离验收；cell.env 是 UID 映射与版本的唯一来源
 systemd/                 guest 服务身份、socket 和资源配置
 lima/                    外层 VM 声明
 scripts/                 宿主 CLI，保持现有用户入口
@@ -39,15 +43,17 @@ cell Pi → Unix socket → Gmail / inference → auth + policy → 上游。不
 
 1. 业务逻辑不导入 Electron。原生 dialog、进程、文件 I/O 边界可注入测试替身。
 2. 宿主 IPC 与 Pi RPC 两层均白名单校验；禁止扩展成通用 exec。
-3. 目录计划 schema v1，迁移旧无版本文件；所有持久项重载后仍为 pending。损坏/未来版本拒绝写入并保留原文件。
+3. 目录计划 schema v2，兼容 v1 与无版本文件。授权在原生确认时记录设备号与 inode；启动时只恢复身份未变的目录，其余保持 pending 并给出原因。损坏/未来版本拒绝写入并保留原文件。
 4. 配置先写临时文件并 fsync，再原子 rename，成功后更新内存；串行修改防止丢更新。
 5. 已打包应用从 Resources/runtime 读取脚本，不依赖开发者绝对路径。运行依赖仍是 Lima 和已有 VM，而非真正新机器零配置。
 6. Pi 断开关闭 stdin 触发远端 EOF 清理，宿主进程超时先 TERM 后 KILL；不保证在途上游请求停止。
 7. 默认检查全离线，真实 VM、Google、模型请求永远显式触发。
+8. 跨组件常量只有一个来源：`guest/cell.env`（UID、Node、Pi 版本）与三处传输上限由测试保证一致；应用版本由主进程注入页面。
+9. 桌面只持久化事件元数据；聊天、审批正文和 RPC 结果不落盘。VM 审计通过 policy admin 读取。
 
 ## 后续模块
 
-真实目录代理与句柄撤销、任务级授权、桌面 OAuth、安装升级/版本兼容协商、持久审计与导出、签名公证、多 agent 实例。增加这些能力时扩展现有边界，不把原型按钮直接映射到高权限宿主操作。
+任务级授权、会话压缩、长驻 guest 管理通道、审计导出、签名公证、自动更新、多 agent 实例。增加这些能力时扩展现有边界，不把原型按钮直接映射到高权限宿主操作。guest 已写入安装版本清单，升级协商可在此基础上实现。
 
 ### 文件与认证接入
 

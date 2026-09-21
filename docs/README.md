@@ -7,6 +7,10 @@
 | 模块职责与依赖方向 | [仓库架构](architecture/REPOSITORY.md) |
 | 构建产物与发布门槛 | [发布流程](engineering/RELEASE.md) |
 | 工程整理验收 | [2026-09-19](engineering/VALIDATION-2026-09-19.md) |
+| 差距修复验收 | [2026-09-20](engineering/VALIDATION-2026-09-20-GAPS.md) |
+| 改名迁移 | [Qisuo → Anchi](engineering/RENAME_MIGRATION.md) |
+| 变更记录 | [CHANGELOG](../CHANGELOG.md) |
+| English summary | [README.en.md](../README.en.md) |
 | 开发入口和测试 | [贡献约定](../CONTRIBUTING.md) |
 | 安全模型 | [安全声明](../SECURITY.md)、[安全基础](SECURITY_FOUNDATION.md) |
 | VM 与 cell 设计 | [架构设计](../SECURE_VM_DESIGN.md) |
