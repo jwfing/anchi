@@ -16,6 +16,7 @@ import inference
 import network_rules
 import pi_gateway
 from common import Denied
+from ledger import Ledger
 
 
 class PiTests(unittest.TestCase):
@@ -178,7 +179,7 @@ class PiTests(unittest.TestCase):
             self.call()
 
     def test_model_daily_limit(self):
-        with inference.database() as conn:
+        with Ledger(inference.DATABASE, 'x').database() as conn:
             conn.executemany(
                 'INSERT INTO runs(id,digest,provider,model,created,state) VALUES(?,?,?,?,?,?)',
                 [(str(i), 'x', 'openai-codex', 'm', time.time(), 'FAILED') for i in range(50)],
