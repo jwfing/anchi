@@ -232,12 +232,27 @@ class PiTests(unittest.TestCase):
             codex_transport.read_response(Response(b'SECRET_ACCESS_TOKEN'))
         self.assertNotIn('SECRET', str(caught.exception))
 
+    def test_roles_include_every_connector(self):
+        import connectors
+
+        for connector in connectors.CONNECTORS.values():
+            self.assertEqual(network_rules.ROLES[connector.id], (connector.user, connector.hosts[0]))
+        self.assertEqual(network_rules.ROLES['codex'], ('secure-inference', 'chatgpt.com'))
+
     def test_multiple_provider_allow_rules_precede_reject(self):
         class User:
             def __init__(self, uid):
                 self.pw_uid = uid
 
-        users = {'secure-auth': 1, 'secure-gmail': 2, 'secure-inference': 3, 'secure-policy': 4}
+        users = {
+            'secure-auth': 1,
+            'secure-gmail': 2,
+            'secure-inference': 3,
+            'secure-policy': 4,
+            'secure-drive': 5,
+            'secure-notion': 6,
+            'secure-slack': 7,
+        }
         with (
             patch('network_rules.pwd.getpwnam', side_effect=lambda name: User(users[name])),
             patch('network_rules.subprocess.run') as run,

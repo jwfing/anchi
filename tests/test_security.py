@@ -137,7 +137,7 @@ class SecurityTests(unittest.TestCase):
                 elif mode == 'boot':
                     policy.BOOT_ID.write_text('another-boot')
                 else:
-                    policy.set_read(False)
+                    policy.set_read('gmail', False)
                 with self.assertRaises(Denied):
                     self.consume(grant)
 
@@ -154,7 +154,7 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(sum(pool.map(attempt, range(4))), 1)
 
     def test_auto_read_does_not_allow_write_or_model(self):
-        policy.set_read(True)
+        policy.set_read('gmail', True)
         self.assertEqual(policy.authorize(self.action, 'gmail')['decision'], 'allow')
         with self.assertRaises(Denied):
             policy.authorize({**self.action, 'operation': 'gmail.send'}, 'gmail')
@@ -172,6 +172,32 @@ class SecurityTests(unittest.TestCase):
         for limit in (0, 501, '10', True):
             with self.assertRaisesRegex(Denied, 'BAD_LIMIT'):
                 policy.inspect_audit(limit)
+
+    def test_read_rules_are_per_connector_and_writes_never_auto(self):
+        policy.set_read('drive', True)
+        search = {'operation': 'drive.search', 'account': 'g', 'params': {'query': 'plan', 'limit': 3}}
+        create = {
+            'operation': 'drive.create',
+            'account': 'g',
+            'params': {'parent_id': 'root', 'name': 'a.txt', 'mime_type': 'text/plain', 'text': 'hi'},
+        }
+        self.assertEqual(policy.authorize(search, 'drive')['decision'], 'allow')
+        self.assertEqual(policy.authorize(create, 'drive')['decision'], 'ask')
+        self.assertEqual(policy.authorize(self.action, 'gmail')['decision'], 'ask')
+        with self.assertRaises(Denied):
+            policy.authorize(search, 'notion')
+        with self.assertRaises(Denied):
+            policy.authorize({**search, 'operation': 'drive.delete'}, 'drive')
+        policy.set_read('drive', False)
+        self.assertEqual(policy.authorize(search, 'drive')['decision'], 'ask')
+        with self.assertRaises(Denied):
+            policy.set_read('bogus', True)
+
+    def test_legacy_gmail_read_column_migrates(self):
+        with policy.database() as conn:
+            conn.execute('UPDATE config SET gmail_read=1 WHERE id=1')
+            conn.execute('DELETE FROM read_rules')
+        self.assertEqual(policy.authorize(self.action, 'gmail')['decision'], 'allow')
 
     def test_target_file_expiry_and_private_addresses(self):
         target = self.root / 'targets.json'

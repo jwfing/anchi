@@ -10,7 +10,10 @@ import sqlite3
 import time
 import uuid
 
+import importlib
+
 from common import Denied, fields
+import connectors
 
 DATABASE = Path('/var/lib/secure-policy/policy.sqlite3')
 BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
@@ -29,6 +32,7 @@ def database():
             epoch INTEGER NOT NULL, boot TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL,
             expires REAL NOT NULL, ticket_hash TEXT, decided REAL, consumed REAL);
           CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at REAL NOT NULL, event TEXT NOT NULL, grant_id TEXT, digest TEXT);
+          CREATE TABLE IF NOT EXISTS read_rules (connector TEXT PRIMARY KEY, allowed INTEGER NOT NULL);
         ''')
         with conn:
             yield conn
@@ -47,20 +51,11 @@ def normalize(action, principal):
         or not re.fullmatch('[a-zA-Z0-9._:-]{1,128}', action['account'])
     ):
         raise Denied('BAD_ACTION')
-    if principal == 'gmail' and op == 'gmail.list':
-        fields(params, ('query', 'limit'), ('query', 'limit'))
-        if (
-            type(params['limit']) is not int
-            or not 1 <= params['limit'] <= 10
-            or not isinstance(params['query'], str)
-            or len(params['query']) > 512
-            or any(ord(c) < 32 for c in params['query'])
-        ):
-            raise Denied('BAD_ACTION')
-    elif principal == 'gmail' and op == 'gmail.read':
-        fields(params, ('id',), ('id',))
-        if not isinstance(params['id'], str) or not re.fullmatch('[a-fA-F0-9]{1,128}', params['id']):
-            raise Denied('BAD_ACTION')
+    if principal != 'inference':
+        connector = connectors.CONNECTORS.get(principal)
+        if connector is None or op not in connector.ops:
+            raise Denied('OPERATION_DENIED')
+        importlib.import_module(connector.module).validate(op, params)
     elif principal == 'inference' and op == 'inference.codex':
         from codex_schema import validate_payload
 
@@ -92,6 +87,16 @@ def normalize(action, principal):
     return encoded, hashlib.sha256(encoded.encode()).hexdigest()
 
 
+def read_allowed(conn, connector):
+    row = conn.execute('SELECT allowed FROM read_rules WHERE connector=?', (connector,)).fetchone()
+    if row is None and connector == 'gmail':
+        # One-time migration of the pre-registry column; the column stays for old backups.
+        legacy = conn.execute('SELECT gmail_read FROM config WHERE id=1').fetchone()[0]
+        conn.execute('INSERT OR IGNORE INTO read_rules VALUES(?,?)', ('gmail', int(legacy)))
+        return bool(legacy)
+    return bool(row and row['allowed'])
+
+
 def audit(conn, event, grant_id=None, digest=None):
     conn.execute('INSERT INTO audit(at,event,grant_id,digest) VALUES(?,?,?,?)', (time.time(), event, grant_id, digest))
 
@@ -115,7 +120,11 @@ def authorize(action, principal):
         ).fetchone()
         if grant and grant['state'] in ('DENIED', 'REVOKED'):
             raise Denied('POLICY_DENIED')
-        auto = principal == 'gmail' and bool(settings['gmail_read'])
+        auto = (
+            principal != 'inference'
+            and connectors.kind(action['operation']) == connectors.READ
+            and read_allowed(conn, principal)
+        )
         if grant and grant['state'] == 'APPROVED':
             grant_id = grant['id']
         elif auto:
@@ -234,10 +243,21 @@ def decide(grant_id, decision, digest=None):
     return {'approval_id': grant_id, 'state': decision}
 
 
-def set_read(allow):
+def set_read(connector, allow):
+    if connector not in connectors.CONNECTORS:
+        raise Denied('UNKNOWN_CONNECTOR')
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
-        conn.execute('UPDATE config SET gmail_read=?,epoch=epoch+1 WHERE id=1', (int(allow),))
+        conn.execute(
+            'INSERT INTO read_rules VALUES(?,?) ON CONFLICT(connector) DO UPDATE SET allowed=excluded.allowed',
+            (connector, int(allow)),
+        )
+        if connector == 'gmail':
+            conn.execute('UPDATE config SET gmail_read=? WHERE id=1', (int(allow),))
+        # Any rule change invalidates every outstanding grant, exactly like before.
+        conn.execute('UPDATE config SET epoch=epoch+1 WHERE id=1')
         conn.execute("UPDATE grants SET state='REVOKED' WHERE state IN ('PENDING','APPROVED','ISSUED')")
-        audit(conn, 'GMAIL_READ_ENABLED' if allow else 'ALL_GRANTS_REVOKED_READ_DISABLED')
-    return {'gmail_read': allow, 'outstanding_grants_revoked': True}
+        audit(
+            conn, f'{connector.upper()}_READ_ENABLED' if allow else f'{connector.upper()}_READ_DISABLED_GRANTS_REVOKED'
+        )
+    return {'connector': connector, 'read': allow, 'outstanding_grants_revoked': True}

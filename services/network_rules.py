@@ -12,13 +12,15 @@ import sys
 import time
 
 from common import CELL_AGENT_HOST_UID
+import connectors
 
 TARGETS = Path('/run/secure-egress/targets.json')
+# role -> (service user, single allowed host). Connector roles come from the registry.
 ROLES = {
-    'gmail': ('secure-gmail', 'gmail.googleapis.com'),
     'auth': ('secure-auth', 'oauth2.googleapis.com'),
     'model': ('secure-inference', 'api.openai.com'),
     'codex': ('secure-inference', 'chatgpt.com'),
+    **{c.id: (c.user, c.hosts[0]) for c in connectors.CONNECTORS.values()},
 }
 
 

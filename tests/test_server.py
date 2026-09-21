@@ -59,7 +59,7 @@ class ServerTests(unittest.TestCase):
 
     def test_credential_scope_enforced_before_handler(self):
         called = []
-        auth = self.service('auth', lambda request: called.append(request) or {'ok': 1})
+        auth = self.service('auth', lambda request, caller: called.append((request, caller)) or {'ok': 1})
         self.assertEqual(self.request(auth, GMAIL_UID, {'op': 'codex_token'})['error'], 'CREDENTIAL_SCOPE_DENIED')
         self.assertEqual(self.request(auth, INFERENCE_UID, {'op': 'access_token'})['error'], 'CREDENTIAL_SCOPE_DENIED')
         self.assertEqual(called, [])
@@ -83,6 +83,25 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(self.call(service, CELL_UID, raw)['error'], 'BAD_REQUEST')
         reply = self.request(service, CELL_UID, {'op': 'x'})
         self.assertEqual(reply, {'ok': False, 'error': 'SERVICE_UNAVAILABLE'})
+
+    def test_modes_and_credential_scopes_come_from_registry(self):
+        for connector in ('gmail', 'drive', 'notion', 'slack'):
+            self.assertIn(connector, server.MODES)
+        self.assertEqual(server.credential_ops('gmail'), ('status', 'access_token'))
+        self.assertEqual(server.credential_ops('drive'), ('status', 'access_token'))
+        self.assertEqual(server.credential_ops('notion'), ('status', 'token'))
+        self.assertEqual(server.credential_ops('slack'), ('status', 'token'))
+        self.assertEqual(server.credential_ops('inference'), ('model_key', 'codex_token'))
+        uids = {1001: 'gmail', 1002: 'inference', 1003: 'drive', 1004: 'notion', 1005: 'slack'}
+        seen = []
+        auth = server.Service('auth', uids, cell_uid=CELL_UID, clock=Clock())
+        auth.handler = lambda request, caller: seen.append((request['op'], caller)) or {}
+        self.assertEqual(self.request(auth, 1004, {'op': 'access_token'})['error'], 'CREDENTIAL_SCOPE_DENIED')
+        self.assertTrue(self.request(auth, 1004, {'op': 'token'})['ok'])
+        self.assertTrue(self.request(auth, 1003, {'op': 'access_token'})['ok'])
+        self.assertEqual(seen, [('token', 'notion'), ('access_token', 'drive')])
+        drive = server.Service('drive', uids, cell_uid=CELL_UID, clock=Clock())
+        self.assertEqual(drive.allowed_uids, {CELL_UID})
 
     def test_utf8_wire_is_bounded_by_bytes_not_escapes(self):
         service = self.service('gmail', lambda request: {'text': request['text']})
