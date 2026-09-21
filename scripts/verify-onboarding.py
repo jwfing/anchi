@@ -3,13 +3,16 @@
 import base64
 import json
 import os
+import re
 import selectors
 import subprocess
 import time
 import sys
 from pathlib import Path
 
-INSTANCE = 'secure-vm-onboarding-test'
+INSTANCE = os.environ.get('ANCHI_INSTALL_VM', 'secure-vm-onboarding-test')
+if not re.fullmatch(r'secure-vm(-[a-z0-9-]+)?', INSTANCE):
+    raise SystemExit('ANCHI_INSTALL_VM must look like secure-vm-<suffix>')
 BASE = ['limactl', 'shell', INSTANCE, '--', 'sudo']
 
 

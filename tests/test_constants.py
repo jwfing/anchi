@@ -61,5 +61,28 @@ class CellEnvTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class LimaTemplateTests(unittest.TestCase):
+    def test_single_template_lists_both_architectures_without_fixed_driver(self):
+        text = (ROOT / 'lima/secure-vm.yaml').read_text()
+        top_level = [
+            line.split(':')[0]
+            for line in text.splitlines()
+            if line and not line[0].isspace() and not line.startswith('#')
+        ]
+        self.assertNotIn('vmType', top_level)
+        self.assertNotIn('arch', top_level)
+        self.assertIn('sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc', text)
+        self.assertIn('sha256:ffe6203da54deeb6db5d2a98a83f9ec8e55f149d3f7ba622e1abe5fa966ee3d6', text)
+        self.assertIn('arch: aarch64', text)
+        self.assertIn('arch: x86_64', text)
+        self.assertIn('mounts: []', text)
+
+    def test_up_script_passes_explicit_vm_type(self):
+        text = (ROOT / 'scripts/up.sh').read_text()
+        self.assertIn('host_vm_type', text)
+        self.assertIn('--vm-type="$vm_type"', text)
+        self.assertIn('ANCHI_INSTALL_VM', (ROOT / 'scripts/verify.sh').read_text())
+
+
 if __name__ == '__main__':
     unittest.main()

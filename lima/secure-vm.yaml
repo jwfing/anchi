@@ -1,7 +1,7 @@
 # Dedicated development VM; never inherit Lima's home-directory mounts.
+# The driver is passed explicitly by scripts/up.sh (vz on macOS, qemu on Linux);
+# Lima picks the image whose arch matches the host.
 minimumLimaVersion: 2.2.0
-vmType: vz
-arch: aarch64
 cpus: 4
 memory: 4GiB
 disk: 30GiB
@@ -9,6 +9,9 @@ images:
   - location: https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img
     arch: aarch64
     digest: sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc
+  - location: https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-amd64.img
+    arch: x86_64
+    digest: sha256:ffe6203da54deeb6db5d2a98a83f9ec8e55f149d3f7ba622e1abe5fa966ee3d6
 mounts: []
 containerd:
   system: false
