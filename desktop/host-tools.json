@@ -1,0 +1,19 @@
+{
+  "linux-x64": {
+    "lima": {
+      "version": "2.2.0",
+      "url": "https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Linux-x86_64.tar.gz",
+      "sha256": "a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a",
+      "layout": "tar",
+      "executable": "bin/limactl"
+    },
+    "codex": {
+      "version": "rust-v0.155.1",
+      "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "a0ef8b2debc3bf747e07b1a039354de31300ac0dcc2276498ba281470b5d9115",
+      "layout": "tar",
+      "executable": "codex-x86_64-unknown-linux-musl",
+      "install_as": "codex"
+    }
+  }
+}
