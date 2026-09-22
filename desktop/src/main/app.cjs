@@ -12,6 +12,7 @@ const { Controller } = require('./controller.cjs');
 const { ActivityLog } = require('./activity-log.cjs');
 const { resolveUserData } = require('./user-data.cjs');
 const { describe } = require('./platform.cjs');
+const { TokenWindow } = require('./token-window.cjs');
 const {
   APP_URL,
   trustedSender,
@@ -76,9 +77,11 @@ async function start() {
     void oauth.cancel().catch(() => {});
   });
   pi = new PiClient({ runtime, files, notify: (event) => controller.emit(event) });
+  let tokens;
   controller = new Controller({
     runtime,
     setup,
+    tokens: { prompt: (descriptor) => tokens.prompt(descriptor) },
     version: app.getVersion(),
     log,
     directories,
@@ -156,13 +159,28 @@ async function start() {
           await handle.close();
         }
       },
-      async confirmGmail() {
+      async confirmStanding(descriptor) {
+        const result = await dialog.showMessageBox(win, {
+          type: 'warning',
+          message: `恢复 ${descriptor.label} 的持续授权？`,
+          detail:
+            (descriptor.scopeText ? descriptor.scopeText + '。' : '') +
+            '此后 Agent 的操作由策略自动放行，不再逐条审批。读取到的内容若含有提示注入，可能直接触发写入或模型调用；仍有修订核对、内容与次数上限和完整审计。',
+          buttons: ['取消', '恢复持续授权'],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        return result.response === 1;
+      },
+      async confirmDisconnect(descriptor) {
         const result = await dialog.showMessageBox(win, {
           type: 'question',
-          message: '允许 Agent 持续读取 Gmail？',
+          message: `断开 ${descriptor.label}？`,
           detail:
-            '允许列出和读取邮件，不允许发送或修改。邮件内容可能被加入模型请求，模型调用仍需审批。',
-          buttons: ['取消', '允许只读'],
+            descriptor.id === 'notion'
+              ? '将删除本机保存的令牌并撤销持续读取；Notion 没有远端撤销接口，请到 Notion 设置中移除该集成。'
+              : '将撤销持续读取、移除本机凭证并尝试撤销远端令牌；在途操作无法回滚。',
+          buttons: ['取消', '断开'],
           defaultId: 0,
           cancelId: 0,
         });
@@ -214,6 +232,7 @@ async function start() {
     },
   });
   hardenWindow(win);
+  tokens = new TokenWindow({ parent: win, preload: path.join(__dirname, '../preload.cjs') });
   ipcMain.handle('desktop:command', async (event, op, args) => {
     if (!trustedSender(event, win)) throw Error('UNTRUSTED_SENDER');
     try {

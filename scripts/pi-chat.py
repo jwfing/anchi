@@ -98,7 +98,7 @@ def main():
     reader = threading.Thread(target=output, daemon=True)
     reader.start()
     print(
-        '输入需求开始对话。/status /sessions /history /new /resume UUID /cancel /quit\n每轮模型请求在独立终端审批；执行中发新需求会返回 BUSY。',
+        '输入需求开始对话。/status /sessions /history /new /resume UUID /cancel /quit\n模型请求默认自动放行；设为逐轮审批时需在独立终端批准。执行中发新需求会返回 BUSY。',
         flush=True,
     )
     try:

@@ -1,5 +1,6 @@
 const http = require('node:http');
 const { timingSafeEqual } = require('node:crypto');
+const { GOOGLE_SCOPES } = require('../shared/connectors.cjs');
 function same(a, b) {
   return (
     typeof a === 'string' &&
@@ -8,8 +9,9 @@ function same(a, b) {
     timingSafeEqual(Buffer.from(a), Buffer.from(b))
   );
 }
-function validateAuthorization(flow, redirect) {
+function validateAuthorization(flow, redirect, scopes = GOOGLE_SCOPES.gmail) {
   const url = new URL(flow.url);
+  const granted = (url.searchParams.get('scope') || '').split(' ').filter(Boolean).sort();
   if (
     url.origin !== 'https://accounts.google.com' ||
     url.pathname !== '/o/oauth2/v2/auth' ||
@@ -21,7 +23,7 @@ function validateAuthorization(flow, redirect) {
     flow.state.length < 32 ||
     url.searchParams.get('redirect_uri') !== redirect ||
     url.searchParams.get('code_challenge_method') !== 'S256' ||
-    url.searchParams.get('scope') !== 'https://www.googleapis.com/auth/gmail.readonly' ||
+    granted.join(' ') !== [...scopes].sort().join(' ') ||
     url.searchParams.get('response_type') !== 'code'
   )
     throw Error('INVALID_AUTHORIZATION_URL');
@@ -36,11 +38,12 @@ class DesktopOAuth {
   async status() {
     return { ...(await this.runtime.auth('status')), ...this.state };
   }
-  async begin() {
+  async begin(connector = 'gmail') {
     if (this.flow) throw Error('OAUTH_IN_PROGRESS');
-    const flow = { server: http.createServer(), consumed: false };
+    if (!GOOGLE_SCOPES[connector]) throw Error('OAUTH_NOT_APPLICABLE');
+    const flow = { server: http.createServer(), consumed: false, connector };
     this.flow = flow;
-    this.state = { pending: true };
+    this.state = { pending: true, connector };
     flow.server.requestTimeout = 5000;
     flow.server.headersTimeout = 5000;
     flow.server.maxHeadersCount = 30;
@@ -54,10 +57,10 @@ class DesktopOAuth {
       });
       flow.host = `127.0.0.1:${flow.server.address().port}`;
       const redirect = `http://${flow.host}/callback`;
-      const auth = await this.runtime.auth('begin', { redirect_uri: redirect });
+      const auth = await this.runtime.auth('begin', { redirect_uri: redirect }, connector);
       if (this.flow !== flow) throw Error('OAUTH_CANCELLED');
       flow.state = auth.state;
-      const url = validateAuthorization(auth, redirect);
+      const url = validateAuthorization(auth, redirect, GOOGLE_SCOPES[connector]);
       flow.timer = setTimeout(() => {
         void this.cancel()
           .catch(() => {})
@@ -109,10 +112,15 @@ class DesktopOAuth {
     flow.server.close();
     try {
       if (url.searchParams.has('error')) throw Error('OAUTH_CANCELLED');
-      await this.runtime.auth('complete', { code, state: flow.state });
-      this.notify({ type: 'activity', text: 'Gmail 已连接。Agent 的读取仍由独立策略控制。' });
+      await this.runtime.auth('complete', { code, state: flow.state }, flow.connector);
+      this.notify({
+        type: 'activity',
+        text: `${flow.connector} 已连接。Agent 的读取仍由独立策略控制。`,
+      });
+      // Account label is fetched with the connector's own identity; failure only affects the label.
+      await this.runtime.connectorAdmin?.(flow.connector, 'probe').catch(() => {});
     } catch {
-      await this.runtime.auth('cancel').catch(() => {});
+      await this.runtime.auth('cancel', {}, flow.connector).catch(() => {});
       this.notify({
         type: 'activity',
         text: 'Google 授权未完成，请重新连接并检查凭证库是否解锁。',
@@ -122,7 +130,7 @@ class DesktopOAuth {
         this.flow = null;
         this.state = { pending: false };
       }
-      this.notify({ type: 'gmail_changed' });
+      this.notify({ type: 'connectors_changed', connector: flow.connector });
     }
   }
   async cancel() {
@@ -134,7 +142,7 @@ class DesktopOAuth {
     clearTimeout(flow.timer);
     flow.server.close();
     flow.server.closeAllConnections();
-    await this.runtime.auth('cancel');
+    await this.runtime.auth('cancel', {}, flow.connector);
   }
 }
 module.exports = { DesktopOAuth, validateAuthorization };

@@ -1,5 +1,7 @@
 # Gmail 只读接入
 
+> Gmail 现在是注册表中的一个 connector；Drive、Notion、Slack 的接入与共同的读写规则见 [连接器](CONNECTORS.md)。
+
 > 本文中的测试数量与验证结果为当日记录；当前以 `make check` 的输出为准。
 
 当前代码已经部署到 `secure-vm`，本地策略和服务边界测试通过。用户已完成 Google OAuth 并读取 3 封邮件，后续 harness 也已实际采集到 3 封近期邮件。
@@ -52,7 +54,7 @@ bash scripts/gmail.sh status
 
 `vault_unlocked` 表示凭证库是否已解锁。`connected` 表示本地存有授权材料，不保证 token 尚未被 Google 撤销。刷新失败并被 Google 判定为授权无效时，`reauth_required` 变为 true，服务停止请求 Google，需重新登录。实际读取才能验证外部授权有效。
 
-全新安装默认逐次审批；若希望沿用已授权的邮箱只读访问，在可信终端运行 `bash scripts/policy.sh gmail-read allow`。当前已有授权在迁移时保留此规则。
+连接后 Gmail 默认处于持续授权，读取自动放行；需要逐条把关时运行 `bash scripts/policy.sh mode gmail ask`，恢复用 `mode gmail auto`（`gmail-read allow|deny` 仍作为别名保留）。
 
 ## 3. 从 cell 读取
 

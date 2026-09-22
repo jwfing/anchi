@@ -41,6 +41,7 @@ class SecurityTests(unittest.TestCase):
         self.temp.cleanup()
 
     def issued(self):
+        policy.set_mode('gmail', 'ask')
         request = policy.authorize(self.action, 'gmail')
         policy.decide(request['approval_id'], 'APPROVED', request['digest'])
         return policy.authorize(self.action, 'gmail')
@@ -91,13 +92,14 @@ class SecurityTests(unittest.TestCase):
             raise TimeoutError()
 
         with patch('auth.google_json', side_effect=fail):
-            self.assertTrue(auth.disconnect()['revocation_pending'])
+            self.assertTrue(auth.disconnect('gmail')['revocation_pending'])
         with patch('auth.google_json', return_value={}) as revoke:
-            self.assertTrue(auth.disconnect()['remote_revoked'])
+            self.assertTrue(auth.disconnect('gmail')['remote_revoked'])
             self.assertEqual(revoke.call_args.args[2], '/revoke')
         self.assertFalse(vault.exists(self.root, 'revocation.json'))
 
     def test_approval_requires_exact_digest(self):
+        policy.set_mode('gmail', 'ask')
         pending = policy.authorize(self.action, 'gmail')
         self.assertEqual(pending['decision'], 'ask')
         with self.assertRaisesRegex(Denied, 'DIGEST_OR_STATE'):
@@ -137,7 +139,7 @@ class SecurityTests(unittest.TestCase):
                 elif mode == 'boot':
                     policy.BOOT_ID.write_text('another-boot')
                 else:
-                    policy.set_read(False)
+                    policy.set_read('gmail', False)
                 with self.assertRaises(Denied):
                     self.consume(grant)
 
@@ -154,7 +156,7 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(sum(pool.map(attempt, range(4))), 1)
 
     def test_auto_read_does_not_allow_write_or_model(self):
-        policy.set_read(True)
+        policy.set_read('gmail', True)
         self.assertEqual(policy.authorize(self.action, 'gmail')['decision'], 'allow')
         with self.assertRaises(Denied):
             policy.authorize({**self.action, 'operation': 'gmail.send'}, 'gmail')
@@ -165,13 +167,70 @@ class SecurityTests(unittest.TestCase):
         grant = self.issued()
         self.consume(grant)
         rows = policy.inspect_audit(10)['audit']
-        self.assertEqual([r['event'] for r in reversed(rows)], ['REQUESTED', 'APPROVED', 'ISSUED_APPROVED', 'CONSUMED'])
+        self.assertEqual(
+            [r['event'] for r in reversed(rows)],
+            ['RULE_GMAIL_ASK', 'REQUESTED', 'APPROVED', 'ISSUED_APPROVED', 'CONSUMED'],
+        )
         self.assertEqual(set(rows[0]), {'id', 'at', 'event', 'grant_id', 'digest'})
         self.assertNotIn('in:inbox', json.dumps(rows))
         self.assertEqual(len(policy.inspect_audit(2)['audit']), 2)
         for limit in (0, 501, '10', True):
             with self.assertRaisesRegex(Denied, 'BAD_LIMIT'):
                 policy.inspect_audit(limit)
+
+    def test_standing_authorization_is_default_and_ask_mode_falls_back_to_approval(self):
+        search = {'operation': 'drive.search', 'account': 'g', 'params': {'query': 'plan', 'limit': 3}}
+        create = {
+            'operation': 'drive.create',
+            'account': 'g',
+            'params': {'parent_id': 'root', 'name': 'a.txt', 'mime_type': 'text/plain', 'text': 'hi'},
+        }
+        model = {
+            'operation': 'inference.openai',
+            'account': 'gen',
+            'params': {
+                'model': 'm',
+                'instructions': 'i',
+                'input': [],
+                'max_output_tokens': 1,
+                'store': False,
+                'tools': [],
+                'stream': False,
+            },
+        }
+        # Connected means authorized: reads, writes and model calls issue grants without a human.
+        self.assertEqual(policy.authorize(search, 'drive')['decision'], 'allow')
+        self.assertEqual(policy.authorize(create, 'drive')['decision'], 'allow')
+        self.assertEqual(policy.authorize(model, 'inference')['decision'], 'allow')
+        self.assertEqual(policy.inspect_rules()['rules'], {p: 'auto' for p in policy.PRINCIPALS})
+        # Switching a principal to ask mode revokes outstanding grants and requires approval again.
+        issued = policy.authorize(create, 'drive')
+        policy.set_mode('drive', 'ask')
+        with self.assertRaises(Denied):
+            policy.consume(create, 'drive', issued['grant_id'], issued['ticket'])
+        self.assertEqual(policy.authorize(create, 'drive')['decision'], 'ask')
+        self.assertEqual(policy.authorize(search, 'drive')['decision'], 'ask')
+        self.assertEqual(policy.authorize(model, 'inference')['decision'], 'allow')
+        policy.set_mode('inference', 'ask')
+        self.assertEqual(policy.authorize(model, 'inference')['decision'], 'ask')
+        self.assertEqual(policy.inspect_rules()['rules']['inference'], 'ask')
+        with self.assertRaises(Denied):
+            policy.authorize(search, 'notion')
+        with self.assertRaises(Denied):
+            policy.authorize({**search, 'operation': 'drive.delete'}, 'drive')
+        for bad in (('bogus', 'auto'), ('drive', 'maybe')):
+            with self.assertRaises(Denied):
+                policy.set_mode(*bad)
+        # Legacy alias keeps working.
+        policy.set_read('drive', True)
+        self.assertEqual(policy.authorize(search, 'drive')['decision'], 'allow')
+
+    def test_absent_rule_means_standing_authorization_regardless_of_legacy_column(self):
+        with policy.database() as conn:
+            conn.execute('UPDATE config SET gmail_read=0 WHERE id=1')
+            conn.execute('DELETE FROM rules')
+        self.assertEqual(policy.inspect_rules()['rules']['gmail'], 'auto')
+        self.assertEqual(policy.authorize(self.action, 'gmail')['decision'], 'allow')
 
     def test_target_file_expiry_and_private_addresses(self):
         target = self.root / 'targets.json'

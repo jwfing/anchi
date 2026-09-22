@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 import inference
 import model_admin
 from common import Denied
+from ledger import Ledger
 
 
 class InferenceTests(unittest.TestCase):
@@ -127,7 +128,7 @@ class InferenceTests(unittest.TestCase):
             self.assertEqual(transport.call_count, 1)
 
     def test_restart_marks_running_unknown(self):
-        with inference.database() as conn:
+        with Ledger(inference.DATABASE, 'x').database() as conn:
             conn.execute(
                 'INSERT INTO runs (id,digest,provider,model,created,state) VALUES (?,?,?,?,?,?)',
                 ('interrupted', 'digest', 'openai', 'model', time.time(), 'RUNNING'),
@@ -137,7 +138,7 @@ class InferenceTests(unittest.TestCase):
 
     def test_daily_budget_persists(self):
         self.enable()
-        with inference.database() as conn:
+        with Ledger(inference.DATABASE, 'x').database() as conn:
             conn.executemany(
                 'INSERT INTO runs (id,digest,provider,model,created,state) VALUES (?,?,?,?,?,?)',
                 [(str(i), 'd', 'openai', 'm', time.time(), 'FAILED') for i in range(50)],

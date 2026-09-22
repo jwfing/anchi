@@ -4,7 +4,27 @@ import json
 import re
 from common import Denied, fields
 
-TOOL_NAMES = {'read', 'bash', 'write', 'edit', 'gmail_status', 'gmail_list', 'gmail_read', 'host_files'}
+TOOL_NAMES = {
+    'read',
+    'bash',
+    'write',
+    'edit',
+    'host_files',
+    'gmail_status',
+    'gmail_list',
+    'gmail_read',
+    'drive_search',
+    'drive_read',
+    'drive_create',
+    'drive_update',
+    'notion_search',
+    'notion_read',
+    'notion_create_page',
+    'notion_append',
+    'slack_channels',
+    'slack_history',
+    'slack_post',
+}
 
 
 def validate_parts(instructions, inputs, tools):
@@ -54,9 +74,20 @@ def validate_parts(instructions, inputs, tools):
             if not isinstance(item['output'], str):
                 raise Denied('TEXT_ONLY')
         elif kind == 'reasoning':
-            fields(item, ('type', 'id', 'summary', 'encrypted_content', 'status'), ('type', 'id'))
-            if not isinstance(item.get('summary', []), list) or not isinstance(item.get('encrypted_content', ''), str):
+            # Codex returns reasoning items with `content` (usually empty); pi replays them verbatim.
+            fields(item, ('type', 'id', 'summary', 'content', 'encrypted_content', 'status'), ('type', 'id'))
+            if (
+                not isinstance(item.get('summary', []), list)
+                or not isinstance(item.get('content', []), list)
+                or not isinstance(item.get('encrypted_content', ''), str)
+            ):
                 raise Denied('BAD_REASONING')
+            for part in item.get('content', []):
+                if not isinstance(part, dict):
+                    raise Denied('BAD_REASONING')
+                fields(part, ('type', 'text'), ('type', 'text'))
+                if part['type'] != 'reasoning_text' or not isinstance(part['text'], str):
+                    raise Denied('BAD_REASONING')
         else:
             raise Denied('BAD_CODEX_INPUT')
     # UTF-8 bytes: the cell sends UTF-8, so CJK text is not penalized by ASCII escaping.

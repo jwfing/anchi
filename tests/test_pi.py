@@ -16,6 +16,7 @@ import inference
 import network_rules
 import pi_gateway
 from common import Denied
+from ledger import Ledger
 
 
 class PiTests(unittest.TestCase):
@@ -117,7 +118,7 @@ class PiTests(unittest.TestCase):
             {'type': 'function', 'name': name, 'parameters': {'type': 'object'}}
             for name in sorted(codex_schema.TOOL_NAMES)
         ]
-        self.assertEqual(len(self.request['tools']), 8)
+        self.assertEqual(len(self.request['tools']), 19)
         with (
             patch('policy_client.require', side_effect=Denied('APPROVAL_REQUIRED:id')),
             patch('codex_transport.responses') as network,
@@ -134,6 +135,26 @@ class PiTests(unittest.TestCase):
             codex_schema.validate_parts(
                 'test', self.request['input'], self.request['tools'] + [self.request['tools'][0]]
             )
+
+    def test_replayed_reasoning_items_keep_their_content_field(self):
+        # Regression: the first reasoning summary in a session made every later turn fail with BAD_REQUEST.
+        item = {
+            'type': 'reasoning',
+            'id': 'rs_1',
+            'summary': [{'type': 'summary_text', 'text': 'why'}],
+            'content': [],
+            'encrypted_content': 'opaque',
+        }
+        codex_schema.validate_parts('t', [item], [])
+        codex_schema.validate_parts('t', [{**item, 'content': [{'type': 'reasoning_text', 'text': 'why'}]}], [])
+        for bad in (
+            {**item, 'content': 'why'},
+            {**item, 'content': [{'type': 'output_text', 'text': 'why'}]},
+            {**item, 'content': [{'type': 'reasoning_text', 'text': 'why', 'url': 'https://x'}]},
+            {**item, 'content': [{'type': 'reasoning_text', 'text': 1}]},
+        ):
+            with self.assertRaises(Denied):
+                codex_schema.validate_parts('t', [bad], [])
 
     def test_cjk_context_is_measured_in_utf8_bytes(self):
         message = lambda text: [{'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}]
@@ -178,7 +199,7 @@ class PiTests(unittest.TestCase):
             self.call()
 
     def test_model_daily_limit(self):
-        with inference.database() as conn:
+        with Ledger(inference.DATABASE, 'x').database() as conn:
             conn.executemany(
                 'INSERT INTO runs(id,digest,provider,model,created,state) VALUES(?,?,?,?,?,?)',
                 [(str(i), 'x', 'openai-codex', 'm', time.time(), 'FAILED') for i in range(50)],
@@ -231,12 +252,43 @@ class PiTests(unittest.TestCase):
             codex_transport.read_response(Response(b'SECRET_ACCESS_TOKEN'))
         self.assertNotIn('SECRET', str(caught.exception))
 
+    def test_roles_include_every_connector(self):
+        import connectors
+
+        for connector in connectors.CONNECTORS.values():
+            self.assertEqual(network_rules.ROLES[connector.id], (connector.user, connector.hosts[0]))
+        self.assertEqual(network_rules.ROLES['codex'], ('secure-inference', 'chatgpt.com'))
+
+    def test_tool_names_cover_connector_tools(self):
+        import subprocess
+
+        script = "import {ALL_TOOL_NAMES} from './pi/connectors.mjs'; console.log(JSON.stringify(ALL_TOOL_NAMES))"
+        names = json.loads(
+            subprocess.run(
+                ['node', '--input-type=module', '-e', script],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        self.assertTrue(set(names) <= codex_schema.TOOL_NAMES)
+        self.assertEqual(len(names), 14)
+
     def test_multiple_provider_allow_rules_precede_reject(self):
         class User:
             def __init__(self, uid):
                 self.pw_uid = uid
 
-        users = {'secure-auth': 1, 'secure-gmail': 2, 'secure-inference': 3, 'secure-policy': 4}
+        users = {
+            'secure-auth': 1,
+            'secure-gmail': 2,
+            'secure-inference': 3,
+            'secure-policy': 4,
+            'secure-drive': 5,
+            'secure-notion': 6,
+            'secure-slack': 7,
+        }
         with (
             patch('network_rules.pwd.getpwnam', side_effect=lambda name: User(users[name])),
             patch('network_rules.subprocess.run') as run,

@@ -1,14 +1,12 @@
 """Bounded email summarization gateway and persistent execution ledger."""
 
 import hashlib
-from contextlib import contextmanager
 import json
 from pathlib import Path
 import re
-import sqlite3
-import time
 
 from common import Denied, fields
+from ledger import Ledger
 import model_transport
 
 CONFIG = Path('/etc/secure-vm/model.json')
@@ -23,27 +21,12 @@ The supplied bodies are excerpts and may be truncated, redacted or missing.
 State that limitation when relevant; do not invent details.'''
 
 
-@contextmanager
-def database():
-    conn = sqlite3.connect(DATABASE, timeout=5)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute('''CREATE TABLE IF NOT EXISTS runs (
-            id TEXT PRIMARY KEY, digest TEXT NOT NULL, provider TEXT NOT NULL,
-            model TEXT NOT NULL, created REAL NOT NULL, finished REAL,
-            state TEXT NOT NULL, result TEXT, error TEXT)''')
-        with conn:
-            yield conn
-    finally:
-        conn.close()
+def ledger(scope='any'):
+    return Ledger(DATABASE, scope)
 
 
 def recover():
-    with database() as conn:
-        conn.execute(
-            "UPDATE runs SET state='UNKNOWN', error='SERVICE_RESTARTED', finished=? WHERE state='RUNNING'",
-            (time.time(),),
-        )
+    ledger().recover()
 
 
 def configuration():
@@ -116,29 +99,11 @@ def run(request, demo=False):
             {'request': request, 'provider': config['provider'], 'model': config['model']}, sort_keys=True
         ).encode()
     ).hexdigest()
-    now, request_id = time.time(), request['request_id']
-    with database() as conn:
-        conn.execute('BEGIN IMMEDIATE')
-        existing = conn.execute('SELECT * FROM runs WHERE id=?', (request_id,)).fetchone()
-        if existing:
-            if existing['digest'] != digest:
-                raise Denied('REQUEST_ID_CONFLICT')
-            if existing['state'] == 'SUCCEEDED':
-                return json.loads(existing['result'])
-            if existing['state'] != 'WAITING_APPROVAL':
-                raise Denied('REQUEST_ALREADY_' + existing['state'])
-        count = conn.execute(
-            'SELECT count(*) FROM runs WHERE created>? AND provider=?', (now - 86400, config['provider'])
-        ).fetchone()[0]
-        if count >= 50:
-            raise Denied('DAILY_REQUEST_LIMIT')
-        if existing:
-            conn.execute("UPDATE runs SET state='RUNNING',error=NULL,finished=NULL WHERE id=?", (request_id,))
-        else:
-            conn.execute(
-                'INSERT INTO runs (id,digest,provider,model,created,state) VALUES (?,?,?,?,?,?)',
-                (request_id, digest, config['provider'], config['model'], now, 'RUNNING'),
-            )
+    request_id = request['request_id']
+    book = ledger(config['provider'])
+    cached = book.begin(request_id, digest, model=config['model'], daily_limit=50)
+    if cached is not None:
+        return cached
     try:
         if demo:
             summary = '[离线演示，非模型生成] 示例邮件 aa：请在周五前审阅设计。待办：审阅设计。'
@@ -168,21 +133,14 @@ def run(request, demo=False):
             'demo': demo,
             'state': 'SUCCEEDED',
         }
-        with database() as conn:
-            conn.execute(
-                "UPDATE runs SET state='SUCCEEDED',result=?,finished=? WHERE id=?",
-                (json.dumps(result), time.time(), request_id),
-            )
+        book.mark(request_id, 'SUCCEEDED', result=result)
         return result
     except Exception as exc:
         code = str(exc) if isinstance(exc, Denied) else 'MODEL_EXECUTION_UNKNOWN'
         state = 'FAILED' if isinstance(exc, Denied) else 'UNKNOWN'
         if isinstance(exc, Denied) and code.startswith('APPROVAL_REQUIRED:'):
             state = 'WAITING_APPROVAL'
-        with database() as conn:
-            conn.execute(
-                'UPDATE runs SET state=?,error=?,finished=? WHERE id=?', (state, code, time.time(), request_id)
-            )
+        book.mark(request_id, state, error=code)
         raise Denied(code) from None
 
 
@@ -197,25 +155,16 @@ def handle(request):
         return status()
     if op == 'history':
         fields(request, ('op',), ('op',))
-        with database() as conn:
-            return {
-                'runs': [
-                    dict(r)
-                    for r in conn.execute(
-                        'SELECT id,provider,model,created,finished,state,error FROM runs ORDER BY created DESC LIMIT 20'
-                    )
-                ]
-            }
+        return {'runs': ledger().history(20)}
     if op == 'result':
         fields(request, ('op', 'request_id'), ('op', 'request_id'))
         if not isinstance(request['request_id'], str) or not re.fullmatch('[0-9a-f]{32}', request['request_id']):
             raise Denied('BAD_REQUEST_ID')
-        with database() as conn:
-            row = conn.execute('SELECT state,result,error FROM runs WHERE id=?', (request['request_id'],)).fetchone()
+        row = ledger().get(request['request_id'])
         if row is None:
             raise Denied('RESULT_NOT_FOUND')
         if row['state'] == 'SUCCEEDED':
-            return json.loads(row['result'])
+            return row['result']
         return {'request_id': request['request_id'], 'state': row['state'], 'error': row['error']}
     if op == 'demo':
         fields(request, ('op', 'request_id'), ('op', 'request_id'))

@@ -67,6 +67,17 @@ class Client:
         assert self.process.returncode == 0
 
 
+def policy_admin(*arguments):
+    return json.loads(
+        subprocess.run(
+            ['bash', str(root / 'scripts/policy.sh'), *arguments], check=True, capture_output=True, text=True
+        ).stdout
+    )
+
+
+# Model calls must wait for approval during this check so no subscription request is ever sent.
+previous_inference_mode = policy_admin('rules')['rules']['inference']
+policy_admin('mode', 'inference', 'ask')
 client = Client()
 try:
     # Pending approval must not block status/cancel, nor accept concurrent prompts.
@@ -127,3 +138,4 @@ finally:
             client.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             client.process.terminate()
+    policy_admin('mode', 'inference', previous_inference_mode)

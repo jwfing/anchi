@@ -20,8 +20,11 @@ def main():
     os.setuid(account.pw_uid)
     os.umask(0o077)
     action = sys.argv[1]
+    connector = sys.argv[2] if len(sys.argv) > 2 else 'gmail'
+    if connector not in (*auth.GOOGLE, *auth.TOKENS):
+        raise Denied('UNKNOWN_CONNECTOR')
     value = {}
-    if action in ('import-client', 'begin', 'complete'):
+    if action in ('import-client', 'begin', 'complete', 'import-token', 'set-account'):
         data = sys.stdin.buffer.read(16385)
         if len(data) > 16384:
             raise Denied('INPUT_TOO_LARGE')
@@ -30,16 +33,20 @@ def main():
         if action == 'import-client':
             result = auth.import_client(value)
         elif action == 'begin':
-            result = auth.begin(value['redirect_uri'])
+            result = auth.begin(connector, value['redirect_uri'])
         elif action == 'complete':
-            result = auth.complete(value)
+            result = auth.complete(connector, value)
         elif action == 'cancel':
-            auth.vault.remove(auth.STORE, 'pending.json')
+            auth.vault.remove(auth.STORE, auth.google(connector)['pending'])
             result = {'cancelled': True}
         elif action == 'status':
             result = auth.status()
         elif action == 'disconnect':
-            result = auth.disconnect()
+            result = auth.disconnect(connector) if connector in auth.GOOGLE else auth.remove_token(connector)
+        elif action == 'import-token':
+            result = auth.import_token(connector, value)
+        elif action == 'set-account':
+            result = auth.set_account(connector, value['account'])
         else:
             raise Denied('UNKNOWN_ADMIN_ACTION')
     print(json.dumps(result))

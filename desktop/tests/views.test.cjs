@@ -89,7 +89,11 @@ test('permissions page explains restore failures and Gmail re-authentication', a
         { id: 'b', path: '/Users/x/out', mode: 'rw', status: 'active', reason: null },
       ],
       events: [],
-      gmail: { connected: true, reauth_required: true, vault_unlocked: true },
+      connectorCatalog: require('../src/shared/connectors.cjs').CONNECTORS,
+      connectors: {
+        gmail: { connected: true, reauth_required: true, auth: 'google' },
+        vault_unlocked: true,
+      },
     },
     messages: [],
     approvals: [],
@@ -165,4 +169,95 @@ test('setup step 1 shows Linux manual root commands and no Homebrew wording', as
     state: { directories: [], events: [], setup: { health: { supported: false } } },
   });
   assert(unsupported.includes('x86_64 Linux'));
+});
+
+test('write approvals are marked and show the target and full text; connector cards render per auth kind', async () => {
+  const { approvalSummary, renderPage } = await import('../src/renderer/views.mjs');
+  const rows = Object.fromEntries(
+    approvalSummary({
+      operation: 'drive.update',
+      account: 'g',
+      params: {
+        file_id: 'f1',
+        name: 'Plan',
+        expected_revision: 'r1',
+        mime_type: 'text/plain',
+        text: 'new body',
+      },
+    }),
+  );
+  assert.equal(rows['类型'], '写入');
+  assert.equal(rows['目标'], 'Plan (f1) 修订 r1');
+  assert.equal(rows['正文'], 'new body');
+  const slack = Object.fromEntries(
+    approvalSummary({
+      operation: 'slack.post',
+      account: 'g',
+      params: { channel: 'C1', text: 'hi', thread_ts: '1.2' },
+    }),
+  );
+  assert.equal(slack['目标'], '频道 C1 线程 1.2');
+  assert.equal(
+    Object.fromEntries(
+      approvalSummary({ operation: 'gmail.list', account: 'g', params: { query: 'q', limit: 1 } }),
+    )['类型'],
+    undefined,
+  );
+  const { CONNECTORS } = require('../src/shared/connectors.cjs');
+  const html = renderPage({
+    page: 'permissions',
+    messages: [],
+    approvals: [],
+    state: {
+      directories: [],
+      events: [],
+      connectorCatalog: CONNECTORS,
+      connectors: {
+        gmail: { connected: true, auth: 'google' },
+        drive: { connected: false, auth: 'google' },
+        notion: { connected: true, auth: 'token', account: 'Acme' },
+        slack: { connected: false, auth: 'token' },
+        vault_unlocked: true,
+      },
+    },
+  });
+  assert(html.includes('data-connector="drive"'));
+  assert(html.includes('Acme'));
+  assert(html.includes('输入 Slack Bot 令牌'));
+  assert(!html.includes('xoxb-1111'));
+  assert(html.includes('改为逐次审批'));
+  const strict = renderPage({
+    page: 'permissions',
+    messages: [],
+    approvals: [],
+    state: {
+      directories: [],
+      events: [],
+      connectorCatalog: CONNECTORS,
+      connectors: {},
+      rules: { drive: 'ask' },
+    },
+  });
+  assert(strict.includes('恢复持续授权'));
+  assert(strict.includes('逐次审批：每个操作都进入独立审批'));
+  assert((html.match(/data-connector-card=/g) || []).length === 4);
+  const detail = renderPage({
+    page: 'approvals',
+    messages: [],
+    approvals: [],
+    approvalsLoaded: true,
+    state: { directories: [], events: [] },
+    detail: {
+      id: 'x',
+      state: 'PENDING',
+      digest: 'd',
+      expires: 1,
+      action: {
+        operation: 'notion.append',
+        account: 'g',
+        params: { page_id: 'p', paragraphs: ['a'], expected_last_edited: 'e', title: 'T' },
+      },
+    },
+  });
+  assert(detail.includes('write-banner'));
 });

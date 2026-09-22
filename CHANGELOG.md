@@ -18,7 +18,13 @@
 
 - Linux x86_64 客户端（实验性）：Lima + QEMU/KVM，单一 VM 模板列出 arm64 与 amd64 镜像并由 `up.sh` 显式选择驱动；首次设置按固定版本与 SHA-256 下载 Lima 与 Codex 到用户目录，QEMU 与 kvm 组权限以命令文本交由用户执行；新增 `platform.cjs`、`downloader.cjs`、`host-tools.json`、`guest/arch.sh`；产物 `Anchi-linux-x64.tar.gz`；`linux-live` 工作流在 KVM runner 上从零建 VM 并运行全部验收脚本。
 
+- Google Drive、Notion、Slack 连接器：声明式注册表（Gmail 一并迁入）、按 connector 的持续只读规则、逐条审批且绑定目标修订的写入（新建、更新、追加、发消息）、独立写账本与每日上限、Notion/Slack 静态令牌经独立窗口导入、Pi 只为已连接 connector 注册工具、桌面按描述表渲染卡片、审批页写入横幅。
+
+### 修复
+- 模型网关不再拒绝带 `content` 字段的 reasoning 项。Codex 返回的推理项含 `content: []`，Pi 原样回放到下一轮，此前会在授权前被 `codex_schema` 以 BAD_REQUEST 拒绝，导致会话内第一次出现推理摘要后所有后续模型调用失败。
+
 ### 变更
+- 审批机制改为按主体的授权模式：Gmail、Drive、Notion、Slack 与模型调用（`inference`）各有 `auto`/`ask` 模式，默认 `auto`（连接即持续授权，读写与模型调用由策略自动签发一次性授权并审计），`ask` 逐次审批。新增 `policy.sh rules` 与 `mode <主体> auto|ask`（`read`/`gmail-read` 保留为别名）；桌面卡片改为模式开关，恢复持续授权时弹出提示注入风险确认；首次设置页可切换模型调用模式。切换模式撤销所有未消费授权。
 - 模型认证到期后可直接在首次设置重新登录或导入，不再要求先断开 Pi；只有重建环境仍需断开。
 - cell 与可信服务之间的 JSON 改为 UTF-8 传输，大小按 UTF-8 字节计，中文上下文容量约为之前的两倍。
 - 文件代理改用首次设置安装的宿主 Python，而不是固定的系统 Python 路径。

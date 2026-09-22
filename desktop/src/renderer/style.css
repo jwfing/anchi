@@ -439,3 +439,21 @@ details summary {
 .warn {
   color: #8d672f;
 }
+.tokenpage {
+  padding: 28px 32px;
+}
+.tokenpage input {
+  width: 100%;
+  padding: 10px 12px;
+  margin: 12px 0 6px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.write-banner {
+  background: #fbeee4;
+  border-left: 3px solid #b8552f;
+  padding: 10px 14px;
+  margin: 12px 0;
+  font-weight: 600;
+}

@@ -43,7 +43,7 @@ cell 内的 agent.py
 
 推理 socket 只接受 guest host 视角 UID 525288。Cell 无法读取模型配置、API key、SQLite 文件，也不能在请求中改 provider、model、endpoint、headers 或 tools。配置由 guest root 管理，服务只读。
 
-Gmail 与模型凭证均由 secure-auth 加密保存，只向对应服务 UID 返回；`/etc/secure-vm/model.json` 仅保存非秘密配置。每次真实模型请求还需独立 policy 批准，返回 `APPROVAL_REQUIRED:<id>` 时先按 [安全基础说明](SECURITY_FOUNDATION.md) 审批，再使用相同 request ID 重试。VM 管理员仍属可信主体。
+Gmail 与模型凭证均由 secure-auth 加密保存，只向对应服务 UID 返回；`/etc/secure-vm/model.json` 仅保存非秘密配置。每次真实模型请求都经 policy 签发一次性授权：`inference` 处于默认的 `auto` 时自动签发；处于 `ask` 时返回 `APPROVAL_REQUIRED:<id>`，先按 [安全基础说明](SECURITY_FOUNDATION.md) 审批，再使用相同 request ID 重试。VM 管理员仍属可信主体。
 
 推理网关不具备 Gmail credential socket 或邮箱读取能力。邮件由 cell 经验证过的文本 schema 提交。允许云推理后，gateway 不能证明这些文本一定来自那几封邮件；这是固定模型服务作为可信数据接收方的设计边界，不是通用数据防泄露系统。
 

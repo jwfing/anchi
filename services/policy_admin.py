@@ -28,8 +28,15 @@ def main():
     approve = sub.add_parser('approve')
     approve.add_argument('id')
     approve.add_argument('--digest', required=True, help='Exact digest shown with the full action')
-    rule = sub.add_parser('gmail-read')
-    rule.add_argument('mode', choices=('allow', 'deny'))
+    sub.add_parser('rules')
+    rule = sub.add_parser('mode')
+    rule.add_argument('principal')
+    rule.add_argument('mode', choices=('auto', 'ask'))
+    legacy_read = sub.add_parser('read')  # alias kept for one release
+    legacy_read.add_argument('connector')
+    legacy_read.add_argument('mode', choices=('allow', 'deny'))
+    legacy = sub.add_parser('gmail-read')  # alias kept for one release
+    legacy.add_argument('mode', choices=('allow', 'deny'))
     args = parser.parse_args()
     if args.op == 'pending':
         value = policy.inspect()
@@ -37,8 +44,14 @@ def main():
         value = policy.inspect_audit(args.limit)
     elif args.op == 'show':
         value = policy.inspect(args.id)
+    elif args.op == 'rules':
+        value = policy.inspect_rules()
+    elif args.op == 'mode':
+        value = policy.set_mode(args.principal, args.mode)
+    elif args.op == 'read':
+        value = policy.set_read(args.connector, args.mode == 'allow')
     elif args.op == 'gmail-read':
-        value = policy.set_read(args.mode == 'allow')
+        value = policy.set_read('gmail', args.mode == 'allow')
     else:
         value = policy.decide(
             args.id,

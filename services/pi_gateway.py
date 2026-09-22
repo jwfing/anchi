@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import time
 
 from common import Denied, fields, rpc
 import codex_schema
@@ -57,56 +56,27 @@ def handle(request):
     codex_schema.validate_payload(payload)
     action = {'operation': 'inference.codex', 'account': credential['generation'], 'params': payload}
     digest = hashlib.sha256(json.dumps(action, sort_keys=True).encode()).hexdigest()
-    # Share the existing durable execution ledger and single service process.
-    from inference import database
+    # Share the durable execution ledger (and database file) with the legacy summarize path.
+    from inference import DATABASE
+    from ledger import Ledger
 
-    with database() as conn:
-        conn.execute('BEGIN IMMEDIATE')
-        row = conn.execute('SELECT * FROM runs WHERE id=?', (request['request_id'],)).fetchone()
-        if row:
-            if row['digest'] != digest:
-                raise Denied('REQUEST_ID_CONFLICT')
-            if row['state'] == 'SUCCEEDED':
-                return json.loads(row['result'])
-            if row['state'] != 'WAITING_APPROVAL':
-                raise Denied('REQUEST_ALREADY_' + row['state'])
-        elif (
-            conn.execute(
-                "SELECT count(*) FROM runs WHERE provider='openai-codex' AND created>?", (time.time() - 86400,)
-            ).fetchone()[0]
-            >= 50
-        ):
-            raise Denied('DAILY_REQUEST_LIMIT')
-        if not row:
-            conn.execute(
-                'INSERT INTO runs(id,digest,provider,model,created,state) VALUES(?,?,?,?,?,?)',
-                (request['request_id'], digest, 'openai-codex', config['model'], time.time(), 'WAITING_APPROVAL'),
-            )
+    book = Ledger(DATABASE, 'openai-codex')
+    cached = book.begin(request['request_id'], digest, model=config['model'], daily_limit=50)
+    if cached is not None:
+        return cached
     try:
         policy_client.require(action)
     except Denied as exc:
-        if not str(exc).startswith('APPROVAL_REQUIRED:'):
-            with database() as conn:
-                conn.execute(
-                    "UPDATE runs SET state='FAILED',error=?,finished=? WHERE id=?",
-                    (str(exc), time.time(), request['request_id']),
-                )
+        if str(exc).startswith('APPROVAL_REQUIRED:'):
+            book.waiting(request['request_id'])
+        else:
+            book.mark(request['request_id'], 'FAILED', error=str(exc))
         raise
-    with database() as conn:
-        conn.execute("UPDATE runs SET state='RUNNING' WHERE id=?", (request['request_id'],))
     try:
         result = codex_transport.responses(payload, credential)
-        with database() as conn:
-            conn.execute(
-                "UPDATE runs SET state='SUCCEEDED',result=?,finished=? WHERE id=?",
-                (json.dumps(result), time.time(), request['request_id']),
-            )
+        book.mark(request['request_id'], 'SUCCEEDED', result=result)
         return result
     except Exception as exc:
         code = str(exc) if isinstance(exc, Denied) else 'CODEX_EXECUTION_UNKNOWN'
-        with database() as conn:
-            conn.execute(
-                'UPDATE runs SET state=?,error=?,finished=? WHERE id=?',
-                ('FAILED' if isinstance(exc, Denied) else 'UNKNOWN', code, time.time(), request['request_id']),
-            )
+        book.mark(request['request_id'], 'FAILED' if isinstance(exc, Denied) else 'UNKNOWN', error=code)
         raise Denied(code) from None

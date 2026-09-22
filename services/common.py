@@ -3,6 +3,7 @@
 import http.client
 import ipaddress
 import json
+import re
 import socket
 import ssl
 import struct
@@ -147,3 +148,67 @@ def google_json(host, method, path, body=None, token=None):
     finally:
         conn.close()
         raw.close()
+
+
+def https_transport(host, method, path, headers, body):
+    """Fixed-IP HTTPS with hostname verification; no redirects, no proxies, bounded read."""
+    addresses = target_ips(host)
+    conn = http.client.HTTPSConnection(host, timeout=30)
+    raw = socket.create_connection((addresses[0], 443), timeout=10)
+    try:
+        raw.settimeout(30)
+        conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        return response.status, response.read(2 * 1024 * 1024 + 1)
+    finally:
+        conn.close()
+        raw.close()
+
+
+TRANSPORT = https_transport
+PROVIDER_METHODS = ('GET', 'POST', 'PATCH')
+
+
+def provider_request(
+    connector,
+    method,
+    path,
+    *,
+    token=None,
+    headers=None,
+    body=None,
+    content_type=None,
+    raw=False,
+    max_bytes=2 * 1024 * 1024,
+):
+    """One request to a connector's single host; the path must match the connector's allowlist."""
+    if (
+        method not in PROVIDER_METHODS
+        or not isinstance(path, str)
+        or not path.startswith('/')
+        or path.startswith('//')
+        or '..' in path
+    ):
+        raise Denied('DESTINATION_DENIED')
+    if not any(re.fullmatch(pattern, path) for pattern in connector.paths):
+        raise Denied('DESTINATION_DENIED')
+    request_headers = {'Accept': 'application/json', **(headers or {})}
+    if token:
+        request_headers['Authorization'] = 'Bearer ' + token
+    if body is not None:
+        request_headers['Content-Type'] = content_type or 'application/json; charset=utf-8'
+    status, payload = TRANSPORT(connector.hosts[0], method, path, request_headers, body)
+    if status != 200:
+        # Never reflect provider error bodies: they can echo tokens or private content.
+        if status in (401, 403):
+            raise Denied('PROVIDER_AUTH_REQUIRED')
+        raise Denied('PROVIDER_RATE_LIMITED' if status == 429 else 'PROVIDER_REQUEST_FAILED')
+    if len(payload) > max_bytes:
+        raise Denied('PROVIDER_RESPONSE_TOO_LARGE')
+    if raw:
+        return payload
+    try:
+        return json.loads(payload) if payload else {}
+    except ValueError:
+        raise Denied('PROVIDER_RESPONSE_INVALID') from None

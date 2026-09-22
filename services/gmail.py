@@ -25,11 +25,33 @@ def body_text(part, depth=0):
     return '\n'.join(body_text(p, depth + 1) for p in part.get('parts', [])[:30])[:12000]
 
 
+def validate(op, params):
+    """Parameter schema the policy service enforces before any grant is issued."""
+    if op == 'gmail.status':
+        fields(params, ())
+    elif op == 'gmail.list':
+        fields(params, ('query', 'limit'), ('query', 'limit'))
+        if (
+            type(params['limit']) is not int
+            or not 1 <= params['limit'] <= 10
+            or not isinstance(params['query'], str)
+            or len(params['query']) > 512
+            or any(ord(c) < 32 for c in params['query'])
+        ):
+            raise Denied('BAD_ACTION')
+    elif op == 'gmail.read':
+        fields(params, ('id',), ('id',))
+        if not isinstance(params['id'], str) or not re.fullmatch('[0-9a-fA-F]{1,128}', params['id']):
+            raise Denied('BAD_ACTION')
+    else:
+        raise Denied('OPERATION_DENIED')
+
+
 def handle(request):
     op = request.get('op')
     if op == 'status':
         fields(request, ('op',), ('op',))
-        return rpc(AUTH_SOCKET, {'op': 'status'})
+        return rpc(AUTH_SOCKET, {'op': 'status'})['gmail']
     if op == 'list':
         fields(request, ('op', 'query', 'limit'), ('op',))
         query, limit = request.get('query', 'in:inbox'), request.get('limit', 5)

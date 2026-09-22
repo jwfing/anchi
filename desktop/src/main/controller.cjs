@@ -1,4 +1,5 @@
 const { validateCommand, LIMITS } = require('../shared/protocol.cjs');
+const { CONNECTORS, byId, isConnector } = require('../shared/connectors.cjs');
 
 const OPERATIONS = Object.freeze({
   snapshot: [],
@@ -22,6 +23,15 @@ const OPERATIONS = Object.freeze({
   'gmail-cancel': [],
   'gmail-disconnect': [],
   'gmail-read': ['mode'],
+  'connector-status': ['connector'],
+  'connector-connect': ['connector'],
+  'connector-cancel': ['connector'],
+  'connector-import-token': ['connector'],
+  'connector-disconnect': ['connector'],
+  'connector-read': ['connector', 'mode'],
+  'connector-mode': ['connector', 'mode'],
+  'model-mode': ['mode'],
+  rules: [],
   approvals: [],
   audit: [],
   'approval-show': ['id'],
@@ -37,6 +47,13 @@ const EXCLUSIVE = new Set([
   'gmail-cancel',
   'gmail-disconnect',
   'gmail-read',
+  'connector-connect',
+  'connector-cancel',
+  'connector-import-token',
+  'connector-disconnect',
+  'connector-read',
+  'connector-mode',
+  'model-mode',
   'directories-add',
   'directories-remove',
   'directories-mode',
@@ -53,6 +70,11 @@ function validateHostCommand(op, args = {}) {
     Object.keys(args).some((k) => !OPERATIONS[op].includes(k))
   )
     throw Error('INVALID_ARGUMENTS');
+  if ('connector' in args && !isConnector(args.connector)) throw Error('INVALID_CONNECTOR');
+  if (op === 'connector-read' && !['allow', 'deny'].includes(args.mode))
+    throw Error('INVALID_MODE');
+  if (['connector-mode', 'model-mode'].includes(op) && !['auto', 'ask'].includes(args.mode))
+    throw Error('INVALID_MODE');
   return args;
 }
 function approvalId(id) {
@@ -73,6 +95,7 @@ class Controller {
     setup,
     version = '',
     log,
+    tokens,
   }) {
     Object.assign(this, {
       runtime,
@@ -85,6 +108,7 @@ class Controller {
       setup,
       version,
       log,
+      tokens,
     });
     this.events = log ? log.recent(200) : [];
     this.mutating = false;
@@ -117,6 +141,7 @@ class Controller {
       root: this.runtime.root,
       version: this.version,
       limits: LIMITS,
+      connectorCatalog: CONNECTORS,
       setup: this.setup
         ? { health: this.setup.health, job: this.setup.job, completedAt: this.setup.completedAt }
         : null,
@@ -236,6 +261,7 @@ class Controller {
         await this.directories.update(args.id, args.mode);
         await this.files.activate(args.id);
         break;
+      // Gmail-specific operations stay one release as aliases of the connector operations.
       case 'gmail-status':
         return this.oauth.status();
       case 'gmail-import': {
@@ -244,20 +270,29 @@ class Controller {
         return this.oauth.status();
       }
       case 'gmail-connect':
-        return this.oauth.begin();
+        return this.connector('connect', { connector: 'gmail' });
       case 'gmail-cancel':
-        await this.oauth.cancel();
-        return this.oauth.status();
+        return this.connector('cancel', { connector: 'gmail' });
       case 'gmail-read':
         if (!['allow', 'deny'].includes(args.mode)) throw Error('INVALID_MODE');
-        if (args.mode === 'allow' && !(await this.dialogs.confirmGmail()))
-          return { cancelled: true };
-        return this.runtime.policy('gmail-read', args.mode);
+        return this.connector('read', { connector: 'gmail', mode: args.mode });
       case 'gmail-disconnect':
-        await this.oauth.cancel();
-        await this.runtime.policy('gmail-read', 'deny');
-        await this.pi.disconnect();
-        return this.runtime.auth('disconnect');
+        return this.connector('disconnect', { connector: 'gmail' });
+      case 'connector-status':
+        return this.oauth.status();
+      case 'connector-connect':
+      case 'connector-cancel':
+      case 'connector-import-token':
+      case 'connector-disconnect':
+      case 'connector-read':
+      case 'connector-mode':
+        return this.connector(op.slice('connector-'.length), args);
+      case 'model-mode':
+        if (args.mode === 'auto' && !(await this.dialogs.confirmStanding({ label: '模型调用' })))
+          return { cancelled: true };
+        return this.runtime.policy('mode', 'inference', args.mode);
+      case 'rules':
+        return this.runtime.policy('rules');
       case 'approvals':
         return this.runtime.policy('pending');
       case 'audit':
@@ -271,6 +306,60 @@ class Controller {
     }
     this.activity('目录权限已更新，撤销前已开始的操作已结束。');
     return this.snapshot();
+  }
+
+  /** Connector lifecycle. Google connectors use loopback OAuth; token connectors use the token window. */
+  async connector(action, args) {
+    const descriptor = byId(args.connector);
+    switch (action) {
+      case 'connect':
+        if (descriptor.auth !== 'google') throw Error('OAUTH_NOT_APPLICABLE');
+        return this.oauth.begin(args.connector);
+      case 'cancel':
+        await this.oauth.cancel();
+        return this.oauth.status();
+      case 'import-token': {
+        if (descriptor.auth !== 'token') throw Error('TOKEN_NOT_APPLICABLE');
+        const token = await this.tokens.prompt(descriptor);
+        if (!token) return { cancelled: true };
+        await this.runtime.auth('import-token', { token }, args.connector);
+        try {
+          await this.runtime.connectorAdmin(args.connector, 'probe');
+        } catch {
+          this.activity(`${descriptor.label} 已保存令牌，但账户探测失败，显示为未验证。`);
+        }
+        this.activity(`${descriptor.label} 令牌已导入。`);
+        return this.oauth.status();
+      }
+      case 'read':
+        // Legacy alias: allow -> standing authorization, deny -> per-request approval.
+        return this.connector('mode', {
+          connector: args.connector,
+          mode: args.mode === 'allow' ? 'auto' : 'ask',
+        });
+      case 'mode':
+        if (args.mode === 'auto' && !(await this.dialogs.confirmStanding(descriptor)))
+          return { cancelled: true };
+        return this.runtime.policy('mode', args.connector, args.mode);
+      case 'disconnect': {
+        if (!(await this.dialogs.confirmDisconnect(descriptor))) return { cancelled: true };
+        await this.oauth.cancel().catch(() => {});
+        // Re-applying the current mode bumps the policy epoch and revokes every outstanding grant.
+        const rules = (await this.runtime.policy('rules')).rules || {};
+        await this.runtime.policy('mode', args.connector, rules[args.connector] || 'auto');
+        if (args.connector === 'gmail') {
+          await this.pi.disconnect();
+          return this.runtime.auth('disconnect', {}, 'gmail');
+        }
+        const result = await this.runtime.connectorAdmin(args.connector, 'disconnect');
+        this.activity(
+          `${descriptor.label} 已断开${result.remote_revoked ? '，远端令牌已撤销' : ''}。`,
+        );
+        return result;
+      }
+      default:
+        throw Error('UNKNOWN_OPERATION');
+    }
   }
 
   async decide(args) {

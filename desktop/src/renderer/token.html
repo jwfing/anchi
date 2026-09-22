@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+    />
+    <title>输入令牌</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="tokenpage">
+      <h1 id="title">输入令牌</h1>
+      <p id="hint" class="muted"></p>
+      <form id="token-form">
+        <input id="token" type="password" autocomplete="off" spellcheck="false" aria-label="令牌" />
+        <p id="token-error" class="error" role="alert"></p>
+        <div class="actions">
+          <button type="button" data-cancel>取消</button>
+          <button type="submit" class="primary">保存到隔离凭证库</button>
+        </div>
+      </form>
+      <p class="caption">令牌只经本窗口和主进程进入 VM 加密库，不会显示在聊天页面或活动记录中。</p>
+    </main>
+    <script type="module" src="token.mjs"></script>
+  </body>
+</html>

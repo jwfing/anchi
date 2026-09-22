@@ -40,6 +40,15 @@ const errors = {
   PYTHON_NOT_INSTALLED: '未找到宿主 Python。请在首次设置步骤 1 安装依赖。',
   TRUSTED_HELPER_FAILED: '无法连接可信服务。请检查 VM 是否运行，必要时在首次设置中修复 Pi。',
   DIRECTORY_CHANGED: '目录已被移动或替换，请在「连接与权限」重新确认后再访问。',
+  TARGET_CHANGED: '目标在审批期间被修改，写入已取消。请重新读取后再试。',
+  TARGET_NOT_WRITABLE: 'Drive 只允许更新由本应用创建的文件。',
+  NOT_IN_CHANNEL: 'Bot 尚未加入该频道，请先在 Slack 中邀请它。',
+  REAUTH_REQUIRED: '上游授权已失效，请在「连接与权限」重新连接。',
+  DAILY_WRITE_LIMIT: '该连接器今日写入次数已达上限。',
+  BAD_TOKEN_FORMAT: '令牌格式不正确，请检查前缀与长度。',
+  PROVIDER_RATE_LIMITED: '上游服务限流，请稍后再试。',
+  TOKEN_NOT_APPLICABLE: '该连接器使用 Google 授权，不接受粘贴令牌。',
+  OAUTH_NOT_APPLICABLE: '该连接器使用令牌导入，不走 Google 授权。',
   PLATFORM_UNSUPPORTED: '此版本支持 Apple Silicon Mac 和 x86_64 Linux。',
   DOWNLOAD_CHECKSUM_MISMATCH: '下载内容校验失败，未安装任何文件。请检查网络后重试。',
   DOWNLOAD_HOST_NOT_ALLOWED: '下载被重定向到未知主机，已拒绝，未安装任何文件。',
@@ -56,7 +65,12 @@ function notice(text) {
   $('#notice').textContent = text;
 }
 async function refresh() {
-  state = { ...(await call('snapshot')), gmail: state.gmail };
+  state = {
+    ...(await call('snapshot')),
+    gmail: state.gmail,
+    connectors: state.connectors,
+    rules: state.rules,
+  };
   render();
 }
 /** Bursts of agent events collapse into one snapshot round trip. */
@@ -214,8 +228,25 @@ const acts = {
     await refresh();
   },
   'gmail-status': async () => {
-    state.gmail = await call('gmail-status');
+    const status = await call('connector-status', { connector: 'gmail' });
+    state.gmail = status;
+    state.connectors = status;
     render();
+  },
+  'connectors-status': async () => {
+    await acts['gmail-status']();
+    state.rules = (await call('rules')).rules;
+    render();
+  },
+  'model-auto': async () => {
+    const result = await call('model-mode', { mode: 'auto' });
+    notice(result.cancelled ? '已取消。' : '模型调用已恢复持续授权。');
+    await acts['connectors-status']();
+  },
+  'model-ask': async () => {
+    await call('model-mode', { mode: 'ask' });
+    notice('模型调用改为逐轮审批；待消费的授权已作废。');
+    await acts['connectors-status']();
   },
   'gmail-import': async () => {
     await call('gmail-import');
@@ -291,6 +322,26 @@ document.addEventListener('click', (e) => {
       await acts[b.dataset.act]?.();
       return;
     }
+    if (b.dataset.connector && b.dataset.cact) {
+      const connector = b.dataset.connector;
+      const action = b.dataset.cact;
+      if (action === 'import-client') await call('gmail-import');
+      else if (action === 'mode-auto') {
+        const result = await call('connector-mode', { connector, mode: 'auto' });
+        notice(result.cancelled ? '已取消，现有设置未改变。' : '已恢复持续授权。');
+      } else if (action === 'mode-ask') {
+        await call('connector-mode', { connector, mode: 'ask' });
+        notice('已改为逐次审批；待消费的授权已作废。');
+      } else {
+        const result = await call('connector-' + action, { connector });
+        if (result?.cancelled) notice('已取消。');
+        else if (result?.manual_step)
+          notice('本机凭证已删除。Notion 没有远端撤销接口，请到 Notion 设置中移除该集成。');
+      }
+      await acts['connectors-status']();
+      await refresh();
+      return;
+    }
     if (b.dataset.activate) {
       await call('directories-activate', { id: b.dataset.activate });
       await refresh();
@@ -334,7 +385,8 @@ window.desktop.onEvent((event) => {
   if (event.type === 'setup_changed') notice(event.job.message);
   if (event.type === 'finished' && event.success)
     notice('任务已完成。可继续对话，或返回首次设置查看下一步。');
-  if (event.type === 'gmail_changed') void acts['gmail-status']().catch((e) => notice(e.message));
+  if (event.type === 'gmail_changed' || event.type === 'connectors_changed')
+    void acts['connectors-status']().catch((e) => notice(e.message));
   if (event.type === 'ready') messages = [];
   if (messages.length > 200) messages = messages.slice(-200);
   if (event.type === 'assistant' && event.text)
@@ -351,4 +403,9 @@ window.desktop.onEvent((event) => {
 });
 void refresh()
   .then(() => acts['setup-status']())
+  .then(() => call('rules'))
+  .then((value) => {
+    state.rules = value.rules;
+    render();
+  })
   .catch((e) => notice(e.message));

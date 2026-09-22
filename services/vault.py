@@ -10,7 +10,19 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from common import Denied
 
 KEY = Path('/run/secure-vault/master.key')
-NAMES = {'client.json', 'tokens.json', 'pending.json', 'model.json', 'revocation.json', 'codex.json'}
+NAMES = {
+    'client.json',
+    'tokens.json',
+    'pending.json',
+    'revocation.json',
+    'drive-tokens.json',
+    'drive-pending.json',
+    'drive-revocation.json',
+    'notion.json',
+    'slack.json',
+    'model.json',
+    'codex.json',
+}
 
 
 def key():

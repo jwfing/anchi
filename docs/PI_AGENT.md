@@ -33,7 +33,7 @@ bash scripts/policy.sh approve APPROVAL_ID --digest EXACT_DIGEST
 # 或 bash scripts/policy.sh deny APPROVAL_ID
 ```
 
-审批页展示将发送的真实模型输入、工具 schema、模型及账户 generation。每个模型回合单独批准，包括工具返回结果后的下一回合。Pi 每 3 秒检查原请求是否被批准；批准后自动继续，不需要重新输入 prompt。cell 和模型都无权批准。
+模型调用默认持续授权，每个回合由策略自动签发授权并记入审计。改为逐轮审批（`policy.sh mode inference ask`）后，审批页展示将发送的真实模型输入、工具 schema、模型及账户 generation，每个模型回合单独批准，包括工具返回结果后的下一回合。Pi 每 3 秒检查原请求是否被批准；批准后自动继续，不需要重新输入 prompt。cell 和模型都无权批准。
 
 当前提供 SDK + JSONL 单次/RPC 入口及简易终端聊天，尚未接入官方 pi 交互 TUI。官方 CLI 同时安装在 cell 镜像中，但直接启动它不会自动拥有安全网关适配与凭证；使用 `scripts/pi.sh`。
 
@@ -56,7 +56,7 @@ runtime cell UID 1000：pi SDK + bash/read/write/edit + Gmail 工具
 
 Pi 安装目录在只读 rootfs `/opt/secure-pi`，Node 在 `/opt/node`。工作目录 `/workspace`，会话保存在 `/workspace/.pi-secure/sessions/`，属于可读写的非可信工作数据。默认禁用扩展、skills、提示模板和 AGENTS.md 自动发现，避免意外加载工作区配置。模型只能声明本地 function tools，不允许 provider 托管浏览器、搜索、图片或文件 URL。
 
-本地工具执行由真实 pi 完成，不经过模型网关“代做”。bash 可以在 cell 内运行普通程序；它仍无 capabilities、无外网路由、不能访问管理 SSH、policy socket 或凭证库。Gmail 工具包括 status/list/read，发送与修改仍不支持。`gmail_list` 默认约束最多 3 条；直接 connector 的可信上限仍为 10 条。
+连接器工具（Gmail、Drive、Notion、Slack 的读与写）在会话创建时按各 connector 的连接状态动态注册，见 [连接器](CONNECTORS.md)。本地工具执行由真实 pi 完成，不经过模型网关“代做”。bash 可以在 cell 内运行普通程序；它仍无 capabilities、无外网路由、不能访问管理 SSH、policy socket 或凭证库。Gmail 工具包括 status/list/read，发送与修改仍不支持。`gmail_list` 默认约束最多 3 条；直接 connector 的可信上限仍为 10 条。
 
 ## 凭证生命周期
 
