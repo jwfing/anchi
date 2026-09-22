@@ -16,7 +16,7 @@ import {
   defineTool,
 } from '@earendil-works/pi-coding-agent';
 import { createBridge, rpc } from './bridge.mjs';
-import { CONNECTOR_TOOLS, connectedConnectors, socketFor } from './connectors.mjs';
+import { CONNECTOR_TOOLS, connectedConnectors, callConnector } from './connectors.mjs';
 
 export async function createSession({ notify, sessionId } = {}) {
   const status = await rpc('/run/secure-inference/api.sock', { op: 'pi_status' });
@@ -63,7 +63,14 @@ export async function createSession({ notify, sessionId } = {}) {
         description: tool.description,
         parameters: tool.parameters,
         execute: async (_id, params, signal) => {
-          const result = await rpc(socketFor(connector), tool.request(params), signal);
+          const result = await callConnector({
+            connector,
+            tool,
+            params,
+            signal,
+            notify,
+            call: rpc,
+          });
           return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
         },
       }),

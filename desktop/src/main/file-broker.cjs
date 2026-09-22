@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { validateProtectedDirectory } = require('./directory-store.cjs');
 class FileBroker {
   constructor({ directories, runtime, notify = () => {} }) {
     Object.assign(this, { directories, runtime, notify });
@@ -20,6 +21,7 @@ class FileBroker {
     return this.serial(async () => {
       const item = this.directories.directories.find((d) => d.id === id);
       if (!item) throw Error('DIRECTORY_NOT_FOUND');
+      validateProtectedDirectory(item.path, item.mode, this.directories.protectedPaths);
       if ((await fs.realpath(item.path)) !== item.path) throw Error('DIRECTORY_CHANGED');
       const stat = await fs.stat(item.path, { bigint: true });
       if (!stat.isDirectory()) throw Error('INVALID_DIRECTORY');

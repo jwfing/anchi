@@ -1,5 +1,4 @@
 const fs = require('node:fs/promises');
-const { createWriteStream } = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { execFile } = require('node:child_process');
@@ -74,18 +73,23 @@ async function install(
       let size = 0;
       const body =
         response.body instanceof Readable ? response.body : Readable.fromWeb(response.body);
-      await pipeline(
-        body,
-        async function* (source) {
-          for await (const chunk of source) {
-            size += chunk.length;
-            if (size > maxBytes) throw Error('DOWNLOAD_TOO_LARGE');
-            hash.update(chunk);
-            yield chunk;
-          }
-        },
-        createWriteStream(temporary, { mode: 0o600 }),
-      );
+      const handle = await fs.open(temporary, 'wx', 0o600);
+      try {
+        await pipeline(
+          body,
+          async function* (source) {
+            for await (const chunk of source) {
+              size += chunk.length;
+              if (size > maxBytes) throw Error('DOWNLOAD_TOO_LARGE');
+              hash.update(chunk);
+              yield chunk;
+            }
+          },
+          handle.createWriteStream(),
+        );
+      } finally {
+        await handle.close();
+      }
       if (hash.digest('hex') !== entry.sha256) throw Error('DOWNLOAD_CHECKSUM_MISMATCH');
       await fs.rm(partial, { recursive: true, force: true });
       await fs.mkdir(partial, { recursive: true, mode: 0o755 });

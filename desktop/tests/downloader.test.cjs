@@ -136,3 +136,25 @@ test('redirects to unknown hosts, too many hops and oversized bodies are refused
   );
   assert.deepEqual(await fs.readdir(path.join(tools, 'lima')), []);
 });
+
+test('immediate stream failures finish file creation and cleanup before rejecting', async (t) => {
+  const { bytes, sha256, tools } = await archive(t, { 'bin/limactl': 'x' });
+  const entry = {
+    version: 'cleanup',
+    url: 'https://github.com/a/b',
+    sha256,
+    executable: 'bin/limactl',
+  };
+  for (let i = 0; i < 20; i++) {
+    await assert.rejects(
+      install('lima', entry, {
+        toolsDirectory: tools,
+        fetch: async () => respond(200, bytes),
+        maxBytes: 1,
+      }),
+      /DOWNLOAD_TOO_LARGE/,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(await fs.readdir(path.join(tools, 'lima')), []);
+  }
+});

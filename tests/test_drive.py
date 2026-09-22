@@ -68,8 +68,8 @@ class DriveTests(ConnectorHarness):
     def test_update_binds_revision(self):
         meta = {'id': 'f1', 'name': 'Plan', 'mimeType': 'text/plain', 'headRevisionId': 'r1'}
         self.responses = [
-            (200, json.dumps(meta).encode()),
-            (200, json.dumps(meta).encode()),
+            (200, json.dumps(meta).encode(), '"etag1"'),
+            (200, json.dumps(meta).encode(), '"etag1"'),
             (200, json.dumps({'id': 'f1', 'headRevisionId': 'r2'}).encode()),
         ]
         drive.handle({'op': 'update', 'request_id': 'b' * 32, 'file_id': 'f1', 'text': 'v2'})
@@ -78,10 +78,48 @@ class DriveTests(ConnectorHarness):
         self.assertEqual(action['params']['name'], 'Plan')
         self.assertEqual(self.calls[2][:2], ('PATCH', '/upload/drive/v3/files/f1?uploadType=media'))
         changed = {**meta, 'headRevisionId': 'r2'}
-        self.responses = [(200, json.dumps(meta).encode()), (200, json.dumps(changed).encode())]
+        self.responses = [(200, json.dumps(meta).encode(), '"etag1"'), (200, json.dumps(changed).encode(), '"etag2"')]
         with self.assertRaisesRegex(Denied, 'TARGET_CHANGED'):
             drive.handle({'op': 'update', 'request_id': 'c' * 32, 'file_id': 'f1', 'text': 'v3'})
         self.assertEqual(len(self.calls), 5)
+        self.assertEqual(self.calls[2][2]['If-Match'], '"etag1"')
+
+    def test_update_fails_closed_without_a_strong_revision_condition(self):
+        for meta, etag in (
+            ({'id': 'f', 'mimeType': DOC}, '"e"'),
+            ({'id': 'f', 'mimeType': 'text/plain'}, '"e"'),
+        ):
+            self.responses = [(200, json.dumps(meta).encode(), etag)]
+            with self.assertRaisesRegex(Denied, 'SAFE_UPDATE_UNAVAILABLE'):
+                drive.handle({'op': 'update', 'request_id': 'a' * 32, 'file_id': 'f', 'text': 'new'})
+        self.assertTrue(all(call[0] == 'GET' for call in self.calls))
+
+    def test_conditional_write_rejects_race_and_replay_uses_cached_result(self):
+        meta = {'id': 'f', 'mimeType': 'text/plain', 'name': 'n', 'headRevisionId': 'r'}
+        request = {'op': 'update', 'request_id': 'a' * 32, 'file_id': 'f', 'text': 'new'}
+        self.responses = [(200, json.dumps(meta).encode(), '"e"')] * 2 + [(412, b'changed')]
+        with self.assertRaisesRegex(Denied, 'TARGET_CHANGED'):
+            drive.handle(request)
+        self.assertEqual(self.calls[-1][2]['If-Match'], '"e"')
+        request['request_id'] = 'b' * 32
+        self.responses = [(200, json.dumps(meta).encode(), '"e"')] * 2 + [(200, b'{"id":"f"}')]
+        first = drive.handle(request)
+        self.assertEqual(drive.handle(request), first)
+        self.assertEqual(len(self.calls), 6)
+
+    def test_update_without_etag_keeps_revision_checks(self):
+        meta = {'id': 'f', 'mimeType': 'text/plain', 'headRevisionId': 'r'}
+        self.responses = [(200, json.dumps(meta).encode())] * 2 + [(200, b'{"id":"f"}')]
+        self.assertEqual(
+            drive.handle({'op': 'update', 'request_id': 'd' * 32, 'file_id': 'f', 'text': 'new'})['id'], 'f'
+        )
+        self.assertNotIn('If-Match', self.calls[-1][2])
+        self.responses = [
+            (200, json.dumps(meta).encode()),
+            (200, json.dumps({**meta, 'headRevisionId': 'r2'}).encode()),
+        ]
+        with self.assertRaisesRegex(Denied, 'TARGET_CHANGED'):
+            drive.handle({'op': 'update', 'request_id': 'e' * 32, 'file_id': 'f', 'text': 'new'})
 
     def test_probe_returns_email_only(self):
         self.responses = [(200, json.dumps({'user': {'emailAddress': 'me@example.com', 'permissionId': 'x'}}).encode())]

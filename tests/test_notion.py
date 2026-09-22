@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -93,6 +94,73 @@ class NotionTests(ConnectorHarness):
         ]
         with self.assertRaisesRegex(Denied, 'TARGET_CHANGED'):
             notion.handle({'op': 'append', 'request_id': 'c' * 32, 'page_id': 'p1', 'paragraphs': ['x']})
+
+    def test_nested_children_and_incomplete_pagination_are_visible(self):
+        self.responses = [
+            (200, b'{"id":"p","properties":{}}'),
+            (
+                200,
+                json.dumps(
+                    {
+                        'results': [
+                            {
+                                'id': 'child',
+                                'type': 'paragraph',
+                                'has_children': True,
+                                'paragraph': {'rich_text': [{'plain_text': 'parent'}]},
+                            }
+                        ]
+                    }
+                ).encode(),
+            ),
+            (
+                200,
+                json.dumps(
+                    {'results': [{'type': 'paragraph', 'paragraph': {'rich_text': [{'plain_text': 'nested'}]}}]}
+                ).encode(),
+            ),
+        ]
+        result = notion.read('T', 'p')
+        self.assertEqual(result['text'], 'parent\nnested')
+        self.assertFalse(result['truncated'])
+        self.responses = [(200, b'{"id":"p","properties":{}}')] + [
+            (200, b'{"results":[],"has_more":true,"next_cursor":"c"}')
+        ] * 5
+        result = notion.read('T', 'p')
+        self.assertTrue(result['truncated'])
+        self.assertIn('page_limit', result['omissions'])
+
+    def test_append_replay_does_not_fetch_changed_page(self):
+        page = b'{"id":"p","last_edited_time":"e1","properties":{}}'
+        self.responses = [(200, page), (200, page), (200, b'{}')]
+        request = {'op': 'append', 'request_id': 'e' * 32, 'page_id': 'p', 'paragraphs': ['x']}
+        result = notion.handle(request)
+        self.assertEqual(notion.handle(request), result)
+        self.assertEqual(len(self.calls), 3)
+
+    def test_changed_page_after_approval_is_rejected_against_frozen_version(self):
+        import connector_base
+
+        request = {'op': 'append', 'request_id': 'f' * 32, 'page_id': 'p', 'paragraphs': ['x']}
+        self.responses = [(200, b'{"id":"p","last_edited_time":"e1","properties":{}}')]
+        with patch.object(connector_base.policy_client, 'require', side_effect=Denied('APPROVAL_REQUIRED:a')):
+            with self.assertRaisesRegex(Denied, 'APPROVAL_REQUIRED'):
+                notion.handle(request)
+        self.responses = [(200, b'{"id":"p","last_edited_time":"e2","properties":{}}')]
+        with self.assertRaisesRegex(Denied, 'TARGET_CHANGED'):
+            notion.handle(request)
+        self.assertTrue(all(call[0] == 'GET' for call in self.calls))
+
+    def test_post_search_failure_is_not_a_write_unknown(self):
+        self.responses = [(503, b'private')]
+        with self.assertRaisesRegex(Denied, '^PROVIDER_REQUEST_FAILED$'):
+            notion.handle({'op': 'search', 'query': 'q', 'limit': 1})
+
+    def test_nontext_omissions_do_not_claim_text_truncation(self):
+        self.responses = [(200, b'{"id":"p"}'), (200, b'{"results":[{"type":"divider"},{"type":"image"}]}')]
+        result = notion.read('T', 'p')
+        self.assertFalse(result['truncated'])
+        self.assertEqual(result['omissions'], ['unsupported_block'])
 
     def test_validation(self):
         with self.assertRaises(Denied):

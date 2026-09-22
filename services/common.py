@@ -48,6 +48,10 @@ class Denied(Exception):
     pass
 
 
+class ExecutionUnknown(Denied):
+    """An upstream write may have committed; never present it as a safe-to-retry rejection."""
+
+
 def recv_json(conn):
     data = bytearray()
     while b'\n' not in data:
@@ -160,7 +164,7 @@ def https_transport(host, method, path, headers, body):
         conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
         conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
-        return response.status, response.read(2 * 1024 * 1024 + 1)
+        return response.status, response.read(2 * 1024 * 1024 + 1), response.getheader('ETag')
     finally:
         conn.close()
         raw.close()
@@ -181,6 +185,8 @@ def provider_request(
     content_type=None,
     raw=False,
     max_bytes=2 * 1024 * 1024,
+    with_etag=False,
+    write=False,
 ):
     """One request to a connector's single host; the path must match the connector's allowlist."""
     if (
@@ -198,17 +204,29 @@ def provider_request(
         request_headers['Authorization'] = 'Bearer ' + token
     if body is not None:
         request_headers['Content-Type'] = content_type or 'application/json; charset=utf-8'
-    status, payload = TRANSPORT(connector.hosts[0], method, path, request_headers, body)
+    response = TRANSPORT(connector.hosts[0], method, path, request_headers, body)
+    status, payload = response[:2]
+    etag = response[2] if len(response) > 2 else None
+    uncertain = ExecutionUnknown if write else Denied
     if status != 200:
         # Never reflect provider error bodies: they can echo tokens or private content.
+        if status == 412:
+            raise Denied('TARGET_CHANGED')
+        if write and status not in (400, 401, 403, 404, 405, 409, 422, 429):
+            raise ExecutionUnknown('WRITE_EXECUTION_UNKNOWN')
         if status in (401, 403):
             raise Denied('PROVIDER_AUTH_REQUIRED')
         raise Denied('PROVIDER_RATE_LIMITED' if status == 429 else 'PROVIDER_REQUEST_FAILED')
     if len(payload) > max_bytes:
-        raise Denied('PROVIDER_RESPONSE_TOO_LARGE')
+        raise uncertain('PROVIDER_RESPONSE_TOO_LARGE')
     if raw:
         return payload
     try:
-        return json.loads(payload) if payload else {}
+        if not payload and write:
+            raise ValueError()
+        value = json.loads(payload) if payload else {}
+        if not isinstance(value, dict):
+            raise ValueError()
+        return (value, etag) if with_etag else value
     except ValueError:
-        raise Denied('PROVIDER_RESPONSE_INVALID') from None
+        raise uncertain('PROVIDER_RESPONSE_INVALID') from None

@@ -90,8 +90,10 @@ def title_of(item):
     return ''
 
 
-def post(token, path, body):
-    return provider_request(SELF, 'POST', path, token=token, headers=HEADERS, body=json.dumps(body).encode('utf-8'))
+def post(token, path, body, *, write=False):
+    return provider_request(
+        SELF, 'POST', path, token=token, headers=HEADERS, body=json.dumps(body).encode('utf-8'), write=write
+    )
 
 
 def get(token, path):
@@ -114,25 +116,57 @@ def search(token, query, limit):
 
 def read(token, page_id):
     page = get(token, f'/v1/pages/{page_id}')
-    lines, cursor = [], None
-    for _ in range(5):
-        path = f'/v1/blocks/{page_id}/children?page_size=100' + (f'&start_cursor={cursor}' if cursor else '')
-        chunk = get(token, path)
-        for block in chunk.get('results', []):
-            kind = block.get('type')
-            if kind in TEXT_BLOCKS:
-                text = plain(block.get(kind, {}).get('rich_text', []))
-                lines.append(('- ' if kind in LIST_BLOCKS else '') + text)
-        cursor = chunk.get('next_cursor')
-        if not chunk.get('has_more') or not cursor:
-            break
-    text, truncated = connector_base.text_limit('\n'.join(lines))
+    lines, reasons = [], set()
+    pages_left, bytes_left = 5, 40000
+
+    def visit(block_id, depth=0):
+        nonlocal pages_left, bytes_left
+        if depth > 8:
+            reasons.add('depth_limit')
+            return
+        cursor = None
+        while True:
+            if pages_left <= 0:
+                reasons.add('page_limit')
+                return
+            pages_left -= 1
+            path = f'/v1/blocks/{block_id}/children?page_size=100' + (f'&start_cursor={cursor}' if cursor else '')
+            chunk = get(token, path)
+            for block in chunk.get('results', []):
+                kind = block.get('type')
+                if kind in TEXT_BLOCKS:
+                    text = ('- ' if kind in LIST_BLOCKS else '') + plain(block.get(kind, {}).get('rich_text', []))
+                    text, clipped = connector_base.text_limit(text, max(0, bytes_left - 1))
+                    lines.append(text)
+                    bytes_left -= len(text.encode('utf-8')) + 1
+                    if clipped or bytes_left <= 0:
+                        reasons.add('text_limit')
+                        return
+                else:
+                    reasons.add('unsupported_block')
+                if block.get('has_children'):
+                    child_id = block.get('id')
+                    if not isinstance(child_id, str) or not ID.fullmatch(child_id):
+                        reasons.add('missing_children')
+                    else:
+                        visit(child_id, depth + 1)
+            if not chunk.get('has_more'):
+                return
+            cursor = chunk.get('next_cursor')
+            if not cursor:
+                reasons.add('missing_cursor')
+                return
+
+    visit(page_id)
+    text = '\n'.join(lines)
+    truncated = bool(reasons - {'unsupported_block'})
     return {
         'id': page.get('id'),
         'title': title_of(page),
         'last_edited_time': page.get('last_edited_time'),
         'text': text,
         'truncated': truncated,
+        'omissions': sorted(reasons),
         'untrusted_content': True,
     }
 
@@ -150,7 +184,7 @@ def create_page(token, params):
         'properties': {'title': {'title': [{'type': 'text', 'text': {'content': params['title']}}]}},
         'children': paragraph_blocks(params['paragraphs']),
     }
-    result = post(token, '/v1/pages', body)
+    result = post(token, '/v1/pages', body, write=True)
     return {'id': result.get('id')}
 
 
@@ -171,6 +205,7 @@ def append(token, params):
         token=token,
         headers=HEADERS,
         body=json.dumps({'children': paragraph_blocks(params['paragraphs'])}).encode('utf-8'),
+        write=True,
     )
     return {'id': params['page_id'], 'appended': len(params['paragraphs'])}
 
@@ -210,6 +245,8 @@ def handle(request):
 
     def prepare(p):
         fields(p, ('page_id', 'paragraphs'), ('page_id', 'paragraphs'))
+        validate('notion.read', {'page_id': p['page_id']})
+        check_paragraphs(p['paragraphs'])
         frozen = prepare_append(token, p)
         validate(operation, frozen)
         return frozen

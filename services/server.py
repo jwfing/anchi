@@ -3,6 +3,7 @@
 import os
 import pwd
 import socket
+import sqlite3
 import sys
 import time
 from collections import deque
@@ -40,12 +41,28 @@ def credential_ops(caller):
     return ('status', 'access_token') if connector.credential.startswith('google:') else ('status', 'token')
 
 
+def recover_connector(mode):
+    connector = connectors.CONNECTORS.get(mode)
+    if connector is None or connectors.WRITE not in connector.ops.values():
+        return True
+    import connector_base
+
+    try:
+        connector_base.ledger(connector).recover()
+        return True
+    except (OSError, sqlite3.Error):
+        # Keep reads/status available, but never execute writes without recovery.
+        print('CONNECTOR_LEDGER_UNAVAILABLE', file=sys.stderr)
+        return False
+
+
 class Service:
     def __init__(self, mode, service_uids, cell_uid=CELL_AGENT_HOST_UID, clock=time.monotonic, peer=peer_uid):
         if mode not in MODES:
             raise ValueError('Unknown service')
         self.mode, self.service_uids, self.clock, self.peer = mode, service_uids, clock, peer
         self.allowed_uids = set(service_uids) if mode in ('auth', 'policy') else {cell_uid}
+        self.writes_ready = True
         self._handler = None
         self.recent = deque()
 
@@ -75,6 +92,13 @@ class Service:
                 raise Denied('CALLER_DENIED')
             self.throttle()
             request = recv_json(conn)
+            connector = connectors.CONNECTORS.get(self.mode)
+            if (
+                connector
+                and not self.writes_ready
+                and connector.ops.get(self.mode + '.' + str(request.get('op'))) == connectors.WRITE
+            ):
+                raise Denied('LEDGER_UNAVAILABLE')
             caller = self.service_uids.get(uid)
             if self.mode == 'auth' and request.get('op') not in credential_ops(caller):
                 raise Denied('CREDENTIAL_SCOPE_DENIED')
@@ -105,6 +129,7 @@ def main():
     if mode == 'inference':
         inference.recover()
     service = Service(mode, service_uids)
+    service.writes_ready = recover_connector(mode)
     while True:
         conn, _ = listener.accept()
         with conn:

@@ -29,13 +29,17 @@ def validate(op, params):
         if type(params['limit']) is not int or not 1 <= params['limit'] <= 200:
             raise Denied('BAD_LIMIT')
     elif op == 'slack.history':
-        fields(params, ('channel', 'limit', 'oldest'), ('channel', 'limit'))
+        fields(params, ('channel', 'limit', 'oldest', 'cursor'), ('channel', 'limit'))
         if not isinstance(params['channel'], str) or not CHANNEL.fullmatch(params['channel']):
             raise Denied('BAD_CHANNEL')
         if type(params['limit']) is not int or not 1 <= params['limit'] <= 50:
             raise Denied('BAD_LIMIT')
         if 'oldest' in params and (type(params['oldest']) is not int or params['oldest'] < 0):
             raise Denied('BAD_OLDEST')
+        if 'cursor' in params and (
+            not isinstance(params['cursor'], str) or not re.fullmatch(r'[A-Za-z0-9_=:-]{1,512}', params['cursor'])
+        ):
+            raise Denied('BAD_CURSOR')
     elif op == 'slack.post':
         fields(params, ('channel', 'text', 'thread_ts'), ('channel', 'text'))
         if not isinstance(params['channel'], str) or not CHANNEL.fullmatch(params['channel']):
@@ -50,9 +54,9 @@ def validate(op, params):
         raise Denied('OPERATION_DENIED')
 
 
-def call(token, method, path, body=None):
+def call(token, method, path, body=None, *, write=False):
     encoded = json.dumps(body).encode('utf-8') if body is not None else None
-    result = provider_request(SELF, method, path, token=token, body=encoded)
+    result = provider_request(SELF, method, path, token=token, body=encoded, write=write)
     if result.get('ok') is not True:
         # Slack signals failures with ok:false; map to fixed codes, never echo provider text.
         raise Denied(ERRORS.get(str(result.get('error')), 'PROVIDER_REJECTED'))
@@ -70,21 +74,35 @@ def history(token, params):
     query = {'channel': params['channel'], 'limit': params['limit']}
     if 'oldest' in params:
         query['oldest'] = params['oldest']
+    if 'cursor' in params:
+        query['cursor'] = params['cursor']
     result = call(token, 'GET', '/api/conversations.history?' + urlencode(query))
     messages = []
+    clipped = False
     for m in result.get('messages', [])[: params['limit']]:
         item = {'ts': m.get('ts'), 'user': m.get('user', ''), 'text': str(m.get('text', ''))[:4000]}
         if m.get('thread_ts'):
             item['thread_ts'] = m['thread_ts']
         messages.append(item)
-    return {'messages': messages, 'untrusted_content': True}
+        if len(json.dumps(messages, ensure_ascii=False).encode('utf-8')) > 46000:
+            messages.pop()
+            clipped = True
+            break
+        if len(str(m.get('text', ''))) > 4000:
+            clipped = True
+    return {
+        'messages': messages,
+        'untrusted_content': True,
+        'truncated': clipped or bool(result.get('has_more')),
+        'next_cursor': result.get('response_metadata', {}).get('next_cursor') if not clipped else None,
+    }
 
 
 def post(token, params):
     body = {'channel': params['channel'], 'text': params['text']}
     if 'thread_ts' in params:
         body['thread_ts'] = params['thread_ts']
-    result = call(token, 'POST', '/api/chat.postMessage', body)
+    result = call(token, 'POST', '/api/chat.postMessage', body, write=True)
     return {'ts': result.get('ts'), 'channel': result.get('channel')}
 
 

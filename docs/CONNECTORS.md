@@ -15,7 +15,7 @@
 
 ## 授权模式
 
-连接账户后该 connector 处于「持续授权」：读写都由策略按白名单自动签发一次性授权，不弹审批。卡片上的「改为逐次审批」把它切到 `ask`：之后每个操作都进入独立审批页，需要核对内容后批准；「恢复持续授权」会先弹出说明提示注入风险的确认框。模型调用有同样的开关，在首次设置页第 4 步。切换任一模式都会撤销所有未消费的授权。终端等价命令：
+全新安装连接账户后该 connector 处于「持续授权」：读写都由策略按白名单自动签发一次性授权，不弹审批。卡片上的「改为逐次审批」把它切到 `ask`：之后每个操作都进入独立审批页，需要核对内容后批准；「恢复持续授权」会先弹出说明提示注入风险的确认框。模型调用有同样的开关，在首次设置页第 4 步。切换任一模式都会撤销所有未消费的授权。终端等价命令：
 
 ```bash
 bash scripts/policy.sh rules                 # 查看每个主体当前模式
@@ -23,11 +23,13 @@ bash scripts/policy.sh mode drive ask        # Drive 改为逐次审批
 bash scripts/policy.sh mode inference auto   # 模型调用恢复持续授权
 ```
 
+旧库缺少新版模式时也使用 `auto` 默认值，不强制迁移为 `ask`；已有显式模式保持不变。升级后请核对权限页：旧只读许可与新版持续读写模式不同，处理不可信来源时建议主动选择逐次审批。
+
 ## 读与写
 
 | Connector | 读 | 写 |
 |---|---|---|
-| Drive | `drive_search`（名称或全文，≤10）、`drive_read`（Google 文档导出文本或 text 类文件，≤40 KB） | `drive_create`（指定文件夹新建文本或 Google 文档）、`drive_update`（更新本应用创建的文件，绑定当前修订） |
+| Drive | `drive_search`（名称或全文，≤10）、`drive_read`（Google 文档导出文本或 text 类文件，≤40 KB） | `drive_create`（指定文件夹新建文本或 Google 文档）、`drive_update`（更新本应用创建的文本文件，要求当前修订，强 ETag 可选；Google 文档暂不支持覆盖） |
 | Notion | `notion_search`（≤10）、`notion_read`（页面块拼成文本，≤40 KB） | `notion_create_page`（父页面下新建）、`notion_append`（追加段落，绑定当前编辑时间） |
 | Slack | `slack_channels`（bot 已加入的频道）、`slack_history`（≤50 条） | `slack_post`（发消息，可选线程） |
 
@@ -35,7 +37,7 @@ bash scripts/policy.sh mode inference auto   # 模型调用恢复持续授权
 
 ## 审批页如何核对写入（逐次审批模式）
 
-写入请求在审批页带有橙色横幅「这是一次写入」，摘要显示：connector 账户、操作、目标（文件名与修订、页面与编辑时间、频道与线程）、正文全文。批准后立即执行一次；更新类操作在执行前再次核对目标修订，变化则以 `TARGET_CHANGED` 失败且不重试。结果不明（超时、断流）记为 UNKNOWN，同一请求不会自动重放。
+写入请求在审批页带有橙色横幅「这是一次写入」，摘要显示：connector 账户、操作、目标（文件名与修订、页面与编辑时间、频道与线程）、正文全文。批准后立即执行一次；更新类操作在执行前再次核对目标修订，变化则以 `TARGET_CHANGED` 失败且不重试。Pi 保留同一 request ID 等待审批，支持取消与 10 分钟超时。首次准备的动作持久化，重试不重新冻结目标版本；已成功的同一请求返回缓存。结果不明（超时、断流、服务端 5xx、成功响应无法解析）记为 UNKNOWN，同一请求不会自动重放，应先到远端核对。
 
 ## 断开
 
@@ -47,14 +49,17 @@ bash scripts/policy.sh mode inference auto   # 模型调用恢复持续授权
 
 - 读取到的邮件、文件、页面和消息可能进入 agent 上下文与云模型；凭证隔离不等于数据不出本机。
 - Drive 使用 `drive.file` scope，只能更新本应用创建的文件；其他文件的更新会被 Google 拒绝并显示为 `TARGET_NOT_WRITABLE`。
-- 修订核对与实际写入之间仍有毫秒级窗口。
+- Drive 更新冻结非空修订号并在执行前复核；上游提供强 ETag 时才携带 `If-Match`，412 返回 `TARGET_CHANGED`。无 ETag 的修订前置检查不是原子条件写入。Google 文档缺少该修订字段，目前拒绝覆盖，可另建文件。
+- Notion 的编辑时间核对仍是执行前检查，不是上游原子条件写入；核对与追加之间存在竞态窗口。
+- Notion 读取会遍历嵌套 block，最多 5 次子块分页请求、8 层、40 KB；未读完时返回 `truncated` 和 `omissions`；图片、分割线等仅在 `omissions` 中说明，不据此声明文本截断。
+- Slack 历史按序列化 UTF-8 总大小限制响应。超出预算或上游仍有更多内容时标记 `truncated`，完整分页时可使用返回的 `next_cursor`。
 - Slack bot 只能读取它已加入的频道；私信、用户令牌与 OAuth 暂不支持。
 - Notion API 版本固定为 `2022-06-28`。
 
 ## 命令行
 
 ```bash
-bash scripts/policy.sh read drive allow      # 持续只读许可，deny 撤销并作废所有待消费授权
+bash scripts/policy.sh read drive allow      # 兼容别名：allow=auto（包含写入），deny=ask
 bash scripts/policy.sh pending               # 待审批
 limactl shell secure-vm -- sudo /usr/bin/python3 /opt/secure-vm/services/connector_admin.py slack probe
 ```

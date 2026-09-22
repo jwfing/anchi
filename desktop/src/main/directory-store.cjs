@@ -35,9 +35,15 @@ function validateDirectory(chosen, home, entries, platform = describe()) {
   if (entries.some((d) => overlaps(chosen, d.path))) throw Error('DIRECTORY_OVERLAPS');
 }
 
+function validateProtectedDirectory(chosen, mode, protectedPaths = []) {
+  if (mode === 'rw' && protectedPaths.some((p) => overlaps(chosen, p)))
+    throw Error('RUNTIME_DIRECTORY_NOT_ALLOWED');
+}
+
 /** Stores plans only. No mount, filesystem capability or grant is created here. */
 class DirectoryStore {
-  constructor(file, home, io = fs, platform = describe()) {
+  constructor(file, home, io = fs, platform = describe(), protectedPaths = []) {
+    this.protectedPaths = protectedPaths;
     this.file = file;
     this.home = home;
     this.io = io;
@@ -120,6 +126,7 @@ class DirectoryStore {
       const chosen = await this.io.realpath(file);
       if (!(await this.io.stat(chosen)).isDirectory()) throw Error('INVALID_DIRECTORY');
       validateDirectory(chosen, this.home, next, this.platform);
+      validateProtectedDirectory(chosen, mode, this.protectedPaths);
       next.push({ id: randomUUID(), path: chosen, mode });
       return next;
     });
@@ -130,6 +137,7 @@ class DirectoryStore {
     return this.mutate((next) => {
       const item = next.find((d) => d.id === id);
       if (!item) throw Error('DIRECTORY_NOT_FOUND');
+      validateProtectedDirectory(item.path, mode, this.protectedPaths);
       item.mode = mode;
       return next;
     });
@@ -154,4 +162,4 @@ class DirectoryStore {
     });
   }
 }
-module.exports = { DirectoryStore, validateDirectory };
+module.exports = { DirectoryStore, validateDirectory, validateProtectedDirectory };

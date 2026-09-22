@@ -35,6 +35,34 @@ class Runtime {
     this.env = childEnvironment(platform);
   }
 
+  async protectedPaths(extra = []) {
+    const paths = [
+      this.root,
+      process.execPath,
+      ...extra,
+      this.platform.toolsDirectory,
+      this.platform.nvmDirectory,
+    ].filter(Boolean);
+    for (const name of ['python', 'limactl', 'codex', 'brew', 'qemu']) {
+      const file = await executable(name, { platform: this.platform }).catch(() => null);
+      if (!file) continue;
+      const real = await fs.realpath(file).catch(() => path.resolve(file));
+      paths.push(file, real);
+      const directory = path.dirname(real);
+      if (directory !== this.platform.home) paths.push(directory);
+      // Only known installation layouts justify protecting a parent above bin/.
+      const installation =
+        real.match(/^(.*\/(?:Cellar|Caskroom)\/[^/]+\/[^/]+)\//)?.[1] ||
+        real.match(/^(.*\/Python\.framework\/Versions\/[^/]+)\//)?.[1];
+      if (installation) paths.push(installation);
+    }
+    return [
+      ...new Set(
+        await Promise.all(paths.map(async (p) => fs.realpath(p).catch(() => path.resolve(p)))),
+      ),
+    ];
+  }
+
   async command(file, args, timeout = 30000) {
     const { stdout } = await exec(file, args, {
       cwd: this.root,

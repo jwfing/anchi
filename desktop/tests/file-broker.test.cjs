@@ -77,3 +77,24 @@ test('persisted grants restore only for the identical directory; consent pins id
   await broker.activate('fresh');
   assert.deepEqual(recorded[1], ['fresh', identity]);
 });
+
+test('persisted write grants overlapping runtime stay inactive after upgrade', async (t) => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-protected-'));
+  t.after(() => fs.rm(temp, { recursive: true, force: true }));
+  const directory = await fs.realpath(temp);
+  const stat = await fs.stat(directory, { bigint: true });
+  const directories = {
+    protectedPaths: [path.join(directory, 'runtime')],
+    directories: [
+      { id: 'g', path: directory, mode: 'rw', identity: [String(stat.dev), String(stat.ino)] },
+    ],
+  };
+  const broker = new FileBroker({ directories, runtime: {} });
+  const errors = await broker.restore();
+  assert.equal(errors.get('g'), 'RUNTIME_DIRECTORY_NOT_ALLOWED');
+  assert.equal(broker.grants.size, 0);
+  await assert.rejects(broker.activate('g'), /RUNTIME_DIRECTORY_NOT_ALLOWED/);
+  directories.directories[0].mode = 'ro';
+  await broker.activate('g', { confirmed: false });
+  assert.equal(broker.grants.get('g').mode, 'ro');
+});

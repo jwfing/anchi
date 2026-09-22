@@ -32,6 +32,56 @@ class Ledger:
         finally:
             conn.close()
 
+    def freeze(self, request_id, source_digest, prepare, *, daily_limit=None):
+        """Reserve before preparing; no network runs under a SQLite transaction."""
+        now = time.time()
+        with self.database() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute(
+                'CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY, source_digest TEXT NOT NULL, action TEXT, created REAL NOT NULL)'
+            )
+            columns = {row[1] for row in conn.execute('PRAGMA table_info(actions)')}
+            if 'created' not in columns:
+                # Previous schema had NOT NULL action: rebuild for reservation rows.
+                conn.execute('ALTER TABLE actions RENAME TO old_actions')
+                conn.execute(
+                    'CREATE TABLE actions (id TEXT PRIMARY KEY, source_digest TEXT NOT NULL, action TEXT, created REAL NOT NULL)'
+                )
+                conn.execute(
+                    'INSERT INTO actions SELECT a.id,a.source_digest,a.action,COALESCE(r.created,?) FROM old_actions a LEFT JOIN runs r ON r.id=a.id',
+                    (now,),
+                )
+                conn.execute('DROP TABLE old_actions')
+            # Keep immutable execution tombstones in runs; discard old payloads, never replay them.
+            conn.execute('DELETE FROM actions WHERE created<?', (now - 7 * 86400,))
+            row = conn.execute('SELECT * FROM actions WHERE id=?', (request_id,)).fetchone()
+            if row:
+                if row['source_digest'] != source_digest:
+                    raise Denied('REQUEST_ID_CONFLICT')
+                if row['action'] is None:
+                    raise Denied('REQUEST_ALREADY_PREPARING')
+                return json.loads(row['action'])
+            if conn.execute('SELECT 1 FROM runs WHERE id=?', (request_id,)).fetchone():
+                raise Denied('REQUEST_LEGACY_REPLAY_DENIED')
+            if daily_limit is not None:
+                count = conn.execute(
+                    'SELECT count(*) FROM (SELECT id FROM actions WHERE created>? UNION SELECT id FROM runs WHERE created>?)',
+                    (now - 86400, now - 86400),
+                ).fetchone()[0]
+                if count >= daily_limit:
+                    raise Denied(self.limit_code)
+            conn.execute('INSERT INTO actions VALUES(?,?,NULL,?)', (request_id, source_digest, now))
+        try:
+            action = prepare()
+            encoded = json.dumps(action)
+        except Exception:
+            with self.database() as conn:
+                conn.execute('DELETE FROM actions WHERE id=? AND action IS NULL', (request_id,))
+            raise
+        with self.database() as conn:
+            conn.execute('UPDATE actions SET action=? WHERE id=? AND action IS NULL', (encoded, request_id))
+        return action
+
     def begin(self, request_id, digest, *, model='', daily_limit=None, window=86400):
         """Reserve request_id as RUNNING. Returns the cached result when it already succeeded."""
         now = time.time()

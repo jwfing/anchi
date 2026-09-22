@@ -24,7 +24,11 @@ def database():
     conn = sqlite3.connect(DATABASE, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
-        conn.executescript('''
+        # Initialization only: ordinary pending/audit reads must not acquire a write lock.
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {'config', 'grants', 'audit', 'rules'} <= tables:
+            conn.execute('BEGIN IMMEDIATE')
+            schema = '''
           CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL, gmail_read INTEGER NOT NULL);
           INSERT OR IGNORE INTO config VALUES(1,1,0);
           CREATE TABLE IF NOT EXISTS grants (
@@ -33,7 +37,11 @@ def database():
             expires REAL NOT NULL, ticket_hash TEXT, decided REAL, consumed REAL);
           CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at REAL NOT NULL, event TEXT NOT NULL, grant_id TEXT, digest TEXT);
           CREATE TABLE IF NOT EXISTS rules (principal TEXT PRIMARY KEY, mode TEXT NOT NULL);
-        ''')
+        '''
+            for statement in schema.split(';'):
+                if statement.strip():
+                    conn.execute(statement)
+            conn.commit()
         with conn:
             yield conn
     finally:
