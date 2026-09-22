@@ -35,6 +35,17 @@ class Runtime {
     this.env = childEnvironment(platform);
   }
 
+  async protectedPaths(extra = []) {
+    const paths = [this.root, process.execPath, ...extra];
+    for (const name of ['python', 'limactl', 'codex', 'brew', 'qemu']) {
+      const file = await executable(name, { platform: this.platform });
+      if (file) {
+        paths.push(file, path.dirname(path.dirname(await fs.realpath(file))));
+      }
+    }
+    return [...new Set(await Promise.all(paths.map(async (p) => fs.realpath(p))))];
+  }
+
   async command(file, args, timeout = 30000) {
     const { stdout } = await exec(file, args, {
       cwd: this.root,

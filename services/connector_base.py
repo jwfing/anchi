@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from common import Denied, rpc
+from common import Denied, ExecutionUnknown, rpc
 from ledger import Ledger
 import policy_client
 
@@ -42,12 +42,17 @@ def write(connector, op, params, account, request_id, prepare, execute):
     """Freeze the exact content, get a one-time grant, execute once; ambiguous outcomes stay UNKNOWN."""
     if not isinstance(request_id, str) or len(request_id) != 32 or any(c not in '0123456789abcdef' for c in request_id):
         raise Denied('BAD_REQUEST_ID')
-    frozen = prepare(dict(params))
+    book = ledger(connector)
+    source_digest = hashlib.sha256(
+        json.dumps(
+            {'operation': op, 'account': account, 'params': params}, sort_keys=True, separators=(',', ':')
+        ).encode()
+    ).hexdigest()
+    frozen = book.freeze(request_id, source_digest, lambda: prepare(dict(params)))
     action = {'operation': op, 'account': account, 'params': frozen}
     digest = hashlib.sha256(
         json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
     ).hexdigest()
-    book = ledger(connector)
     cached = book.begin(request_id, digest, model=op, daily_limit=DAILY_WRITES)
     if cached is not None:
         return cached
@@ -61,6 +66,9 @@ def write(connector, op, params, account, request_id, prepare, execute):
         raise
     try:
         result = execute(frozen)
+    except ExecutionUnknown:
+        book.mark(request_id, 'UNKNOWN', error='WRITE_EXECUTION_UNKNOWN')
+        raise Denied('WRITE_EXECUTION_UNKNOWN') from None
     except Denied as exc:
         book.mark(request_id, 'FAILED', error=str(exc))
         raise

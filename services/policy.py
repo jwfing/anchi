@@ -24,7 +24,10 @@ def database():
     conn = sqlite3.connect(DATABASE, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
-        conn.executescript('''
+        conn.execute('BEGIN IMMEDIATE')
+        legacy = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='config'").fetchone()
+        migrated = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rules'").fetchone()
+        schema = '''
           CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL, gmail_read INTEGER NOT NULL);
           INSERT OR IGNORE INTO config VALUES(1,1,0);
           CREATE TABLE IF NOT EXISTS grants (
@@ -33,7 +36,17 @@ def database():
             expires REAL NOT NULL, ticket_hash TEXT, decided REAL, consumed REAL);
           CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at REAL NOT NULL, event TEXT NOT NULL, grant_id TEXT, digest TEXT);
           CREATE TABLE IF NOT EXISTS rules (principal TEXT PRIMARY KEY, mode TEXT NOT NULL);
-        ''')
+        '''
+        for statement in schema.split(';'):
+            if statement.strip():
+                conn.execute(statement)
+        # Existing installations had mandatory write/model approvals. Preserve that boundary,
+        # including legacy read-only standing grants (which cannot map to auto read+write).
+        with conn:
+            if legacy and not migrated:
+                conn.executemany('INSERT OR IGNORE INTO rules VALUES(?,?)', [(p, 'ask') for p in PRINCIPALS])
+                conn.execute('UPDATE config SET epoch=epoch+1 WHERE id=1')
+                conn.execute("UPDATE grants SET state='REVOKED' WHERE state IN ('PENDING','APPROVED','ISSUED')")
         with conn:
             yield conn
     finally:

@@ -1,4 +1,6 @@
 import importlib.util
+import json
+from unittest.mock import patch
 import os
 from pathlib import Path
 import tempfile
@@ -33,7 +35,10 @@ class HostFilesTests(unittest.TestCase):
         self.assertFalse((self.root / 'output/report.txt').exists())
         self.assertEqual((self.root / deleted['trashed_as']).read_text(), 'replacement')
         self.assertTrue(deleted['trashed_as'].startswith(module.TRASH + '/'))
-        self.assertTrue(deleted['trashed_as'].endswith('output__report.txt'))
+        self.assertEqual(
+            json.loads((self.root / (deleted['trashed_as'] + '.json')).read_text())['original_path'],
+            'output/report.txt',
+        )
         # The trash stays hidden from listing and unreachable through the tool.
         self.assertEqual(self.run_op('list')['entries'], [{'name': 'output', 'kind': 'directory'}])
         with self.assertRaisesRegex(ValueError, 'INVALID_PATH'):
@@ -62,3 +67,32 @@ class HostFilesTests(unittest.TestCase):
         self.grant['identity'][1] = '0'
         with self.assertRaisesRegex(ValueError, 'DIRECTORY_CHANGED'):
             self.run_op('list')
+
+    def test_failed_replace_keeps_original_and_backup(self):
+        self.run_op('write', 'report.txt', text='old')
+        with patch.object(module.os, 'replace', side_effect=OSError('injected')):
+            with self.assertRaises(OSError):
+                self.run_op('write', 'report.txt', text='new')
+        self.assertEqual(self.run_op('read', 'report.txt')['text'], 'old')
+        backups = [p for p in (self.root / module.TRASH).iterdir() if not p.name.endswith('.json')]
+        self.assertEqual([p.read_text() for p in backups], ['old'])
+        self.assertFalse(any(p.name.startswith('.anchi-') and p.is_file() for p in self.root.iterdir()))
+
+    def test_long_nested_paths_and_unicode_names_are_recoverable(self):
+        for name in ('x' * 230, '中文' * 35):
+            relative = 'nested/' + name
+            (self.root / 'nested').mkdir(exist_ok=True)
+            self.run_op('write', relative, text='old')
+            result = self.run_op('write', relative, text='new')
+            self.assertEqual((self.root / result['previous']).read_text(), 'old')
+            result = self.run_op('delete', relative)
+            self.assertEqual((self.root / result['trashed_as']).read_text(), 'new')
+            self.assertEqual(
+                json.loads((self.root / (result['trashed_as'] + '.json')).read_text())['original_path'], relative
+            )
+
+    def test_large_previous_file_is_not_destroyed_by_overwrite(self):
+        (self.root / 'large').write_bytes(b'x' * (module.LIMIT + 1))
+        with self.assertRaisesRegex(ValueError, 'UNSAFE_OR_LARGE_FILE'):
+            self.run_op('write', 'large', text='new')
+        self.assertEqual((self.root / 'large').stat().st_size, module.LIMIT + 1)

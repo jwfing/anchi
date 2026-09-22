@@ -129,3 +129,27 @@ test('sensitive roots, ancestors and credential stores are rejected per platform
   }
   assert.doesNotThrow(() => validateDirectory('/home/fixture/docs', '/home/fixture', [], linux));
 });
+
+test('runtime code and installation ancestors cannot receive write authority', async (t) => {
+  const { validateProtectedDirectory } = require('../src/main/directory-store.cjs');
+  const protectedPaths = ['/Users/fixture/Work/anchi', '/Users/fixture/Applications/Anchi.app'];
+  for (const chosen of [
+    '/Users/fixture/Work',
+    '/Users/fixture/Work/anchi/scripts',
+    '/Users/fixture/Applications',
+  ])
+    assert.throws(
+      () => validateProtectedDirectory(chosen, 'rw', protectedPaths),
+      /RUNTIME_DIRECTORY_NOT_ALLOWED/,
+    );
+  validateProtectedDirectory('/Users/fixture/Work/results', 'rw', protectedPaths);
+  validateProtectedDirectory('/Users/fixture/Work', 'ro', protectedPaths);
+  const { store, selected } = await fixture(t);
+  await store.add(selected, 'ro');
+  store.protectedPaths = [store.directories[0].path + '/runtime'];
+  await assert.rejects(
+    store.update(store.directories[0].id, 'rw'),
+    /RUNTIME_DIRECTORY_NOT_ALLOWED/,
+  );
+  assert.equal(store.directories[0].mode, 'ro');
+});

@@ -61,3 +61,75 @@ test('only connected connectors are registered', async () => {
   };
   assert.deepEqual(await connectedConnectors(rpc), ['gmail']);
 });
+
+test('approval waits reuse one write request and notify once, then return the result', async () => {
+  const { callConnector } = await import('../connectors.mjs');
+  const calls = [],
+    events = [];
+  const result = await callConnector({
+    connector: 'slack',
+    tool: CONNECTOR_TOOLS.slack.find((t) => t.name === 'slack_post'),
+    params: { channel: 'C1', text: 'hello' },
+    notify: (e) => events.push(e),
+    wait: async () => {},
+    call: async (_socket, request) => {
+      calls.push(request);
+      if (calls.length < 3) throw Error('APPROVAL_REQUIRED:abc');
+      return { ts: '1.1' };
+    },
+  });
+  assert.deepEqual(result, { ts: '1.1' });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].approval_id, 'abc');
+  assert.equal(calls[0], calls[2]);
+  assert.equal(events[0].request_id, calls[0].request_id);
+});
+
+test('connector approvals stop on denial, timeout, unknown result and abort', async () => {
+  const { callConnector } = await import('../connectors.mjs');
+  const base = {
+    connector: 'slack',
+    tool: CONNECTOR_TOOLS.slack.find((t) => t.name === 'slack_post'),
+    params: { channel: 'C1', text: 'x' },
+  };
+  for (const code of ['POLICY_DENIED', 'WRITE_EXECUTION_UNKNOWN']) {
+    let calls = 0;
+    await assert.rejects(
+      callConnector({
+        ...base,
+        call: async () => {
+          calls++;
+          throw Error(code);
+        },
+      }),
+      new RegExp(code),
+    );
+    assert.equal(calls, 1);
+  }
+  await assert.rejects(
+    callConnector({
+      ...base,
+      approvalWaitMs: 0,
+      now: () => 1,
+      call: async () => {
+        throw Error('APPROVAL_REQUIRED:a');
+      },
+    }),
+    /APPROVAL_WAIT_TIMEOUT/,
+  );
+  const abort = new AbortController();
+  let calls = 0;
+  await assert.rejects(
+    callConnector({
+      ...base,
+      signal: abort.signal,
+      wait: async () => abort.abort(),
+      call: async () => {
+        calls++;
+        throw Error('APPROVAL_REQUIRED:a');
+      },
+    }),
+    /ABORTED/,
+  );
+  assert.equal(calls, 1);
+});

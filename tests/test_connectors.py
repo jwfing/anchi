@@ -202,6 +202,44 @@ class FlowTests(unittest.TestCase):
             )
         self.assertEqual(connector_base.ledger(self.slack).get('d' * 32)['state'], 'FAILED')
 
+    def test_frozen_metadata_survives_approval_retry_and_success(self):
+        from unittest.mock import Mock
+
+        prepare = Mock(return_value={'text': 'x', 'revision': 'r1'})
+        execute = Mock(return_value={'id': 'done'})
+        args = (self.slack, 'slack.post', {'text': 'x'}, 'gen', 'e' * 32, prepare, execute)
+        self.require.side_effect = Denied('APPROVAL_REQUIRED:a')
+        with self.assertRaises(Denied):
+            connector_base.write(*args)
+        prepare.side_effect = AssertionError('must not re-fetch changed metadata')
+        self.require.side_effect = None
+        self.assertEqual(connector_base.write(*args), {'id': 'done'})
+        self.assertEqual(connector_base.write(*args), {'id': 'done'})
+        execute.assert_called_once_with({'text': 'x', 'revision': 'r1'})
+        self.assertEqual(prepare.call_count, 1)
+        with self.assertRaisesRegex(Denied, 'REQUEST_ID_CONFLICT'):
+            connector_base.write(self.slack, 'slack.post', {'text': 'changed'}, 'gen', 'e' * 32, prepare, execute)
+        with self.assertRaisesRegex(Denied, 'REQUEST_ID_CONFLICT'):
+            connector_base.write(self.slack, 'slack.post', {'text': 'x'}, 'new-account', 'e' * 32, prepare, execute)
+
+    def test_uncertain_provider_responses_are_never_failed_or_replayed(self):
+        for index, response in enumerate(
+            ((200, b'not json'), (503, b'private upstream text'), (200, b'x' * (2 * 1024 * 1024 + 1)))
+        ):
+            request_id = f'{index:032x}'
+
+            def execute(p):
+                return common.provider_request(self.slack, 'POST', '/api/chat.postMessage', token='T', body=b'{}')
+
+            with patch('common.TRANSPORT', return_value=response) as transport:
+                args = (self.slack, 'slack.post', {'text': 'x'}, 'gen', request_id, lambda p: p, execute)
+                with self.assertRaisesRegex(Denied, 'WRITE_EXECUTION_UNKNOWN'):
+                    connector_base.write(*args)
+                self.assertEqual(connector_base.ledger(self.slack).get(request_id)['state'], 'UNKNOWN')
+                with self.assertRaisesRegex(Denied, 'REQUEST_ALREADY_UNKNOWN'):
+                    connector_base.write(*args)
+                transport.assert_called_once()
+
     def test_text_limit(self):
         text, truncated = connector_base.text_limit('中' * 20000, 40000)
         self.assertTrue(truncated)

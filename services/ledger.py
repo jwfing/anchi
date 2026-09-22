@@ -32,6 +32,25 @@ class Ledger:
         finally:
             conn.close()
 
+    def freeze(self, request_id, source_digest, prepare):
+        """Persist the first prepared action; retries never re-read mutable upstream metadata."""
+        with self.database() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute(
+                'CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY, source_digest TEXT NOT NULL, action TEXT NOT NULL)'
+            )
+            row = conn.execute('SELECT * FROM actions WHERE id=?', (request_id,)).fetchone()
+            if row:
+                if row['source_digest'] != source_digest:
+                    raise Denied('REQUEST_ID_CONFLICT')
+                return json.loads(row['action'])
+            if conn.execute('SELECT 1 FROM runs WHERE id=?', (request_id,)).fetchone():
+                # Pre-upgrade executions have no frozen input. Never reinterpret or replay them.
+                raise Denied('REQUEST_LEGACY_REPLAY_DENIED')
+            action = prepare()
+            conn.execute('INSERT INTO actions VALUES(?,?,?)', (request_id, source_digest, json.dumps(action)))
+            return action
+
     def begin(self, request_id, digest, *, model='', daily_limit=None, window=86400):
         """Reserve request_id as RUNNING. Returns the cached result when it already succeeded."""
         now = time.time()

@@ -55,18 +55,31 @@ def validate(op, params):
         # expected_revision/name/mime_type are filled by prepare(); the cell never supplies them.
         fields(
             params,
-            ('file_id', 'text', 'expected_revision', 'name', 'mime_type'),
-            ('file_id', 'text', 'expected_revision', 'name', 'mime_type'),
+            ('file_id', 'text', 'expected_revision', 'expected_etag', 'name', 'mime_type'),
+            ('file_id', 'text', 'expected_revision', 'expected_etag', 'name', 'mime_type'),
         )
         if not ID.fullmatch(str(params['file_id'])) or not isinstance(params['expected_revision'], str):
             raise Denied('BAD_TARGET')
+        if (
+            not valid_etag(params['expected_etag'])
+            or not params['expected_revision']
+            or params['mime_type'] not in TEXT_TYPES
+        ):
+            raise Denied('SAFE_UPDATE_UNAVAILABLE')
         check_text(params['text'])
     else:
         raise Denied('OPERATION_DENIED')
 
 
+def valid_etag(value):
+    return isinstance(value, str) and re.fullmatch(r'"[\x21\x23-\x7e]{1,256}"', value) is not None
+
+
 def metadata(token, file_id):
-    return provider_request(SELF, 'GET', f'/drive/v3/files/{file_id}?fields={FIELDS}', token=token)
+    value, etag = provider_request(
+        SELF, 'GET', f'/drive/v3/files/{file_id}?fields={FIELDS}', token=token, with_etag=True
+    )
+    return {**value, '_etag': etag}
 
 
 def search(token, query, limit):
@@ -121,10 +134,15 @@ def create(token, params):
 def prepare_update(token, params):
     """Bind the approval to the file's current revision so a concurrent edit fails the write."""
     meta = metadata(token, params['file_id'])
-    if meta.get('mimeType') not in (*TEXT_TYPES, DOC):
+    if meta.get('mimeType') == DOC:
+        raise Denied('SAFE_UPDATE_UNAVAILABLE')
+    if meta.get('mimeType') not in TEXT_TYPES:
         raise Denied('UNSUPPORTED_MIME_TYPE')
+    if not meta.get('headRevisionId') or not valid_etag(meta.get('_etag')):
+        raise Denied('SAFE_UPDATE_UNAVAILABLE')
     return {
         **params,
+        'expected_etag': meta['_etag'],
         'expected_revision': str(meta.get('headRevisionId', '')),
         'name': meta.get('name', ''),
         'mime_type': meta['mimeType'],
@@ -133,7 +151,10 @@ def prepare_update(token, params):
 
 def update(token, params):
     current = metadata(token, params['file_id'])
-    if str(current.get('headRevisionId', '')) != params['expected_revision']:
+    if (
+        str(current.get('headRevisionId', '')) != params['expected_revision']
+        or current.get('_etag') != params['expected_etag']
+    ):
         raise Denied('TARGET_CHANGED')
     content_type = 'text/plain' if params['mime_type'] == DOC else params['mime_type']
     try:
@@ -142,12 +163,15 @@ def update(token, params):
             'PATCH',
             f'/upload/drive/v3/files/{params["file_id"]}?uploadType=media',
             token=token,
+            headers={'If-Match': params['expected_etag']},
             body=params['text'].encode('utf-8'),
             content_type=content_type,
         )
     except Denied as exc:
         # drive.file scope: Google refuses files this app did not create.
-        raise Denied('TARGET_NOT_WRITABLE' if str(exc) == 'PROVIDER_AUTH_REQUIRED' else str(exc)) from None
+        if str(exc) == 'PROVIDER_AUTH_REQUIRED':
+            raise Denied('TARGET_NOT_WRITABLE') from None
+        raise
     return {'id': result.get('id'), 'revision': result.get('headRevisionId')}
 
 
@@ -186,6 +210,8 @@ def handle(request):
 
     def prepare(p):
         fields(p, ('file_id', 'text'), ('file_id', 'text'))
+        validate('drive.read', {'file_id': p['file_id']})
+        check_text(p['text'])
         frozen = prepare_update(token, p)
         validate(operation, frozen)
         return frozen

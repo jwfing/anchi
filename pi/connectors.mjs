@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { Type } from 'typebox';
 
@@ -73,7 +74,8 @@ export const CONNECTOR_TOOLS = {
     },
     {
       name: 'drive_update',
-      description: '用新正文替换本应用创建的 Drive 文件；文件被他人修改则失败。' + APPROVAL,
+      description:
+        '替换本应用创建的文本文件；要求强 ETag 与修订号，不支持覆盖 Google 文档。' + APPROVAL,
       parameters: Type.Object({ file_id: id, text }),
       request: write('update', ['file_id', 'text']),
     },
@@ -122,8 +124,9 @@ export const CONNECTOR_TOOLS = {
         channel,
         limit: limit(50),
         oldest: Type.Optional(Type.Integer({ minimum: 0 })),
+        cursor: Type.Optional(Type.String({ maxLength: 512 })),
       }),
-      request: read('history', ['channel', 'limit', 'oldest']),
+      request: read('history', ['channel', 'limit', 'oldest', 'cursor']),
     },
     {
       name: 'slack_post',
@@ -154,4 +157,37 @@ export async function connectedConnectors(rpc) {
     }
   }
   return connected;
+}
+
+/** Keep one immutable request (including its write id) alive until approval or cancellation. */
+export async function callConnector({
+  connector,
+  tool,
+  params,
+  signal,
+  notify = () => {},
+  call,
+  wait = delay,
+  now = Date.now,
+  pollMs = 3000,
+  approvalWaitMs = 600000,
+}) {
+  const request = tool.request(params);
+  const deadline = now() + approvalWaitMs;
+  let notified;
+  while (true) {
+    if (signal?.aborted) throw Error('ABORTED');
+    try {
+      return await call(socketFor(connector), request, signal);
+    } catch (error) {
+      if (!error.message.startsWith('APPROVAL_REQUIRED:')) throw error;
+      if (now() >= deadline) throw Error('APPROVAL_WAIT_TIMEOUT');
+      const id = error.message.slice('APPROVAL_REQUIRED:'.length);
+      if (id !== notified) {
+        notify({ type: 'approval_required', approval_id: id, request_id: request.request_id });
+        notified = id;
+      }
+      await wait(pollMs, undefined, { signal });
+    }
+  }
 }

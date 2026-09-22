@@ -104,6 +104,10 @@ def main():
     listener = socket.socket(fileno=3)
     if mode == 'inference':
         inference.recover()
+    elif mode in connectors.CONNECTORS:
+        import connector_base
+
+        connector_base.ledger(connectors.CONNECTORS[mode]).recover()
     service = Service(mode, service_uids)
     while True:
         conn, _ = listener.accept()

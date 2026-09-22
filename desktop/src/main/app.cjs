@@ -45,6 +45,7 @@ async function start() {
     await fs.realpath(os.homedir()),
     fs,
     platform,
+    await runtime.protectedPaths([app.getAppPath(), path.dirname(process.execPath)]),
   );
   let settingsError = false;
   try {

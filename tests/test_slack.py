@@ -11,6 +11,19 @@ from connector_harness import ConnectorHarness
 
 
 class SlackTests(ConnectorHarness):
+    def test_history_has_a_wire_budget_and_reports_omissions(self):
+        import common
+        from unittest.mock import Mock
+
+        self.responses = [
+            (200, json.dumps({'ok': True, 'messages': [{'ts': '1.1', 'text': '中' * 2000}] * 50}).encode())
+        ]
+        result = slack.handle({'op': 'history', 'channel': 'C1', 'limit': 50})
+        self.assertTrue(result['truncated'])
+        self.assertGreater(len(result['messages']), 0)
+        self.assertLess(len(result['messages']), 50)
+        common.send_json(Mock(), {'ok': True, 'result': result})
+
     def test_channels_only_member_and_history_trimmed(self):
         listing = {
             'ok': True,

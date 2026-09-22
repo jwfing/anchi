@@ -14,6 +14,7 @@ const SECRET_DIRECTORIES = Object.freeze([
   '.config',
   '.lima',
   '.hermes',
+  '.nvm',
   '.gnupg',
   'Library',
   '.local/share/anchi',
@@ -22,6 +23,7 @@ const SYSTEM_DIRECTORIES = Object.freeze({
   'darwin-arm64': [
     '/',
     '/System',
+    '/opt',
     '/Library',
     '/etc',
     '/private',
