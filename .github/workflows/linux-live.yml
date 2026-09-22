@@ -33,7 +33,7 @@ jobs:
       ANCHI_INSTALL_VM: secure-vm-onboarding-test
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - uses: actions/setup-python@v7
