@@ -17,7 +17,7 @@ const CONNECTORS = Object.freeze([
     label: 'Google Drive',
     auth: 'google',
     scopeText:
-      '读取全部文件；新建文件；仅可覆盖本应用创建且具备强 ETag 与修订号的文本文件（drive.readonly + drive.file）',
+      '读取全部文件；新建文件；仅可覆盖本应用创建且具备修订号的文本文件（drive.readonly + drive.file）',
     dataText: '文件正文可能进入 agent 上下文与云模型；更新绑定目标修订。',
     tokenHint: null,
     tokenPattern: null,

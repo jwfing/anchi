@@ -48,7 +48,7 @@ def write(connector, op, params, account, request_id, prepare, execute):
             {'operation': op, 'account': account, 'params': params}, sort_keys=True, separators=(',', ':')
         ).encode()
     ).hexdigest()
-    frozen = book.freeze(request_id, source_digest, lambda: prepare(dict(params)))
+    frozen = book.freeze(request_id, source_digest, lambda: prepare(dict(params)), daily_limit=DAILY_WRITES)
     action = {'operation': op, 'account': account, 'params': frozen}
     digest = hashlib.sha256(
         json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()

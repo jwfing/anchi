@@ -23,13 +23,13 @@ bash scripts/policy.sh mode drive ask        # Drive 改为逐次审批
 bash scripts/policy.sh mode inference auto   # 模型调用恢复持续授权
 ```
 
-从旧版仅支持持续读取的策略库升级时，所有主体迁移为 `ask`，既有写入与模型审批边界保留，旧的持续读取也不会被扩大成持续读写授权。已经设置过新版 `auto` / `ask` 的记录保持不变。旧待处理授权作废，用户可在核对后重新开启持续授权。
+旧库缺少新版模式时也使用 `auto` 默认值，不强制迁移为 `ask`；已有显式模式保持不变。升级后请核对权限页：旧只读许可与新版持续读写模式不同，处理不可信来源时建议主动选择逐次审批。
 
 ## 读与写
 
 | Connector | 读 | 写 |
 |---|---|---|
-| Drive | `drive_search`（名称或全文，≤10）、`drive_read`（Google 文档导出文本或 text 类文件，≤40 KB） | `drive_create`（指定文件夹新建文本或 Google 文档）、`drive_update`（更新本应用创建的文本文件，要求当前修订和强 ETag；Google 文档暂不支持覆盖） |
+| Drive | `drive_search`（名称或全文，≤10）、`drive_read`（Google 文档导出文本或 text 类文件，≤40 KB） | `drive_create`（指定文件夹新建文本或 Google 文档）、`drive_update`（更新本应用创建的文本文件，要求当前修订，强 ETag 可选；Google 文档暂不支持覆盖） |
 | Notion | `notion_search`（≤10）、`notion_read`（页面块拼成文本，≤40 KB） | `notion_create_page`（父页面下新建）、`notion_append`（追加段落，绑定当前编辑时间） |
 | Slack | `slack_channels`（bot 已加入的频道）、`slack_history`（≤50 条） | `slack_post`（发消息，可选线程） |
 
@@ -49,9 +49,9 @@ bash scripts/policy.sh mode inference auto   # 模型调用恢复持续授权
 
 - 读取到的邮件、文件、页面和消息可能进入 agent 上下文与云模型；凭证隔离不等于数据不出本机。
 - Drive 使用 `drive.file` scope，只能更新本应用创建的文件；其他文件的更新会被 Google 拒绝并显示为 `TARGET_NOT_WRITABLE`。
-- Drive 更新要求强 ETag 与非空修订号，PATCH 携带 `If-Match`；412 返回 `TARGET_CHANGED`。缺少可靠条件或目标为 Google 文档时返回 `SAFE_UPDATE_UNAVAILABLE`，可另建文件。上游条件请求行为仍需真实账户验收。
+- Drive 更新冻结非空修订号并在执行前复核；上游提供强 ETag 时才携带 `If-Match`，412 返回 `TARGET_CHANGED`。无 ETag 的修订前置检查不是原子条件写入。Google 文档缺少该修订字段，目前拒绝覆盖，可另建文件。
 - Notion 的编辑时间核对仍是执行前检查，不是上游原子条件写入；核对与追加之间存在竞态窗口。
-- Notion 读取会遍历嵌套 block，最多 5 次子块分页请求、8 层、40 KB；未读完或遇到不支持的内容时返回 `truncated` 和 `omissions`。
+- Notion 读取会遍历嵌套 block，最多 5 次子块分页请求、8 层、40 KB；未读完时返回 `truncated` 和 `omissions`；图片、分割线等仅在 `omissions` 中说明，不据此声明文本截断。
 - Slack 历史按序列化 UTF-8 总大小限制响应。超出预算或上游仍有更多内容时标记 `truncated`，完整分页时可使用返回的 `next_cursor`。
 - Slack bot 只能读取它已加入的频道；私信、用户令牌与 OAuth 暂不支持。
 - Notion API 版本固定为 `2022-06-28`。

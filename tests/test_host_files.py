@@ -96,3 +96,11 @@ class HostFilesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'UNSAFE_OR_LARGE_FILE'):
             self.run_op('write', 'large', text='new')
         self.assertEqual((self.root / 'large').stat().st_size, module.LIMIT + 1)
+        self.assertEqual(list((self.root / module.TRASH).iterdir()), [])
+
+    def test_short_reads_preserve_the_whole_backup(self):
+        self.run_op('write', 'file', text='abcdefghijk')
+        read = os.read
+        with patch.object(module.os, 'read', side_effect=lambda fd, count: read(fd, min(count, 2))):
+            result = self.run_op('write', 'file', text='replacement')
+        self.assertEqual((self.root / result['previous']).read_text(), 'abcdefghijk')

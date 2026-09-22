@@ -43,8 +43,7 @@ const errors = {
   TARGET_CHANGED: '目标在审批期间被修改，写入已取消。请重新读取后再试。',
   RUNTIME_DIRECTORY_NOT_ALLOWED:
     '该目录包含应用运行代码或工具安装文件，不能授予写权限。请选择独立的工作目录。',
-  SAFE_UPDATE_UNAVAILABLE:
-    '无法安全覆盖此文件：需要强 ETag 和修订号；Google 文档目前仅支持读取和新建。',
+  SAFE_UPDATE_UNAVAILABLE: '无法安全覆盖此文件：需要非空修订号；Google 文档目前仅支持读取和新建。',
   WRITE_EXECUTION_UNKNOWN: '远端写入结果不明，请先到对应账户核对，避免重复提交。',
   REQUEST_ALREADY_UNKNOWN: '该请求的远端结果仍不确定，已阻止重复执行。请到对应账户核对。',
   TARGET_NOT_WRITABLE: 'Drive 只允许更新由本应用创建的文件。',

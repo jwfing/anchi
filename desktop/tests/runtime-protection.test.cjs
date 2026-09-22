@@ -22,6 +22,7 @@ test('runtime protection includes real tool installations behind executable syml
   const platform = {
     ...describe({ platform: 'linux', arch: 'x64', home: root }),
     tools: { python: [alias] },
+    toolsDirectory: path.join(root, 'python-install'),
   };
   const paths = await new Runtime(runtimeRoot, platform).protectedPaths();
   assert(paths.includes(runtimeRoot));
@@ -32,6 +33,26 @@ test('runtime protection includes real tool installations behind executable syml
   );
   assert.throws(
     () => validateProtectedDirectory(root, 'rw', paths),
+    /RUNTIME_DIRECTORY_NOT_ALLOWED/,
+  );
+});
+
+test('a standalone home/bin tool does not protect all home and missing paths do not break startup', async (t) => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'anchi-home-bin-'));
+  t.after(() => fs.rm(temp, { recursive: true, force: true }));
+  const home = await fs.realpath(temp);
+  await fs.mkdir(path.join(home, 'bin'));
+  const tool = path.join(home, 'bin/codex');
+  await fs.writeFile(tool, '', { mode: 0o700 });
+  const platform = {
+    ...describe({ platform: 'linux', arch: 'x64', home }),
+    tools: { codex: [tool] },
+  };
+  const paths = await new Runtime(path.join(home, 'missing-runtime'), platform).protectedPaths();
+  assert(!paths.includes(home));
+  validateProtectedDirectory(path.join(home, 'Documents'), 'rw', paths);
+  assert.throws(
+    () => validateProtectedDirectory(path.join(home, 'bin'), 'rw', paths),
     /RUNTIME_DIRECTORY_NOT_ALLOWED/,
   );
 });

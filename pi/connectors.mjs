@@ -75,7 +75,7 @@ export const CONNECTOR_TOOLS = {
     {
       name: 'drive_update',
       description:
-        '替换本应用创建的文本文件；要求强 ETag 与修订号，不支持覆盖 Google 文档。' + APPROVAL,
+        '替换本应用创建的文本文件；要求修订号，强 ETag 可选，不支持覆盖 Google 文档。' + APPROVAL,
       parameters: Type.Object({ file_id: id, text }),
       request: write('update', ['file_id', 'text']),
     },
@@ -187,7 +187,12 @@ export async function callConnector({
         notify({ type: 'approval_required', approval_id: id, request_id: request.request_id });
         notified = id;
       }
-      await wait(pollMs, undefined, { signal });
+      try {
+        await wait(pollMs, undefined, { signal });
+      } catch (error) {
+        if (signal?.aborted) throw Error('ABORTED');
+        throw error;
+      }
     }
   }
 }

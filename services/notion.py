@@ -90,8 +90,10 @@ def title_of(item):
     return ''
 
 
-def post(token, path, body):
-    return provider_request(SELF, 'POST', path, token=token, headers=HEADERS, body=json.dumps(body).encode('utf-8'))
+def post(token, path, body, *, write=False):
+    return provider_request(
+        SELF, 'POST', path, token=token, headers=HEADERS, body=json.dumps(body).encode('utf-8'), write=write
+    )
 
 
 def get(token, path):
@@ -157,7 +159,7 @@ def read(token, page_id):
 
     visit(page_id)
     text = '\n'.join(lines)
-    truncated = bool(reasons)
+    truncated = bool(reasons - {'unsupported_block'})
     return {
         'id': page.get('id'),
         'title': title_of(page),
@@ -182,7 +184,7 @@ def create_page(token, params):
         'properties': {'title': {'title': [{'type': 'text', 'text': {'content': params['title']}}]}},
         'children': paragraph_blocks(params['paragraphs']),
     }
-    result = post(token, '/v1/pages', body)
+    result = post(token, '/v1/pages', body, write=True)
     return {'id': result.get('id')}
 
 
@@ -203,6 +205,7 @@ def append(token, params):
         token=token,
         headers=HEADERS,
         body=json.dumps({'children': paragraph_blocks(params['paragraphs'])}).encode('utf-8'),
+        write=True,
     )
     return {'id': params['page_id'], 'appended': len(params['paragraphs'])}
 

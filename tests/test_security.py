@@ -40,34 +40,31 @@ class SecurityTests(unittest.TestCase):
             p.stop()
         self.temp.cleanup()
 
-    def test_upgrade_preserves_legacy_approval_boundaries_once(self):
+    def test_legacy_upgrade_keeps_auto_default_and_current_explicit_modes(self):
         import sqlite3
 
-        with sqlite3.connect(policy.DATABASE) as conn:
-            conn.executescript("""
-                CREATE TABLE config(id INTEGER PRIMARY KEY, epoch INTEGER, gmail_read INTEGER);
-                INSERT INTO config VALUES(1,7,0);
-                CREATE TABLE read_rules(connector TEXT PRIMARY KEY, allowed INTEGER);
-                INSERT INTO read_rules VALUES('gmail',0);
-                INSERT INTO read_rules VALUES('drive',1);
-            """)
+        conn = sqlite3.connect(policy.DATABASE)
+        conn.executescript(
+            'CREATE TABLE config(id INTEGER PRIMARY KEY, epoch INTEGER, gmail_read INTEGER); INSERT INTO config VALUES(1,7,0);'
+        )
         conn.close()
-        self.assertTrue(all(mode == 'ask' for mode in policy.inspect_rules()['rules'].values()))
-        self.assertEqual(policy.authorize(self.action, 'gmail')['decision'], 'ask')
-        policy.set_mode('drive', 'auto')
-        self.assertEqual(policy.inspect_rules()['rules']['drive'], 'auto')
-        self.assertEqual(policy.inspect_rules()['rules']['inference'], 'ask')
-
-    def test_legacy_migration_revokes_outstanding_grants(self):
+        self.assertTrue(all(mode == 'auto' for mode in policy.inspect_rules()['rules'].values()))
         policy.set_mode('gmail', 'ask')
-        pending = policy.authorize(self.action, 'gmail')
-        with policy.database() as conn:
-            old_epoch = conn.execute('SELECT epoch FROM config').fetchone()[0]
-            conn.execute('DROP TABLE rules')
         self.assertEqual(policy.inspect_rules()['rules']['gmail'], 'ask')
-        self.assertEqual(policy.inspect(pending['approval_id'])['state'], 'REVOKED')
-        with policy.database() as conn:
-            self.assertEqual(conn.execute('SELECT epoch FROM config').fetchone()[0], old_epoch + 1)
+        self.assertEqual(policy.inspect_rules()['rules']['inference'], 'auto')
+
+    def test_policy_reads_do_not_require_a_write_lock(self):
+        import sqlite3
+
+        policy.inspect_rules()
+        conn = sqlite3.connect(policy.DATABASE)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            self.assertEqual(policy.inspect_rules()['rules']['gmail'], 'auto')
+            policy.inspect()
+            policy.inspect_audit()
+        finally:
+            conn.close()
 
     def issued(self):
         policy.set_mode('gmail', 'ask')

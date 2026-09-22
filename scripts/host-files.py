@@ -20,6 +20,19 @@ def directory(parent, name):
     return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
 
 
+def read_bounded(handle):
+    chunks, size = [], 0
+    while size <= LIMIT:
+        chunk = os.read(handle, min(8192, LIMIT + 1 - size))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    if size > LIMIT:
+        raise ValueError('FILE_TOO_LARGE')
+    return b''.join(chunks)
+
+
 def move_to_trash(root_fd, parent_fd, name, relative, *, copy=False):
     """Rename within the same filesystem; the hidden trash is invisible to the agent."""
     try:
@@ -31,18 +44,13 @@ def move_to_trash(root_fd, parent_fd, name, relative, *, copy=False):
         # Fixed length on every filesystem; keep the original path in private metadata.
         target = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex
         metadata = target + '.json'
-        handle = os.open(metadata, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=trash_fd)
-        with os.fdopen(handle, 'w') as stream:
-            json.dump({'original_path': relative}, stream)
-            stream.flush()
-            os.fsync(stream.fileno())
         if copy:
             source = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
             try:
                 st = os.fstat(source)
                 if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > LIMIT:
                     raise ValueError('UNSAFE_OR_LARGE_FILE')
-                data = os.read(source, LIMIT + 1)
+                data = read_bounded(source)
                 if len(data) > LIMIT:
                     raise ValueError('FILE_TOO_LARGE')
                 handle = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=trash_fd)
@@ -54,6 +62,11 @@ def move_to_trash(root_fd, parent_fd, name, relative, *, copy=False):
                 os.close(source)
         else:
             os.rename(name, target, src_dir_fd=parent_fd, dst_dir_fd=trash_fd)
+        handle = os.open(metadata, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=trash_fd)
+        with os.fdopen(handle, 'w') as stream:
+            json.dump({'original_path': relative}, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.fsync(trash_fd)
     finally:
         os.close(trash_fd)
@@ -129,7 +142,7 @@ def operate(value):
             st = os.fstat(handle)
             if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > LIMIT:
                 raise ValueError('UNSAFE_OR_LARGE_FILE')
-            data = os.read(handle, LIMIT + 1)
+            data = read_bounded(handle)
             if len(data) > LIMIT:
                 raise ValueError('FILE_TOO_LARGE')
             return {'text': data.decode('utf-8')}

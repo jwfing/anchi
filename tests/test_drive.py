@@ -88,8 +88,6 @@ class DriveTests(ConnectorHarness):
         for meta, etag in (
             ({'id': 'f', 'mimeType': DOC}, '"e"'),
             ({'id': 'f', 'mimeType': 'text/plain'}, '"e"'),
-            ({'id': 'f', 'mimeType': 'text/plain', 'headRevisionId': 'r'}, None),
-            ({'id': 'f', 'mimeType': 'text/plain', 'headRevisionId': 'r'}, 'W/"e"'),
         ):
             self.responses = [(200, json.dumps(meta).encode(), etag)]
             with self.assertRaisesRegex(Denied, 'SAFE_UPDATE_UNAVAILABLE'):
@@ -108,6 +106,20 @@ class DriveTests(ConnectorHarness):
         first = drive.handle(request)
         self.assertEqual(drive.handle(request), first)
         self.assertEqual(len(self.calls), 6)
+
+    def test_update_without_etag_keeps_revision_checks(self):
+        meta = {'id': 'f', 'mimeType': 'text/plain', 'headRevisionId': 'r'}
+        self.responses = [(200, json.dumps(meta).encode())] * 2 + [(200, b'{"id":"f"}')]
+        self.assertEqual(
+            drive.handle({'op': 'update', 'request_id': 'd' * 32, 'file_id': 'f', 'text': 'new'})['id'], 'f'
+        )
+        self.assertNotIn('If-Match', self.calls[-1][2])
+        self.responses = [
+            (200, json.dumps(meta).encode()),
+            (200, json.dumps({**meta, 'headRevisionId': 'r2'}).encode()),
+        ]
+        with self.assertRaisesRegex(Denied, 'TARGET_CHANGED'):
+            drive.handle({'op': 'update', 'request_id': 'e' * 32, 'file_id': 'f', 'text': 'new'})
 
     def test_probe_returns_email_only(self):
         self.responses = [(200, json.dumps({'user': {'emailAddress': 'me@example.com', 'permissionId': 'x'}}).encode())]

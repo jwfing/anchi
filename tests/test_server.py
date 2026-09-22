@@ -3,6 +3,7 @@ import sys
 import threading
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 import server
@@ -47,6 +48,21 @@ class ServerTests(unittest.TestCase):
 
     def request(self, service, uid, value):
         return self.exchange(service, uid, lambda a: send_json(a, value))
+
+    def test_readonly_connector_has_no_ledger_and_failed_recovery_blocks_only_writes(self):
+        import sqlite3
+
+        with patch('connector_base.ledger') as ledger:
+            self.assertTrue(server.recover_connector('gmail'))
+            ledger.assert_not_called()
+            ledger.return_value.recover.side_effect = sqlite3.OperationalError('readonly')
+            with patch('sys.stderr'):
+                ready = server.recover_connector('drive')
+        self.assertFalse(ready)
+        service = self.service('drive', lambda request: {'available': True})
+        service.writes_ready = ready
+        self.assertTrue(self.request(service, CELL_UID, {'op': 'status'})['ok'])
+        self.assertEqual(self.request(service, CELL_UID, {'op': 'create'})['error'], 'LEDGER_UNAVAILABLE')
 
     def test_kernel_uid_gates_every_mode(self):
         gmail = self.service('gmail', lambda request: {'echo': request})

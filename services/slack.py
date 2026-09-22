@@ -54,9 +54,9 @@ def validate(op, params):
         raise Denied('OPERATION_DENIED')
 
 
-def call(token, method, path, body=None):
+def call(token, method, path, body=None, *, write=False):
     encoded = json.dumps(body).encode('utf-8') if body is not None else None
-    result = provider_request(SELF, method, path, token=token, body=encoded)
+    result = provider_request(SELF, method, path, token=token, body=encoded, write=write)
     if result.get('ok') is not True:
         # Slack signals failures with ok:false; map to fixed codes, never echo provider text.
         raise Denied(ERRORS.get(str(result.get('error')), 'PROVIDER_REJECTED'))
@@ -102,7 +102,7 @@ def post(token, params):
     body = {'channel': params['channel'], 'text': params['text']}
     if 'thread_ts' in params:
         body['thread_ts'] = params['thread_ts']
-    result = call(token, 'POST', '/api/chat.postMessage', body)
+    result = call(token, 'POST', '/api/chat.postMessage', body, write=True)
     return {'ts': result.get('ts'), 'channel': result.get('channel')}
 
 

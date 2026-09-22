@@ -133,3 +133,19 @@ test('connector approvals stop on denial, timeout, unknown result and abort', as
   );
   assert.equal(calls, 1);
 });
+
+test('real timer cancellation returns the stable ABORTED code', async () => {
+  const { callConnector } = await import('../connectors.mjs');
+  const abort = new AbortController();
+  const work = callConnector({
+    connector: 'slack',
+    tool: CONNECTOR_TOOLS.slack.find((t) => t.name === 'slack_post'),
+    params: { channel: 'C1', text: 'x' },
+    signal: abort.signal,
+    call: async () => {
+      setImmediate(() => abort.abort());
+      throw Error('APPROVAL_REQUIRED:a');
+    },
+  });
+  await assert.rejects(work, { message: 'ABORTED' });
+});

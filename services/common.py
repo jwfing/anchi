@@ -186,6 +186,7 @@ def provider_request(
     raw=False,
     max_bytes=2 * 1024 * 1024,
     with_etag=False,
+    write=False,
 ):
     """One request to a connector's single host; the path must match the connector's allowlist."""
     if (
@@ -206,12 +207,12 @@ def provider_request(
     response = TRANSPORT(connector.hosts[0], method, path, request_headers, body)
     status, payload = response[:2]
     etag = response[2] if len(response) > 2 else None
-    uncertain = ExecutionUnknown if method != 'GET' else Denied
+    uncertain = ExecutionUnknown if write else Denied
     if status != 200:
         # Never reflect provider error bodies: they can echo tokens or private content.
         if status == 412:
             raise Denied('TARGET_CHANGED')
-        if method != 'GET' and status not in (400, 401, 403, 404, 405, 409, 422, 429):
+        if write and status not in (400, 401, 403, 404, 405, 409, 422, 429):
             raise ExecutionUnknown('WRITE_EXECUTION_UNKNOWN')
         if status in (401, 403):
             raise Denied('PROVIDER_AUTH_REQUIRED')
@@ -221,7 +222,7 @@ def provider_request(
     if raw:
         return payload
     try:
-        if not payload and method != 'GET':
+        if not payload and write:
             raise ValueError()
         value = json.loads(payload) if payload else {}
         if not isinstance(value, dict):

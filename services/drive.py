@@ -61,7 +61,7 @@ def validate(op, params):
         if not ID.fullmatch(str(params['file_id'])) or not isinstance(params['expected_revision'], str):
             raise Denied('BAD_TARGET')
         if (
-            not valid_etag(params['expected_etag'])
+            (params['expected_etag'] is not None and not valid_etag(params['expected_etag']))
             or not params['expected_revision']
             or params['mime_type'] not in TEXT_TYPES
         ):
@@ -126,7 +126,13 @@ def create(token, params):
     upload_type = 'text/plain' if params['mime_type'] == DOC else params['mime_type']
     body, content_type = multipart(meta, params['text'], upload_type)
     result = provider_request(
-        SELF, 'POST', '/upload/drive/v3/files?uploadType=multipart', token=token, body=body, content_type=content_type
+        SELF,
+        'POST',
+        '/upload/drive/v3/files?uploadType=multipart',
+        token=token,
+        body=body,
+        content_type=content_type,
+        write=True,
     )
     return {'id': result.get('id'), 'name': result.get('name')}
 
@@ -138,11 +144,11 @@ def prepare_update(token, params):
         raise Denied('SAFE_UPDATE_UNAVAILABLE')
     if meta.get('mimeType') not in TEXT_TYPES:
         raise Denied('UNSUPPORTED_MIME_TYPE')
-    if not meta.get('headRevisionId') or not valid_etag(meta.get('_etag')):
+    if not meta.get('headRevisionId'):
         raise Denied('SAFE_UPDATE_UNAVAILABLE')
     return {
         **params,
-        'expected_etag': meta['_etag'],
+        'expected_etag': meta.get('_etag') if valid_etag(meta.get('_etag')) else None,
         'expected_revision': str(meta.get('headRevisionId', '')),
         'name': meta.get('name', ''),
         'mime_type': meta['mimeType'],
@@ -151,19 +157,19 @@ def prepare_update(token, params):
 
 def update(token, params):
     current = metadata(token, params['file_id'])
-    if (
-        str(current.get('headRevisionId', '')) != params['expected_revision']
-        or current.get('_etag') != params['expected_etag']
+    if str(current.get('headRevisionId', '')) != params['expected_revision'] or (
+        params['expected_etag'] is not None and current.get('_etag') != params['expected_etag']
     ):
         raise Denied('TARGET_CHANGED')
-    content_type = 'text/plain' if params['mime_type'] == DOC else params['mime_type']
+    content_type = params['mime_type']
     try:
         result = provider_request(
             SELF,
             'PATCH',
             f'/upload/drive/v3/files/{params["file_id"]}?uploadType=media',
             token=token,
-            headers={'If-Match': params['expected_etag']},
+            headers={'If-Match': params['expected_etag']} if params['expected_etag'] else {},
+            write=True,
             body=params['text'].encode('utf-8'),
             content_type=content_type,
         )

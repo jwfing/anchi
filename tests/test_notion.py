@@ -151,6 +151,17 @@ class NotionTests(ConnectorHarness):
             notion.handle(request)
         self.assertTrue(all(call[0] == 'GET' for call in self.calls))
 
+    def test_post_search_failure_is_not_a_write_unknown(self):
+        self.responses = [(503, b'private')]
+        with self.assertRaisesRegex(Denied, '^PROVIDER_REQUEST_FAILED$'):
+            notion.handle({'op': 'search', 'query': 'q', 'limit': 1})
+
+    def test_nontext_omissions_do_not_claim_text_truncation(self):
+        self.responses = [(200, b'{"id":"p"}'), (200, b'{"results":[{"type":"divider"},{"type":"image"}]}')]
+        result = notion.read('T', 'p')
+        self.assertFalse(result['truncated'])
+        self.assertEqual(result['omissions'], ['unsupported_block'])
+
     def test_validation(self):
         with self.assertRaises(Denied):
             notion.validate('notion.create_page', {'parent_page_id': 'p', 'title': 't', 'paragraphs': ['x' * 2001]})

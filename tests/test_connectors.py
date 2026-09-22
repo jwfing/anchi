@@ -59,6 +59,30 @@ class LedgerTests(unittest.TestCase):
             self.ledger.begin('b' * 32, 'd')
         self.assertEqual(self.ledger.get('b' * 32)['state'], 'UNKNOWN')
 
+    def test_freeze_prepares_without_writer_lock_and_reserves_quota(self):
+        import sqlite3
+
+        def prepare():
+            conn = sqlite3.connect(self.ledger.path, timeout=0)
+            try:
+                conn.execute('BEGIN IMMEDIATE')
+            finally:
+                conn.close()
+            return {'v': 1}
+
+        self.assertEqual(self.ledger.freeze('a', 'd', prepare, daily_limit=1), {'v': 1})
+        with self.assertRaisesRegex(Denied, 'DAILY_WRITE_LIMIT'):
+            self.ledger.freeze('b', 'd', lambda: self.fail('quota must precede network'), daily_limit=1)
+        with self.ledger.database() as conn:
+            self.assertEqual(conn.execute('SELECT count(*) FROM actions').fetchone()[0], 1)
+        self.ledger.begin('a', 'd')
+        self.ledger.mark('a', 'SUCCEEDED', result={})
+        with self.ledger.database() as conn:
+            conn.execute('UPDATE actions SET created=0')
+        self.ledger.freeze('c', 'd', prepare)
+        with self.assertRaisesRegex(Denied, 'REQUEST_LEGACY_REPLAY_DENIED'):
+            self.ledger.freeze('a', 'd', prepare)
+
     def test_daily_limit_and_recover(self):
         for i in range(3):
             self.ledger.begin(f'{i:032x}', 'd', daily_limit=3)
@@ -229,7 +253,9 @@ class FlowTests(unittest.TestCase):
             request_id = f'{index:032x}'
 
             def execute(p):
-                return common.provider_request(self.slack, 'POST', '/api/chat.postMessage', token='T', body=b'{}')
+                return common.provider_request(
+                    self.slack, 'POST', '/api/chat.postMessage', token='T', body=b'{}', write=True
+                )
 
             with patch('common.TRANSPORT', return_value=response) as transport:
                 args = (self.slack, 'slack.post', {'text': 'x'}, 'gen', request_id, lambda p: p, execute)
