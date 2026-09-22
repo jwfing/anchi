@@ -56,8 +56,11 @@ test('kvm availability is null on macOS and follows /dev/kvm access on Linux', a
   );
 });
 
+const onLinux = (files) =>
+  describe({ platform: 'linux', arch: 'x64', home: '/h', exists: (f) => files.includes(f) });
+
 test('manual steps name exactly the root actions the app refuses to run', () => {
-  const linux = describe({ platform: 'linux', arch: 'x64', home: '/h' });
+  const linux = onLinux(['/usr/bin/apt-get']);
   assert.deepEqual(manualSteps(linux, { qemu: true, kvm: true }), []);
   const steps = manualSteps(linux, { qemu: false, kvm: false });
   assert.equal(steps.length, 2);
@@ -71,4 +74,21 @@ test('manual steps name exactly the root actions the app refuses to run', () => 
     }),
     [],
   );
+});
+
+test('the qemu step follows the package manager the host actually has', () => {
+  const missing = { qemu: false, kvm: true };
+  assert.match(
+    manualSteps(onLinux(['/usr/bin/pacman']), missing)[0],
+    /pacman -S --needed qemu-base/,
+  );
+  assert.match(
+    manualSteps(onLinux(['/usr/bin/dnf']), missing)[0],
+    /dnf install -y qemu-system-x86 qemu-img/,
+  );
+  // Both present: the first match wins rather than the step being dropped.
+  assert.match(manualSteps(onLinux(['/usr/bin/pacman', '/usr/bin/apt-get']), missing)[0], /pacman/);
+  const unknown = manualSteps(onLinux([]), missing)[0];
+  assert.doesNotMatch(unknown, /apt-get|pacman|dnf/);
+  assert.match(unknown, /qemu-system-x86_64/);
 });

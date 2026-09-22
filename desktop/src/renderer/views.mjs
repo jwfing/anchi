@@ -155,7 +155,7 @@ export function renderPage({
       : linux
         ? `<div class="card"><h2>1 · 准备系统环境</h2><p>Lima：${label(h.lima)} · Codex：${label(h.codex)} · Python：${label(h.python)} · QEMU：${label(h.qemu)} · KVM：${label(h.kvm)}</p>
       <p class="muted">Lima 与 Codex 由应用按固定版本和 SHA-256 下载到 ~/.local/share/anchi/tools，不需要管理员密码。${disk}</p>
-      ${h.manualSteps?.length ? `<p>QEMU 与 KVM 权限需要你在终端执行：</p><pre>${esc(h.manualSteps.join('\n'))}</pre><p class="caption">执行后退出登录并重新登录，再点「重新检查」。</p>` : ''}
+      ${h.manualSteps?.length ? `<p>${h.kvm === false ? 'QEMU 与 KVM 权限需要你在终端执行：' : '安装 QEMU 需要你在终端执行：'}</p><pre>${esc(h.manualSteps.join('\n'))}</pre><p class="caption">${h.kvm === false ? '加入 kvm 组后需退出登录并重新登录，再点「重新检查」。' : '执行后点「重新检查」。'}</p>` : ''}
       <div class="actions">${stepButton('下载 Lima 与 Codex', 'setup-dependencies')}${button('查看 Linux 安装说明', 'setup-homebrew')}</div>
       </div>`
         : `<div class="card"><h2>1 · 准备系统环境</h2><p>Lima：${label(h.lima)} · Python：${label(h.python)} · Codex：${label(h.codex)}</p>

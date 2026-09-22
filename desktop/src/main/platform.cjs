@@ -1,6 +1,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs/promises');
+const { existsSync } = require('node:fs');
 
 /**
  * The only module that knows what differs between supported hosts. Everything else asks
@@ -53,13 +54,34 @@ const SYSTEM_DIRECTORIES = Object.freeze({
     '/var',
   ],
 });
-/** Root-only steps the app shows verbatim instead of running; the user executes them. */
-const MANUAL = Object.freeze({
-  qemu: 'sudo apt-get install -y qemu-system-x86 qemu-utils',
-  kvm: 'sudo usermod -aG kvm "$USER"',
+const PACKAGE_MANAGERS = Object.freeze([
+  ['pacman', '/usr/bin/pacman'],
+  ['apt-get', '/usr/bin/apt-get'],
+  ['dnf', '/usr/bin/dnf'],
+]);
+/**
+ * Root-only steps the app shows verbatim instead of running; the user executes them.
+ * Lima's Linux driver needs qemu-system-x86_64 and qemu-img, whose package names differ per distro.
+ */
+const QEMU_INSTALL = Object.freeze({
+  pacman: 'sudo pacman -S --needed qemu-base',
+  'apt-get': 'sudo apt-get install -y qemu-system-x86 qemu-utils',
+  dnf: 'sudo dnf install -y qemu-system-x86 qemu-img',
+  unknown: '用发行版的包管理器安装 qemu-system-x86_64 和 qemu-img',
 });
+const MANUAL_KVM = 'sudo usermod -aG kvm "$USER"';
 
-function describe({ platform = process.platform, arch = process.arch, home = os.homedir() } = {}) {
+/** First package manager present; 'unknown' keeps the step honest instead of naming a wrong distro. */
+function packageManager(exists) {
+  return (PACKAGE_MANAGERS.find(([, file]) => exists(file)) || ['unknown'])[0];
+}
+
+function describe({
+  platform = process.platform,
+  arch = process.arch,
+  home = os.homedir(),
+  exists = existsSync,
+} = {}) {
   const id =
     platform === 'darwin' && arch === 'arm64'
       ? 'darwin-arm64'
@@ -118,6 +140,7 @@ function describe({ platform = process.platform, arch = process.arch, home = os.
         '/bin',
       ].join(':'),
       dependencies: { kind: 'download', tools: ['lima', 'codex'] },
+      packageManager: packageManager(exists),
       kvmDevice: '/dev/kvm',
       extraEnvironment: ['XDG_RUNTIME_DIR'],
     };
@@ -145,8 +168,8 @@ async function kvmAvailable(info, access = fs.access) {
 function manualSteps(info, health) {
   if (info.id !== 'linux-x64') return [];
   const steps = [];
-  if (health.qemu === false) steps.push(MANUAL.qemu);
-  if (health.kvm === false) steps.push(MANUAL.kvm);
+  if (health.qemu === false) steps.push(QEMU_INSTALL[info.packageManager] || QEMU_INSTALL.unknown);
+  if (health.kvm === false) steps.push(MANUAL_KVM);
   return steps;
 }
 
