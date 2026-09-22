@@ -171,7 +171,9 @@ class Runtime {
     await this.command(await this.lima(), ['start', 'secure-vm', '--tty=false'], 120000);
   }
 
+  /** policy.sh execs limactl itself, so resolve it here for the same error the other calls give. */
   async policy(op, ...args) {
+    await this.lima();
     return JSON.parse(
       await this.command('/bin/bash', [path.join(this.root, 'scripts/policy.sh'), op, ...args]),
     );
