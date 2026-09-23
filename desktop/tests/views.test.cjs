@@ -137,6 +137,22 @@ test('setup step 1 shows Linux manual root commands and no Homebrew wording', as
   assert(!html.includes('Homebrew'));
   assert(html.includes('QEMU：待完成'));
   assert(html.includes('KVM：待完成'));
+  assert(html.includes('退出登录并重新登录'));
+  // KVM already usable (Arch ships /dev/kvm 0666): only the package step, and no re-login advice.
+  const kvmReady = renderPage({
+    page: 'setup',
+    messages: [],
+    approvals: [],
+    state: {
+      directories: [],
+      events: [],
+      setup: {
+        health: { ...health, kvm: true, manualSteps: ['sudo pacman -S --needed qemu-base'] },
+      },
+    },
+  });
+  assert(kvmReady.includes('pacman -S --needed qemu-base'));
+  assert(!kvmReady.includes('退出登录并重新登录'));
   const ready = renderPage({
     page: 'setup',
     messages: [],

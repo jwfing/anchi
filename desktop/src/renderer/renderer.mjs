@@ -38,6 +38,7 @@ const errors = {
   PI_NOT_CONNECTED: 'Pi 尚未连接。请完成首次设置后连接。',
   HOMEBREW_REQUIRED: '请先从步骤 1 的链接安装 Homebrew，再重新检查。',
   PYTHON_NOT_INSTALLED: '未找到宿主 Python。请在首次设置步骤 1 安装依赖。',
+  LIMA_NOT_INSTALLED: '尚未安装 Lima。请在首次设置步骤 1 点击「下载 Lima 与 Codex」。',
   TRUSTED_HELPER_FAILED: '无法连接可信服务。请检查 VM 是否运行，必要时在首次设置中修复 Pi。',
   DIRECTORY_CHANGED: '目录已被移动或替换，请在「连接与权限」重新确认后再访问。',
   TARGET_CHANGED: '目标在审批期间被修改，写入已取消。请重新读取后再试。',
@@ -408,8 +409,10 @@ window.desktop.onEvent((event) => {
 });
 void refresh()
   .then(() => acts['setup-status']())
-  .then(() => call('rules'))
+  // The policy service lives in the VM; before it runs there are no rules to read, not an error.
+  .then(() => (state.setup?.health?.vm === 'Running' ? call('rules') : null))
   .then((value) => {
+    if (!value) return;
     state.rules = value.rules;
     render();
   })

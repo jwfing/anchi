@@ -32,11 +32,11 @@
 
 ## Linux
 
-支持 x86_64 的 Ubuntu 22.04+ 与 Debian 12+，需要 CPU 虚拟化扩展与 `/dev/kvm`；虚拟机占用 4 GB 内存与最多 30 GB 动态磁盘，开始前至少留 8 GB 空间。
+支持 x86_64 的 Ubuntu 22.04+ 与 Debian 12+，需要 CPU 虚拟化扩展与 `/dev/kvm`。其他使用 pacman 或 dnf 的发行版（Arch、Fedora）可以按同样步骤运行，应用会给出对应的安装命令，但未纳入 CI 验证。虚拟机占用 4 GB 内存与最多 30 GB 动态磁盘，开始前至少留 8 GB 空间。
 
 1. 解压 `Anchi-linux-x64.tar.gz`，运行 `Anchi-linux-x64/Anchi`。若发行版禁用非特权用户命名空间，Electron 会提示沙箱错误，此时执行一次 `sudo chown root Anchi-linux-x64/chrome-sandbox && sudo chmod 4755 Anchi-linux-x64/chrome-sandbox`；不要用 `--no-sandbox` 绕过。
 2. 首次设置步骤 1 点击「下载 Lima 与 Codex」。应用按固定版本与 SHA-256 下载到 `~/.local/share/anchi/tools`，不需要管理员密码；校验失败不会安装任何文件。
-3. QEMU 与 KVM 权限需要你在终端执行页面上显示的两条命令：`sudo apt-get install -y qemu-system-x86 qemu-utils` 与 `sudo usermod -aG kvm "$USER"`。执行后退出登录并重新登录，再点「重新检查」。
+3. QEMU 与 KVM 权限需要你在终端执行页面上显示的命令，应用按检测到的包管理器给出对应写法：Debian/Ubuntu 是 `sudo apt-get install -y qemu-system-x86 qemu-utils`，Arch 是 `sudo pacman -S --needed qemu-base`，Fedora 是 `sudo dnf install -y qemu-system-x86 qemu-img`。若 `/dev/kvm` 不可读写，还会显示 `sudo usermod -aG kvm "$USER"`，执行后需退出登录并重新登录；Arch 的 udev 默认把 `/dev/kvm` 设为 `0666`，通常不会出现这一条。完成后点「重新检查」。
 4. 之后的步骤与 macOS 相同。配置目录为 `~/.config/Anchi`，主密钥为 `~/.config/secure-vm/vault.key`，虚拟机在 `~/.lima/secure-vm`。
 5. Codex 登录会打开系统浏览器；Linux 上的 Codex 二进制由应用下载，版本固定，升级随应用发布。
 
