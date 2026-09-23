@@ -52,7 +52,7 @@ button:disabled {
 }
 .shell {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
+  grid-template-columns: 238px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -105,7 +105,7 @@ nav button {
   text-align: center;
 }
 .shell.sidebar-collapsed {
-  grid-template-columns: 68px minmax(0, 1fr);
+  grid-template-columns: 84px minmax(0, 1fr);
 }
 .sidebar-collapsed nav {
   padding-left: 10px;
@@ -418,7 +418,7 @@ button:focus-visible {
 }
 @media (max-width: 900px) {
   .shell {
-    grid-template-columns: 160px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
   }
   .brand {
     font-size: 22px;
@@ -765,4 +765,23 @@ details summary {
 .activity-details summary {
   margin: 4px 0 0;
   font-size: 11px;
+}
+
+.nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+#language-toggle {
+  width: 30px;
+  height: 34px;
+  padding: 4px;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+nav .nav-label {
+  overflow-wrap: anywhere;
 }

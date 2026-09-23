@@ -1,3 +1,4 @@
+import { t, translateEvent, text as msg, html, htmlText, getLocale } from './i18n.mjs';
 const escape = (value) =>
   String(value ?? '').replace(
     /[&<>"']/g,
@@ -22,51 +23,55 @@ const types = new Map([
   ['protocol_error', 'Agent 通信异常'],
 ]);
 export function describeActivity(event) {
-  let title = types.get(event.type) || '其他活动',
+  let title = t(types.get(event.type)) || t('其他活动'),
     tone = 'neutral',
-    label = '记录';
-  const tool = tools.get(event.tool) || event.tool || '工具';
+    label = t('记录');
+  const tool = t(tools.get(event.tool)) || event.tool || t('工具');
   if (event.type === 'finished') {
     if (event.cancelled) {
-      title = '任务已取消';
+      title = t('任务已取消');
       tone = 'warning';
-      label = '已取消';
+      label = t('已取消');
     } else if (event.success === true) {
-      title = '任务已完成';
+      title = t('任务已完成');
       tone = 'success';
-      label = '成功';
+      label = t('成功');
     } else if (event.success === false) {
-      title = '任务失败';
+      title = t('任务失败');
       tone = 'error';
-      label = '失败';
+      label = t('失败');
     } else {
-      title = '任务已结束';
-      label = '已结束';
+      title = t('任务已结束');
+      label = t('已结束');
     }
   } else if (event.type === 'tool_start') {
-    title = `开始：${tool}`;
-    label = '开始';
+    title = msg`开始：${tool}`;
+    label = t('开始');
   } else if (event.type === 'tool_end') {
-    title = `${tool} · ${event.is_error === true ? '执行失败' : '执行结束'}`;
+    title = `${tool} · ${event.is_error === true ? t('执行失败') : t('执行结束')}`;
     tone = event.is_error === true ? 'error' : 'neutral';
-    label = event.is_error === true ? '失败' : '结束';
+    label = event.is_error === true ? t('失败') : t('结束');
   } else if (event.type === 'approval_required') {
     tone = 'warning';
-    label = '需审批';
+    label = t('需审批');
   } else if (['turn_error', 'protocol_error'].includes(event.type)) {
     tone = 'error';
-    label = '异常';
+    label = t('异常');
   } else if (event.type === 'activity') {
-    const decision = /^审批\s+(\S+)[：:]\s*(approve|deny|revoke)$/.exec(event.text || '');
+    const decision = /^(?:审批|Approval)\s+(\S+)[：:]\s*(approve|deny|revoke)$/.exec(
+      event.text || '',
+    );
     if (decision) {
-      title = { approve: '审批请求已批准', deny: '审批请求已拒绝', revoke: '审批授权已撤销' }[
-        decision[2]
-      ];
+      title = {
+        approve: t('审批请求已批准'),
+        deny: t('审批请求已拒绝'),
+        revoke: t('审批授权已撤销'),
+      }[decision[2]];
       tone = decision[2] === 'approve' ? 'success' : 'warning';
-      label = '审批';
+      label = t('审批');
       return { title, tone, label, approvalId: decision[1] };
     }
-    title = event.text || '活动已记录';
+    title = translateEvent(event.text) || t('活动已记录');
   }
   return { title, tone, label, approvalId: event.approval_id };
 }
@@ -76,37 +81,50 @@ export function renderActivity(events = []) {
     .slice()
     .reverse();
   if (!items.length)
-    return '<p class="muted">尚无活动。连接 Pi 并开始任务后，记录会显示在这里。</p>';
+    return htmlText('<p class="muted">尚无活动。连接 Pi 并开始任务后，记录会显示在这里。</p>');
   const groups = new Map();
   for (const event of items) {
     const date = event.time ? new Date(event.time) : null;
     const valid = date && Number.isFinite(date.getTime());
     const day = valid
-      ? date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
-      : '时间未知';
+      ? date.toLocaleDateString(getLocale(), { year: 'numeric', month: 'long', day: 'numeric' })
+      : t('时间未知');
     if (!groups.has(day)) groups.set(day, []);
     const { title, tone, label, approvalId } = describeActivity(event);
     const fields = [
-      ['事件', event.type],
-      ['工具', event.tool],
-      ['审批 ID', approvalId],
-      ['时间', event.time],
-      ['错误', event.error],
-      ['错误代码', event.code],
+      [t('事件'), event.type],
+      [t('工具'), event.tool],
+      [t('审批 ID'), approvalId],
+      [t('时间'), event.time],
+      [t('错误'), event.error],
+      [t('错误代码'), event.code],
     ].filter(([, value]) => value !== undefined && value !== '');
     const time = valid
-      ? date.toLocaleTimeString('zh-CN', {
+      ? date.toLocaleTimeString(getLocale(), {
           hour12: false,
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
         })
-      : '未知时间';
-    groups
-      .get(day)
-      .push(
-        `<li class="activity-item"><span class="activity-time">${escape(time)}</span><div class="activity-content"><div class="activity-line"><span class="activity-badge activity-${tone}">${label}</span><strong>${escape(title)}</strong></div><details class="activity-details"><summary>详情</summary><dl class="kv">${fields.map(([key, value]) => `<dt>${key}</dt><dd>${escape(value)}</dd>`).join('')}</dl></details></div></li>`,
-      );
+      : t('未知时间');
+    groups.get(day).push(
+      html`<li class="activity-item">
+        <span class="activity-time">${escape(time)}</span>
+        <div class="activity-content">
+          <div class="activity-line">
+            <span class="activity-badge activity-${tone}">${label}</span
+            ><strong>${escape(title)}</strong>
+          </div>
+          <details class="activity-details">
+            <summary>详情</summary>
+            <dl class="kv">
+              ${fields.map(([key, value]) => `<dt>${key}</dt><dd>${escape(value)}</dd>`).join('')}
+            </dl>
+          </details>
+        </div>
+      </li>`,
+    );
   }
-  return `<p class="caption">最近 ${items.length} 条活动 · 最新在前 · 本地时间</p>${[...groups].map(([day, rows]) => `<section class="activity-day"><h2>${day}</h2><ol class="activity-list">${rows.join('')}</ol></section>`).join('')}`;
+  return html`<p class="caption">最近 ${items.length} 条活动 · 最新在前 · 本地时间</p>
+    ${[...groups].map(([day, rows]) => `<section class="activity-day"><h2>${day}</h2><ol class="activity-list">${rows.join('')}</ol></section>`).join('')}`;
 }

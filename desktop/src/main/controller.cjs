@@ -1,8 +1,10 @@
+const { t } = require('./language.cjs');
 const { validateCommand, LIMITS } = require('../shared/protocol.cjs');
 const { CONNECTORS, byId, isConnector } = require('../shared/connectors.cjs');
 
 const OPERATIONS = Object.freeze({
   snapshot: [],
+  'set-language': ['locale'],
   'setup-status': [],
   'first-task': [],
   'setup-start': ['action'],
@@ -75,6 +77,8 @@ function validateHostCommand(op, args = {}) {
     throw Error('INVALID_MODE');
   if (['connector-mode', 'model-mode'].includes(op) && !['auto', 'ask'].includes(args.mode))
     throw Error('INVALID_MODE');
+  if (op === 'set-language' && !['en', 'zh-CN'].includes(args.locale))
+    throw Error('INVALID_LOCALE');
   return args;
 }
 function approvalId(id) {
@@ -93,6 +97,8 @@ class Controller {
     files,
     oauth,
     setup,
+    preferences,
+    onLanguageChange = () => {},
     version = '',
     log,
     tokens,
@@ -106,6 +112,8 @@ class Controller {
       files,
       oauth,
       setup,
+      preferences,
+      onLanguageChange,
       version,
       log,
       tokens,
@@ -139,6 +147,7 @@ class Controller {
   }
   snapshot() {
     return {
+      locale: this.preferences?.locale || 'en',
       root: this.runtime.root,
       version: this.version,
       limits: LIMITS,
@@ -162,7 +171,7 @@ class Controller {
     args = validateHostCommand(op, args);
     if (
       this.setup?.busy &&
-      !['snapshot', 'setup-status', 'setup-cancel-login', 'disconnect'].includes(op)
+      !['snapshot', 'set-language', 'setup-status', 'setup-cancel-login', 'disconnect'].includes(op)
     )
       throw Error('SETUP_IN_PROGRESS');
     const exclusive = EXCLUSIVE.has(op);
@@ -177,12 +186,18 @@ class Controller {
 
   async handle(op, args) {
     switch (op) {
+      case 'set-language': {
+        const result = await this.preferences.setLocale(args.locale);
+        this.onLanguageChange(args.locale);
+        return result;
+      }
       case 'first-task': {
         if (!this.pi.state.connected || this.pi.state.busy) throw Error('PI_NOT_READY');
         if (this.firstTask?.state === 'running') throw Error('FIRST_TASK_RUNNING');
         await this.pi.request('new');
-        const text =
-          '这是首次使用的示例任务。仅根据以下虚构文本，整理成三条待办清单，不要调用任何工具：周一整理项目需求，周二写出设计初稿，周三与团队评审。';
+        const text = t(
+          '这是首次使用的示例任务。仅根据以下虚构文本，整理成三条待办清单，不要调用任何工具：周一整理项目需求，周二写出设计初稿，周三与团队评审。',
+        );
         const result = await this.pi.request('prompt', { text });
         this.firstTask = {
           state: 'running',

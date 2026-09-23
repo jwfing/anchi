@@ -1,9 +1,13 @@
-'use strict';
+import { t, translateEvent, html, getLocale, setLocale, localizeStatic } from './i18n.mjs';
 import { esc, button, renderPage } from './views.mjs';
 const $ = (s) => document.querySelector(s);
+let localeReady = false;
+let noticeSource = '';
+let languageBusy = false;
+let modalContent = null;
 let state = { directories: [], events: [], connected: false, busy: false },
   page = 'setup',
-  env = '尚未检查',
+  env = t('尚未检查'),
   messages = [],
   approvals = [],
   approvalsLoaded = false,
@@ -68,7 +72,8 @@ function notice(text) {
       text = message;
       break;
     }
-  $('#notice').textContent = text;
+  noticeSource = text;
+  $('#notice').textContent = translateEvent(text);
 }
 async function refresh() {
   state = {
@@ -77,6 +82,10 @@ async function refresh() {
     connectors: state.connectors,
     rules: state.rules,
   };
+  if (!localeReady) {
+    setLocale(state.locale || 'en');
+    localeReady = true;
+  }
   render();
 }
 /** Bursts of agent events collapse into one snapshot round trip. */
@@ -89,10 +98,11 @@ function scheduleRefresh() {
 }
 function modal(title, body) {
   $('#modal').innerHTML =
-    `<h2 id="dialog-title">${title}</h2>${body}<div class="dialogfoot">${button('关闭', 'close')}</div>`;
+    `<h2 id="dialog-title">${title}</h2>${body}<div class="dialogfoot">${button(t('关闭'), 'close')}</div>`;
   $('#modal').showModal();
 }
 function render() {
+  renderShell();
   const previousChat = $('.chatlog');
   const chatScroll = previousChat?.scrollTop || 0;
   const followChat =
@@ -105,23 +115,23 @@ function render() {
     focusId && typeof active.selectionStart === 'number'
       ? [active.selectionStart, active.selectionEnd]
       : null;
-  $('#version').textContent = '桌面开发版' + (state.version ? ' · ' + state.version : '');
+  $('#version').textContent = t('桌面开发版') + (state.version ? ' · ' + state.version : '');
   $('#status').textContent = state.connected
     ? state.busy
-      ? '● Pi 任务执行中'
-      : '● Pi 已连接'
+      ? t('● Pi 任务执行中')
+      : t('● Pi 已连接')
     : state.starting
-      ? '◌ 正在连接 Pi'
-      : '○ Pi 未连接';
+      ? t('◌ 正在连接 Pi')
+      : t('○ Pi 未连接');
   $('#status').title = $('#status').textContent;
   $('#status').setAttribute('aria-label', $('#status').textContent);
   $('#approvals-badge').textContent = approvals.length ? String(approvals.length) : '';
   $('#crumb').textContent = {
-    setup: '首次设置',
+    setup: t('首次设置'),
     agent: 'Agent',
-    permissions: '连接与权限',
-    approvals: '独立审批',
-    activity: '活动记录',
+    permissions: t('连接与权限'),
+    approvals: t('独立审批'),
+    activity: t('活动记录'),
   }[page];
   document
     .querySelectorAll('[data-page]')
@@ -147,6 +157,20 @@ function render() {
         element.setSelectionRange(selection[0], selection[1]);
     }
   }
+}
+function renderShell() {
+  document.documentElement.lang = getLocale();
+  document.title = t('安栖 · 本地 Agent');
+  localizeStatic($('nav'));
+  localizeStatic($('.top'));
+  const collapsed = $('.shell').classList.contains('sidebar-collapsed');
+  const label = t(collapsed ? '展开导航' : '收起导航');
+  $('#sidebar-toggle').title = label;
+  $('#sidebar-toggle').setAttribute('aria-label', label);
+  const language = $('#language-toggle');
+  language.textContent = getLocale() === 'en' ? '中' : 'EN';
+  language.title = getLocale() === 'en' ? '切换到中文' : 'Switch to English';
+  language.setAttribute('aria-label', language.title);
 }
 async function loadApprovals({ show = true } = {}) {
   const value = await call('approvals');
@@ -191,14 +215,14 @@ const acts = {
     const value = await call('environment');
     env =
       value.instances.map((x) => `${x.name} · ${x.status} · ${x.arch}`).join(', ') ||
-      '未找到 secure-vm';
+      t('未找到 secure-vm');
     render();
   },
   'vm-start': async () => {
-    notice('正在启动已有 VM…');
+    notice(t('正在启动已有 VM…'));
     await call('vm-start');
     await acts.environment();
-    notice('VM 已启动。重启后可能需要先解锁凭证库。');
+    notice(t('VM 已启动。重启后可能需要先解锁凭证库。'));
   },
   connect: async () => {
     await call('connect');
@@ -215,7 +239,7 @@ const acts = {
   cancel: async () => {
     await call('rpc', { op: 'cancel' });
     await refresh();
-    notice('本地任务已取消。待审批请求请在独立审批页拒绝或撤销。');
+    notice(t('本地任务已取消。待审批请求请在独立审批页拒绝或撤销。'));
   },
   new: async () => {
     await call('rpc', { op: 'new' });
@@ -229,10 +253,15 @@ const acts = {
   },
   sessions: async () => {
     const value = await call('rpc', { op: 'sessions' });
-    modal(
-      '恢复 Pi 会话',
-      `<p class="muted">恢复上下文不恢复授权，也不自动执行任务。</p>${value.sessions.map((s) => `<div class="resource"><span class="caption">${esc(s.modified)}</span><br><button data-resume="${esc(s.session_id)}">${esc(s.session_id)}</button></div>`).join('') || '没有已保存会话。'}`,
-    );
+    modalContent = () =>
+      modal(
+        t('恢复 Pi 会话'),
+        html`<p class="muted">恢复上下文不恢复授权，也不自动执行任务。</p>
+          ${value.sessions.map((s) => `<div class="resource"><span class="caption">${esc(s.modified)}</span><br><button data-resume="${esc(s.session_id)}">${esc(s.session_id)}</button></div>`).join('') || t('没有已保存会话。')}`,
+      );
+    const show = modalContent;
+    show();
+    modalContent = show;
   },
   'add-ro': async () => {
     await call('directories-add', { mode: 'ro' });
@@ -255,12 +284,12 @@ const acts = {
   },
   'model-auto': async () => {
     const result = await call('model-mode', { mode: 'auto' });
-    notice(result.cancelled ? '已取消。' : '模型调用已恢复持续授权。');
+    notice(result.cancelled ? t('已取消。') : t('模型调用已恢复持续授权。'));
     await acts['connectors-status']();
   },
   'model-ask': async () => {
     await call('model-mode', { mode: 'ask' });
-    notice('模型调用改为逐轮审批；待消费的授权已作废。');
+    notice(t('模型调用改为逐轮审批；待消费的授权已作废。'));
     await acts['connectors-status']();
   },
   'gmail-import': async () => {
@@ -282,11 +311,11 @@ const acts = {
   },
   'gmail-allow': async () => {
     const result = await call('gmail-read', { mode: 'allow' });
-    notice(result.cancelled ? '已取消授权，现有权限未改变。' : '已允许持续只读访问。');
+    notice(result.cancelled ? t('已取消授权，现有权限未改变。') : t('已允许持续只读访问。'));
   },
   'gmail-deny': async () => {
     await call('gmail-read', { mode: 'deny' });
-    notice('持续读取已撤销；待处理审批已撤销。');
+    notice(t('持续读取已撤销；待处理审批已撤销。'));
   },
   approvals: loadApprovals,
   audit: async () => {
@@ -327,9 +356,29 @@ document.addEventListener('input', (e) => {
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.id === 'language-toggle') {
+    if (languageBusy) return;
+    languageBusy = true;
+    b.disabled = true;
+    const locale = getLocale() === 'en' ? 'zh-CN' : 'en';
+    void call('set-language', { locale })
+      .then(() => {
+        state.locale = locale;
+        setLocale(locale);
+        render();
+        notice(noticeSource);
+        if ($('#modal').open && modalContent) modalContent();
+      })
+      .catch((e) => notice(e.message))
+      .finally(() => {
+        languageBusy = false;
+        b.disabled = false;
+      });
+    return;
+  }
   if (b.id === 'sidebar-toggle') {
     const collapsed = $('.shell').classList.toggle('sidebar-collapsed');
-    const label = collapsed ? '展开导航' : '收起导航';
+    const label = collapsed ? t('展开导航') : t('收起导航');
     b.setAttribute('aria-expanded', String(!collapsed));
     b.setAttribute('aria-label', label);
     b.title = label;
@@ -352,15 +401,15 @@ document.addEventListener('click', (e) => {
       if (action === 'import-client') await call('gmail-import');
       else if (action === 'mode-auto') {
         const result = await call('connector-mode', { connector, mode: 'auto' });
-        notice(result.cancelled ? '已取消，现有设置未改变。' : '已恢复持续授权。');
+        notice(result.cancelled ? t('已取消，现有设置未改变。') : t('已恢复持续授权。'));
       } else if (action === 'mode-ask') {
         await call('connector-mode', { connector, mode: 'ask' });
-        notice('已改为逐次审批；待消费的授权已作废。');
+        notice(t('已改为逐次审批；待消费的授权已作废。'));
       } else {
         const result = await call('connector-' + action, { connector });
-        if (result?.cancelled) notice('已取消。');
+        if (result?.cancelled) notice(t('已取消。'));
         else if (result?.manual_step)
-          notice('本机凭证已删除。Notion 没有远端撤销接口，请到 Notion 设置中移除该集成。');
+          notice(t('本机凭证已删除。Notion 没有远端撤销接口，请到 Notion 设置中移除该集成。'));
       }
       await acts['connectors-status']();
       await refresh();
@@ -408,7 +457,7 @@ document.addEventListener('submit', (e) => {
 window.desktop.onEvent((event) => {
   if (event.type === 'setup_changed') notice(event.job.message);
   if (event.type === 'finished' && event.success)
-    notice('任务已完成。可继续对话，或返回首次设置查看下一步。');
+    notice(t('任务已完成。可继续对话，或返回首次设置查看下一步。'));
   if (event.type === 'gmail_changed' || event.type === 'connectors_changed')
     void acts['connectors-status']().catch((e) => notice(e.message));
   if (event.type === 'ready') messages = [];
@@ -417,14 +466,15 @@ window.desktop.onEvent((event) => {
     messages.push({ role: 'assistant', text: event.text });
   if (event.type === 'user') messages.push({ role: 'user', text: event.text });
   if (event.type === 'approval_required') {
-    notice('Pi 提示需要审批。请进入独立审批页，从策略服务读取详情。');
+    notice(t('Pi 提示需要审批。请进入独立审批页，从策略服务读取详情。'));
     void loadApprovals({ show: false }).catch(() => {});
   }
   if (event.type === 'turn_error' || event.type === 'protocol_error')
-    notice('Pi 错误：' + event.error);
-  if (event.type === 'assistant' && event.error) notice('模型调用失败：' + event.error);
+    notice(t('Pi 错误：') + event.error);
+  if (event.type === 'assistant' && event.error) notice(t('模型调用失败：') + event.error);
   scheduleRefresh();
 });
+renderShell();
 void refresh()
   .then(() => acts['setup-status']())
   // The policy service lives in the VM; before it runs there are no rules to read, not an error.

@@ -1,3 +1,4 @@
+const { t, text: msg, getLocale } = require('./language.cjs');
 const { BrowserWindow, ipcMain } = require('electron');
 const { TOKEN_URL, trustedSender, hardenWindow } = require('./security.cjs');
 
@@ -15,9 +16,9 @@ class TokenWindow {
         parent: this.parent,
         modal: true,
         width: 560,
-        height: 400,
+        height: 460,
         resizable: false,
-        title: `输入 ${descriptor.label} 令牌`,
+        title: msg`输入 ${descriptor.label} 令牌`,
         webPreferences: {
           preload: this.preload,
           nodeIntegration: false,
@@ -47,7 +48,9 @@ class TokenWindow {
         return { ok: true };
       });
       win.once('closed', () => finish(null));
-      void win.loadURL(`${TOKEN_URL}?connector=${encodeURIComponent(descriptor.id)}`);
+      void win.loadURL(
+        `${TOKEN_URL}?connector=${encodeURIComponent(descriptor.id)}&locale=${getLocale()}`,
+      );
     });
   }
 }

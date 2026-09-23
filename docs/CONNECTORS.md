@@ -15,7 +15,7 @@ The token window is a separate main-process-created modal with a password field.
 
 ## Authorization modes
 
-New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation on Independent approval. Restoring standing authorization requires confirmation of prompt-injection risk. Model calls have the same control in setup section 4. Any mode change revokes all unconsumed grants.
+New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation on Approvals. Restoring standing authorization requires confirmation of prompt-injection risk. Model calls have the same control in setup section 4. Any mode change revokes all unconsumed grants.
 
 ```bash
 bash scripts/policy.sh rules                 # Show current modes

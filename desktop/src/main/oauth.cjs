@@ -1,3 +1,4 @@
+const { t } = require('./language.cjs');
 const http = require('node:http');
 const { timingSafeEqual } = require('node:crypto');
 const { GOOGLE_SCOPES } = require('../shared/connectors.cjs');
@@ -108,7 +109,7 @@ class DesktopOAuth {
     }
     flow.consumed = true;
     clearTimeout(flow.timer);
-    res.end('可以关闭此页面，返回安栖查看连接结果。');
+    res.end(t('可以关闭此页面，返回安栖查看连接结果。'));
     flow.server.close();
     try {
       if (url.searchParams.has('error')) throw Error('OAUTH_CANCELLED');

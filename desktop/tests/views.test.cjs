@@ -1,4 +1,7 @@
-const { test } = require('node:test');
+const { test, beforeEach } = require('node:test');
+beforeEach(async () => {
+  (await import('../src/renderer/i18n.mjs')).setLocale('zh-CN');
+});
 const assert = require('node:assert/strict');
 
 test('untrusted agent and approval text cannot create executable controls', async () => {

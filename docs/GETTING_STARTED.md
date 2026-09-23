@@ -2,7 +2,7 @@
 
 macOS on Apple Silicon is supported; Linux x86_64 is experimental. Current builds are internal development packages. Public macOS distribution still requires Developer ID signing and notarization.
 
-The desktop currently uses Chinese UI labels. The control names below describe their functions in English.
+The desktop opens in English by default. Use the language button beside the sidebar expand/collapse control to switch between English and Simplified Chinese. The choice is saved locally and applies to pages, status messages, token entry and confirmation dialogs. Chat content and full approval payloads retain their original language.
 
 ## macOS: from launch to the first task
 
@@ -13,8 +13,8 @@ The desktop currently uses Chinese UI labels. The control names below describe t
 5. Select Initialize / Unlock. First use creates `~/.config/secure-vm/vault.key`; existing keys are reused. Back up this file: a replacement key cannot decrypt existing accounts. Unlock again after restarting the VM.
 6. Select Sign in / Reauthenticate and complete Codex ChatGPT subscription login in the system browser, or import an existing Codex login. Only the short-lived access token is imported through stdin into the encrypted VM vault; the refresh token stays on the host. Setup shows expiry. Reimport or sign in again after expiry without disconnecting Pi. Never paste a token into chat.
 7. Connect Pi, wait for the connected state, then start the example task. It turns three fictional project statements into a task list without requiring mail or directory access.
-8. Model calls use standing authorization by default, so the example runs directly and is audited. If you changed model calls to per-turn approval in the setup page's fourth section, open Independent approval, refresh from the policy service, inspect the full action and approve it. In that mode, the model is not called before approval.
-9. Return to Agent for the result. First-task completion requires both a text reply and successful completion for the same session and turn. Then connect accounts or grant directories as needed under Connections and permissions. Directory grants persist until revoked; overwritten or deleted files remain recoverable in the directory's hidden `.anchi-trash`.
+8. Model calls use standing authorization by default, so the example runs directly and is audited. If you changed model calls to per-turn approval in the setup page's fourth section, open Approvals, refresh from the policy service, inspect the full action and approve it. In that mode, the model is not called before approval.
+9. Return to Agent for the result. First-task completion requires both a text reply and successful completion for the same session and turn. Then connect accounts or grant directories as needed under Connectors. Directory grants persist until revoked; overwritten or deleted files remain recoverable in the directory's hidden `.anchi-trash`.
 
 Model calls may consume subscription quota. Files or mail already read can enter model context. The example starts a new session to avoid inheriting old context.
 
