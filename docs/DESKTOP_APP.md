@@ -1,89 +1,73 @@
-# 安栖桌面开发版
+# Anchi desktop development build
 
-2026-09-19，Electron 44.4.3，macOS Apple Silicon，版本 0.1.1。
+Version 0.1.1 uses Electron 44.4.3. macOS on Apple Silicon is the primary platform; Linux x86_64 is experimental.
 
-## 启动
+## Launch and packaging
 
-双击 `artifacts/releases/0.1.1/Anchi-darwin-arm64/Anchi.app`。这是开发构建，未做 Developer ID 签名、公证或分发安装器；不要将它视为已经可以分发给其他用户的独立产品。`artifacts/desktop/` 下的旧应用是历史原型。
+On macOS, open `artifacts/releases/0.1.1/Anchi-darwin-arm64/Anchi.app`. It is a development build without a validated Developer ID signature, notarization or distribution installer.
 
-应用默认进入首次设置，可以检测并安装依赖、创建 VM 和安装 Pi、初始化凭证库、启动 Codex 浏览器登录并导入订阅认证。完整步骤见 [首次使用指南](GETTING_STARTED.md)。Homebrew 尚未安装时由用户在系统安装器完成官方 .pkg 安装。新的打包流程把白名单运行脚本放入 `Resources/runtime`，不再引用开发者仓库绝对路径；移动应用不影响脚本定位。不会把凭证、用户工作区、node_modules 或 VM 镜像放入运行资源。源码模式仍使用仓库脚本。
+Setup can inspect/install dependencies, create the VM and Pi, initialize/unlock the vault and launch Codex browser login or import existing subscription authentication. See [getting started](GETTING_STARTED.md). If Homebrew is absent, the user installs its official `.pkg` through the system installer.
 
-从源码启动和打包：
+The package includes allowlisted scripts under `Resources/runtime`; moving the app does not depend on a developer checkout. Runtime resources exclude credentials, user workspaces, `node_modules` and VM images. Source mode uses repository scripts.
 
 ```bash
 cd desktop
 npm ci
 npm start
-# 退出正在运行的应用后重新打包
+# Quit the running application before repackaging.
 npm run package
 npm test
 ```
 
-## 当前真实功能
+## Workspace and current features
 
-- 首次设置检测依赖和真实 VM/Pi/认证状态；原生确认后安装或修复环境。失败和中断可重试，保留既有工作区和凭证。
-- 连接真实 Pi JSONL RPC；聊天、取消、新会话、会话列表、恢复与历史。
-- 系统原生目录选择器；只读/读写目录选择采用 schema v2 在本机持久保存（含授权时记录的设备号与 inode），拒绝重复、重叠及常见敏感目录。兼容 v1 和旧无版本配置；损坏或未知版本配置保留原文件并禁止覆盖。配置文件为 `~/Library/Application Support/Anchi/directory-plans.json`；旧 `Qisuo` 目录在首次启动时自动迁移。
-- 直接从独立策略服务读取 pending 和完整动作；批准时绑定 digest，重新核对状态并由原生确认框确认，再调用既有 policy admin。
-- 拒绝或撤销策略记录；关闭应用时先询问，再结束本地 Pi 连接。VM 保持运行。
-- 活动记录落盘到 `activity.jsonl`，只含事件类型、时间、工具名和审批 ID，不含聊天和审批正文；活动页可读取 VM 内策略审计。
-- 审批页切换时自动载入，导航显示待审批数量；请求详情先展示结构化摘要，完整 JSON 折叠可查。
-- 模型认证到期时在首次设置直接重新登录或导入，不需要断开 Pi；首次设置显示认证到期时间和 VM 服务版本。
+- Setup checks real dependency, VM, Pi and authentication state. Installation/repair follows native confirmation and can retry failures or interruptions without deleting existing workspaces or credentials.
+- Chat uses real Pi JSONL RPC: send, cancel, create sessions, list/resume sessions and load history.
+- The navigation stays in place and can collapse to icons. Agent uses a compact environment bar, a conversation area and a bottom composer with session controls. Task status appears as a small toast. Connection tips are separate from status and authorization controls.
+- Native directory selection supports read-only/read-write grants. Version 2 plans record device and inode, reject overlapping and sensitive directories, and restore only unchanged identities. Version 1 and unversioned plans remain readable; corrupt/future versions are preserved and cannot be overwritten.
+- Plans live in `~/Library/Application Support/Anchi/directory-plans.json` on macOS. An existing `Qisuo` directory migrates once when `Anchi` is absent; if migration fails, the app uses the old directory to preserve access. Linux uses `~/.config/Anchi`.
+- Independent approval reads pending requests and full actions directly from policy. Approval binds the digest, rechecks current state and uses native confirmation before invoking policy administration.
+- Requests can be denied or revoked. Closing the app asks before ending the local Pi connection; the VM remains running.
+- Desktop activity metadata persists in `activity.jsonl`. The activity page groups events by date and exposes technical identifiers in expandable details; it can also read VM policy audit. Chat and approval bodies are not stored in this log.
+- Opening approvals loads pending requests; navigation shows their count. Details include a structured summary and expandable full JSON.
+- Setup displays authentication expiry and VM service version. Expired model authentication can be reimported without disconnecting Pi.
 
-## 真实目录授权
+## Directory grants
 
-在「连接与权限」选择目录及只读/读写模式，再确认原生授权框。成功后显示「已授权」，并记录目录身份。重新打开应用时，身份未变的目录自动恢复；被移动、替换或不可访问的目录显示原因并要求「重新确认」。改权限会先撤销旧能力，再激活新能力；移除先阻止新请求，等待在途操作结束后删除配置。
+Under Connections and permissions, choose a directory and mode, then confirm in the native dialog. Only successful broker activation is shown as authorized. Unchanged identities restore on startup; moved, replaced or inaccessible directories show a reason and require reconfirmation. Changing mode revokes the old capability before activating the new one. Removing a grant blocks new requests, waits for in-flight operations, then removes the plan.
 
-Pi 使用 `host_files` 工具，先调用 `op=grants` 获得目录 ID，再以该 ID 和相对路径调用 `list/read/write/mkdir/delete`。shell 不能直接打开宿主路径；VM 继续不挂载宿主目录。文本限制为 24000 UTF-8 字节，列表最多 100 项；不支持二进制、隐藏文件、符号链接、硬链接或递归删除。读写权限允许覆盖和删除普通文件：被覆盖的旧版本和被删除的文件移入该目录下隐藏的 `.anchi-trash`，供用户找回，Agent 无法访问；写入采用临时文件原子替换。撤销不会收回已读到的内容。
+Pi calls `host_files` with `op=grants` to obtain IDs, then uses an ID and relative path for `list/read/write/mkdir/delete`. Shell cannot open host paths directly; the VM has no host mounts. Limits: 24,000 UTF-8 bytes, at most 100 directory entries, no binary/hidden files, symlinks, hard links or recursive deletion. Overwritten and deleted regular files move into hidden `.anchi-trash` for host-side recovery. The agent cannot access that directory. Writes use atomic replacement; revocation does not retract content already read.
 
-`scripts/host-files.py` 在宿主执行，使用首次设置安装的 Homebrew Python，找不到时回退系统 Python。Pi 适配器升级运行 `bash scripts/install-pi.sh`，需先退出占用 cell 的会话。
+`scripts/host-files.py` runs on the host using the installed host Python (Homebrew Python on macOS, with system fallback). Upgrade the Pi adapter with `bash scripts/install-pi.sh` after closing sessions occupying the cell.
 
-## 连接器卡片
+## Account connectors and Google OAuth
 
-「连接与权限」按 `desktop/src/shared/connectors.cjs` 的描述为 Gmail、Google Drive、Notion、Slack 各渲染一张卡片：状态与账户标签、连接或输入令牌、断开、当前授权模式与「改为逐次审批 / 恢复持续授权」开关。令牌粘贴窗口是主进程单独创建的模态窗口，令牌不经过主页面。审批页对写入请求显示横幅、目标与正文全文。详见 [连接器](CONNECTORS.md)。
+Gmail, Drive, Notion and Slack cards come from `desktop/src/shared/connectors.cjs`. Each shows status/account, connection or token entry, disconnect and authorization-mode controls. Static tokens use a separate modal main-process window and never pass through the main page. Write approval includes a banner, target and full body. See [connectors](CONNECTORS.md).
 
-## 桌面 Gmail OAuth
+1. Start the VM, unlock the vault and refresh account status.
+2. If needed, import a Google Desktop OAuth client JSON. It goes through stdin into the encrypted VM vault, not desktop configuration.
+3. Connect Google in the system browser. The random loopback callback validates state, Host and path; PKCE verifier remains in the VM. The main process sends the code directly to auth; neither Pi nor the renderer receives tokens.
+4. Refresh status. Connecting grants standing authorization immediately; switch the connector to per-request approval to review each operation.
+5. Switching modes revokes unconsumed grants. Restoring automatic authorization requires native confirmation. Disconnect also stops Pi and attempts remote revocation; failed revocation can be retried.
 
-1. 启动 VM，解锁既有凭证库，进入「连接与权限」刷新账户状态。
-2. 若未配置 Google Desktop OAuth 客户端，点击「导入客户端 JSON」选择已申请的客户端文件；通过 stdin 导入 VM 加密库，不写入桌面配置。
-3. 点击「连接 Google」，在系统浏览器完成授权。桌面只开放随机 loopback 回调，校验 state、Host 和路径；PKCE verifier 留在 VM。授权码由主进程直接送认证服务，令牌不进入页面或 Pi。
-4. 回到应用刷新状态。连接即授权：Agent 随即可以持续读取该账户，不需要再点一次许可。若要逐条把关，点击卡片上的「改为逐次审批」。
-5. 「改为逐次审批」会撤销全部未消费的授权，之后每个邮件请求进入独立审批；「恢复持续授权」需在原生确认框确认。「断开账户」还停止 Pi 并撤销 Google 令牌。若远端撤销失败，显示待重试，再次点击断开即可。
+OAuth waiting can be cancelled and expires after ten minutes. The account owner must complete real browser consent. Task-scoped mail restrictions, a budget UI and automatic updates are not implemented.
 
-可取消等待中的 OAuth；十分钟内未完成自动取消。真实交互式授权必须由账户所有者完成。模型调用默认持续授权，可在首次设置页改为逐轮审批；任务级邮件范围、预算界面及自动更新尚未实现。
+## A real task
 
-## 一次真实使用
+Check the environment and start an existing stopped VM. Unlock after VM restart; refresh subscription authentication using [Pi authentication](PI_AGENT.md). Connect Pi and wait for its session ID; only one cell runs at a time, so close any terminal Pi first.
 
-1. 打开应用，点击「检查环境」。如果已有 VM 停止，可以点击「启动已有 VM」。
-2. 如 VM 重启导致凭证库锁定，先按 [安全基础](SECURITY_FOUNDATION.md) 完成宿主解锁；订阅认证过期按 [Pi 认证](PI_AGENT.md) 更新。
-3. 点击「连接 Pi」，等待真实 session ID。当前只允许一个 cell；请先关闭占用它的命令行 Pi。
-4. 发送任务。默认持续授权下模型请求自动放行，直接等待结果。
-5. 若模型调用或某个 connector 已改为逐次审批，收到提示后进入「独立审批」，点击「从策略服务刷新」，核对实际内容、模型、资源及 digest，批准后在原生对话框确认。
-6. 回到聊天查看结果。停止任务不会回滚工具动作，也不能保证已提交的上游请求停止计费。
+Send a task. Automatic mode proceeds under policy; in approval mode, open Independent approval, refresh from policy, inspect the actual model, resource, content and digest, and confirm approval in the native dialog. Return to chat for the result. Cancellation neither rolls back completed tool actions nor guarantees an already submitted upstream request stops billing.
 
-## 桌面信任边界
+## Desktop trust boundary
 
-渲染器启用 sandbox/contextIsolation，禁用 Node 集成；页面、CSS 和脚本仅通过固定白名单的 `anchi://app/` 协议加载。严格 CSP 禁止页面联网、嵌入 frame 和内联脚本；拒绝新窗口、导航和浏览器权限。
+The renderer uses sandbox/contextIsolation without Node integration. HTML, CSS and modules load only through the allowlisted `anchi://app/` protocol. CSP blocks networking, frames and inline scripts; new windows, navigation and browser permissions are denied.
 
-preload 只暴露固定 IPC，主进程校验窗口、顶层 frame、来源和操作白名单。RPC 禁止 shell、endpoint、凭证等自定义字段。子进程使用固定命令和参数数组、最小环境；stdout 按有界 JSONL 解码。agent 内容按文本转义，不能生成实际审批按钮。
+Preload exposes fixed IPC. Main validates window, top-level frame, origin and operation. RPC rejects arbitrary shell, endpoint or credential fields. Child processes use fixed commands/argument arrays and minimal environments; stdout is bounded JSONL. Agent text is escaped and cannot manufacture approval controls.
 
-批准不信任 agent 提示中的详情：主进程从策略服务重新读取，再使用用户看过的 digest 比较和提交。原生确认是最终用户动作，没有自动批准路径。
+Approval never trusts details in an agent notification: main fetches the action from policy, compares the digest the user reviewed, and submits only after native confirmation. Main, the development checkout and host administrator remain trusted. Renderer hardening is not proof of a complete security audit. See [Electron security guidance](https://www.electronjs.org/docs/latest/tutorial/security).
 
-桌面主进程、开发仓库和宿主管理员仍是可信组件；这里的 renderer 加固不是整个安全模型已审计的证明。实现遵循 [Electron 安全建议](https://www.electronjs.org/docs/latest/tutorial/security)。
+## Development and release checks
 
-## 最初桌面版本验证（历史）
+Run `npm test` in `desktop/` for offline behavior tests. For a package check, launch the app, inspect setup and VM state, connect Pi, create/resume a session, open/cancel the native picker, inspect independent approval details and exit. A successful launch does not establish signed distribution or crash-recovery guarantees.
 
-- 3 个 Node 测试通过：RPC 操作/参数边界，目录祖先关系，UTF-8 分片及超长 agent 帧拒绝。
-- JavaScript 语法检查通过；依赖安装报告 0 个已知漏洞。
-- 实际生成并启动 arm64 `.app`；修复自定义协议资源加载问题。
-- 桌面实测 VM 状态 `Running`，真实 Pi 握手返回 session ID。
-- 原生目录选择器已打开并取消；未选择或授予任何宿主目录。
-- 已走查聊天、权限和审批页布局；未自动批准模型调用或读取真实邮件。
-
-本轮未验证新机器安装、签名分发、真实目录访问、完整模型审批后回答及 GUI 崩溃恢复。
-
-## 工程整理
-
-主进程模块见 [仓库结构](architecture/REPOSITORY.md)。统一 `make check` 包含桌面 controller、存储事务、进程生命周期、IPC 来源及打包资源测试，以及原有 Pi/Python 回归。新的产物和发布门槛见 [发布流程](engineering/RELEASE.md)。历史手工验收不等于重构后全部流程已经再次验证。
-
-产品名称为 **Anchi（安栖）**。用户配置目录为 `~/Library/Application Support/Anchi/`，旧 `Qisuo` 目录在首次启动时迁移；开发版 Bundle ID 为 `local.anchi.desktop`，构建变量以 `ANCHI_*` 为准并兼容 `QISUO_*`。不会因改名重新创建账户或凭证库。详见 [改名迁移](engineering/RENAME_MIGRATION.md)。
+See [module responsibilities](architecture/REPOSITORY.md) and [release gates](engineering/RELEASE.md). The development Bundle ID is `local.anchi.desktop`; release variables use `ANCHI_*` with `QISUO_*` compatibility. Configuration migration preserves accounts and the vault. The Lima instance and guest runtime paths retain the internal name `secure-vm`.

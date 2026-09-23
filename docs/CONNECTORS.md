@@ -1,67 +1,69 @@
-# 连接器：Google Drive、Notion、Slack（与 Gmail）
+# Account connectors
 
-2026-09-21。四个 connector 都在 `services/connectors.py` 注册，各自独立 UID、独立 socket、独立出口；默认连接即持续授权（读写自动放行），每个 connector 可单独改为逐次审批。凭证只进入 VM 凭证库，cell 内的 agent 只能通过结构化操作调用。
+Gmail, Google Drive, Notion and Slack are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Connecting grants standing authorization by default; each connector can switch to per-request approval. Credentials stay in the VM vault, and the cell agent can invoke only structured operations.
 
-## 授权准备
+## Account setup
 
-| Connector | 准备 | 应用内动作 |
+| Connector | Preparation | Desktop action |
 |---|---|---|
-| Gmail | 与之前相同：Google Cloud 项目启用 Gmail API，导入 Desktop OAuth 客户端 JSON | 「连接 Google」，scope 只读 |
-| Google Drive | 同一 Google Cloud 项目启用 Drive API；OAuth 同意屏幕加入 `drive.readonly` 与 `drive.file` | 「连接 Google」，单独一次授权，令牌与 Gmail 分开存 |
-| Notion | 打开 [app.notion.com/developers/connections](https://app.notion.com/developers/connections)（需为工作区 Owner）→ Internal connections → Create a new connection；在 Configuration 勾选读取、插入、更新内容并复制 Installation access token；在 Content access 或页面菜单「Connections」把测试页面共享给该连接 | 「输入 Notion 令牌」，在独立小窗口粘贴以 `ntn_` 开头的密钥 |
-| Slack | api.slack.com 创建应用，Bot Token Scopes 加入 `channels:read`、`channels:history`、`groups:read`、`groups:history`、`chat:write`，安装到工作区，把 bot 邀请进需要访问的频道 | 「输入 Slack Bot 令牌」，粘贴以 `xoxb-` 开头的令牌 |
+| Gmail | Enable Gmail API in Google Cloud; import a Desktop OAuth client JSON | Connect Google with the read-only scope |
+| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | Connect Google separately; tokens are stored independently from Gmail |
+| Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | Enter the `ntn_` token in the separate Notion token window |
+| Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | Enter the `xoxb-` Bot User OAuth Token |
 
-令牌粘贴窗口由主进程单独创建，只有一个密码框；令牌经 IPC 直达主进程，再经 stdin 进入 VM 加密库，不经过展示 agent 内容的页面，也不写入活动记录。导入后应用会以该 connector 自己的身份调用 `auth.test`、`users/me` 或 `about` 取回账户标签显示在卡片上；探测失败只影响标签。
+The token window is a separate main-process-created modal with a password field. Tokens go through IPC to the main process and stdin to the encrypted vault, never through the page displaying agent content or the activity log. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
 
-## 授权模式
+## Authorization modes
 
-全新安装连接账户后该 connector 处于「持续授权」：读写都由策略按白名单自动签发一次性授权，不弹审批。卡片上的「改为逐次审批」把它切到 `ask`：之后每个操作都进入独立审批页，需要核对内容后批准；「恢复持续授权」会先弹出说明提示注入风险的确认框。模型调用有同样的开关，在首次设置页第 4 步。切换任一模式都会撤销所有未消费的授权。终端等价命令：
+New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation on Independent approval. Restoring standing authorization requires confirmation of prompt-injection risk. Model calls have the same control in setup section 4. Any mode change revokes all unconsumed grants.
 
 ```bash
-bash scripts/policy.sh rules                 # 查看每个主体当前模式
-bash scripts/policy.sh mode drive ask        # Drive 改为逐次审批
-bash scripts/policy.sh mode inference auto   # 模型调用恢复持续授权
+bash scripts/policy.sh rules                 # Show current modes
+bash scripts/policy.sh mode drive ask        # Require approval for Drive
+bash scripts/policy.sh mode inference auto   # Restore automatic model authorization
 ```
 
-旧库缺少新版模式时也使用 `auto` 默认值，不强制迁移为 `ask`；已有显式模式保持不变。升级后请核对权限页：旧只读许可与新版持续读写模式不同，处理不可信来源时建议主动选择逐次审批。
+Older databases without a mode use `auto`; explicit modes are preserved. The old read-only permission is not equivalent to standing read/write authorization. Review modes after upgrading, especially when handling untrusted content.
 
-## 读与写
+## Available operations
 
-| Connector | 读 | 写 |
+| Connector | Reads | Writes |
 |---|---|---|
-| Drive | `drive_search`（名称或全文，≤10）、`drive_read`（Google 文档导出文本或 text 类文件，≤40 KB） | `drive_create`（指定文件夹新建文本或 Google 文档）、`drive_update`（更新本应用创建的文本文件，要求当前修订，强 ETag 可选；Google 文档暂不支持覆盖） |
-| Notion | `notion_search`（≤10）、`notion_read`（页面块拼成文本，≤40 KB） | `notion_create_page`（父页面下新建）、`notion_append`（追加段落，绑定当前编辑时间） |
-| Slack | `slack_channels`（bot 已加入的频道）、`slack_history`（≤50 条） | `slack_post`（发消息，可选线程） |
+| Drive | `drive_search`: name/full text, up to 10 results; `drive_read`: exported Google Docs text or text files, up to 40 KB | `drive_create`: text or Google Docs in a folder; `drive_update`: app-created text files with a current revision, optional strong ETag; Google Docs overwrite is unsupported |
+| Notion | `notion_search`: up to 10 results; `notion_read`: page blocks as text, up to 40 KB | `notion_create_page`: child page; `notion_append`: paragraphs bound to current edit time |
+| Slack | `slack_channels`: joined channels; `slack_history`: up to 50 messages | `slack_post`: message, optionally in a thread |
+| Gmail | Status, list and read; see [Gmail setup](GMAIL_SETUP.md) | None |
 
-写入正文上限 48 KB；每个 connector 每天最多 200 次写入；更新类操作无论哪种模式都绑定目标修订。Pi 只为「已连接」的 connector 注册工具。
+Write bodies are limited to 48 KB and each connector to 200 writes per day. Updates bind to the target revision in either mode. Pi registers tools only for connected connectors when creating a session.
 
-## 审批页如何核对写入（逐次审批模式）
+## Reviewing writes in approval mode
 
-写入请求在审批页带有橙色横幅「这是一次写入」，摘要显示：connector 账户、操作、目标（文件名与修订、页面与编辑时间、频道与线程）、正文全文。批准后立即执行一次；更新类操作在执行前再次核对目标修订，变化则以 `TARGET_CHANGED` 失败且不重试。Pi 保留同一 request ID 等待审批，支持取消与 10 分钟超时。首次准备的动作持久化，重试不重新冻结目标版本；已成功的同一请求返回缓存。结果不明（超时、断流、服务端 5xx、成功响应无法解析）记为 UNKNOWN，同一请求不会自动重放，应先到远端核对。
+Write approvals have a prominent banner, account, operation, target (file/revision, page/edit time, or channel/thread) and full body. Approval authorizes one execution. Updates recheck the target immediately before execution; changes fail with `TARGET_CHANGED` without retry.
 
-## 断开
+Pi retains the same request ID while waiting, supports cancellation and times out after ten minutes. Prepared actions are persisted; retries do not freeze a newer target version. Successful requests return cached results. Timeouts, dropped connections, upstream 5xx or unparseable success responses are recorded as UNKNOWN and are not automatically replayed. Check the remote service before taking further action.
 
-- Gmail、Drive：撤销持续读取，删除本机令牌，尝试 Google 远端撤销；失败会显示待重试。
-- Slack：撤销持续读取，调用 `auth.revoke` 使令牌失效，删除本机令牌。
-- Notion：撤销持续读取并删除本机令牌；Notion 没有远端撤销接口，请到 Notion 设置中移除该集成。
+## Disconnecting
 
-## 数据去向与限制
+- Gmail/Drive: revoke local access, remove tokens and attempt Google revocation. Failed remote revocation is shown as pending retry.
+- Slack: revoke local access, call `auth.revoke`, then remove the token.
+- Notion: revoke local access and remove the token. No remote revoke API is available; remove the integration in Notion settings yourself.
 
-- 读取到的邮件、文件、页面和消息可能进入 agent 上下文与云模型；凭证隔离不等于数据不出本机。
-- Drive 使用 `drive.file` scope，只能更新本应用创建的文件；其他文件的更新会被 Google 拒绝并显示为 `TARGET_NOT_WRITABLE`。
-- Drive 更新冻结非空修订号并在执行前复核；上游提供强 ETag 时才携带 `If-Match`，412 返回 `TARGET_CHANGED`。无 ETag 的修订前置检查不是原子条件写入。Google 文档缺少该修订字段，目前拒绝覆盖，可另建文件。
-- Notion 的编辑时间核对仍是执行前检查，不是上游原子条件写入；核对与追加之间存在竞态窗口。
-- Notion 读取会遍历嵌套 block，最多 5 次子块分页请求、8 层、40 KB；未读完时返回 `truncated` 和 `omissions`；图片、分割线等仅在 `omissions` 中说明，不据此声明文本截断。
-- Slack 历史按序列化 UTF-8 总大小限制响应。超出预算或上游仍有更多内容时标记 `truncated`，完整分页时可使用返回的 `next_cursor`。
-- Slack bot 只能读取它已加入的频道；私信、用户令牌与 OAuth 暂不支持。
-- Notion API 版本固定为 `2022-06-28`。
+## Data handling and limits
 
-## 命令行
+- Read mail, files, pages and messages may enter agent context and cloud models. Credential isolation does not keep all content local.
+- Drive's `drive.file` scope limits updates to app-created files; other updates fail with `TARGET_NOT_WRITABLE`.
+- Drive requires a nonempty revision and rechecks it. A strong ETag, when supplied upstream, is sent with `If-Match`; HTTP 412 maps to `TARGET_CHANGED`. Without an ETag the precheck is not an atomic conditional write. Google Docs overwrite is refused because the required revision field is absent; reading and creation remain available.
+- Notion's edit-time check also has a race between checking and appending.
+- Notion traverses nested blocks with at most five child-pagination requests, depth eight and 40 KB. Incomplete text is marked `truncated`; images and other nontext omissions are reported separately in `omissions`.
+- Slack history is bounded by total serialized UTF-8 size. More upstream content or a size limit produces `truncated`; use `next_cursor` where available.
+- Slack supports only joined channels, not direct messages, user tokens or OAuth. Notion uses API version `2022-06-28`.
+
+## CLI and validation
 
 ```bash
-bash scripts/policy.sh read drive allow      # 兼容别名：allow=auto（包含写入），deny=ask
-bash scripts/policy.sh pending               # 待审批
+bash scripts/policy.sh read drive allow  # Compatibility alias: allow=auto (includes writes), deny=ask
+bash scripts/policy.sh pending
 limactl shell secure-vm -- sudo /usr/bin/python3 /opt/secure-vm/services/connector_admin.py slack probe
 ```
 
-真实账户验证需要维护者用自己的账户完成：连接、搜索、读取、新建、更新或追加或发送，并在独立审批中核对全文后批准。
+Real-account validation remains a maintainer task: connect, search, read, create, update/append/post, inspect and approve full write content in `ask` mode, then disconnect. Local tests do not replace provider-specific account checks.

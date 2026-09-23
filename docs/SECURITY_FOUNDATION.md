@@ -1,46 +1,42 @@
-# M5 / M6 / M7 实现与验收
+# Credential, policy and network services
 
-> 本文中的测试数量与验证结果为当日记录；当前以 `make check` 的输出为准。
+These trusted services keep credentials, authorization and provider networking outside the agent cell. See [Pi integration](PI_AGENT.md), [connectors](CONNECTORS.md) and the [security model](../SECURITY.md) for their callers and boundaries. Gmail remains read-only; Drive, Notion and Slack expose the documented write operations.
 
-2026-09-18。本轮补齐当前单用户、只读 Gmail MVP 的安全基础。随后 M8 已部署真实 pi agent，见 [Pi 接入](PI_AGENT.md)。发送功能仍未实现，也未测试发信。
+## Encrypted credentials
 
-## M5：凭证库
+A separate `secure-auth` UID owns OAuth client configuration, access/refresh tokens, temporary PKCE state and optional model keys. `/var/lib/secure-auth/*.json.enc` uses AES-256-GCM with random twelve-byte nonces and the logical filename as AAD, preventing credential-file substitution. Directory mode is 0700; files are 0600 with atomic replacement and fsync.
 
-`secure-auth` 独立 UID 持有 OAuth client、access/refresh token、PKCE 临时状态和可选模型 key。文件在 `/var/lib/secure-auth/*.json.enc`，使用 AES-256-GCM、随机 12 字节 nonce，逻辑文件名作为 AAD，防止不同凭证文件互换。目录 0700，文件 0600，原子替换并 fsync。
-
-主密钥是 macOS 管理端 `~/.config/secure-vm/vault.key` 的 32 字节文件，权限 0600，不在项目或 VM 磁盘里。解锁时经 Lima SSH stdin 传入 guest root 管理入口，只保存到 tmpfs `/run/secure-vault/master.key`。VM 禁用 swap，服务与密钥管理工具禁止 core dump；重启后必须重新解锁。
+The 32-byte master key is `~/.config/secure-vm/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled. Restart requires unlocking again.
 
 ```bash
-python3 scripts/vault.py init    # 首次生成；已有密钥时仅解锁
+python3 scripts/vault.py init    # Create once; reuse an existing key
 python3 scripts/vault.py status
 python3 scripts/vault.py lock
-python3 scripts/vault.py unlock  # 每次 VM 重启后运行
+python3 scripts/vault.py unlock
 ```
 
-已有明文凭证迁移时先加密、解密核对，再删除旧文件；本机 client/token 已迁移，真实 Gmail 仍可列出 3 封邮件。没有明文回退。错误密钥不会替换已解锁的正确密钥。请单独保护主密钥备份；丢失后无法解密，需重新授权。
+Plaintext migration encrypts, decrypts to verify, then removes the old file, with no plaintext fallback. A wrong key cannot replace an already-unlocked correct one. Protect a separate key backup; losing it requires reauthorization.
 
-Google access token 仅返回给 `secure-gmail`；模型 key 仅返回给 `secure-inference`。内核 `SO_PEERCRED` 提供调用者身份，RPC 自报角色没有效力。刷新仍由 auth 服务串行执行。重新授权产生新的账户 generation，旧账户的精确批准不可用于新账户。
+Auth returns Google access tokens only to the appropriate connector identity and model keys only to inference, using kernel `SO_PEERCRED`, not self-declared roles. Refresh is serialized by auth. Reauthorization creates a new account generation, so old exact approvals cannot apply to a different account.
 
-断开先删除本地可用 token，再尝试 Google `/revoke`。远端失败时保留加密的撤销重试材料，返回 `remote_revoked:false, revocation_pending:true`；再次执行 disconnect 重试。不会将这份材料作为可用账户 token 返回。已在途的调用不能靠锁库或断开撤回。本轮远端撤销采用模拟测试，未撤销用户真实授权。
+Disconnect removes locally usable tokens before attempting Google `/revoke`. Failure retains encrypted retry material and reports `remote_revoked:false, revocation_pending:true`; it is never returned as an active account token. Repeat disconnect to retry. Lock/disconnect cannot retract in-flight calls.
 
-保护范围是凭证文件静态加密，不是整盘加密。邮件工作区、审批暂存正文和摘要仍未加密；迁移前的旧磁盘块/旧备份不保证被安全擦除。macOS 管理员、运行中的 guest root、含内存的快照仍是可信边界，不能声称对它们保密。目前没有 Keychain/TPM 托管或自动密钥轮换。
+This is credential-file encryption, not full-disk encryption. Mail workspaces, approval bodies and summaries remain unencrypted. Old disk blocks/backups are not securely erased. Host administrators, running guest root and memory snapshots remain trusted. Keychain/TPM custody and automatic key rotation are not implemented.
 
-## M6：独立策略与审批
+## Independent policy and approval
 
-`secure-policy` 是独立 UID 和 systemd 服务，无 IP 网络，cell 看不到它的 socket。仅 Gmail 和 inference 网关能调用 authorize/consume；它们无法通过 RPC 批准。管理命令经宿主的 Lima SSH 身份进入 guest root，再降权操作 policy 数据库。
+`secure-policy` has its own UID/systemd service and no IP networking. Its socket is hidden from the cell. Connector/inference identities may authorize/consume but cannot approve. Administration enters through trusted host Lima SSH and guest root, then drops to the policy identity.
 
 ```text
-cell 请求
- → gateway 验证操作与参数
- → auth 取得对应凭证与 account generation
- → policy 对规范化 operation/account/params 做决定
-   → 主体处于 auto（默认）：签发短期一次性授权
-   → 主体处于 ask：返回 APPROVAL_REQUIRED:<id>，暂停
- → gateway 原子消费一次性授权
- → 固定 provider HTTPS 请求
+Cell request -> gateway validates operation/parameters
+ -> auth supplies matching credentials and account generation
+ -> policy evaluates canonical operation/account/params
+    auto: issue a short-lived one-time grant
+    ask: return APPROVAL_REQUIRED:<id> and pause
+ -> gateway atomically consumes the grant -> fixed provider HTTPS call
 ```
 
-授权绑定：调用服务身份、完整规范化请求的 SHA-256、账户 generation、策略 epoch、当前 Linux boot ID、有效期。一次性随机 ticket 的哈希入库，消费使用 SQLite 事务。待审批请求有效 10 分钟，签发后的 ticket 有效 60 秒。修改内容、跨账户、重放、过期、撤销、策略变更或正常重启均导致拒绝。
+Grants bind caller service, SHA-256 of the canonical request, account generation, policy epoch, Linux boot ID and expiry. Random ticket hashes are stored; consumption is transactional SQLite. Pending approval expires after ten minutes and issued tickets after sixty seconds. Changed content, account substitution, replay, expiry, revocation, policy change or normal reboot causes rejection.
 
 ```bash
 bash scripts/policy.sh pending
@@ -48,52 +44,46 @@ bash scripts/policy.sh show APPROVAL_ID
 bash scripts/policy.sh approve APPROVAL_ID --digest EXACT_DIGEST
 bash scripts/policy.sh deny APPROVAL_ID
 bash scripts/policy.sh revoke APPROVAL_ID
+bash scripts/policy.sh rules
+bash scripts/policy.sh mode gmail ask
+bash scripts/policy.sh mode inference auto
 ```
 
-`show` 显示真实 operation/account/params，包括即将发送给模型的完整输入；应审查内容后使用对应 digest 批准。终端 JSON 转义控制字符，邮件内容只作为数据。批准后重试原始请求；推理记录使用 `WAITING_APPROVAL`，支持相同 request ID 继续；外部调用结果不确定仍为 `UNKNOWN`，不会自动重试。
+`show` exposes the actual action, including complete model input. Review it before approving the exact digest. Terminal JSON escapes control characters and treats mail as data. Resume the original request after approval; inference uses WAITING_APPROVAL and the same request ID. Uncertain external execution remains UNKNOWN without automatic retry.
 
-每个主体（`gmail`、`drive`、`notion`、`slack`、`inference`）有一个模式，缺省为 `auto`：策略按白名单自动签发一次性授权，读写与模型调用都不需要人工批准；`ask` 则每个操作都进入上面的审批流程。可信管理端可以切换：
+Each connector and inference has `auto`/`ask`; missing modes default to `auto`. Mode changes increment the epoch and revoke all unconsumed grants. `ask` means review each request, not permanent denial. All modes retain allowlists, revision binding and quotas. `read <connector> allow|deny` and `gmail-read` remain compatibility aliases. There is no `gmail.send` path.
 
-```bash
-bash scripts/policy.sh rules                  # 查看全部主体的模式
-bash scripts/policy.sh mode gmail ask         # Gmail 改为逐次审批
-bash scripts/policy.sh mode inference auto    # 模型调用恢复持续授权
-```
+`/var/lib/secure-policy/policy.sqlite3` stores grants and audit metadata. Authorization cleans request bodies older than seven days and audit older than thirty days; no traffic means no scheduled cleanup. Task/session scopes, multitenancy, Web approval and frozen mail-send/MIME objects are not implemented. Boot ID handles normal cold restart, not same-boot database rollback or complete memory-snapshot rollback.
 
-更改模式会递增 epoch 并撤销所有未消费 grant。`ask` 不是永久禁止，而是把决定交回给人。每条请求在两种模式下都受固定操作/参数白名单、修订绑定与每日次数上限约束。`read <connector> allow|deny` 与 `gmail-read` 仍作为别名保留一个版本。没有 gmail.send 授权路径。
+## Kernel egress control
 
-数据库 `/var/lib/secure-policy/policy.sqlite3` 存储 grant 和审计元数据；每次 authorize 清理 7 天前请求正文和 30 天前审计。无流量时不会定时清理。当前没有细分任务/会话权限、多租户、Web 审批或发送对象/MIME 冻结。boot ID 防止正常冷重启恢复旧 grant，不解决同一启动内数据库回滚或完整内存快照回滚；这些仍属后续恢复设计。
+The cell has a separate network namespace without external routes. Guest nftables `inet secure_vm` filters output by socket UID for IPv4 and IPv6.
 
-## M7：内核出口控制
-
-Cell 继续使用无外部路由的独立 network namespace。Guest host 新增 nftables `inet secure_vm` output 链，按 socket UID 执行规则，IPv4/IPv6 均覆盖：
-
-| UID 对应服务 | 唯一允许的外部目的地 |
+| Service | Allowed destinations (TCP 443 only) |
 |---|---|
-| secure-auth | oauth2.googleapis.com 解析的公开 IP，TCP 443 |
-| secure-gmail | gmail.googleapis.com 解析的公开 IP，TCP 443 |
-| secure-inference | api.openai.com、chatgpt.com 解析的公开 IP，TCP 443 |
-| secure-policy、映射 agent UID 525288 | 不允许任何 IP 出口 |
+| Auth | Public IPs of `oauth2.googleapis.com` |
+| Gmail | Public IPs of `gmail.googleapis.com` |
+| Drive | Public IPs of `www.googleapis.com` |
+| Notion | Public IPs of `api.notion.com` |
+| Slack | Public IPs of `slack.com` |
+| Inference | Public IPs of `api.openai.com`, `chatgpt.com` |
+| Policy and mapped agent UID 525288 | No IP egress |
 
-每个受控 UID 在允许规则之后都有 reject，覆盖其他 TCP、UDP、DNS、私网/宿主和 IPv6 目的地。Guest 管理用户/root 仍可联网，不能交给 agent。
+Connector destinations come from `services/connectors.py`. Each controlled UID has a final reject covering all other TCP/UDP/DNS/private/host/IPv6 paths. Guest management users/root retain networking and must not be exposed to the agent.
 
-仅 root 更新服务可以解析上述固定域名。解析结果必须全是公开地址；原子更新 nft IP set，并写入 `/run/secure-egress/targets.json`。网关直接连接文件中的数值 IP，不执行 DNS，仍使用原域名进行 TLS SNI 和证书校验。服务依赖出口规则初始化成功才启动。
+Only a root updater resolves fixed provider domains. Every resolved address must be public. It atomically updates nft sets and `/run/secure-egress/targets.json`. Services connect to numeric targets without DNS while using the original hostname for TLS SNI/certificate verification. Egress initialization is a startup dependency.
 
-每 2 分钟刷新；targets 文件 4 分钟过期，内核元素 5 分钟过期。刷新故障不会开放直连：短期继续使用旧有效集合，到期拒绝。HTTPS 由固定业务代码构造路径/方法，不跟随重定向，不使用环境代理，无任意 CONNECT 通道。
+Refresh runs every two minutes; target files expire after four and kernel entries after five. On refresh failure, old valid targets work only until expiry; no direct-connect fallback opens. Trusted code constructs fixed method/path requests with no redirects, environment proxies or arbitrary CONNECT tunnel.
 
-内核只检查 IP/端口，不能区分同 IP 承载的不同域名或 API。路径、HTTP 方法和请求内容仍由可信网关检查；若该网关本身被攻陷，可能滥用允许 IP 上的其他服务。没有独立 L7 出口代理，也没有 taint tracking。这套边界适用于当前固定连接器，不能直接扩展为任意浏览器的安全保证。
+Kernel IP/port checks cannot distinguish domains/APIs sharing an IP. HTTP paths and bodies remain the gateway's responsibility; a compromised gateway could misuse another service on an allowed IP. There is no independent L7 proxy or taint tracking. These controls must not be generalized into a claim about arbitrary browser safety.
 
-## 验证与后续
-
-复测命令：
+## Verification and limits
 
 ```bash
-python3 -m unittest discover -s tests -v
+make check
 bash scripts/verify.sh
 ```
 
-M5–M7 初始验收包括：43 项单元测试；真实 cell 的 24 项隔离、12 项 Gmail 和 11 项推理边界检查；guest 中 28 项凭证/身份/审批/网络集成检查。出口负向测试直接以各服务 UID 创建裸 socket，正向测试只做 provider TLS 握手，不发送凭证；云模型未被调用。IPv6 在无可用路由时也会失败，因此该项还依赖对已安装 IPv6 nft 规则的检查。
+Offline tests cover service logic; VM checks exercise deployed identities, sockets, credentials, approvals and network isolation. Provider account lifecycle, malicious-content behavior and recovery need separate checks. Do not infer real-account readiness or complete prompt-injection protection from passing infrastructure tests.
 
-额外完成真实 Gmail 迁移后读取、锁库拒绝、VM 完整重启自动锁库、重启后的出口规则恢复及解锁恢复。没有发送邮件，没有真实远端 revoke 测试。
-
-后续 M8 已完成真实 pi 部署、Codex 订阅推理、审批后继续及本地工具循环，见 [Pi 接入记录](PI_AGENT.md)。真实邮件与恶意邮件行为仍待测试。`guest/agent.py` 继续作为旧受限工作流入口，真实 agent 入口为 `scripts/pi.sh`。
+The agent entry point is `scripts/pi.sh`. Current limitations, including snapshot rollback, trusted administrators and cloud disclosure, are described in the [security model](../SECURITY.md).

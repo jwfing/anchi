@@ -1,54 +1,60 @@
-# 安全模型与报告
+# Security model and reporting
 
-本项目仍为开发版，不承诺已经完成安全审计或适合不受监督地处理真实敏感账户。
+This is a development project. It has not completed a security audit and is not claimed suitable for unattended processing of sensitive real accounts.
 
-## 信任边界
+## Trust boundaries
 
-- 不可信：cell 内的完整 agent、插件、工具进程、会话文件和模型输出。
-- 可信：宿主 OS/管理员、桌面主进程、运行脚本、guest 管理面、auth/policy/connectors。
-- 上游凭证不进入 cell；agent 请求操作，由外部策略和 connector 控制。隐藏 key 不等于阻止所有合法接口滥用。
-- 读取内容可以进入 agent 上下文与云模型。不能把凭证隔离宣传为敏感数据不离开本机。
-- 桌面 renderer 禁止 Node、联网和任意导航，通过白名单 IPC 请求主进程操作。显示 agent 内容必须转义为文本。
+- **Untrusted:** the entire agent, extensions, tool processes, session files and model output inside the cell.
+- **Trusted:** the host OS and administrator, desktop main process, runtime scripts, guest administration, and auth/policy/connector services.
+- Upstream credentials never enter the cell. External policy and connectors control requested operations. Hiding keys does not prevent every misuse of an otherwise valid interface.
+- Read content may enter agent context and cloud models. Credential isolation must not be described as keeping sensitive content on the host.
+- The desktop renderer has no Node access, networking or arbitrary navigation. It uses allowlisted IPC; agent content is escaped as text.
 
-## 当前边界
+## Host directory access
 
-目录通过宿主文件代理访问。授权在原生确认时记录目录的设备号和 inode，持续至撤销；应用启动时只恢复身份未变的目录，被移动、替换或不可访问的目录回到未启用并要求重新确认。代理逐层 O_NOFOLLOW 打开、校验只读/读写模式；拒绝隐藏路径、符号链接、硬链接和特殊文件。删除和覆盖不直接销毁文件，而是移入被授权目录下隐藏的 `.anchi-trash`，Agent 无法列出或读取该目录；这降低了提示注入导致的数据损失，但不是版本控制，用户需自行清理。撤销立即阻止新请求并等待已开始的有界操作结束；已读取的内容无法收回。宿主其他进程和管理员属于可信边界，不防御它们并发移动已打开的目录。只支持有限大小的 UTF-8 文本，不等于任意 POSIX 文件挂载。
+The host file broker records device and inode at native confirmation. Grants last until revoked; startup restores only unchanged directory identities. Moved, replaced or inaccessible directories become inactive and require confirmation. The broker opens path components with `O_NOFOLLOW`, enforces read-only/read-write modes, and rejects hidden paths, symlinks, hard links and special files.
 
-可写目录不能覆盖应用代码、运行资源、工具真实目录与已知安装根。旧授权恢复执行同样检查，冲突授权保持未激活。工具路径失效不会导致桌面启动失败；不会从 `~/bin` 推断整个家目录为安装根。
+Deletion and overwrite preserve old content in a private `.anchi-trash` inside the granted directory. The agent cannot list or read it. This reduces data loss from prompt injection but is not version control; users manage retention and restore files on the host. Overwrite copies and syncs old content before atomically replacing the original. Failure preserves the original path, and old content larger than 24 KB cannot be overwritten. Fixed-length trash IDs have JSON sidecars recording original relative paths.
 
-本地文本覆盖先复制旧内容到私有回收目录并同步，再原子替换原文件；失败时原路径保留。旧内容超过 24 KB 时拒绝覆盖。回收项使用固定长度 ID，配套 JSON 记录原相对路径，由用户在宿主恢复。
+Revocation immediately blocks new requests and waits for already-started bounded operations. It cannot retract content already read. Other host processes and administrators are trusted; the broker does not defend against their concurrent relocation of open directories. Access is limited to bounded UTF-8 text, not a general POSIX mount.
 
-## 授权模式
+Writable grants cannot overlap app code, runtime resources, real tool directories or known installation roots. Restored grants undergo the same checks. Invalid tool paths do not prevent startup, and a standalone executable in `~/bin` does not cause the entire home directory to be treated as an installation root.
 
-策略服务为每个主体（Gmail、Drive、Notion、Slack 各 connector，以及模型调用 `inference`）保存一个模式：
+## Authorization modes
 
-- `auto`（默认，「持续授权」）：连接账户即授权。读取、写入与模型调用由策略按固定的操作与参数白名单自动签发一次性授权并记入审计，不需要人工点击。
-- `ask`（「逐次审批」）：每个操作进入独立审批，用户核对完整的规范化动作与 digest 后批准；批准只对该次内容有效，10 分钟内不批准即过期。
+Policy stores a mode for each connector (Gmail, Drive, Notion, Slack) and model inference:
 
-缺少新版模式的旧策略库也使用 `auto` 默认值，不自动迁移为 `ask`；已有显式模式保持不变。旧版只读许可不等同于新版持续读写许可，升级用户应核对连接与权限页，处理不可信来源时可切换为逐次审批。
+- **`auto` (default, standing authorization):** connecting authorizes use. Allowlisted operations and parameters receive one-time grants automatically; reads, writes and model calls are audited without a human click.
+- **`ask` (per-request approval):** each operation requires independent review of the normalized full action and digest. Approval applies only to that exact content and expires if not granted within ten minutes.
 
-两种模式下不变的约束：cell 拿不到凭证；每个操作仍要通过 connector 的操作/路径白名单与大小上限；更新类写入绑定目标当前修订并在执行前再次核对（`TARGET_CHANGED`）；每个 connector 每天最多 200 次写入、每个 VM 每天最多 50 个不同模型请求；结果不明不重试；所有决定与执行进入 policy 审计。切换模式会递增策略 epoch 并撤销所有未消费的授权。
+Older policy databases without an explicit new mode also default to `auto`; explicit modes are retained. A legacy read-only grant is not equivalent to the new standing read/write mode. Review the permissions page after upgrading.
 
-持续授权接受的风险必须说清：读取到的邮件、文件、页面或消息如果含有提示注入，模型可能据此发起写入或再次调用模型，中间没有人工闸门。仍存在的缓解只有上面的白名单、修订绑定、次数上限和事后审计。处理不可信来源、或希望逐条把关时，在「连接与权限」把对应 connector 或模型调用改为逐次审批；恢复持续授权时应用会再次弹出说明这一风险的确认框。
+Both modes retain these constraints: credentials stay outside the cell; connector operation/path allowlists and size limits still apply; updates bind to a current target revision and recheck before writing (`TARGET_CHANGED`); each connector allows at most 200 writes daily and each VM at most 50 distinct model requests daily; uncertain outcomes are not retried; policy decisions and execution are audited. Mode changes increment the policy epoch and revoke all unconsumed grants.
 
-无论哪种模式，模型回合产生的工具调用（cell 内 bash、read/write，以及对已授权目录的 host_files 操作）都直接执行，不单独审批；读写目录授权应限于结果目录。
+Standing authorization accepts prompt-injection risk: instructions embedded in mail, files, pages or messages can cause the model to write or make another model call without an intervening human gate. The remaining controls are the allowlists, revision checks, quotas and audit above. Use per-request approval when you want to inspect each operation. Restoring standing authorization presents a native confirmation explaining this risk.
 
-桌面 OAuth 使用系统浏览器、127.0.0.1 临时端口、state 和 PKCE；Google 令牌只进入 VM 认证层。刷新令牌失效时认证服务标记「需要重新认证」并停止请求 Google，用户须重新连接。尚无任务级 Gmail 细粒度限制；连接账户即进入持续授权，可按 connector 改为逐次审批。取消本地任务不会撤回上游请求，也不会自动撤销此前产生的待审批记录。
+In either mode, local tool calls from a model turn (cell bash/read/write and `host_files` within granted directories) execute without individual approval. Limit read/write grants to intended output directories.
 
-Linux 宿主与 macOS 使用相同的信任边界：可信服务与 cell 仍在 Lima 管理的虚拟机内，只是驱动换成 QEMU/KVM，网络为 QEMU 用户态 NAT。`/dev/kvm` 的访问权限由宿主管理员决定，应用只展示需要 root 的命令，不代为执行。应用下载的 Lima 与 Codex 只按 `desktop/host-tools.json` 中固定的 SHA-256 校验，不校验 Lima 的 GPG 签名或 Codex 的 sigstore 签名；下载只接受 GitHub 发布域名的 HTTPS。
+## Authentication and connectors
 
-Google Drive、Notion、Slack 连接器与 Gmail 同构：每个是独立 UID、独立 socket、只允许各自主机的 TCP 443；操作在 `services/connectors.py` 登记并标明读或写。读取与写入（新建、更新、追加、发消息）都遵循上述授权模式：默认持续授权自动放行，逐次审批时审批对象是冻结的完整内容。更新类操作在两种模式下都绑定目标当前修订并在执行前再次核对，结果不明不重试，每个 connector 每天最多 200 次写入。Notion 与 Slack 的静态令牌只经主进程独立窗口进入 VM 凭证库；Notion 没有远端撤销接口。cell 内 Pi 只为已连接的 connector 注册工具。
+Desktop OAuth uses the system browser, an ephemeral `127.0.0.1` port, state and PKCE. Google tokens enter only the VM authentication layer. Invalid refresh credentials set reauthentication-required and stop further Google requests until the user reconnects. Gmail has no task-scoped sender/folder restrictions. Cancelling a local task cannot withdraw an upstream request or automatically revoke pending approvals.
 
-连接器审批等待保留相同请求，冻结动作持久化；准备目标信息时不持有数据库写锁。冻结动作最多保留七天，执行记录保留用于防止重放。写入配额在准备之前预留，远端结果不明记为 UNKNOWN。只读 POST（如 Notion 搜索）不会被归为写入。
+Drive, Notion and Slack follow the Gmail service boundary: separate UIDs and sockets, provider-specific TCP 443 egress and registry-defined read/write operations. Both reads and writes follow the configured authorization mode. In `ask`, the complete write content is frozen for review. Static Notion/Slack tokens enter through a separate main-process window, never the agent-content renderer. Notion has no remote token-revocation API. Pi registers tools only for connected connectors.
 
-Drive 文本更新冻结非空修订号，写入前再次核对；仅当上游提供强 ETag 时发送 If-Match，不要求 ETag 必须存在。无 ETag 时的修订检查和 Notion 编辑时间检查均存在检查与写入之间的竞态，不构成原子并发控制。Google 文档覆盖暂时拒绝，读取与新建保留。
+Approval waits retain the same request. Frozen actions persist; target preparation does not hold a database write lock. Frozen content is retained for at most seven days while execution records remain for replay protection. Write quota is reserved before preparation. Uncertain remote outcomes are UNKNOWN. Read-only POST operations such as Notion search are not treated as writes.
 
-桌面活动记录落盘到应用配置目录，只保存事件类型、时间、工具名和审批 ID，不保存聊天、审批正文或 RPC 结果；完整策略审计仍在 VM 的 policy 数据库中，可通过可信管理入口读取。cell 与可信服务之间的 JSON 以 UTF-8 传输，长度上限按 UTF-8 字节计。
+Drive text updates require a nonempty revision and recheck it immediately before writing. `If-Match` is sent only when a strong ETag exists; ETags are not mandatory. Without an ETag, the revision precheck has a check/write race. Notion's edit-time check has the same limitation. Neither is atomic concurrency control. Google Docs overwrite is refused; read and create remain available.
 
-VM 管理员与宿主管理员可以访问可信组件。nspawn 共享 guest 内核；测试通过不是逃逸不可能的证明。已允许的模型/connector 通道也不等于防止所有内容外泄。
+## Isolation and platform limits
 
-## 报告问题
+Linux and macOS share the same trust boundaries: services and the cell run inside a Lima VM. Linux uses QEMU/KVM and QEMU user-mode NAT. The host administrator grants `/dev/kvm` access; the app displays privileged commands but does not execute them. Lima and Codex downloads verify the pinned SHA-256 in `desktop/host-tools.json`, not Lima GPG or Codex sigstore signatures. Downloads accept only HTTPS GitHub release hosts.
 
-优先通过维护者已有的私密联系渠道报告；当前仓库尚未设立公开安全邮箱或漏洞奖励计划。不要在公开 issue 中粘贴真实 token、邮件、凭证路径内容或可被直接使用的私密攻击材料。
+Desktop `activity.jsonl` stores event metadata (type, time, tool and approval identifiers), not chat, approval bodies or RPC results. Full policy audit remains in the VM policy database and is read through the trusted administration interface. Cell/service JSON uses UTF-8 byte limits.
 
-报告包括受影响版本、环境、最小合成复现、预期边界和实际结果。涉及审批、凭证读取、进程逃逸或出口绕过的修复必须补回归测试。详细部署边界见 [安全基础](docs/SECURITY_FOUNDATION.md)。
+Host and VM administrators can access trusted components. nspawn shares the guest kernel. Passing isolation tests does not prove escape is impossible. Allowed model/connector channels do not prevent every form of content exfiltration.
+
+## Reporting a vulnerability
+
+Use an existing private contact channel with the maintainer. The repository has no dedicated public security email or bug bounty program. Do not post real tokens, mail, credential-file contents or directly usable private attack material in public issues.
+
+Include the affected version, environment, minimal synthetic reproduction, expected boundary and observed behavior. Fixes involving approval, credential reads, process escape or egress bypass require regression coverage. See the [security foundation](docs/SECURITY_FOUNDATION.md) for deployment details.

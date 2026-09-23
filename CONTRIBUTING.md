@@ -1,24 +1,24 @@
-# Contributing to Anchi / 为安栖贡献
+# Contributing to Anchi
 
-当前是走向 MVP 的工程开发版，未达到公开分发条件。提交变更前先阅读 [架构与目录职责](docs/architecture/REPOSITORY.md) 和 [安全边界](SECURITY.md)。
+Anchi is an MVP development build, not ready for public distribution. Read the [repository architecture](docs/architecture/REPOSITORY.md) and [security boundaries](SECURITY.md) before making changes.
 
-## 贡献方式与提交流程
+## Contributions and pull requests
 
-可以通过修复问题、改进首次使用体验、补充安全边界测试、完善文档或提交可复现的 Bug 报告参与项目。较大的功能和架构改动，建议先开 Issue 明确目标与范围。
+Contribute fixes, onboarding improvements, security-boundary tests, documentation or reproducible bug reports. Open an issue to agree on the scope of substantial features or architecture changes.
 
-Bug 报告请包含系统版本、应用版本、复现步骤、预期行为和实际结果；优先使用合成数据复现。安全问题按 [SECURITY.md](SECURITY.md) 私下报告，不在公开 Issue 中贴出凭证或私密材料。
+Bug reports should include OS and app versions, reproduction steps, expected behavior and actual results. Prefer synthetic data. Report vulnerabilities privately under [SECURITY.md](SECURITY.md); never publish credentials or private material in an issue.
 
-Fork 并克隆仓库后，为本次变更创建分支，例如：
+Fork and clone the repository, then create a focused branch:
 
 ```bash
 git switch -c fix/describe-the-change
 ```
 
-完成开发和验证后，将分支推送到自己的 Fork，向项目提交 PR。PR 应描述具体问题及改动后的行为，关联对应 Issue，并列出已执行的验证、未覆盖的场景和已知限制。界面修改可附脱敏截图；安装、权限或隔离修改应说明实测环境和结果。每个 PR 尽量聚焦一个问题，并根据评审反馈完善。
+Push the branch to your fork and open a PR describing the concrete problem, resulting behavior, related issue, checks performed, untested scenarios and limitations. UI changes can include sanitized screenshots. Installation, permission and isolation changes should identify the live environment and results. Keep each PR focused and address review feedback.
 
-## 开发环境
+## Development environment
 
-桌面和 VM 开发以 macOS Apple Silicon 为目标；离线测试支持 Linux/macOS。需要 Node 22+、npm、Python 3.11+；CI 使用 `.nvmrc` 和 Python 3.13。
+macOS on Apple Silicon is the primary desktop/VM target; Linux x86_64 support is experimental. Offline checks run on Linux and macOS. Install Node 22+, npm and Python 3.11+; CI uses `.nvmrc` and Python 3.13.
 
 ```bash
 python3 -m venv .venv
@@ -29,29 +29,35 @@ make check PYTHON=.venv/bin/python
 make desktop
 ```
 
-仅测试时可设置 `ELECTRON_SKIP_BINARY_DOWNLOAD=1` 安装桌面依赖。依赖使用各组件自己的 lockfile，升级必须同时提交 manifest 和 lockfile，不新增一个重复管理它们的根 npm lock。
+For test-only installs, set `ELECTRON_SKIP_BINARY_DOWNLOAD=1`. Each component owns its lockfile; dependency updates must include both manifest and lockfile. Do not add a root npm lockfile that duplicates their ownership.
 
-## 日常工作
+## Daily workflow
 
-- `make check` 是提交前入口：Ruff、shellcheck（本机已安装时）、Prettier、语法检查和所有离线单元测试。不操作 VM、不访问账户、不批准模型。
-- `make format` 用 Ruff 格式化 Python，用 Prettier 格式化 `desktop/` 与 `pi/`；配置见 `ruff.toml` 和各目录的 `.prettierrc.json`。避免在安全修改中混入全库无关重排。
-- cell UID 映射、Node 与 Pi 版本只写在 `guest/cell.env`；跨语言传输上限写在 `services/common.py`、`pi/limits.mjs`、`desktop/src/shared/protocol.cjs` 三处并由测试保证一致。不要在脚本或服务里再写这些字面量。
-- `make verify-vm` 是显式 live 检查。模型/Gmail live 测试另按相应文档执行，不进入默认 CI。
-- 添加权限相关 IPC 时同时更新 controller 操作白名单、边界测试、文档与 renderer；禁止通用 shell/文件读写代理。
-- 系统选择器返回路径仍需主进程校验。保存的目录配置不等于有效授权；只有文件代理激活成功后才能显示已授权。启动时的自动恢复只接受设备号与 inode 都未变的目录，其余保持未启用。改动需覆盖只读、越界拒绝、撤销和恢复失败行为。
-- 新配置必须有 schema、验证与迁移规则。未知版本/损坏文件应保留原数据，不能静默覆盖。
-- 功能变更要更新能力表；原型、已实现能力和未来计划分别记录。
+- Run `make check` before submitting: Ruff, shellcheck when locally installed, Prettier, syntax checks and all offline unit tests. It does not operate the VM, access accounts or approve model requests. OAuth tests require a loopback listener.
+- `make format` uses Ruff for Python and Prettier for `desktop/` and `pi/`; see `ruff.toml` and component `.prettierrc.json` files. Avoid unrelated repository-wide formatting in security changes.
+- Keep cell UID mapping and Node/Pi versions in `guest/cell.env`. Transport limits in `services/common.py`, `pi/limits.mjs` and `desktop/src/shared/protocol.cjs` are checked for consistency. Do not duplicate these literals elsewhere.
+- Live VM checks use `make verify-vm`. Gmail/model checks are explicit and excluded from default CI.
+- Permission-related IPC changes must update controller allowlists, boundary tests, documentation and the renderer. Do not add generic shell or file proxies.
+- Validate native picker paths in the main process. A saved directory plan is not an active grant. Only show authorization after broker activation. Startup restoration requires matching device and inode; otherwise leave the grant inactive with a reason. Cover read-only behavior, escape denial, revocation and failed restoration.
+- New configuration needs a schema, validation and migration rules. Preserve corrupt or unknown-version files rather than silently overwriting them.
+- Update capability documentation when behavior changes. Distinguish prototypes, implemented features and future plans.
 
-## 测试分层
+## Documentation
 
-| 层 | 路径 | 依赖与目的 |
+Write documentation in English. `README.md` is the single project overview; do not maintain language-specific duplicates. Link task-specific guides from [docs/README.md](docs/README.md). Keep current guides directly under `docs/`, architecture under `docs/architecture/`, and release procedures under `docs/engineering/`. Keep maintained documentation aligned with the current implementation. Remove superseded proposals and dated acceptance reports; use Git history for historical context. Document verification commands and current limitations rather than old test totals.
+
+Keep commands, paths, protocol fields and configuration keys exact. UI labels in the app may remain localized; English documentation describes the corresponding control. Update relative links and heading anchors whenever a document moves or a heading changes.
+
+## Test layers
+
+| Layer | Location | Dependencies and purpose |
 |---|---|---|
-| 服务边界 | `tests/` | Python + cryptography；网络与策略使用 mock |
-| Pi 协议 | `pi/tests/` | Node + Pi SDK；会话、取消、输入校验 |
-| 桌面业务 | `desktop/tests/` | Node；审批、配置事务、RPC 生命周期、IPC 来源、打包资源 |
-| 真实隔离 | `guest/check-*.py`、`scripts/verify.sh` | 已部署 VM；验证 OS 边界 |
-| 手工桌面验收 | `docs/DESKTOP_APP.md` | 窗口、原生选择器、真实连接；未经用户批准不提交真实模型请求 |
+| Service boundaries | `tests/` | Python + cryptography; mocked networking and policy |
+| Pi protocol | `pi/tests/` | Node + Pi SDK; sessions, cancellation and input validation |
+| Desktop behavior | `desktop/tests/` | Node; approvals, transactional configuration, RPC lifecycle, IPC origin and packaging |
+| Live isolation | `guest/check-*.py`, `scripts/verify.sh` | Deployed VM; OS-boundary checks |
+| Manual desktop acceptance | [Desktop guide](docs/DESKTOP_APP.md) | Windows, native pickers and real connections; real model requests require user authorization |
 
-## 发布
+## Releases
 
-参见 [发布流程](docs/engineering/RELEASE.md)。不要提交 `artifacts/`、node_modules、凭证、邮件正文或真实用户会话。项目采用 [Apache License 2.0](license.md)。请确认你有权提交相关贡献，并保留第三方依赖的版权和许可证声明。
+Follow the [release guide](docs/engineering/RELEASE.md). Never commit `artifacts/`, `node_modules`, credentials, mail bodies or real user sessions. Contributions are licensed under [Apache-2.0](license.md); ensure you have the right to contribute and retain third-party notices.

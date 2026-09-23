@@ -1,72 +1,71 @@
-# 仓库架构与职责
+# Repository architecture and responsibilities
 
-状态：2026-09-19。采用按信任边界组织的单仓库；先保持已部署脚本路径稳定，不为了目录命名破坏 guest 更新协议。
+The monorepo follows trust boundaries. Deployed script and guest paths stay stable rather than changing solely for naming consistency. This map describes the current modules and their dependencies.
 
-```text
-desktop/                 宿主桌面应用，独立 npm 包
-  src/main/app.cjs       Electron 窗口与生命周期装配
-  src/main/security.cjs  页面资源白名单、权限与 IPC 来源校验
-  src/main/controller.cjs 业务用例、审批与操作白名单
-  src/main/runtime.cjs   固定 Lima / 管理脚本调用
-  src/main/pi-client.cjs Pi 连接、请求关联、超时与断开
-  src/main/directory-store.cjs 版本化目录计划（v2 含目录身份），事务式写入
-  src/main/file-broker.cjs 进程内目录能力、启动恢复与串行撤销
-  src/main/activity-log.cjs 只含元数据的活动记录落盘
-  src/main/host-tools.cjs 宿主可执行文件查找，路径表来自 platform
-  src/main/platform.cjs  唯一的平台差异来源：工具路径、系统目录黑名单、依赖策略、子进程 PATH、KVM 设备
-  src/main/downloader.cjs 按 host-tools.json 固定版本与 SHA-256 下载宿主工具（Linux）
-  host-tools.json        每个平台可下载工具的版本、URL 与 SHA-256
-  scripts/package-target.cjs 打包输出名按宿主平台
-  scripts/install-host-tool.cjs CI 与命令行用的单工具安装入口
-  src/main/user-data.cjs 配置目录一次性迁移
-  src/main/token-window.cjs 静态令牌输入的独立模态窗口
-  src/shared/connectors.cjs connector 描述表（标签、授权方式、scope 与令牌格式）
-  src/renderer/token.html / token.mjs 令牌输入页，不渲染 agent 内容
-  src/shared/            纯协议、校验函数与传输上限常量
-  src/preload.cjs        最小 contextBridge
-  src/renderer/          ES module 展示与交互；views 为纯函数，无 OS / token 访问
-  scripts/               语法检查、白名单资源打包
-  tests/                 Electron 无关的业务/边界测试
-pi/                      cell 内 agent 适配器，独立 npm 包；version.mjs / limits.mjs 为版本与上限来源
-services/                guest 上可信的 auth / policy / connectors；connectors.py 是注册表，ledger.py 与 connector_base.py 是读写执行公共层，drive.py / notion.py / slack.py / gmail.py 是 handler，connector_admin.py 做账户探测与断开
-guest/                   cell 构建、启动及真实隔离验收；cell.env 是 UID 映射与版本的唯一来源，arch.sh 做架构与宿主驱动映射
-systemd/                 guest 服务身份、socket 和资源配置
-lima/                    外层 VM 声明
-scripts/                 宿主 CLI，保持现有用户入口
-tests/                   可信服务的离线回归测试
-prototype/               纯模拟 UX 参考，不参与产品打包
-docs/                    产品规格、使用说明、验证记录和工程规范
-artifacts/               本机构建产物，不纳入版本管理
-```
+## Modules
 
-## 调用方向
+| Location | Responsibility |
+|---|---|
+| `desktop/src/main/app.cjs` | Electron windows and lifecycle assembly |
+| `desktop/src/main/security.cjs` | Asset allowlist, browser permissions and IPC-origin validation |
+| `desktop/src/main/controller.cjs` | Use cases, approval handling and operation allowlist |
+| `desktop/src/main/runtime.cjs` | Fixed Lima and administration script invocations |
+| `desktop/src/main/pi-client.cjs` | Pi connection, request correlation, timeout and disconnect |
+| `desktop/src/main/directory-store.cjs` | Versioned directory plans; v2 includes identity; transactional persistence |
+| `desktop/src/main/file-broker.cjs` | In-process directory capabilities, restore and serialized revocation |
+| `desktop/src/main/activity-log.cjs` | Durable activity metadata only |
+| `desktop/src/main/platform.cjs` | Platform-specific tool paths, protected directories, dependency policy, child PATH and KVM |
+| `desktop/src/main/host-tools.cjs` | Resolve executables using platform tables |
+| `desktop/src/main/downloader.cjs`, `desktop/host-tools.json` | Pinned Linux tool downloads and SHA-256 verification |
+| `desktop/src/main/user-data.cjs` | One-time configuration migration |
+| `desktop/src/main/token-window.cjs` | Separate static-token input modal |
+| `desktop/src/main/oauth.cjs` | Loopback callback and browser authentication |
+| `desktop/src/main/setup.cjs` | Setup state, bounded install/login commands and interrupted-job recovery |
+| `desktop/src/shared/` | Protocol, validation, transport limits and connector UI descriptors |
+| `desktop/src/preload.cjs` | Minimal contextBridge |
+| `desktop/src/renderer/` | ES-module presentation; pure views/activity formatting; no OS or token access; token page is separate from agent content |
+| `desktop/scripts/` | Source checks, allowlisted runtime bundle, host-specific packaging, releases and live file checks |
+| `desktop/tests/` | Business/boundary tests without importing Electron into domain code |
+| `pi/` | Untrusted-cell Pi adapter and RPC; `version.mjs`/`limits.mjs` provide version/limits |
+| `services/connectors.py` | Connector registry |
+| `services/ledger.py`, `connector_base.py` | Shared execution ledger and connector read/write flow |
+| `services/drive.py`, `notion.py`, `slack.py`, `gmail.py` | Provider handlers |
+| `services/connector_admin.py` | Account probes and disconnect |
+| Other `services/` modules | Trusted auth, policy, inference and readiness metadata |
+| `guest/` | Cell construction, startup and live checks; `cell.env` owns UID/version pins, `arch.sh` maps architecture/driver |
+| `systemd/`, `lima/` | Service identities, sockets, resource limits and outer VM |
+| `scripts/` | Stable host CLI and explicit deployment/live checks |
+| `tests/` | Trusted-service offline regression tests |
+| `prototype/` | Simulated UX reference, excluded from product packaging |
+| `docs/` | Current usage, architecture, security and release guides |
+| `artifacts/` | Local build output, not version-controlled |
 
-Renderer → preload → 主进程 controller → PiClient → 固定宿主脚本 → cell 内 Pi。
+## Call direction
 
-主进程 controller → Runtime → 独立 policy admin；批准详情来自策略服务，不来自 agent 消息。Pi 的审批事件只能提示 UI。
+Renderer → preload → main-process Controller → PiClient → fixed host script → cell Pi.
 
-cell Pi → Unix socket → Gmail / inference → auth + policy → 上游。不得为了 UI 方便把 auth socket 或管理入口暴露给 cell。
+Controller → Runtime → independent policy administration. Approval details come from policy, never agent messages; a Pi approval event is only a notification.
 
-## 关键设计决定
+Cell Pi → Unix socket → connector/inference → auth + policy → upstream. Never expose auth sockets or administration to the cell for UI convenience.
 
-1. 业务逻辑不导入 Electron。原生 dialog、进程、文件 I/O 边界可注入测试替身。
-2. 宿主 IPC 与 Pi RPC 两层均白名单校验；禁止扩展成通用 exec。
-3. 目录计划 schema v2，兼容 v1 与无版本文件。授权在原生确认时记录设备号与 inode；启动时只恢复身份未变的目录，其余保持 pending 并给出原因。损坏/未来版本拒绝写入并保留原文件。
-4. 配置先写临时文件并 fsync，再原子 rename，成功后更新内存；串行修改防止丢更新。
-5. 已打包应用从 Resources/runtime 读取脚本，不依赖开发者绝对路径。运行依赖仍是 Lima 和已有 VM，而非真正新机器零配置。
-6. Pi 断开关闭 stdin 触发远端 EOF 清理，宿主进程超时先 TERM 后 KILL；不保证在途上游请求停止。
-7. 默认检查全离线，真实 VM、Google、模型请求永远显式触发。
-8. 跨组件常量只有一个来源：`guest/cell.env`（UID、Node、Pi 版本）与三处传输上限由测试保证一致；应用版本由主进程注入页面。
-9. 桌面只持久化事件元数据；聊天、审批正文和 RPC 结果不落盘。VM 审计通过 policy admin 读取。
-11. connector 只在 `services/connectors.py` 登记一次，服务模式、出口角色、凭证范围、策略校验、guest 安装与 Pi 工具都由它派生或由一致性测试锁定；写操作复用 policy 的一次性授权并记入各自账本。
-10. 平台差异只存在于 `platform.cjs` 与 `guest/arch.sh`；单一 Lima 模板列出双架构镜像，驱动由 `scripts/up.sh` 显式传入；宿主工具下载版本固定在 `host-tools.json`，只校验 SHA-256。
+`file-broker.cjs` owns host capabilities while `scripts/host-files.py` enforces access with directory file descriptors. `pi/host-files.mjs` forwards requests but cannot grant itself access. OAuth sends authorization through `runtime.auth` and guest stdin; the renderer never sees codes, PKCE verifiers or tokens.
 
-## 后续模块
+## Design decisions
 
-任务级授权、会话压缩、长驻 guest 管理通道、审计导出、签名公证、自动更新、多 agent 实例。增加这些能力时扩展现有边界，不把原型按钮直接映射到高权限宿主操作。guest 已写入安装版本清单，升级协商可在此基础上实现。
+1. Domain logic does not import Electron. Dialog/process/filesystem boundaries accept test doubles.
+2. Both host IPC and Pi RPC are allowlisted; neither becomes generic exec.
+3. Directory schema v2 reads v1/unversioned plans. Native confirmation records device/inode. Restore only identical directories; preserve corrupt/future-version originals.
+4. Write configuration to a temporary file, fsync, atomically rename, then update memory. Serialize mutations.
+5. Packaged scripts come from `Resources/runtime`, never developer absolute paths. Setup can provision dependencies, but actual runtime still needs Lima and a configured VM.
+6. Disconnect closes stdin for remote EOF cleanup; timeout escalates TERM to KILL. In-flight upstream calls may continue.
+7. Default checks are offline. VM, account and model checks are explicit.
+8. `guest/cell.env` owns UID/Node/Pi pins; tests align the three language-specific transport limits. Main injects the app version into the page.
+9. Desktop persists event metadata only. VM audit is read through policy administration.
+10. Platform differences belong in `platform.cjs` and `guest/arch.sh`. One Lima template lists both architectures; `up.sh` selects the driver. Host downloads use manifest SHA-256 pins.
+11. Registry entries drive or consistency-check service modes, egress, credential scope, policy, installation and Pi tools. Writes reuse one-time policy grants and connector ledgers.
 
-### 文件与认证接入
+Setup readiness exposes metadata only. First-task success requires matching session and turn plus a reply and completion. Model authorization follows the configured policy mode.
 
-`file-broker.cjs` 持有进程内目录能力和串行撤销队列；`scripts/host-files.py` 使用目录 fd 实施宿主文件操作。`pi/host-files.mjs` 只传送数据请求，不能授权自身。`oauth.cjs` 管理 loopback 回调与系统浏览器，`runtime.auth` 通过 stdin 调用 guest 管理面。renderer 不接触授权码、PKCE verifier 或令牌。`desktop/scripts/release.cjs` 负责证书预检、公证与发行验证。
+## Future work
 
-`setup.cjs` 持有首次设置任务状态、受限安装/登录命令和中断恢复日志；`services/setup_status.py` 只返回安装、凭证库和模型认证的就绪元数据。首次任务成功按 session/turn 关联，示例不自动批准模型调用。
+Task-scoped authorization, context compaction, a persistent guest management channel, audit export, completed signing/notarization acceptance, automatic updates and multiple agents. Extend existing boundaries rather than mapping prototype buttons directly to privileged host operations. The installed guest version manifest can support later upgrade negotiation.
