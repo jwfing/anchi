@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f6f8fc" />
+    <title>Anchi 安栖 — 让 Agent 自由工作，权限始终在你手中</title>
+    <meta
+      name="description"
+      content="Anchi 安栖是为本地 AI Agent 构建的安全运行环境。隔离执行、凭据托管、明确授权，让 agent 在你设定的边界内工作。"
+    />
+    <link rel="canonical" href="https://anchi.elseward.xyz/" />
+    <meta property="og:title" content="Anchi 安栖 — 给 Agent 一个安全的家" />
+    <meta
+      property="og:description"
+      content="隔离执行，凭据托管，权限由你掌握。为本地 AI Agent 构建的安全运行环境。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://anchi.elseward.xyz/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">跳转到主要内容</a>
+    <header class="header wrap">
+      <a class="brand" href="#" aria-label="Anchi 首页"
+        ><svg viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M5 26 16 5l11 21M10 20h12M16 13v15" /></svg
+        ><span>anchi<span class="brand-cn">安栖</span></span></a
+      >
+      <nav aria-label="主导航">
+        <a href="#security">安全设计</a><a href="#workflow">如何工作</a
+        ><a class="nav-github" href="https://github.com/jwfing/anchi"
+          >GitHub <span aria-hidden="true">↗</span></a
+        >
+      </nav>
+    </header>
+    <main id="main">
+      <section class="hero wrap">
+        <div class="hero-copy">
+          <a class="release" href="#start"
+            ><span class="release-tag">开发预览</span> A safe home for your
+            agents <span aria-hidden="true">↗</span></a
+          >
+          <h1>让 Agent 自由工作。<br /><span>让权限有迹可循。</span></h1>
+          <p class="intro">
+            你的电脑，不必毫无保留。Anchi 为本地 AI Agent
+            提供隔离的运行环境，把账户凭据和访问权限，留在你掌控的一侧。
+          </p>
+          <div class="hero-actions">
+            <a
+              class="button primary"
+              href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
+              >开始探索 Anchi <span aria-hidden="true">↗</span></a
+            ><a class="text-link" href="#security"
+              >看看安全如何发生 <span aria-hidden="true">↓</span></a
+            >
+          </div>
+          <p class="availability">
+            macOS · Apple Silicon <span>/</span> 开源 · Apache 2.0
+          </p>
+        </div>
+        <div
+          class="architecture"
+          role="img"
+          aria-label="Anchi 权限架构示意：agent 在 Lima 虚拟机的隔离 cell 内执行，通过权限服务访问账户连接器；主机文件由独立文件代理按授权开放，凭据不进入 agent cell。"
+        >
+          <div class="diagram-top">
+            <span>THE ANCHI BOUNDARY</span><span>01 / LOCAL RUNTIME</span>
+          </div>
+          <div class="machine-label">
+            <span class="tiny-square"></span> 你的电脑
+            <span class="diagram-meta">HOST</span>
+          </div>
+          <div class="vm">
+            <div class="layer-label">
+              LIMA VIRTUAL MACHINE <span>隔离边界</span>
+            </div>
+            <div class="agent-cell">
+              <div class="cell-icon">&gt;_</div>
+              <div>
+                <strong>Agent workspace</strong><span>代码 · 工具 · 会话</span>
+              </div>
+              <span class="cell-label">CELL</span>
+            </div>
+            <div class="connector-line">
+              <span>操作请求</span><span aria-hidden="true">↓</span>
+            </div>
+            <div class="policy">
+              <span class="policy-icon">⌘</span>
+              <div>
+                <strong>Anchi 权限服务</strong
+                ><span>授权检查 · 操作边界 · 审计记录</span>
+              </div>
+              <span class="policy-check" aria-hidden="true">✓</span>
+            </div>
+            <div class="service-row">
+              <span>账户连接器</span><span>模型网关</span
+              ><span class="credential"
+                >凭据托管
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <rect x="3" y="7" width="10" height="7" rx="1" />
+                  <path d="M5 7V5a3 3 0 0 1 6 0v2" /></svg
+              ></span>
+            </div>
+          </div>
+          <div class="host-files">
+            <span class="folder-icon" aria-hidden="true">▱</span
+            ><span>主机文件代理</span><span>仅开放已授权目录</span>
+          </div>
+          <div class="diagram-bottom">
+            <span class="blue-dot"></span> 凭据不进入 Agent 工作区
+            <span aria-hidden="true">↗</span>
+          </div>
+        </div>
+      </section>
+      <div class="principles wrap">
+        <span>给能力划定边界</span>
+        <p>本地隔离执行</p>
+        <span class="plus">+</span>
+        <p>独立凭据托管</p>
+        <span class="plus">+</span>
+        <p>明确的访问授权</p>
+      </div>
+      <section id="security" class="security wrap section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">01 — BUILT AROUND BOUNDARIES</p>
+            <h2>安心，来自清晰的边界。</h2>
+          </div>
+          <p>从执行环境到每一次资源访问，<br />让安全成为运行方式的一部分。</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature">
+            <span class="feature-number">01 / ISOLATION</span
+            ><svg class="feature-icon" viewBox="0 0 40 40" aria-hidden="true">
+              <rect x="6" y="6" width="28" height="28" rx="3" />
+              <rect x="14" y="14" width="12" height="12" rx="1" />
+              <path d="M20 2v4m0 28v4M2 20h4m28 0h4" />
+            </svg>
+            <h3>它的工作区，<br />与你的系统分开。</h3>
+            <p>
+              Agent 和工具运行在 Lima 虚拟机内的独立 cell
+              中。执行代码不意味着获得整个主机的访问权。
+            </p>
+          </article>
+          <article class="feature">
+            <span class="feature-number">02 / CREDENTIALS</span
+            ><svg class="feature-icon" viewBox="0 0 40 40" aria-hidden="true">
+              <rect x="8" y="17" width="24" height="18" rx="3" />
+              <path d="M13 17v-6a7 7 0 0 1 14 0v6m-7 7v5" />
+            </svg>
+            <h3>可以使用服务，<br />不必拿走密钥。</h3>
+            <p>
+              账户凭据保存在受信任的服务层。Agent
+              通过受控接口调用连接器和模型，凭据不进入它的运行空间。
+            </p>
+          </article>
+          <article class="feature">
+            <span class="feature-number">03 / PERMISSIONS</span
+            ><svg class="feature-icon" viewBox="0 0 40 40" aria-hidden="true">
+              <path d="M7 10h26M7 20h26M7 30h26" />
+              <circle cx="15" cy="10" r="4" />
+              <circle cx="26" cy="20" r="4" />
+              <circle cx="17" cy="30" r="4" />
+            </svg>
+            <h3>开放多少权限，<br />由你来决定。</h3>
+            <p>
+              文件目录可设为只读或读写，也可撤销授权。连接器默认使用持续授权；需要时，可切换为逐次审批。
+            </p>
+          </article>
+        </div>
+      </section>
+      <section id="workflow" class="workflow-section">
+        <div class="wrap workflow section">
+          <div class="workflow-copy">
+            <p class="eyebrow">02 — YOUR AGENT, YOUR RULES</p>
+            <h2>把任务交出去。<br />把控制权留下来。</h2>
+            <p>
+              在一个桌面应用里完成环境设置、连接账户、发起对话和查看活动。少一些对权限的猜测，多一些对工作的专注。
+            </p>
+            <a
+              class="text-link"
+              href="https://github.com/jwfing/anchi/blob/main/docs/DESKTOP_APP.md"
+              >了解桌面工作流 <span aria-hidden="true">↗</span></a
+            >
+            <div class="connector-list">
+              <span>可连接的服务</span>
+              <p>
+                Gmail <small>只读</small> <i>/</i> Drive <i>/</i> Notion
+                <i>/</i> Slack
+              </p>
+            </div>
+          </div>
+          <ol class="steps">
+            <li>
+              <span class="step-no">01</span>
+              <div>
+                <h3>安置你的 Agent</h3>
+                <p>跟随桌面引导，设置本地隔离环境并完成模型登录。</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-no">02</span>
+              <div>
+                <h3>打开恰到好处的权限</h3>
+                <p>
+                  连接需要的服务，授权指定文件夹，并选择适合任务的审批方式。
+                </p>
+              </div>
+            </li>
+            <li>
+              <span class="step-no">03</span>
+              <div>
+                <h3>开始工作，随时掌握动态</h3>
+                <p>
+                  通过对话推进任务，查看活动记录，在独立审批界面检查待授权的操作。
+                </p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+      <section class="transparency wrap">
+        <span class="note-mark" aria-hidden="true">i</span>
+        <div>
+          <h3>安全需要透明，也需要边界。</h3>
+          <p>
+            Anchi
+            目前为开发预览，尚未完成独立安全审计。隔离凭据并不等于数据完全留在本机：Agent
+            读取的内容可能发送给云端模型。Linux
+            支持仍为实验性，公开签名发行尚未就绪。
+          </p>
+          <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
+            >阅读完整安全模型 <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </section>
+      <section id="start" class="start wrap">
+        <div>
+          <p class="eyebrow">A SAFE HOME. A CLEAR BOUNDARY.</p>
+          <h2>给你的 Agent，<br />一个安心工作的地方。</h2>
+        </div>
+        <div class="start-actions">
+          <a class="button primary" href="https://github.com/jwfing/anchi"
+            >在 GitHub 探索 Anchi <span aria-hidden="true">↗</span></a
+          >
+          <p>开源构建中，欢迎一起完善。</p>
+        </div>
+      </section>
+    </main>
+    <footer class="footer wrap">
+      <a class="brand footer-brand" href="#"
+        >anchi<span class="brand-cn">安栖</span></a
+      ><span>A safe home for your agents.</span>
+      <div>
+        <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
+          >安全模型</a
+        ><a href="https://github.com/jwfing/anchi">GitHub ↗</a
+        ><span>© 2026 Anchi</span>
+      </div>
+    </footer>
+  </body>
+</html>
