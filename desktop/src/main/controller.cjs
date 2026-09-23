@@ -115,6 +115,7 @@ class Controller {
     this.firstTask = null;
   }
   emit(event) {
+    event = { ...event, time: event.time || new Date().toISOString() };
     if (this.firstTask?.state === 'running') {
       if (event.type === 'disconnected') this.firstTask.state = 'failed';
       if (

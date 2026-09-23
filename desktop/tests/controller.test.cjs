@@ -220,3 +220,25 @@ test('connector operations route to the right trusted CLI with the connector arg
   assert.deepEqual(calls, [['policy', 'mode', 'gmail', 'ask']]);
   assert(!JSON.stringify(controller.events).includes('xoxb-'));
 });
+
+test('live activity, notifications and persisted events share a timestamp', () => {
+  const { controller } = fixture();
+  const written = [],
+    notified = [];
+  controller.log = {
+    append(event) {
+      written.push(event);
+      return Promise.resolve();
+    },
+  };
+  controller.notify = (event) => notified.push(event);
+  const input = { type: 'tool_start', tool: 'bash' };
+  controller.emit(input);
+  const event = controller.events.at(-1);
+  assert(Number.isFinite(Date.parse(event.time)));
+  assert.equal(written[0].time, event.time);
+  assert.equal(notified[0].time, event.time);
+  assert.equal(input.time, undefined);
+  controller.emit({ type: 'ready', time: '2026-09-21T12:00:00Z' });
+  assert.equal(controller.events.at(-1).time, '2026-09-21T12:00:00Z');
+});
