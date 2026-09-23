@@ -1,43 +1,46 @@
-# 变更记录
+# Changelog
 
-格式参考 Keep a Changelog；版本号来自 `desktop/package.json`。
+Follows the Keep a Changelog structure. The app version comes from `desktop/package.json`.
 
 ## Unreleased
 
-### 新增
-- 目录授权持续至撤销：授权时记录目录的设备号与 inode（目录计划 schema v2），应用启动时只恢复身份未变的目录；被移动、替换或不可访问的目录回到「未启用」并显示原因。
-- 文件代理的删除和覆盖改为移入被授权目录下的隐藏 `.anchi-trash`，用户可找回，Agent 无法看到或访问。
-- Gmail 刷新令牌失效时进入「需要重新认证」状态，不再重复请求 Google；桌面权限页显示该状态。
-- 桌面活动记录落盘到 `activity.jsonl`（仅事件类型、时间与标识，不含聊天和审批正文）；活动页可读取 VM 内策略审计（`policy_admin.py audit`）。
-- 审批页自动载入、导航徽标显示待审批数量；请求详情先展示结构化摘要（操作、账户、模型、工具、最近用户输入），完整 JSON 折叠可查。
-- 首次设置显示模型认证到期时间与 VM 服务版本；guest 安装时写入 `/opt/secure-vm/installed.json`。
-- `guest/cell.env` 成为 cell UID 映射、Node 与 Pi 版本的唯一来源；shell、Python、Pi 端及测试共同读取。
-- 跨语言传输上限常量（`services/common.py`、`pi/limits.mjs`、`desktop/src/shared/protocol.cjs`）由测试保证一致。
-- `make lint`：Ruff、shellcheck、Prettier（含 `pi/`）；CI 增加 shellcheck、macOS 未签名打包冒烟任务和 Dependabot。
-- 新增测试：服务端 UID 与限速、`bridge.mjs` 审批等待与 UTF-8 分帧、`network_rules.refresh`、`setup_status`、多层 multipart 正文、目录恢复、活动日志、配置目录迁移等。
+### Added
 
-- Linux x86_64 客户端（实验性）：Lima + QEMU/KVM，单一 VM 模板列出 arm64 与 amd64 镜像并由 `up.sh` 显式选择驱动；首次设置按固定版本与 SHA-256 下载 Lima 与 Codex 到用户目录，QEMU 与 kvm 组权限以命令文本交由用户执行；新增 `platform.cjs`、`downloader.cjs`、`host-tools.json`、`guest/arch.sh`；产物 `Anchi-linux-x64.tar.gz`；`linux-live` 工作流在 KVM runner 上从零建 VM 并运行全部验收脚本。
+- Persistent directory grants: schema v2 records device and inode at authorization, restores only unchanged identities and explains inactive moved/replaced/inaccessible directories.
+- Recoverable file deletion/overwrite through hidden `.anchi-trash` inside each grant; inaccessible to agents.
+- Gmail reauthentication-required state after invalid refresh credentials, avoiding repeated Google requests.
+- Metadata-only `activity.jsonl` and desktop access to VM audit through `policy_admin.py audit`.
+- Automatic pending-approval loading, navigation count badge, structured action/account/model/tool/recent-input summaries and expandable full JSON.
+- Setup authentication-expiry and VM-version display; guest `/opt/secure-vm/installed.json`.
+- `guest/cell.env` as the single source for cell UID mapping and Node/Pi pins, shared by shell, Python, Pi and tests.
+- Cross-language transport-limit consistency tests for Python, Pi and desktop.
+- `make lint` with Ruff, shellcheck and Prettier, including Pi; shellcheck CI, unsigned packaging smoke jobs and Dependabot.
+- Regression coverage for service UID/rate limits, bridge approval waits and UTF-8 framing, egress refresh, readiness, nested multipart mail, directory restore, activity logs and configuration migration.
+- Experimental Linux x86_64 desktop: Lima/QEMU/KVM, one dual-architecture VM template with explicit driver selection, pinned SHA-256 Lima/Codex downloads, user-run QEMU/KVM privileged steps, platform/downloader/tool-manifest/guest-architecture modules, Linux tarball and fresh-VM KVM CI.
+- Drive, Notion and Slack connectors alongside registry-based Gmail: separate identities/egress, revision-bound writes, per-connector execution ledgers and quotas, separate static-token input window, dynamic Pi tool registration, descriptor-based cards and write-approval banners. The initial per-write approval design was superseded by authorization modes below.
 
-- Google Drive、Notion、Slack 连接器：声明式注册表（Gmail 一并迁入）、按 connector 的持续只读规则、逐条审批且绑定目标修订的写入（新建、更新、追加、发消息）、独立写账本与每日上限、Notion/Slack 静态令牌经独立窗口导入、Pi 只为已连接 connector 注册工具、桌面按描述表渲染卡片、审批页写入横幅。
+### Fixed
 
-### 修复
-- 只对具有写操作的连接器恢复写账本，避免 Gmail 在只读服务文件系统上启动崩溃；恢复失败时保留读取，拒绝写入。
-- 阻止可写授权覆盖 Anchi 运行代码、工具真实目录和已知安装根；独立 `~/bin` 工具不再误保护整个家目录，失效路径不会导致桌面退出。
-- Pi 连接器保留请求 ID 等待审批，支持真实 timer 取消；写动作冻结后重放不会重新获取目标版本。准备阶段不持有 SQLite 写锁，提前预留每日配额并清理七天前冻结内容。
-- Drive 文本更新使用修订前置复核，ETag 可选；Google 文档覆盖明确拒绝。远端写入结果不明归为 UNKNOWN，只读 POST 不受影响。
-- 本地覆盖先备份再原子替换，长路径使用固定长度回收 ID；复制失败不留下孤立 sidecar，短读会继续读取。
-- Notion 读取嵌套块并区分文本截断与非文本遗漏；Slack 历史按 UTF-8 总大小截断。
-- 下载失败路径等待文件打开和关闭后再清理，避免 macOS CI 偶发残留临时文件。
-- 模型网关不再拒绝带 `content` 字段的 reasoning 项。Codex 返回的推理项含 `content: []`，Pi 原样回放到下一轮，此前会在授权前被 `codex_schema` 以 BAD_REQUEST 拒绝，导致会话内第一次出现推理摘要后所有后续模型调用失败。
+- Restore write ledgers only for write-capable connectors, avoiding Gmail startup failure on its read-only filesystem. Failed recovery retains reads but rejects writes.
+- Reject writable grants over Anchi code, runtime resources, real tool directories and installation roots. Standalone `~/bin` tools no longer protect the entire home; stale tool paths no longer terminate startup.
+- Connector approval waits retain request IDs and support real-timer cancellation. Frozen writes do not refetch target revisions on replay. Preparation avoids holding SQLite write locks, reserves quota early and removes frozen content older than seven days.
+- Drive text updates require a revision precheck with optional ETag; Google Docs overwrite is refused. Ambiguous remote writes become UNKNOWN; read-only POST remains a read.
+- Local overwrite backs up before atomic replacement, uses fixed-length trash IDs, avoids orphan sidecars on copy failure and continues after short reads.
+- Notion nested-block reading distinguishes truncated text from omitted nontext content; Slack history respects total serialized UTF-8 size.
+- Download-failure cleanup waits for file open/close to avoid temporary-file races on macOS CI.
+- Accept Codex reasoning items containing `content: []`, which Pi replays into later turns. Previously schema rejection before authorization broke subsequent model calls after the first reasoning summary.
 
-### 变更
-- 审批机制改为按主体的授权模式：Gmail、Drive、Notion、Slack 与模型调用（`inference`）各有 `auto`/`ask` 模式，默认 `auto`（连接即持续授权，读写与模型调用由策略自动签发一次性授权并审计），`ask` 逐次审批。新增 `policy.sh rules` 与 `mode <主体> auto|ask`（`read`/`gmail-read` 保留为别名）；桌面卡片改为模式开关，恢复持续授权时弹出提示注入风险确认；首次设置页可切换模型调用模式。切换模式撤销所有未消费授权。
-- 模型认证到期后可直接在首次设置重新登录或导入，不再要求先断开 Pi；只有重建环境仍需断开。
-- cell 与可信服务之间的 JSON 改为 UTF-8 传输，大小按 UTF-8 字节计，中文上下文容量约为之前的两倍。
-- 文件代理改用首次设置安装的宿主 Python，而不是固定的系统 Python 路径。
-- 渲染器合并连续事件的快照刷新，重绘时保持输入焦点；页面切换不再被长任务阻塞。
-- 产品改名收尾：配置目录首次启动时从 `Qisuo` 迁移到 `Anchi`；发布变量接受 `ANCHI_*`（`QISUO_*` 仍可用）；开发版 Bundle ID 改为 `local.anchi.desktop`；npm 包名改为 `anchi-desktop`、`anchi-pi`。
-- 应用版本由主进程注入页面，不再手写在 HTML 中。
+### Changed
 
-### 已知未完成
-- 任务级授权、多 agent 实例、Gmail 发送、会话压缩、旧 API-key 推理路径的去留、签名公证与自动更新。详见 README 能力表。
+- Per-subject authorization modes for Gmail, Drive, Notion, Slack and `inference`: `auto` is default standing authorization for reads, writes and model calls; `ask` requires per-request approval. Both issue/audit one-time grants. Added `policy.sh rules` and `mode <subject> auto|ask`, retaining `read`/`gmail-read` aliases. Desktop mode restoration confirms prompt-injection risk; setup controls model mode. Changes revoke all unconsumed grants.
+- Expired model authentication can be reimported or renewed without disconnecting Pi; rebuilding the environment still requires disconnecting.
+- Cell/service JSON uses UTF-8 byte accounting, approximately doubling Chinese-context capacity compared with the previous escaped encoding.
+- File broker uses setup-installed host Python rather than a fixed system interpreter.
+- Renderer coalesces event-driven snapshots and preserves input focus; navigation is no longer blocked by long-running actions.
+- Qisuo-to-Anchi migration: one-time user-data rename, canonical `ANCHI_*` release variables with legacy aliases, `local.anchi.desktop` development Bundle ID and `anchi-desktop`/`anchi-pi` package names.
+- Main process injects the app version instead of hard-coding it in HTML.
+- Documentation consolidated into one English README and current English usage, architecture, security and release guides. Removed historical proposals, implementation plans, legacy runbooks and dated acceptance reports; their original versions remain in Git history.
+
+### Known incomplete work
+
+Task-scoped grants, multiple agents, Gmail sending, context compaction, the future of legacy API-key inference, completed signing/notarization acceptance and automatic updates. See the README capability table.

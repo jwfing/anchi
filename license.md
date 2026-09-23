@@ -1,4 +1,4 @@
-# Anchi / 安栖
+# Anchi
 
 Copyright 2026 Junwen
 

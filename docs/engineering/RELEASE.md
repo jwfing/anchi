@@ -1,48 +1,46 @@
-# 构建与发布
+# Build and release
 
-## 本机构建
+## Local builds
 
 ```bash
 make check
 make package
 ```
 
-目前仅支持 macOS arm64 打包，产物在 `artifacts/releases/<version>/Anchi-darwin-arm64/Anchi.app`。旧 `artifacts/desktop/` 是历史开发构建，不覆盖运行中的旧应用。重新构建同一版本前先退出该版本应用。
+Build on the target host: macOS arm64 produces `artifacts/releases/<version>/Anchi-darwin-arm64/Anchi.app`; Linux x64 produces the Linux directory and archive below. Cross-platform packaging is unsupported. Quit the running app before rebuilding the same version.
 
-版本来自 `desktop/package.json`。Electron 与依赖由 lockfile 固定。构建在系统临时目录组装运行资源，结束后清理，不向源码写入本机路径。
+Version comes from `desktop/package.json`; lockfiles pin Electron and dependencies. Assembly uses a temporary system directory and cleans it afterwards, without writing local paths into source files.
 
-资源只收录 scripts/services/guest/systemd/lima/pi 的允许文件类型，不复制 node_modules、密钥、用户工作区或会话。资源 manifest 记录文件尺寸与 SHA-256；构建 manifest 记录版本、平台、Electron 和资源 manifest 摘要。摘要用于追踪构建内容，不替代代码签名或供应链验证。
+Runtime resources include only allowlisted file types from scripts/services/guest/systemd/lima/pi, excluding dependencies, keys, workspaces and sessions. The resource manifest records size and SHA-256; the build manifest records version, platform, Electron and the resource-manifest digest. Hashes track content; they do not replace signing or supply-chain validation.
 
-构建产物自带控制脚本和首次引导，可以安装 Lima 与 Pi、创建 secure-vm。Homebrew 系统安装及浏览器登录仍由用户完成。桌面配置在 macOS 的 `~/Library/Application Support/Anchi/`（含 `directory-plans.json` 与 `activity.jsonl`），不进入应用包。guest 安装脚本把运行资源版本写入 VM 的 `/opt/secure-vm/installed.json`，首次设置据此提示 VM 服务是否落后于应用。
+Packaged setup includes scripts to install dependencies and Pi and create `secure-vm`. Users complete Homebrew system installation and browser login themselves. macOS configuration is in `~/Library/Application Support/Anchi/`, including `directory-plans.json` and `activity.jsonl`, outside the app. Guest installation writes `/opt/secure-vm/installed.json` so setup can compare runtime and app versions.
 
-## Linux 产物
+## Linux artifacts
 
-在 x86_64 Linux 上运行 `npm --prefix desktop run package` 产出 `artifacts/releases/<version>/Anchi-linux-x64/` 与 `Anchi-linux-x64.tar.gz` 加 `.sha256`。Linux 没有签名流程，`ANCHI_RELEASE=1` 在 Linux 上直接报错。打包不跨平台：macOS 产物只在 macOS 上构建，Linux 产物只在 Linux 上构建；CI 的打包冒烟在两种 runner 上各跑一次。
+`npm --prefix desktop run package` on Linux x64 creates `artifacts/releases/<version>/Anchi-linux-x64/`, `Anchi-linux-x64.tar.gz` and its `.sha256`. Linux has no signing path; `ANCHI_RELEASE=1` fails with `RELEASE_UNSUPPORTED_PLATFORM`. Packaging smoke tests run on both host platforms.
 
-宿主工具的固定版本在 `desktop/host-tools.json`。升级步骤：改版本与 URL，下载新包并用 `shasum -a 256` 重算 SHA 写回，Lima 另与其发布页 `SHA256SUMS` 核对，然后手动触发 `linux-live` 工作流确认从零建 VM 仍通过。
+Tool versions are pinned in `desktop/host-tools.json`. To update: change version and URL, download the exact artifact, recompute SHA-256 with `shasum -a 256`, compare Lima with published `SHA256SUMS`, and run `linux-live` to verify fresh VM installation. Only SHA-256 is checked; Lima GPG and Codex sigstore verification are not implemented.
 
-## 发布门槛
+## Public-release gates
 
-当前产物为未签名的开发版；下列项目未全部完成前不对外宣称正式产品：
+Current outputs are development builds. The following checklist records release requirements, not a claim they are all complete:
 
-- [ ] 明确仓库许可证、第三方许可证与隐私说明。
-- [ ] Developer ID 签名、公证、staple 与干净机器 Gatekeeper 验证。
-- [ ] 全新安装、安装取消、升级/降级、失败恢复与配置迁移验证。
-- [ ] 目录真实访问和撤销、OAuth 连接与撤销、任务权限边界验收。
-- [ ] 用户可恢复的配置备份、异常退出和断电恢复策略。
-- [ ] 安全评审、依赖审查、分发更新校验与版本兼容矩阵。
+- License, third-party notices and privacy documentation reviewed.
+- Developer ID signing, notarization, stapling and clean-machine Gatekeeper validation.
+- Clean installation, cancellation, upgrade/downgrade, recovery and configuration migration.
+- Real directory access/revocation, OAuth connection/revocation and task permission boundaries.
+- Recoverable configuration backups and crash/power-loss recovery policy.
+- Security/dependency review, verified updates and compatibility matrix.
 
-## 每次变更验证
+After `make check`, run packaging and desktop acceptance appropriate to the change. Guest changes need explicit VM checks. CI runs offline checks on Linux/macOS and packaging smoke jobs; it does not store credentials, connect accounts, approve models or publish releases.
 
-`make check` 通过后，按改动范围运行打包和桌面验收。涉及 guest 部署再显式运行真实隔离测试。CI 在 Linux 与 macOS 运行离线检查；推送到 main 或手动触发时另在 macOS 做一次未签名打包冒烟。CI 不保存凭证、不连接账户、不自动批准模型，也不发布产物。
+Manual package checks: launch from Finder or the Linux executable, inspect VM state, connect Pi, create/resume a session, open/cancel the native picker, inspect trusted approval details and exit. Do not automatically approve a model merely to prove the UI works.
 
-打包后的手工检查：从 Finder 启动 → 检查 VM → 连接 Pi → 新建/恢复会话 → 原生目录选择与取消 → 可信审批详情核对 → 退出连接。模型真实请求必须由用户确认，不能为证明 UI 正常自动批准。
+## Developer ID signing and notarization
 
-## Developer ID 签名与公证入口
+Formal releases require a valid Developer ID Application certificate and Keychain notarization profile. Without them, only unsigned development packages can be produced; ad-hoc signing must not masquerade as a formal release.
 
-本机目前检测到 0 个有效 code-signing identities。未提供证书和 Keychain profile 前，仅能生成未签名开发包，不会自动使用 ad-hoc 签名冒充正式发布。
-
-安装自己的 Developer ID Application 证书（含私钥），并用 Apple `notarytool store-credentials` 交互式将公证凭据保存在 Keychain。不要把密码、私钥或 API key 写入仓库或发到聊天中。随后配置以下非秘密值：
+Install your Developer ID Application certificate with its private key. Save notarization credentials interactively with Apple's `notarytool store-credentials`. Never put secrets in the repository or chat. Configure these nonsecret values:
 
 ```bash
 export ANCHI_RELEASE=1
@@ -53,14 +51,14 @@ export ANCHI_BUNDLE_ID='com.yourcompany.anchi'
 npm --prefix desktop run package
 ```
 
-旧的 `QISUO_*` 变量仍被接受，见 [改名迁移](RENAME_MIGRATION.md)。
+Legacy `QISUO_*` release variables remain accepted; `ANCHI_*` values take precedence when both are set.
 
-签名产物单独写入 `artifacts/releases/<version>/signed/`；失败构建不保留之前的成功 manifest 或分发 ZIP。发布模式先检查证书和 Keychain profile，再以 hardened runtime 及 Electron osx-sign 默认 entitlements 签名所有组件。随后 codesign 严格验证 → ZIP 提交 notarytool 并等待 Accepted → staple → staple validate → Gatekeeper assess → 重新生成携带票据的分发 ZIP 和 SHA-256。只有全部成功才写入 `signed: true, notarized: true` 的 build manifest；Apple 返回的 receipt 保存在 notarization.json。应用只能依赖可信内置资源，不能把外部下载内容注入签名包。
+Signed output goes under `artifacts/releases/<version>/signed/`. Failed builds do not retain an old success manifest or distribution ZIP. Release mode preflights identity/profile, signs all components with hardened runtime and Electron osx-sign default entitlements, then performs strict codesign verification, submits a ZIP to notarytool, waits for Accepted, staples, validates the staple, assesses Gatekeeper and rebuilds the ticket-bearing distribution ZIP plus SHA-256. Only complete success writes `signed: true, notarized: true`; Apple's receipt is saved as `notarization.json`. Downloaded external content must not be injected into the signed package.
 
-实现依据：[Electron Code Signing](https://www.electronjs.org/docs/latest/tutorial/code-signing)、[Apple Notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)。真实 Apple 提交、干净机器 Gatekeeper 和全新安装仍须在有效开发者配置下验收。
+References: [Electron signing](https://www.electronjs.org/docs/latest/tutorial/code-signing), [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution). Real submission, clean-machine Gatekeeper and fresh install still require valid developer configuration and acceptance.
 
-## 文件代理实测
+## File-broker live check
 
-`node desktop/scripts/verify-files.cjs` 使用现有 VM 和合成临时目录，验证 cell JSONL 工具到宿主的真实往返、读写、路径拒绝、覆盖与删除进入 `.anchi-trash`、只读和撤销；不调用模型或读取 Gmail。执行前退出 Pi，会占用固定 secure-cell unit。
+`node desktop/scripts/verify-files.cjs` uses an existing VM and synthetic temporary directory to test real cell-to-host JSONL round trips, read/write, path rejection, trash recovery for overwrite/delete, read-only mode and revocation. It calls no model and reads no Gmail. Exit Pi first because the test occupies the fixed cell unit.
 
-产品名称为 **Anchi（安栖）**。开发版 Bundle ID 为 `local.anchi.desktop`；用户配置目录迁移和兼容变量见 [改名迁移](RENAME_MIGRATION.md)。
+The development Bundle ID is `local.anchi.desktop`; renaming and configuration migration are documented separately.

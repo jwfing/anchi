@@ -1,43 +1,45 @@
-# 第一次使用安栖（Pi）
+# Getting started with Anchi and Pi
 
-本版支持 Apple Silicon Mac。正式对外分发仍需 Developer ID 签名公证；当前应用是内部开发包。
+macOS on Apple Silicon is supported; Linux x86_64 is experimental. Current builds are internal development packages. Public macOS distribution still requires Developer ID signing and notarization.
 
-## 从打开应用到第一个任务
+The desktop currently uses Chinese UI labels. The control names below describe their functions in English.
 
-1. 把 Anchi.app 放到本机并打开，默认进入「首次设置」。点击重新检查，查看实际就绪状态。
-2. 如果没有 Homebrew，点击安装包下载页，下载官方 `.pkg`，在 macOS 系统安装器完成安装后返回应用。不需要在安栖输入管理员密码。
-3. 点击「安装或补齐依赖」：确认后安装 Lima、Python 和 Codex CLI。需要网络；Homebrew 可能要求先完成系统开发工具安装。系统权限提示由 macOS 处理。
-4. 点击「安装 Pi」。应用创建无宿主挂载的 VM、隔离 cell 和可信服务，安装固定版本 Pi。VM 使用 4 GB 内存和最多 30 GB 的动态虚拟磁盘；开始安装前至少需要 8 GB 可用空间。进度显示期间保持应用打开。
-5. 点击「初始化 / 解锁」。首次生成主密钥于 `~/.config/secure-vm/vault.key`；已有密钥会复用。请备份该文件，不能用新密钥替代旧密钥解密已有账户。重启 VM 后需要再解锁。
-6. 点击「登录 / 重新认证」，在系统浏览器完成 Codex 的 ChatGPT 订阅登录；已有 Codex 登录可选择「使用已有 Codex 登录」。应用仅把短期访问令牌经 stdin 导入 VM 加密库，刷新令牌留在宿主。页面会显示认证到期时间；到期后直接重新登录或导入即可，已连接的 Pi 不需要断开。不要把 token 粘贴到聊天。
-7. 点击「连接 Pi」，等待已连接，再点击「开始示例任务」。任务只把三句虚构项目计划整理成待办清单，不要求邮箱或目录权限。
-8. 默认情况下模型调用处于持续授权，请求由策略自动放行并记入审计，示例任务直接运行。若你在第 4 步把模型调用改成「逐轮审批」，则要进入「独立审批」，从策略服务刷新请求、查看完整动作后批准；未批准不会调用模型。
-9. 回到 Agent 页面查看结果。只有同一会话、同一任务既返回文本又成功结束，才记录首个任务完成。之后可到「连接与权限」按需连接 Gmail 或开放目录。目录授权持续至撤销；被覆盖或删除的文件会留在该目录下隐藏的 `.anchi-trash` 里供你找回。
+## macOS: from launch to the first task
 
-模型使用可能消耗订阅配额。已有读取的文件/邮件内容可能进入模型上下文；首次示例启动一个新会话，避免继承旧会话内容。
+1. Open `Anchi.app`. It starts on First-time setup. Select Recheck to inspect actual readiness.
+2. If Homebrew is missing, open its installer download page and install the official `.pkg` through the macOS installer. Do not enter an administrator password into Anchi.
+3. Select Install dependencies and confirm installation of Lima, Python and Codex CLI. This requires networking; Homebrew may first need system developer tools. macOS handles system permission prompts.
+4. Select Install Pi. The app creates a VM without host mounts, an isolated cell and trusted services, then installs the pinned Pi version. The VM uses 4 GB RAM and up to 30 GB of dynamically allocated disk. Keep at least 8 GB free before installation and leave the app open while it runs.
+5. Select Initialize / Unlock. First use creates `~/.config/secure-vm/vault.key`; existing keys are reused. Back up this file: a replacement key cannot decrypt existing accounts. Unlock again after restarting the VM.
+6. Select Sign in / Reauthenticate and complete Codex ChatGPT subscription login in the system browser, or import an existing Codex login. Only the short-lived access token is imported through stdin into the encrypted VM vault; the refresh token stays on the host. Setup shows expiry. Reimport or sign in again after expiry without disconnecting Pi. Never paste a token into chat.
+7. Connect Pi, wait for the connected state, then start the example task. It turns three fictional project statements into a task list without requiring mail or directory access.
+8. Model calls use standing authorization by default, so the example runs directly and is audited. If you changed model calls to per-turn approval in the setup page's fourth section, open Independent approval, refresh from the policy service, inspect the full action and approve it. In that mode, the model is not called before approval.
+9. Return to Agent for the result. First-task completion requires both a text reply and successful completion for the same session and turn. Then connect accounts or grant directories as needed under Connections and permissions. Directory grants persist until revoked; overwritten or deleted files remain recoverable in the directory's hidden `.anchi-trash`.
 
-## 出错后继续
+Model calls may consume subscription quota. Files or mail already read can enter model context. The example starts a new session to avoid inheriting old context.
 
-- 安装失败：检查网络和磁盘，重新点击相同步骤。已成功的基础环境可复用；不会删除工作区或凭证。
-- 安装意外中断：再次打开会显示中断状态，重新检查后重试。由安装器标记的未完成 rootfs 会保存在 VM 中的 `rootfs-incomplete-*` 再重建；未标记的未知 rootfs 不自动处理。
-- 安装过程中不能正常关闭应用，避免遗留半安装状态；浏览器登录等待可以取消。强制结束或系统关机后通过上述重试恢复。
-- VM 停止：先启动环境，再解锁；不需要重新安装 Pi。
-- 凭证库无法解锁：恢复原主密钥。已有加密数据时程序拒绝生成替代密钥。
-- 模型认证过期：在首次设置点击「使用已有 Codex 登录」或「登录 / 重新认证」，不需要断开 Pi。
-- Gmail 显示「需要重新认证」：Google 刷新令牌已失效（Testing 模式应用通常 7 天过期），在「连接与权限」重新点击「连接 Google」。
-- 目录显示「目录已变化」或「不可访问」：目录被移动、替换或所在磁盘未挂载，确认后点击「重新确认」。
-- 审批拒绝或超时：确认原因后重新开始任务，会生成新的审批，旧审批不自动复用。
+## Recovery
 
-系统依赖来源：[Homebrew 官方安装说明](https://docs.brew.sh/Installation)。登录方式和凭证存储参照 [OpenAI 官方认证文档](https://developers.openai.com/zh-Hans/docs/auth)。组织管理策略限制登录或文件凭证缓存时，应用会失败并提示重新检查，不绕过组织策略。
+- **Installation failed:** check networking and disk space, then retry the same step. Completed base setup can be reused without deleting workspaces or credentials.
+- **Interrupted installation:** reopen, recheck and retry. Installer-marked incomplete root filesystems are preserved as `rootfs-incomplete-*` before rebuilding. Unknown, unmarked root filesystems are not automatically modified.
+- **Closing during installation:** normal close is blocked while installation runs. Browser-login waits can be cancelled. After forced termination or shutdown, use the retry flow.
+- **Stopped VM:** start it and unlock the vault; reinstalling Pi is unnecessary.
+- **Vault cannot unlock:** restore the original master key. The app refuses to generate a replacement when encrypted data already exists.
+- **Expired model authentication:** sign in or import the existing Codex login again; Pi can remain connected.
+- **Gmail requires reauthentication:** reconnect Google. Testing-mode OAuth refresh tokens commonly expire after seven days.
+- **Directory changed or inaccessible:** check whether it moved, was replaced or is on an unmounted disk, then reconfirm the grant.
+- **Approval denied or timed out:** resolve the cause and restart the task. New approvals are created; old ones are not silently reused.
+
+References: [Homebrew installation](https://docs.brew.sh/Installation), [OpenAI authentication](https://developers.openai.com/zh-Hans/docs/auth). Organization restrictions on login or credential caching are respected; the app reports failure rather than bypassing them.
 
 ## Linux
 
-支持 x86_64 的 Ubuntu 22.04+ 与 Debian 12+，需要 CPU 虚拟化扩展与 `/dev/kvm`。其他使用 pacman 或 dnf 的发行版（Arch、Fedora）可以按同样步骤运行，应用会给出对应的安装命令，但未纳入 CI 验证。虚拟机占用 4 GB 内存与最多 30 GB 动态磁盘，开始前至少留 8 GB 空间。
+The target is x86_64 Ubuntu 22.04+ or Debian 12+ with CPU virtualization and `/dev/kvm`. Arch and Fedora receive package-manager-specific commands but are not covered by CI. The recorded KVM CI environment used Ubuntu 24.04 and QEMU 8.2. Reserve 4 GB RAM, up to 30 GB dynamic VM storage and at least 8 GB free disk before setup.
 
-1. 解压 `Anchi-linux-x64.tar.gz`，运行 `Anchi-linux-x64/Anchi`。若发行版禁用非特权用户命名空间，Electron 会提示沙箱错误，此时执行一次 `sudo chown root Anchi-linux-x64/chrome-sandbox && sudo chmod 4755 Anchi-linux-x64/chrome-sandbox`；不要用 `--no-sandbox` 绕过。
-2. 首次设置步骤 1 点击「下载 Lima 与 Codex」。应用按固定版本与 SHA-256 下载到 `~/.local/share/anchi/tools`，不需要管理员密码；校验失败不会安装任何文件。
-3. QEMU 与 KVM 权限需要你在终端执行页面上显示的命令，应用按检测到的包管理器给出对应写法：Debian/Ubuntu 是 `sudo apt-get install -y qemu-system-x86 qemu-utils`，Arch 是 `sudo pacman -S --needed qemu-base`，Fedora 是 `sudo dnf install -y qemu-system-x86 qemu-img`。若 `/dev/kvm` 不可读写，还会显示 `sudo usermod -aG kvm "$USER"`，执行后需退出登录并重新登录；Arch 的 udev 默认把 `/dev/kvm` 设为 `0666`，通常不会出现这一条。完成后点「重新检查」。
-4. 之后的步骤与 macOS 相同。配置目录为 `~/.config/Anchi`，主密钥为 `~/.config/secure-vm/vault.key`，虚拟机在 `~/.lima/secure-vm`。
-5. Codex 登录会打开系统浏览器；Linux 上的 Codex 二进制由应用下载，版本固定，升级随应用发布。
+1. Extract `Anchi-linux-x64.tar.gz` and run `Anchi-linux-x64/Anchi`. If unprivileged user namespaces are disabled and Electron reports a sandbox error, run `sudo chown root Anchi-linux-x64/chrome-sandbox && sudo chmod 4755 Anchi-linux-x64/chrome-sandbox` once. Do not bypass the sandbox with `--no-sandbox`.
+2. In setup step 1, select Download Lima and Codex. Pinned, SHA-256-verified files install into `~/.local/share/anchi/tools` without administrator access. Failed verification installs nothing.
+3. Run the displayed QEMU/KVM commands yourself. Debian/Ubuntu: `sudo apt-get install -y qemu-system-x86 qemu-utils`; Arch: `sudo pacman -S --needed qemu-base`; Fedora: `sudo dnf install -y qemu-system-x86 qemu-img`. If `/dev/kvm` is not readable and writable, setup also shows `sudo usermod -aG kvm "$USER"`; log out and back in afterwards. Arch commonly grants `0666` access through udev and does not need this step. Select Recheck when done.
+4. Continue with the same Pi installation, unlock and login flow as macOS. Configuration is in `~/.config/Anchi`, the master key in `~/.config/secure-vm/vault.key`, and the VM in `~/.lima/secure-vm`.
+5. Codex login opens the system browser. The Linux Codex binary is downloaded by the app and updated through pinned application releases.
 
-命令行部署同样可用：把 `~/.local/share/anchi/tools/lima/current/bin` 加入 PATH 后运行 `bash scripts/install-pi.sh`。
+For CLI deployment, add `~/.local/share/anchi/tools/lima/current/bin` to `PATH`, then run `bash scripts/install-pi.sh`.

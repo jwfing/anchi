@@ -1,54 +1,47 @@
-# Pi 多轮聊天与 stdin/stdout 协议
+# Pi chat and stdin/stdout protocol
 
-> 本文中的测试数量与验证结果为当日记录；当前以 `make check` 的输出为准。
+Use terminal chat for interactive sessions or RPC v1 for desktop integration. The one-shot `printf ... | bash scripts/pi.sh` interface is also available.
 
-2026-09-19。新增持续运行的 pi 会话与宿主终端客户端。原 `printf ... | bash scripts/pi.sh` 单次调用方式保留。
-
-## 终端聊天
+## Terminal chat
 
 ```bash
 python3 scripts/pi-chat.py
-```
-
-看到 `你>` 后直接输入需求。当前任务完成后可继续追问，pi 会保留本会话上下文。
-
-| 命令 | 用途 |
-|---|---|
-| `/status` | 查看 session ID、当前任务 ID 和忙闲状态 |
-| `/cancel` 或 Ctrl+C | 取消当前模型等待/工具循环，保留会话 |
-| `/history` | 查看最近 40 条用户/助手文本，每条最多 8000 字符 |
-| `/sessions` | 列出最多 100 个已保存会话的 ID 与修改时间 |
-| `/resume UUID` | 恢复指定会话，上下文加载后等你发下一条需求 |
-| `/new` | 新建会话，已有历史保留 |
-| `/quit` 或 Ctrl+D | 取消当前任务并退出进程 |
-
-也可以启动时恢复：
-
-```bash
 python3 scripts/pi-chat.py --resume SESSION_UUID
 ```
 
-恢复失败会报错退出，不会悄悄切换到新会话。运行中发送另一条需求或切换会话返回 `BUSY`，不会自动排队。需要改变任务时，先 `/cancel`，再发新需求。
+Enter a request at the user prompt. After completion, follow-up requests retain session context.
 
-聊天终端会显示审批 ID。在独立终端核对并批准：
+| Command | Purpose |
+|---|---|
+| `/status` | Session ID, turn ID and busy state |
+| `/cancel` or Ctrl+C | Cancel current model wait/tool loop while retaining the session |
+| `/history` | Up to 40 recent user/assistant texts, at most 8,000 characters each |
+| `/sessions` | Up to 100 saved session IDs and modification times |
+| `/resume UUID` | Load a session and wait for the next request |
+| `/new` | Start a new session while preserving old history |
+| `/quit` or Ctrl+D | Cancel the task and exit |
+
+Failed restoration exits with an error rather than silently creating a new session. A new prompt or session switch while busy returns `BUSY`, without queuing. Cancel before changing the task.
+
+Model requests are automatically authorized by default. When `inference` is set to `ask`, inspect and approve the displayed request in a separate terminal:
 
 ```bash
 bash scripts/policy.sh show APPROVAL_ID
 bash scripts/policy.sh approve APPROVAL_ID --digest EXACT_DIGEST
 ```
 
-模型请求默认由策略自动放行；只有把 `inference` 改为 `ask` 时才需要按上面的命令逐次审批。聊天协议没有 approve 或 token 接口。取消会停止 pi 等待和本地后续执行；已经发出的远端请求可能继续计费或写入网关执行记录，已经完成的工具动作不会回滚。待审批记录不会因本地取消而自动撤销，需要时使用 `policy.sh deny/revoke`，否则按原规则过期。
+Chat has no approval or token interface. Cancellation stops local waiting and subsequent execution, but remote requests may continue billing or updating the gateway ledger. Completed tool actions are not rolled back. Pending approvals require explicit deny/revoke or expire normally.
 
-## 程序通信接口
+## RPC v1
 
 ```bash
 bash scripts/pi.sh --rpc
 ```
 
-保持 stdin 打开，一行一条 JSON。每条命令必须带本连接内唯一的 `id`（1–64 个字母、数字、下划线或连字符）。接口协议版本为 1；这是本项目的受限协议，不是官方 pi CLI 的完整 RPC 协议。
+Keep stdin open and send one JSON object per line. Each command needs a connection-unique `id` of 1–64 letters, digits, underscores or hyphens. This is the project's restricted protocol, not the complete official Pi CLI RPC protocol.
 
 ```json
-{"id":"first","op":"prompt","text":"记住项目代号 Cedar"}
+{"id":"first","op":"prompt","text":"Remember the project name Cedar"}
 {"id":"status1","op":"status"}
 {"id":"cancel1","op":"cancel"}
 {"id":"list1","op":"sessions"}
@@ -58,37 +51,35 @@ bash scripts/pi.sh --rpc
 {"id":"close1","op":"close"}
 ```
 
-`prompt` 先返回接受确认，模型/工具异步执行。示例：
+`prompt` acknowledges acceptance before asynchronous model/tool execution:
 
 ```json
 {"type":"response","id":"first","op":"prompt","ok":true,"result":{"accepted":true,"session_id":"...","turn_id":"first","busy":true}}
 {"type":"approval_required","approval_id":"...","request_id":"...","session_id":"...","turn_id":"first"}
-{"type":"assistant","text":"已记住。","stop_reason":"stop","session_id":"...","turn_id":"first"}
+{"type":"assistant","text":"Remembered.","stop_reason":"stop","session_id":"...","turn_id":"first"}
 {"type":"finished","success":true,"cancelled":false,"session_id":"...","turn_id":"first"}
 ```
 
-事件中 `turn_id` 关联用户的 prompt 命令；`approval_required.request_id` 是可信模型网关的一次请求 ID，两者用途不同。一次用户需求可能包含多个模型回合/工具调用。`finished` 才表示本次用户需求结束，`prompt` 的接受确认不代表执行成功。
+`turn_id` identifies the user's prompt. `approval_required.request_id` identifies one trusted gateway request. One prompt can produce several model turns and tools. Only `finished` indicates task completion; acceptance is not success.
 
-其他事件包含 `ready`、`tool_start`、`tool_end`、`turn_error`、`protocol_error`。解析失败、重复 ID、未知操作或非法字段都会明确拒绝。单行上限 64KiB、prompt 上限 8000 字符、待处理命令最多 32 条；每次用户需求的模型回合计数重新开始，仍最多 8 回合，网关每日限额保持不变。stdin EOF 取消任务并关闭会话，stdout 不再可用时应由调用方结束连接；单次文本调用模式仍在 EOF 后正常执行。
+Other events: `ready`, `tool_start`, `tool_end`, `turn_error`, `protocol_error`. Invalid JSON, duplicate IDs, unknown operations and illegal fields are rejected. Limits are 64 KiB per line, 8,000 prompt characters and 32 pending commands. Each prompt resets the cell's eight-model-turn limit; the trusted daily gateway quota still applies. stdin EOF cancels and closes RPC, while one-shot text mode still executes after EOF. Callers should close connections whose stdout is no longer usable.
 
-## 持久化和边界
+## Persistence and boundaries
 
-会话依旧在 cell 的 `/workspace/.pi-secure/sessions/`。恢复只接受 UUID，匹配指定目录里的正规 JSONL 文件，拒绝路径穿越、符号链接、错误 header 和超过 16MiB 的文件。会话属于可被 cell 修改的非可信数据，恢复上下文不等于恢复任何批准或权限。
+Sessions live in `/workspace/.pi-secure/sessions/` inside the cell. Restore accepts UUIDs only and requires a regular JSONL file in that directory with a valid header and size no greater than 16 MiB. Traversal and symlinks are rejected. These are untrusted, cell-writable files; restoring context restores no approvals or permissions.
 
-恢复不自动重发中断的模型请求，也不自动执行历史工具动作。它加载会话上下文并等待新指令；新指令产生新的模型请求，仍经完整内容审批。模型保持可信网关当前配置，不允许聊天客户端指定 endpoint、token 或后台权限。
+Restore does not resend interrupted requests or replay tools. It waits for a new instruction, whose model requests follow current authorization policy. Model configuration comes from the trusted gateway; clients cannot set endpoints, tokens or background privileges.
 
-每个进程仅有一个活跃会话，VM 仍只允许一个 cell 同时运行。退出聊天后才能启动另一个 cell 命令。暂不支持后台任务队列、Web UI、自动压缩或多 cell 并发。上下文增长仍可能触发网关约 44KB 的上限（按 UTF-8 字节计，中文约 1.4 万字），此时桌面会提示，可用 `/new` 开始新会话。
+Each process has one active session; the VM permits one cell at a time. There is no background queue, automatic compaction, Web UI or concurrent multi-cell operation. Growing context can hit the roughly 44 KB UTF-8 gateway limit; use `/new` when necessary.
 
-## 测试
+## Validation
 
 ```bash
 node --test pi/tests/*.test.mjs
 python3 -m unittest discover -s tests -q
 python3 scripts/check-pi-rpc.py
-# 实际模型测试；脚本会临时把 inference 切到 ask，需要为其输出的合成请求逐次批准：
+# Real model check: temporarily selects ask mode; approve only the displayed synthetic requests.
 python3 scripts/check-pi-rpc.py --live
 ```
 
-离线协议测试覆盖忙闲/取消、重复命令、历史恢复、EOF 清理和超长行处理。真实 VM 测试验证审批等待中状态可查与取消、跨 cell 进程恢复、禁止任意路径恢复；`--live` 额外验证连续追问与进程重启后模型仍能回忆合成标记，不涉及真实邮件。
-
-本轮实测通过：5 项 Node 协议/会话测试、55 项 Python 回归测试；真实 pi 完成两轮记忆对话，关闭 cell 进程后恢复同一 session，第三轮仍正确返回 `PI_RPC_MEMORY_213db825`。等待审批时的取消在 5 秒内完成，恢复动作本身未发起模型调用。
+Offline coverage includes busy/cancel handling, duplicate IDs, history/restore, EOF cleanup and oversized lines. VM checks exercise status/cancel while awaiting approval, cross-process restore and arbitrary-path rejection. `--live` additionally verifies follow-up memory and restart recovery using synthetic markers, not mail.
