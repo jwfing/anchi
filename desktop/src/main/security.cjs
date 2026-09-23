@@ -8,6 +8,7 @@ const ASSETS = Object.freeze({
   '/style.css': 'style.css',
   '/renderer.mjs': 'renderer.mjs',
   '/views.mjs': 'views.mjs',
+  '/activity.mjs': 'activity.mjs',
   '/token.html': 'token.html',
   '/token.mjs': 'token.mjs',
 });

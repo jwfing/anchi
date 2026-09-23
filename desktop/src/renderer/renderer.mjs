@@ -93,6 +93,11 @@ function modal(title, body) {
   $('#modal').showModal();
 }
 function render() {
+  const previousChat = $('.chatlog');
+  const chatScroll = previousChat?.scrollTop || 0;
+  const followChat =
+    !previousChat || previousChat.scrollHeight - chatScroll - previousChat.clientHeight < 40;
+  $('main').classList.toggle('agent-main', page === 'agent');
   // Re-rendering replaces the DOM; keep the caret where the user was typing.
   const active = document.activeElement;
   const focusId = active?.id || null;
@@ -108,6 +113,8 @@ function render() {
     : state.starting
       ? '◌ 正在连接 Pi'
       : '○ Pi 未连接';
+  $('#status').title = $('#status').textContent;
+  $('#status').setAttribute('aria-label', $('#status').textContent);
   $('#approvals-badge').textContent = approvals.length ? String(approvals.length) : '';
   $('#crumb').textContent = {
     setup: '首次设置',
@@ -130,6 +137,8 @@ function render() {
     approvalsLoaded,
     audit,
   });
+  const chat = $('.chatlog');
+  if (chat) chat.scrollTop = followChat ? chat.scrollHeight : chatScroll;
   if (focusId) {
     const element = document.getElementById(focusId);
     if (element && !element.disabled) {
@@ -318,6 +327,15 @@ document.addEventListener('input', (e) => {
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.id === 'sidebar-toggle') {
+    const collapsed = $('.shell').classList.toggle('sidebar-collapsed');
+    const label = collapsed ? '展开导航' : '收起导航';
+    b.setAttribute('aria-expanded', String(!collapsed));
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    b.querySelector('span').textContent = collapsed ? '»' : '«';
+    return;
+  }
   // Navigation never waits behind a long-running action such as starting the VM.
   if (b.dataset.page) {
     navigate(b.dataset.page);

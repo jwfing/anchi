@@ -12,17 +12,37 @@
   </head>
   <body>
     <div class="shell">
-      <nav>
-        <div class="brand">◈ 安栖</div>
+      <nav aria-label="主导航">
+        <div class="nav-head">
+          <div class="brand">◈ 安栖</div>
+          <button id="sidebar-toggle" aria-label="收起导航" aria-expanded="true" title="收起导航">
+            <span aria-hidden="true">«</span>
+          </button>
+        </div>
         <p class="caption">本地 Agent 工作空间<br /><span id="version">桌面开发版</span></p>
-        <button data-page="setup">☷　首次设置</button><button data-page="agent">◫　Agent</button
-        ><button data-page="permissions">◎　连接与权限</button
-        ><button data-page="approvals">
-          ◇　独立审批 <span id="approvals-badge" class="badge"></span></button
-        ><button data-page="activity">≋　活动记录</button>
+        <button data-page="setup" aria-label="首次设置" title="首次设置">
+          <span class="nav-icon" aria-hidden="true">☷</span><span class="nav-label">首次设置</span>
+        </button>
+        <button data-page="agent" aria-label="Agent" title="Agent">
+          <span class="nav-icon" aria-hidden="true">◫</span><span class="nav-label">Agent</span>
+        </button>
+        <button data-page="permissions" aria-label="连接与权限" title="连接与权限">
+          <span class="nav-icon" aria-hidden="true">◎</span
+          ><span class="nav-label">连接与权限</span>
+        </button>
+        <button data-page="approvals" aria-label="独立审批" title="独立审批">
+          <span class="nav-icon" aria-hidden="true">◇</span><span class="nav-label">独立审批</span>
+          <span id="approvals-badge" class="badge"></span>
+        </button>
+        <button data-page="activity" aria-label="活动记录" title="活动记录">
+          <span class="nav-icon" aria-hidden="true">≋</span><span class="nav-label">活动记录</span>
+        </button>
         <footer>
           <p id="status" class="caption">正在加载…</p>
-          <button data-act="disconnect">停止并断开 Pi</button>
+          <button data-act="disconnect" aria-label="停止并断开 Pi" title="停止并断开 Pi">
+            <span class="nav-icon" aria-hidden="true">⏻</span
+            ><span class="nav-label">停止并断开 Pi</span>
+          </button>
         </footer>
       </nav>
       <section>

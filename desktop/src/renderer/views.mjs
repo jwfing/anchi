@@ -1,3 +1,4 @@
+import { renderActivity } from './activity.mjs';
 export const esc = (s) =>
   String(s ?? '').replace(
     /[&<>"']/g,
@@ -100,11 +101,15 @@ export function connectorCard(descriptor, status, pending, mode = 'auto') {
       <p class="${status?.reauth_required ? 'error' : ''}">${esc(connectorStatusText(status))}</p>
       <p class="caption">${esc(descriptor.scopeText)}</p>
       <p class="caption">${status?.revocation_pending ? '远端撤销待重试，请再次点击断开。' : ''}${pending ? '正在等待浏览器授权…' : ''}</p>
-      <div class="actions">${authButtons}${act('断开', 'disconnect')}</div>
-      <p class="caption">${esc(modeText(mode))}</p>
-      <div class="actions">${mode === 'ask' ? act('恢复持续授权', 'mode-auto') : act('改为逐次审批', 'mode-ask')}</div>
-      ${descriptor.tokenHint ? `<p class="muted">${esc(descriptor.tokenHint)}</p>` : ''}
-      <p class="muted">${esc(descriptor.dataText)} 连接即授权：连接后 Agent 可持续读写；改为逐次审批后每个操作都需你确认。</p>
+      <div class="actions">${authButtons}<div class="actions connector-controls">${mode === 'ask' ? act('恢复持续授权', 'mode-auto') : act('改为逐次审批', 'mode-ask')}${act('断开', 'disconnect')}</div></div>
+      <p class="connector-mode">${esc(modeText(mode))}</p>
+      <aside class="connector-tips" aria-label="连接提示">
+        <span class="connector-tips-icon" aria-hidden="true">ⓘ</span>
+        <div>
+          ${descriptor.tokenHint ? `<p>${esc(descriptor.tokenHint)}</p>` : ''}
+          <p>${esc(descriptor.dataText)} 连接即授权：连接后 Agent 可持续读写；改为逐次审批后每个操作都需你确认。</p>
+        </div>
+      </aside>
     </div>`;
 }
 
@@ -191,51 +196,56 @@ export function renderPage({
       }`;
   }
   if (page === 'agent') {
-    return /* HTML */ `<div class="row">
-        <div>
-          <div class="eyebrow">PI / LOCAL WORKSPACE</div>
-          <h1>你的本地工作助理</h1>
-          <span class="muted">首次使用请完成「首次设置」，之后可继续会话或开始新任务。</span>
-        </div>
+    return /* HTML */ `<div class="agent-workspace">
+      <div class="row agent-heading">
+        <h1>你的本地工作助理</h1>
         <span class="tag">${state.connected ? '已连接真实 agent' : '等待连接'}</span>
       </div>
-      <div class="card">
-        <div class="row">
-          <div>
-            <h3>secure-vm</h3>
-            <span class="caption">${esc(env)}</span>
-          </div>
-          <div class="actions">
-            ${button('检查环境', 'environment')}${button('启动已有 VM', 'vm-start')}${button(state.connected ? '刷新状态' : '连接 Pi', state.connected ? 'status' : 'connect', 'primary')}
-          </div>
+      <div class="card agent-environment">
+        <div class="agent-environment-status">
+          <strong>secure-vm</strong><span class="caption path">${esc(env)}</span>
         </div>
-        <p class="caption path">
-          模型认证由隔离认证层托管。认证过期时在「首次设置」重新导入即可，不需要断开 Pi。
-        </p>
+        <div class="actions">
+          ${button('检查环境', 'environment')}${button('启动已有 VM', 'vm-start')}${button(state.connected ? '刷新状态' : '连接 Pi', state.connected ? 'status' : 'connect', 'primary')}
+        </div>
       </div>
-      <div class="actions toolbar">
-        ${button('新会话', 'new')}${button('恢复会话', 'sessions')}${button('加载历史', 'history')}${button('停止任务', 'cancel')}
+      <div class="chatlog" aria-label="与 Pi 的对话" tabindex="0">
+        ${messages.length ? messages.map((m) => `<div class="bubble ${m.role === 'user' ? 'user' : ''}"><span class="caption message-author">${m.role === 'user' ? '你' : 'Pi'}</span><div class="message-text">${esc(m.text)}</div></div>`).join('') : `<div class="chat-empty"><h2>${state.connected ? '开始一个新任务' : '先连接，再开始对话'}</h2><p class="muted">${state.connected ? '描述你的需求，或试试「介绍一下你自己，不要使用工具」。' : '首次使用请完成「首次设置」，然后连接 Pi。'}</p></div>`}
       </div>
-      <p class="caption">会话：${esc(state.sessionId || '未连接')} · 新会话不继承旧审批</p>
-      <div class="chatlog">
-        ${messages.length ? messages.map((m) => `<div class="bubble ${m.role === 'user' ? 'user' : ''}"><span class="caption">${m.role === 'user' ? '你' : 'Pi'}</span><br>${esc(m.text)}</div>`).join('') : '<div class="card"><h2>先连接，再开始对话。</h2><p class="muted">可以先发送「介绍一下你自己，不要使用工具」。模型调用会进入独立审批。</p></div>'}
+      <div class="agent-input">
+        ${state.busy ? `<div class="agent-busy-toast" role="status"><span>任务执行中</span><button data-act="approvals" title="进入独立审批，核对真实请求">查看审批</button></div>` : ''}
+        <div class="row session-toolbar">
+          <div class="actions">
+            ${button('新会话', 'new')}${button('恢复会话', 'sessions')}${button('加载历史', 'history')}${button('停止任务', 'cancel')}
+          </div>
+          <span class="caption session-id" title="${esc(state.sessionId || '未连接')}"
+            >会话：${esc(state.sessionId || '未连接')}</span
+          >
+        </div>
+        <form id="compose" class="composer">
+          <textarea
+            id="prompt"
+            aria-label="发送给 Pi 的需求"
+            maxlength="${Number(state.limits?.prompt_chars) || 8000}"
+            placeholder="描述你希望完成的任务…"
+            ${!state.connected || state.busy ? 'disabled' : ''}
+          >
+${esc(draft)}</textarea>
+          <button class="primary" ${!state.connected || state.busy ? 'disabled' : ''}>发送</button>
+        </form>
+        <details class="agent-help">
+          <summary>会话与权限说明</summary>
+          <p class="caption">
+            新会话不继承旧审批。模型认证由隔离认证层托管；认证过期时在「首次设置」重新导入即可，不需要断开
+            Pi。
+          </p>
+          <p class="caption">
+            本地目录通过 host_files 工具访问；shell 仅能访问 cell
+            工作区。默认持续授权：读写与模型调用由策略自动放行并记入审计；可在「权限」中改为逐次审批。
+          </p>
+        </details>
       </div>
-      ${state.busy ? `<div class="note">任务执行中。如收到审批提示，请进入「独立审批」核对真实请求。${button('查看审批', 'approvals')}</div>` : ''}
-      <form id="compose" class="composer">
-        <textarea
-          id="prompt"
-          aria-label="发送给 Pi 的需求"
-          maxlength="${Number(state.limits?.prompt_chars) || 8000}"
-          placeholder="描述你希望完成的任务…"
-          ${!state.connected || state.busy ? 'disabled' : ''}
-        >
-${esc(draft)}</textarea
-        ><button class="primary" ${!state.connected || state.busy ? 'disabled' : ''}>发送</button>
-      </form>
-      <p class="caption">
-        本地目录通过 host_files 工具访问；shell 仅能访问 cell 工作区。默认持续授权：
-        读写与模型调用由策略自动放行并记入审计；可在「权限」中改为逐次审批。
-      </p>`;
+    </div>`;
   } else if (page === 'permissions') {
     const catalog = Array.isArray(state.connectorCatalog) ? state.connectorCatalog : [];
     const statuses = state.connectors || {};
@@ -307,19 +317,7 @@ ${esc(draft)}</textarea
       <p class="muted">
         桌面只保存事件类型、时间和标识，不保存聊天与审批正文；完整策略审计存于 VM，可在下方读取。
       </p>
-      <div class="card">
-        ${
-          state.events
-            .filter((e) => !['assistant', 'user', 'response'].includes(e.type))
-            .slice()
-            .reverse()
-            .map(
-              (e) =>
-                `<div class="resource"><span class="tag">${esc(e.type)}</span> <span class="caption">${esc(e.time ? new Date(e.time).toLocaleString() : '')}</span> ${esc(e.text || e.error || e.tool || e.approval_id || '')} ${e.type === 'finished' ? esc(e.success ? '任务成功' : e.cancelled ? '任务取消' : '任务失败') : ''}</div>`,
-            )
-            .join('') || '尚无活动。'
-        }
-      </div>
+      <div class="card">${renderActivity(state.events)}</div>
       <div class="card">
         <div class="row">
           <h2>策略审计（VM）</h2>
