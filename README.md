@@ -74,6 +74,7 @@ Package locally with `make package PYTHON=.venv/bin/python`. Version 0.1.1 produ
 | `scripts/` | Stable host CLI entry points and explicit live checks |
 | `tests/` | Offline service regression tests |
 | `prototype/` | Simulated UX reference; excluded from app packaging |
+| `landing/` | Static product landing page for `anchi.elseward.xyz`; see [preview and deployment notes](landing/README.md) |
 | `docs/` | Current user guides, architecture and release procedures |
 
 See [module responsibilities](docs/architecture/REPOSITORY.md). Existing guest and script paths remain stable to avoid breaking deployed environments.
