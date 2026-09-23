@@ -6,6 +6,8 @@ Follows the Keep a Changelog structure. The app version comes from `desktop/pack
 
 ### Added
 
+- English desktop interface by default, with a persistent English/Simplified Chinese toggle beside the sidebar collapse control. Pages, token entry, native confirmations and activity labels follow the selected language while chat and approval content remain unchanged.
+
 - Persistent directory grants: schema v2 records device and inode at authorization, restores only unchanged identities and explains inactive moved/replaced/inaccessible directories.
 - Recoverable file deletion/overwrite through hidden `.anchi-trash` inside each grant; inaccessible to agents.
 - Gmail reauthentication-required state after invalid refresh credentials, avoiding repeated Google requests.

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -15,9 +15,14 @@
       <nav aria-label="主导航">
         <div class="nav-head">
           <div class="brand">◈ 安栖</div>
-          <button id="sidebar-toggle" aria-label="收起导航" aria-expanded="true" title="收起导航">
-            <span aria-hidden="true">«</span>
-          </button>
+          <div class="nav-controls">
+            <button id="language-toggle" type="button" title="切换到中文" aria-label="切换到中文">
+              中
+            </button>
+            <button id="sidebar-toggle" aria-label="收起导航" aria-expanded="true" title="收起导航">
+              <span aria-hidden="true">«</span>
+            </button>
+          </div>
         </div>
         <p class="caption">本地 Agent 工作空间<br /><span id="version">桌面开发版</span></p>
         <button data-page="setup" aria-label="首次设置" title="首次设置">

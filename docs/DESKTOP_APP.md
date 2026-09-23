@@ -21,12 +21,14 @@ npm test
 
 ## Workspace and current features
 
+- English is the default interface language. Switch between English and Simplified Chinese using the button beside the sidebar expand/collapse control. The preference is saved in `preferences.json` in the app configuration directory and restored on restart. Language changes preserve the active session and draft; user content and approval payloads are not translated.
+
 - Setup checks real dependency, VM, Pi and authentication state. Installation/repair follows native confirmation and can retry failures or interruptions without deleting existing workspaces or credentials.
 - Chat uses real Pi JSONL RPC: send, cancel, create sessions, list/resume sessions and load history.
 - The navigation stays in place and can collapse to icons. Agent uses a compact environment bar, a conversation area and a bottom composer with session controls. Task status appears as a small toast. Connection tips are separate from status and authorization controls.
 - Native directory selection supports read-only/read-write grants. Version 2 plans record device and inode, reject overlapping and sensitive directories, and restore only unchanged identities. Version 1 and unversioned plans remain readable; corrupt/future versions are preserved and cannot be overwritten.
 - Plans live in `~/Library/Application Support/Anchi/directory-plans.json` on macOS. An existing `Qisuo` directory migrates once when `Anchi` is absent; if migration fails, the app uses the old directory to preserve access. Linux uses `~/.config/Anchi`.
-- Independent approval reads pending requests and full actions directly from policy. Approval binds the digest, rechecks current state and uses native confirmation before invoking policy administration.
+- Approvals reads pending requests and full actions directly from policy. Approval binds the digest, rechecks current state and uses native confirmation before invoking policy administration.
 - Requests can be denied or revoked. Closing the app asks before ending the local Pi connection; the VM remains running.
 - Desktop activity metadata persists in `activity.jsonl`. The activity page groups events by date and exposes technical identifiers in expandable details; it can also read VM policy audit. Chat and approval bodies are not stored in this log.
 - Opening approvals loads pending requests; navigation shows their count. Details include a structured summary and expandable full JSON.
@@ -34,7 +36,7 @@ npm test
 
 ## Directory grants
 
-Under Connections and permissions, choose a directory and mode, then confirm in the native dialog. Only successful broker activation is shown as authorized. Unchanged identities restore on startup; moved, replaced or inaccessible directories show a reason and require reconfirmation. Changing mode revokes the old capability before activating the new one. Removing a grant blocks new requests, waits for in-flight operations, then removes the plan.
+Under Connectors, choose a directory and mode, then confirm in the native dialog. Only successful broker activation is shown as authorized. Unchanged identities restore on startup; moved, replaced or inaccessible directories show a reason and require reconfirmation. Changing mode revokes the old capability before activating the new one. Removing a grant blocks new requests, waits for in-flight operations, then removes the plan.
 
 Pi calls `host_files` with `op=grants` to obtain IDs, then uses an ID and relative path for `list/read/write/mkdir/delete`. Shell cannot open host paths directly; the VM has no host mounts. Limits: 24,000 UTF-8 bytes, at most 100 directory entries, no binary/hidden files, symlinks, hard links or recursive deletion. Overwritten and deleted regular files move into hidden `.anchi-trash` for host-side recovery. The agent cannot access that directory. Writes use atomic replacement; revocation does not retract content already read.
 
@@ -56,7 +58,7 @@ OAuth waiting can be cancelled and expires after ten minutes. The account owner 
 
 Check the environment and start an existing stopped VM. Unlock after VM restart; refresh subscription authentication using [Pi authentication](PI_AGENT.md). Connect Pi and wait for its session ID; only one cell runs at a time, so close any terminal Pi first.
 
-Send a task. Automatic mode proceeds under policy; in approval mode, open Independent approval, refresh from policy, inspect the actual model, resource, content and digest, and confirm approval in the native dialog. Return to chat for the result. Cancellation neither rolls back completed tool actions nor guarantees an already submitted upstream request stops billing.
+Send a task. Automatic mode proceeds under policy; in approval mode, open Approvals, refresh from policy, inspect the actual model, resource, content and digest, and confirm approval in the native dialog. Return to chat for the result. Cancellation neither rolls back completed tool actions nor guarantees an already submitted upstream request stops billing.
 
 ## Desktop trust boundary
 
