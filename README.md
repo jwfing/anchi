@@ -1,4 +1,4 @@
-# Anchi
+# Anchi / 安栖
 
 Anchi is a permission runtime for local agents. The environment holds account credentials; agents use resources through controlled interfaces. This is an **MVP development build**, not a publicly distributable release. The isolation proof of concept and desktop control plane are implemented.
 
