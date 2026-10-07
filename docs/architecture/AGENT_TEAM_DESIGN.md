@@ -54,7 +54,7 @@ The implementation starts from the `my-bot` daemon (scheduler, team, permissions
 | Runtime | Phase | Model authentication |
 |---|---|---|
 | Codex | 1 | The cell holds a placeholder `auth.json` that carries the real account id (an identifier) and placeholder tokens. The proxy injects the access token on `chatgpt.com`, including the WebSocket model stream, and the trusted side owns refresh. Verified end to end in the PoC, including tool calls. The image must install the full `codex-package-<target>`, not the bare binary. By default Codex runs with `--sandbox danger-full-access`, and the cell is the only isolation boundary; the VM keeps Ubuntu's restriction on unprivileged user namespaces. As a per-agent option, an AppArmor profile can grant `userns` to `/usr/bin/bwrap` so Codex's `workspace-write` sandbox works inside the cell; this also lets the agent create nested user namespaces through bwrap |
-| Claude Code | 2 | Subscription by default via a `claude setup-token` token. The cell holds a placeholder `CLAUDE_CODE_OAUTH_TOKEN`; the proxy substitutes the real token on requests to Anthropic hosts. API key or Bedrock remain optional alternatives. |
+| Claude Code | 2 | Subscription by default via a `claude setup-token` token. The cell holds a placeholder `CLAUDE_CODE_OAUTH_TOKEN`; the proxy substitutes the real token on requests to Anthropic hosts. API key or Bedrock remain optional alternatives. Verified in the PoC with a `setup-token` token, including tool use; Claude Code performs no local token-format check and contacts only `api.anthropic.com` (plus credential-free telemetry). |
 
 Pi is replaced by the runtime SDKs. Connectors are exposed to both runtimes through a single **Anchi MCP server** inside the cell, which forwards to the existing connector sockets. Each connector is integrated once and both runtimes can use it.
 
@@ -89,8 +89,9 @@ Passthrough must not turn the proxy into a path to private networks. The PoC sho
 
 1. **Per-agent scope.** A rule applies only to cells whose agent is configured with that connector. An agent without the connector gets no injection.
 2. **No redirect following** with injected credentials. An injected request is never forwarded to a different host.
-3. **Operation allowlist or denylist** per connector, with a reserved `mode: auto|ask` field. Phase 1 implements only `auto`.
-4. **Deny credential-minting APIs**, because their responses would carry new credentials into the cell:
+3. **Runtime APIs: replace only.** For model runtimes (Anthropic, OpenAI), the proxy replaces a placeholder the client sent and never adds a credential to a request that carried none. Connector rules such as git smart HTTP may inject unconditionally.
+4. **Operation allowlist or denylist** per connector, with a reserved `mode: auto|ask` field. Phase 1 implements only `auto`.
+5. **Deny credential-minting APIs**, because their responses would carry new credentials into the cell:
    - AWS: `iam:CreateAccessKey`, `sts:AssumeRole*`, `sts:GetSessionToken`, `sts:GetFederationToken`, and IAM writes in general
    - GitHub: creating deploy keys or user SSH keys, installation-token endpoints, Actions secrets
 

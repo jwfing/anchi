@@ -123,3 +123,28 @@ Fixes made on the way:
 Not covered: S3 uploads (`ANCHI_POC_S3_BUCKET`). Recent CLIs default to streaming checksums (`STREAMING-UNSIGNED-PAYLOAD-TRAILER`), which the proxy currently refuses together with signed `aws-chunked`.
 
 Design implication: the key used here is a long-lived IAM user key that can read production logs and buckets. The proxy keeps it out of the cell, but any agent granted the AWS connector can use everything that key allows, except the denied operations. Agents should get a dedicated least-privilege principal. The proxy deny list complements IAM policy; it does not replace it.
+
+## Claude Code with a placeholder OAuth token (2026-10-06, real credentials)
+
+`build-layer.sh claude` installs Claude Code 2.1.292 from npm through the proxy: 6 s, 240 MB. `run-claude.sh` runs `claude -p` as `agent`. The cell holds `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-anchi-placeholder-…`; the proxy injects the real token on `api.anthropic.com`.
+
+| Run | Token given to the proxy | Result |
+|---|---|---|
+| 1 | Fake | `401 Invalid bearer token` from Anthropic. Claude Code accepted the placeholder locally; there is no client-side token-format check |
+| 2 | `accessToken` from `~/.claude/.credentials.json` | `OAuth token revoked`. On macOS the live login is in the Keychain, and this file was stale. Injection worked; the token was dead |
+| 3 | Long-lived `claude setup-token` token | **Passed.** Plain reply `hi`. A tool turn with `--dangerously-skip-permissions` ran Bash (`uname -m`, `ls /`) and wrote `report.txt`. `/etc/anchi-probe` failed with `Permission denied` |
+
+The cell took 8.3 s for both turns.
+
+Hosts contacted:
+
+- **`api.anthropic.com`, injected:** `v1/messages`, `api/claude_cli/bootstrap`, `api/claude_code/settings`, `api/claude_code/policy_limits`, `api/eval/…`, `api/event_logging/v2/batch`, `mcp-registry/v0/servers`. One redirect was logged on this host.
+- **`http-intake.logs.us5.datadoghq.com`, passthrough:** telemetry, sent without any credential.
+
+No request went to `claude.ai` or `console.anthropic.com`, and no token refresh was attempted. A `setup-token` token needs no refresh, so the trusted side only has to store it.
+
+Findings:
+
+1. **The `setup-token` design works end to end**, including tool use, and the cell never sees the token. The terms-of-use risk recorded in the design remains.
+2. **Inject only over a placeholder for runtime APIs.** Claude Code sends `mcp-registry` (and, with a fake token, `event_logging`) requests without credentials. The proxy currently adds the real token to them anyway. For runtime hosts (Anthropic, OpenAI), replace a placeholder the client sent and never add a credential to an unauthenticated request. git is the exception: its first request is unauthenticated by design.
+3. **Telemetry leaves through passthrough.** Datadog, and `ab.chatgpt.com` for Codex, receive data but no credentials. Deny them per agent if needed.
