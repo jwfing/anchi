@@ -18,6 +18,7 @@ import {
   type Methods,
   SETUP_ACTIONS,
   type SetupAction,
+  type ServiceConnectorId,
   type TaskStatus,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
@@ -47,9 +48,15 @@ import {
   setupStatus,
 } from './setup.ts';
 import { Store } from './store.ts';
+import { SERVICE_IDS, ServiceSetup } from './services.ts';
 import { SkillStore } from './skills.ts';
 import { TriggerRunner } from './triggers.ts';
 import { parse as parseYaml } from 'yaml';
+
+function serviceId(v: unknown): ServiceConnectorId {
+  if (!SERVICE_IDS.includes(v as ServiceConnectorId)) throw new Error('unknown service connector');
+  return v as ServiceConnectorId;
+}
 
 const STATUSES: TaskStatus[] = ['queued', 'running', 'done', 'failed', 'cancelled'];
 
@@ -68,6 +75,8 @@ export interface DaemonOptions {
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
   hostRun?: typeof hostOutput;
+  /** Opens a URL for the user (Google sign-in); tests replace it. */
+  openUrl?: (url: string) => void;
   /** Run schedule and polling triggers (default true). */
   triggers?: boolean;
   /** Watch the egress proxy's approval queue (default true). */
@@ -120,6 +129,7 @@ export class Daemon {
   readonly approvals: ApprovalWatcher;
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
+  readonly services: ServiceSetup;
   private server?: Server;
   private watchers: FSWatcher[] = [];
   private clients = new Map<string, Peer>();
@@ -151,6 +161,7 @@ export class Daemon {
     this.store = new Store(opts.layout.dbFile);
     this.proposals = new Proposals(opts.layout);
     this.skills = new SkillStore(join(opts.layout.root, 'skills'));
+    this.services = new ServiceSetup(this.guest, (r) => this.broadcast('oauth', r), opts.openUrl);
     this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log);
     this.approvals.on('changed', (approvals) => this.broadcast('approvals', { approvals }));
@@ -261,7 +272,7 @@ export class Daemon {
       }
       return this.guest.scan(task);
     },
-    'setup.status': () => setupStatus(this.guest, this.lima),
+    'setup.status': () => setupStatus(this.guest, this.lima, this.services),
     'setup.importClaude': async ({ token }) => {
       await this.guest.importClaude(str(token, 'token', 500).trim());
       return claudeStatus(this.guest);
@@ -311,6 +322,26 @@ export class Daemon {
     'approvals.list': () => this.approvals.list(),
     'triggers.list': () => this.triggers.list(),
     'skills.list': () => this.skills.list(),
+    'services.setToken': async ({ id, token }) => {
+      await this.services.setToken(serviceId(id), str(token, 'token', 500).trim());
+      return null;
+    },
+    'services.disconnect': async ({ id }) => {
+      await this.services.disconnect(serviceId(id));
+      return null;
+    },
+    'services.setMode': async ({ id, mode }) => {
+      if (mode !== 'auto' && mode !== 'ask') throw new Error('mode is auto or ask');
+      await this.services.setMode(serviceId(id), mode);
+      return null;
+    },
+    'services.googleClient': async ({ json }) => {
+      await this.services.setGoogleClient(str(json, 'client JSON', 16_384));
+      return null;
+    },
+    'services.googleLogin': async ({ id }) => ({
+      url: await this.services.googleLogin(serviceId(id)),
+    }),
     'skills.add': async ({ source, id }) => {
       const skill = await this.skills.add(
         str(source, 'source', 500),
@@ -473,6 +504,7 @@ export class Daemon {
     this.hub.shutdown();
     this.approvals.stop();
     this.triggers.stop();
+    this.services.stop();
     clearInterval(this.purgeTimer);
     clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();

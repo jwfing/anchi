@@ -9,6 +9,7 @@ import type {
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
+import type { ServiceSetup } from './services.ts';
 
 export const CONNECTOR_IDS: ConnectorId[] = ['github', 'aws', 'linear'];
 
@@ -59,7 +60,11 @@ export async function connectorStatuses(guest: Guest): Promise<ConnectorStatus[]
   }));
 }
 
-export async function setupStatus(guest: Guest, lima: LimaTransport): Promise<SetupStatus> {
+export async function setupStatus(
+  guest: Guest,
+  lima: LimaTransport,
+  services?: ServiceSetup,
+): Promise<SetupStatus> {
   const vm = await lima.vmStatus();
   const empty: SetupStatus = {
     vm,
@@ -67,6 +72,8 @@ export async function setupStatus(guest: Guest, lima: LimaTransport): Promise<Se
     installed: false,
     codex: { runtime: 'codex', connected: false, accountId: null, expiresAt: null },
     claude: { runtime: 'claude-code', connected: false, kind: null },
+    services: [],
+    googleClient: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
   };
   if (vm !== 'running') return empty;
@@ -78,7 +85,20 @@ export async function setupStatus(guest: Guest, lima: LimaTransport): Promise<Se
       connectorStatuses(guest),
       guest.imageStatus('codex', 'base').catch(() => false),
     ]);
-    return { vm, vaultUnlocked: vault.unlocked, installed: base, codex, claude, connectors };
+    const svc = (await services?.status().catch(() => undefined)) ?? {
+      services: [],
+      googleClient: false,
+    };
+    return {
+      vm,
+      vaultUnlocked: vault.unlocked,
+      installed: base,
+      codex,
+      claude,
+      connectors,
+      services: svc.services,
+      googleClient: svc.googleClient,
+    };
   } catch {
     return empty;
   }

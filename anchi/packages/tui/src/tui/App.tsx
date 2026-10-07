@@ -4,6 +4,7 @@ import type {
   Approval,
   BuilderProposal,
   ConnectorId,
+  ServiceConnectorId,
   SkillInfo,
   ConnectorSecret,
   SetupStatus,
@@ -12,6 +13,7 @@ import type {
   TaskStatus,
 } from '@anchi/protocol';
 import type { DaemonClient } from '@anchi/daemon';
+import { readFile, stat } from 'node:fs/promises';
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from 'ink';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
@@ -66,8 +68,12 @@ const TONE: Record<Tone, { color?: string; dimColor?: boolean; bold?: boolean }>
 
 type SecretField = { key: string; label: string; masked: boolean; optional?: boolean };
 /** Masked inputs: connector credentials, and the Claude Code token (`claude`). */
-type SecretTarget = ConnectorId | 'claude';
+type SecretTarget = ConnectorId | 'claude' | 'notion' | 'slack';
 const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
+  notion: [
+    { key: 'token', label: 'Notion internal integration secret (ntn_… or secret_…)', masked: true },
+  ],
+  slack: [{ key: 'token', label: 'Slack bot token (xoxb-…)', masked: true }],
   claude: [
     {
       key: 'token',
@@ -271,6 +277,10 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       }),
       client.on('setup', ({ line }) => setSetupLog((log) => [...log, line].slice(-8))),
       client.on('approvals', ({ approvals: next }) => setApprovals(next)),
+      client.on('oauth', ({ id, ok, error }) => {
+        say(ok ? `${id} connected` : `${id}: ${error ?? 'sign-in failed'}`);
+        refreshSetup();
+      }),
       client.on('tasksDeleted', () => {
         void client
           .call('tasks.list', { limit: 500 })
@@ -515,6 +525,13 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           return setModal({ ...modal, index: modal.index + 1, values, input: '' });
         }
         setModal(null);
+        if (modal.connector === 'notion' || modal.connector === 'slack') {
+          const id = modal.connector;
+          return runAction(
+            () => client.call('services.setToken', { id, token: values.token ?? '' }),
+            `${id} connected`,
+          );
+        }
         if (modal.connector === 'claude') {
           return runAction(
             () => client.call('setup.importClaude', { token: values.token ?? '' }),
@@ -678,9 +695,54 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       }
       if (current === 'connectors') {
         const ids: ConnectorId[] = ['github', 'aws', 'linear'];
+        const services: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
         if (key.upArrow || ch === 'k') return setConnectorCursor((c) => Math.max(0, c - 1));
         if (key.downArrow || ch === 'j')
-          return setConnectorCursor((c) => Math.min(ids.length - 1, c + 1));
+          return setConnectorCursor((c) => Math.min(ids.length + services.length - 1, c + 1));
+        if (connectorCursor >= ids.length) {
+          const sid = services[connectorCursor - ids.length]!;
+          const status = setup?.services?.find((x) => x.id === sid);
+          if (key.return || ch === 'c') {
+            if (sid === 'notion' || sid === 'slack') {
+              return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
+            }
+            if (!setup?.googleClient) {
+              return setModal({
+                kind: 'text',
+                title: 'Google OAuth client',
+                label:
+                  'Path of the Desktop app OAuth client JSON from Google Cloud (needed once for Gmail and Drive)',
+                input: '',
+                submit: async (path) => {
+                  const text = await readClientFile(path.trim());
+                  await client.call('services.googleClient', { json: text });
+                  refreshSetup();
+                  say('Google client stored; press Enter again to sign in');
+                },
+              });
+            }
+            return runAction(async () => {
+              const { url } = await client.call('services.googleLogin', { id: sid });
+              say(`sign in to Google in your browser (${url.slice(0, 60)}…)`);
+            }, `opened Google sign-in for ${sid}`);
+          }
+          if (ch === 'm' && status) {
+            const mode = status.mode === 'ask' ? 'auto' : 'ask';
+            return runAction(
+              () => client.call('services.setMode', { id: sid, mode }),
+              `${sid} writes: ${mode === 'ask' ? 'ask for approval' : 'automatic'}`,
+            );
+          }
+          if (ch === 'd' && status?.connected) {
+            return setModal({
+              kind: 'confirm',
+              title: `Disconnect ${sid}`,
+              body: `Remove the ${sid} credential from the vault${sid === 'gmail' || sid === 'drive' ? ' and revoke it at Google' : ''}.`,
+              action: () => client.call('services.disconnect', { id: sid }),
+            });
+          }
+          return;
+        }
         const id = ids[connectorCursor]!;
         if (key.return || ch === 'c') return openConnector(id);
         if (ch === 'g' && id === 'github') {
@@ -841,7 +903,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
         : agent
           ? 'Enter send · ^X new task · Esc cancel/sidebar · ^E editor · ^T tools · ^V verbose · PgUp/PgDn · Tab sidebar'
           : current === 'connectors'
-            ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · Esc sidebar'
+            ? '↑↓ choose · Enter connect · g github from gh · p aws profile · m service writes auto/ask · d disconnect · Esc'
             : current === 'skills'
               ? '↑↓ choose · a add · d remove · Esc sidebar'
               : current === 'runtimes'
@@ -1079,12 +1141,39 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
           <Text dimColor>{`  ${notes[c.id]}`}</Text>
         </Box>
       ))}
+      <Text bold dimColor>
+        SERVICES
+      </Text>
+      {(setup.services ?? []).map((c, i) => (
+        <Box key={c.id} flexDirection="column">
+          <Text inverse={i + setup.connectors.length === cursor}>
+            <Text color={c.reauthRequired ? 'red' : c.connected ? 'green' : 'gray'}>
+              {c.connected ? '●' : '○'}
+            </Text>{' '}
+            {c.id.padEnd(8)}
+            {c.reauthRequired
+              ? 'sign in again'
+              : c.connected
+                ? sanitizeLine(c.account ?? 'connected')
+                : 'not connected'}
+            {` · writes ${c.mode === 'ask' ? 'ask' : 'auto'}`}
+          </Text>
+        </Box>
+      ))}
       <Text dimColor>
         Secrets go from this screen to the VM vault. They are never stored on this Mac or shown
-        again.
+        again. Google tokens are obtained in the VM.
       </Text>
     </Box>
   );
+}
+
+/** Reads the Google client JSON the user points at (on this Mac). */
+async function readClientFile(path: string): Promise<string> {
+  const home = process.env.HOME ?? '';
+  const file = path.startsWith('~/') ? `${home}${path.slice(1)}` : path;
+  if ((await stat(file)).size > 16_384) throw new Error('that file is too large for a client JSON');
+  return readFile(file, 'utf8');
 }
 
 function SkillsView({ skills, cursor }: { skills: SkillInfo[] | null; cursor: number }) {

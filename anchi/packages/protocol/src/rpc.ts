@@ -114,6 +114,19 @@ export interface ClaudeAccountStatus {
   kind: 'oauth' | 'api_key' | null;
 }
 
+/** Connectors served by trusted services in the VM (formerly set up in the desktop app). */
+export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack';
+
+export interface ServiceConnectorStatus {
+  id: ServiceConnectorId;
+  connected: boolean;
+  account: string | null;
+  /** Google: the refresh token stopped working; sign in again. */
+  reauthRequired: boolean;
+  /** `ask`: every write waits for approval. */
+  mode: 'auto' | 'ask';
+}
+
 export interface SetupStatus {
   vm: 'missing' | 'stopped' | 'running' | 'unknown';
   vaultUnlocked: boolean;
@@ -121,6 +134,9 @@ export interface SetupStatus {
   codex: RuntimeAccountStatus;
   claude: ClaudeAccountStatus;
   connectors: ConnectorStatus[];
+  services: ServiceConnectorStatus[];
+  /** Whether a Google OAuth client is stored (needed for Gmail and Drive). */
+  googleClient: boolean;
 }
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */
@@ -247,6 +263,13 @@ export interface Methods {
   'approvals.list': [Record<string, never>, Approval[]];
   'triggers.list': [Record<string, never>, TriggerInfo[]];
   'skills.list': [Record<string, never>, SkillInfo[]];
+  'services.setToken': [{ id: ServiceConnectorId; token: string }, null];
+  'services.disconnect': [{ id: ServiceConnectorId }, null];
+  'services.setMode': [{ id: ServiceConnectorId; mode: 'auto' | 'ask' }, null];
+  /** The Google Cloud Desktop OAuth client JSON (its text), for Gmail and Drive. */
+  'services.googleClient': [{ json: string }, null];
+  /** Starts Google sign-in; returns the URL (also opened in the browser). Ends with `oauth`. */
+  'services.googleLogin': [{ id: ServiceConnectorId }, { url: string }];
   /** Adds a skill from a local directory or a GitHub tree URL (pinned to its commit). */
   'skills.add': [{ source: string; id?: string }, SkillInfo];
   'skills.remove': [{ id: string }, null];
@@ -262,6 +285,8 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
+  /** A Google sign-in finished. */
+  oauth: { id: ServiceConnectorId; ok: boolean; error?: string };
   /** Tasks were deleted; clients reload their task list. */
   tasksDeleted: Record<string, never>;
   /** The pending approvals, whenever they change. */

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node --import tsx
+import { readFileSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
@@ -419,9 +420,62 @@ setup
     }),
   );
 
+const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack'] as const;
+type ServiceId = (typeof SERVICE_IDS)[number];
+const isService = (id: string): id is ServiceId => (SERVICE_IDS as readonly string[]).includes(id);
+
 setup.command('disconnect <id>').action(async (id: string) => {
-  await withClient((client) => client.call('connectors.remove', { id: id as ConnectorId }));
+  await withClient((client) =>
+    isService(id)
+      ? client.call('services.disconnect', { id })
+      : client.call('connectors.remove', { id: id as ConnectorId }),
+  );
 });
+
+setup
+  .command('service <id>')
+  .description('Connect gmail or drive (Google sign-in) or notion or slack (token, without echo)')
+  .action((id: string) =>
+    withClient(async (client) => {
+      if (!isService(id)) fail('service must be gmail, drive, notion or slack');
+      if (id === 'notion' || id === 'slack') {
+        const token = process.stdin.isTTY ? await askSecret(`${id} token: `) : await readStdin();
+        await client.call('services.setToken', { id, token });
+        return console.log(`${id} connected`);
+      }
+      const done = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        client.on('oauth', (r) => r.id === id && resolve(r));
+      });
+      const { url } = await client.call('services.googleLogin', { id });
+      console.log(`Sign in to Google in your browser. If it did not open:\n${url}`);
+      const r = await done;
+      if (!r.ok) fail(r.error ?? 'sign-in failed');
+      console.log(`${id} connected`);
+    }),
+  );
+
+setup
+  .command('google-client <path>')
+  .description('Store the Google Cloud Desktop app OAuth client JSON (needed for Gmail and Drive)')
+  .action((path: string) =>
+    withClient(async (client) => {
+      if (statSync(path).size > 16_384) fail('that file is too large for a client JSON');
+      await client.call('services.googleClient', { json: readFileSync(path, 'utf8') });
+      console.log('Google client stored');
+    }),
+  );
+
+setup
+  .command('service-mode <id> <mode>')
+  .description('Writes of a service: auto, or ask (each write waits for approval)')
+  .action((id: string, mode: string) =>
+    withClient(async (client) => {
+      if (!isService(id) || (mode !== 'auto' && mode !== 'ask'))
+        fail('usage: service-mode <gmail|drive|notion|slack> <auto|ask>');
+      await client.call('services.setMode', { id, mode });
+      console.log(`${id} writes: ${mode}`);
+    }),
+  );
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
