@@ -1,6 +1,6 @@
 # Agent team phase 3 plan
 
-**Status: proposal, decisions open.** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status), [host directories](HOST_DIRECTORIES_PLAN.md)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
+**Status: decisions confirmed on 2026-10-07; in progress.** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status), [host directories](HOST_DIRECTORIES_PLAN.md)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
 
 ## Goal and scope
 
@@ -74,7 +74,7 @@
 ### P5 — Codex token re-import (S)
 
 - The daemon watches the Mac's `~/.codex/auth.json`; when the access token changed and is newer than the vault's, it imports it (access token and account id only, as `setup codex` does).
-- Consent once: `anchi setup codex --keep-updated`, stored in `settings.yaml`; off by default.
+- On by default (F4); `codexAutoImport: false` in `settings.yaml` turns it off. Only the access token and account id leave the Mac, as with `setup codex`; the refresh token never does.
 
 ### P6 — `aws-chunked` uploads (M)
 
@@ -94,15 +94,15 @@
 
 Phase 1 scenarios 1–3 (GitHub private push and PR, AWS logs to issue, Linear comment), phase 2 scenarios 1–5, Claude Code multi-turn with resume, CJK IME in three terminals, Drive sign-in again.
 
-## Decisions to confirm
+## Decisions
 
-| # | Question | Recommendation |
-|---|---|---|
-| F1 | P2: should mandatory approval apply to every origin, or only to tasks started by triggers and delegation? | Every origin. Simpler to explain, and a user's own prompt can also be steered by content the agent reads |
-| F2 | P3: default egress for agents without `egress` | Open, as today, with the builder proposing a list. A closed default would break every existing agent |
-| F3 | P4: replace the direct socket binds with the bridge now, or keep binds and add per-agent policy later | Replace now: per-agent policy is the reason the bridge exists, and the binds are recent |
-| F4 | P5: automatic Codex re-import by default or opt-in | Opt-in; the import reads a credential file on the Mac |
-| F5 | Order | P1, P2, P5, P8 first (small, high value), then P3, P4, P6, P7; P9 whenever accounts are ready |
+Confirmed on 2026-10-07:
+
+- **F1:** mandatory approval of high-risk operations applies to every origin, including the user's own tasks.
+- **F2:** agents without `egress` keep open egress; the builder proposes a list for new agents.
+- **F3:** P4 replaces the direct connector socket binds with the bridge now.
+- **F4:** Codex token re-import is on by default.
+- **F5:** order P1, P2, P5, P8, then P3, P4, P6, P7; P9 when accounts are ready.
 
 ## Risks
 
