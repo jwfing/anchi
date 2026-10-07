@@ -14,7 +14,7 @@ source "$here/lib.sh"
 layer=$POC/layers/codex/upper
 image=$POC/images/codex
 aa_profile=/etc/apparmor.d/anchi-poc-bwrap
-[[ -x $layer/usr/local/bin/codex ]] || { echo "build the layer first" >&2; exit 1; }
+[[ -x $layer/opt/codex/bin/codex ]] || { echo "build the layer first" >&2; exit 1; }
 
 cleanup() {
   mountpoint -q "$image" && umount "$image"
