@@ -1,0 +1,41 @@
+[Unit]
+Description=Anchi agent-team egress proxy (credential injection for task cells)
+Requires=secure-auth.socket secure-egress.service
+After=network-online.target secure-egress.service
+
+[Service]
+User=anchi-egress
+Group=anchi-egress
+SupplementaryGroups=secure-auth-clients
+Environment=PYTHONPATH=/opt/secure-vm/services
+ExecStart=/opt/anchi-egress/venv/bin/mitmdump --quiet -s /opt/secure-vm/services/egress_proxy.py \
+  --listen-host 127.0.0.1 --listen-port 18080 \
+  --set confdir=/var/lib/anchi-egress/mitm --set stream_large_bodies=8m --set connection_strategy=lazy
+RuntimeDirectory=anchi-egress
+RuntimeDirectoryMode=0755
+StateDirectory=anchi-egress
+StateDirectoryMode=0700
+LogsDirectory=anchi-egress
+LogsDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+InaccessiblePaths=/var/lib/secure-auth /run/secure-vault /var/lib/secure-vm /var/lib/anchi
+MemoryMax=1G
+MemorySwapMax=0
+TasksMax=64
+LimitCORE=0
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

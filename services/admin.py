@@ -21,10 +21,12 @@ def main():
     os.umask(0o077)
     action = sys.argv[1]
     connector = sys.argv[2] if len(sys.argv) > 2 else 'gmail'
-    if connector not in (*auth.GOOGLE, *auth.TOKENS):
+    if connector not in (*auth.GOOGLE, *auth.TOKENS, 'aws'):
         raise Denied('UNKNOWN_CONNECTOR')
+    if connector == 'aws' and action not in ('import-aws', 'disconnect', 'status', 'set-account'):
+        raise Denied('UNKNOWN_ADMIN_ACTION')
     value = {}
-    if action in ('import-client', 'begin', 'complete', 'import-token', 'set-account'):
+    if action in ('import-client', 'begin', 'complete', 'import-token', 'import-aws', 'set-account'):
         data = sys.stdin.buffer.read(16385)
         if len(data) > 16384:
             raise Denied('INPUT_TOO_LARGE')
@@ -41,8 +43,12 @@ def main():
             result = {'cancelled': True}
         elif action == 'status':
             result = auth.status()
+        elif action == 'disconnect' and connector == 'aws':
+            result = auth.remove_aws()
         elif action == 'disconnect':
             result = auth.disconnect(connector) if connector in auth.GOOGLE else auth.remove_token(connector)
+        elif action == 'import-aws' and connector == 'aws':
+            result = auth.import_aws(value)
         elif action == 'import-token':
             result = auth.import_token(connector, value)
         elif action == 'set-account':

@@ -19,8 +19,9 @@ from common import Denied, fields
 CONFIG = Path('/etc/secure-vm/pi.json')
 
 
-def validate(value):
-    fields(value, ('access_token', 'account_id', 'model'), ('access_token', 'account_id', 'model'))
+def validate(value, pi=True):
+    required = ('access_token', 'account_id', 'model') if pi else ('access_token', 'account_id')
+    fields(value, ('access_token', 'account_id', 'model'), required)
     token = value['access_token']
     if not isinstance(token, str) or not 100 <= len(token) <= 16000:
         raise Denied('CODEX_SUBSCRIPTION_TOKEN_REQUIRED')
@@ -38,7 +39,7 @@ def validate(value):
         raise Denied('CODEX_ACCOUNT_MISMATCH')
     if expires <= time.time() + 120:
         raise Denied('CODEX_TOKEN_EXPIRED_RELOGIN_ON_HOST')
-    if not isinstance(value['model'], str) or not re.fullmatch('gpt-[a-zA-Z0-9._-]{1,80}', value['model']):
+    if pi and (not isinstance(value['model'], str) or not re.fullmatch('gpt-[a-zA-Z0-9._-]{1,80}', value['model'])):
         raise Denied('BAD_MODEL_NAME')
     # JWT claims here are only local metadata; the upstream service validates the token.
     return {'access_token': token, 'account_id': account, 'expires_at': expires}
@@ -54,19 +55,41 @@ def main():
             vault.remove(auth.STORE, 'codex.json')
         print('{"configured":false}')
         return
-    if sys.argv[1] != 'import':
+    if sys.argv[1] == 'status':
+        with auth.locked():
+            credential = auth.read('codex.json') if vault.exists(auth.STORE, 'codex.json') else None
+        print(
+            json.dumps(
+                {
+                    'configured': credential is not None,
+                    'account_id': credential and credential['account_id'],
+                    'expires_at': credential and credential['expires_at'],
+                }
+            )
+        )
+        return
+    # `import` also configures Pi; `import-token` only stores the credential for agent cells.
+    if sys.argv[1] not in ('import', 'import-token'):
         raise Denied('UNKNOWN_ADMIN_ACTION')
+    pi = sys.argv[1] == 'import'
     raw = sys.stdin.buffer.read(20001)
     if len(raw) > 20000:
         raise Denied('INPUT_TOO_LARGE')
     value = json.loads(raw)
-    credential = validate(value)
+    credential = validate(value, pi)
     with auth.locked():
         old = auth.read('codex.json') if vault.exists(auth.STORE, 'codex.json') else {}
         credential['generation'] = (
             old.get('generation') if old.get('account_id') == credential['account_id'] else uuid.uuid4().hex
         )
         auth.write('codex.json', credential)
+    if not pi:
+        print(
+            json.dumps(
+                {'configured': True, 'account_id': credential['account_id'], 'expires_at': credential['expires_at']}
+            )
+        )
+        return
     CONFIG.parent.mkdir(mode=0o750, exist_ok=True)
     gid = pwd.getpwnam('secure-inference').pw_gid
     os.chown(CONFIG.parent, 0, gid)

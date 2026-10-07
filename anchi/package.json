@@ -1,0 +1,27 @@
+{
+  "name": "anchi",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deps": "node scripts/check-deps.mjs",
+    "format": "prettier --write packages scripts",
+    "format:check": "prettier --check packages scripts",
+    "check": "pnpm run deps && pnpm run typecheck && pnpm run format:check && pnpm run test",
+    "anchi": "tsx packages/tui/src/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "ink-testing-library": "^4.0.0",
+    "prettier": "3.9.8",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

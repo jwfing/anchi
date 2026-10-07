@@ -1,0 +1,17 @@
+{
+  "name": "@anchi/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./main": "./src/main.ts"
+  },
+  "dependencies": {
+    "@anchi/core": "workspace:*",
+    "@anchi/protocol": "workspace:*",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5",
+    "tsx": "^4.23.15"
+  }
+}

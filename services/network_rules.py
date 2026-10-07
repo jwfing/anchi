@@ -24,6 +24,35 @@ ROLES = {
 }
 
 
+# The agent-team egress proxy passes unmatched traffic through, so its backstop is the reverse of
+# the per-service allowlists: any public destination, never a private, loopback or link-local one.
+EGRESS_USER = 'anchi-egress'
+EGRESS_LISTEN_PORT = 18080
+PRIVATE_V4 = (
+    '0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, '
+    '192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3'
+)
+PRIVATE_V6 = '::/127, ::ffff:0:0/96, 64:ff9b::/96, 100::/64, 2001:db8::/32, fc00::/7, fe80::/10, ff00::/8'
+
+
+def egress_proxy_rules():
+    try:
+        uid = pwd.getpwnam(EGRESS_USER).pw_uid
+    except KeyError:
+        return []
+    return [
+        # Its own listener, both directions (the cell bridges connect to it in-process), and the
+        # local DNS stub.
+        f'  meta skuid {uid} ip daddr 127.0.0.1 tcp dport {EGRESS_LISTEN_PORT} accept',
+        f'  meta skuid {uid} ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp sport {EGRESS_LISTEN_PORT} accept',
+        f'  meta skuid {uid} ip daddr 127.0.0.53 meta l4proto {{ tcp, udp }} th dport 53 accept',
+        f'  meta skuid {uid} ip daddr {{ {PRIVATE_V4} }} counter reject',
+        f'  meta skuid {uid} ip6 daddr {{ {PRIVATE_V6} }} counter reject',
+        f'  meta skuid {uid} meta l4proto != tcp counter reject',
+        f'  meta skuid {uid} accept',
+    ]
+
+
 def nft(text):
     subprocess.run(['/usr/sbin/nft', '-f', '-'], input=text, text=True, check=True, capture_output=True)
 
@@ -51,6 +80,7 @@ def initialize():
     # The policy engine must never create IP traffic, even outside its service unit.
     lines.append(f'  meta skuid {pwd.getpwnam("secure-policy").pw_uid} counter reject')
     lines.append(f'  meta skuid {CELL_AGENT_HOST_UID} counter reject')
+    lines.extend(egress_proxy_rules())
     lines += [' }', '}']
     nft('\n'.join(lines))
 

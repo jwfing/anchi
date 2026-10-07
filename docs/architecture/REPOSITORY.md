@@ -36,6 +36,13 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `systemd/`, `lima/` | Service identities, sockets, resource limits and outer VM |
 | `scripts/` | Stable host CLI and explicit deployment/live checks |
 | `tests/` | Trusted-service offline regression tests |
+| `anchi/packages/protocol` | Agent team: client, cell runner and event schemas; bounded JSON-lines codec |
+| `anchi/packages/core` | Agent team: agent and image configuration (trusted, host) |
+| `anchi/packages/daemon` | Agent team: daemon, task store, cell sessions, fixed guest commands, builder proposals (trusted, host) |
+| `anchi/packages/tui` | Agent team: Ink TUI and CLI; sanitizes all agent text (trusted, host) |
+| `anchi/packages/cell-runner` | Agent team: Codex SDK host inside task cells (untrusted) |
+| `guest/anchi_cell.py` | `anchi-cell` / `anchi-image`: task cells, image layers, reaper, live exec and credential scan (guest root) |
+| `services/egress_rules.py`, `egress_proxy.py` | Agent-team egress proxy: injection rules independent of mitmproxy, and the mitmproxy addon with per-cell sockets |
 | `prototype/` | Simulated UX reference, excluded from product packaging |
 | `docs/` | Current usage, architecture, security and release guides |
 | `artifacts/` | Local build output, not version-controlled |
@@ -49,6 +56,8 @@ Controller → Runtime → independent policy administration. Approval details c
 Cell Pi → Unix socket → connector/inference → auth + policy → upstream. Never expose auth sockets or administration to the cell for UI convenience.
 
 `file-broker.cjs` owns host capabilities while `scripts/host-files.py` enforces access with directory file descriptors. `pi/host-files.mjs` forwards requests but cannot grant itself access. OAuth sends authorization through `runtime.auth` and guest stdin; the renderer never sees codes, PKCE verifiers or tokens.
+
+Agent team: TUI → daemon socket → daemon → fixed `anchi-cell`/`anchi-image` and admin commands over `limactl shell … sudo` → task cell runner (stdio). Cell → its proxy socket → `anchi-egress` → `secure-auth` (credentials) → upstream. A dependency check keeps runtime SDKs and the cell runner out of host packages.
 
 ## Design decisions
 

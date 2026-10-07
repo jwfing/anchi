@@ -39,7 +39,13 @@ GOOGLE = {
 TOKENS = {
     'notion': {'file': 'notion.json', 'pattern': r'(ntn_|secret_)[A-Za-z0-9_-]{30,190}'},
     'slack': {'file': 'slack.json', 'pattern': r'xoxb-[A-Za-z0-9-]{30,190}'},
+    # Agent-team connectors: only the egress proxy reads these, to inject them into cell traffic.
+    'github': {'file': 'github.json', 'pattern': r'(ghp_|gho_|ghu_|github_pat_)[A-Za-z0-9_]{20,255}'},
+    'linear': {'file': 'linear.json', 'pattern': r'lin_api_[A-Za-z0-9]{20,100}'},
 }
+AWS_FILE = 'aws.json'
+# Connectors whose credentials the egress proxy may read; never exposed to any other caller.
+EGRESS_CONNECTORS = {'github': 'github.json', 'linear': 'linear.json', 'aws': AWS_FILE}
 
 
 @contextmanager
@@ -105,10 +111,32 @@ def connector_status(connector):
     }
 
 
+def aws_status():
+    connected = vault.exists(STORE, AWS_FILE)
+    account = None
+    if connected and vault.KEY.exists():
+        try:
+            value = read(AWS_FILE)
+            account = value.get('account') or value['access_key_id'][:4] + '…' + value['access_key_id'][-4:]
+        except Denied:
+            pass
+    return {
+        'connected': connected,
+        'reauth_required': False,
+        'account': account,
+        'scope_text': '',
+        'revocation_pending': False,
+        'auth': 'aws',
+    }
+
+
 def status(connector=None):
+    if connector == 'aws':
+        return aws_status()
     if connector:
         return connector_status(connector)
     value = {name: connector_status(name) for name in (*GOOGLE, *TOKENS)}
+    value['aws'] = aws_status()
     value['client_configured'] = vault.exists(STORE, 'client.json')
     value['vault_unlocked'] = vault.KEY.exists()
     # Top-level Gmail fields stay for one release so older desktop builds keep working.
@@ -257,14 +285,58 @@ def import_token(connector, value):
     return connector_status(connector)
 
 
+AWS_KEY_ID = re.compile(r'(AKIA|ASIA)[A-Z0-9]{12,124}')
+AWS_REGION = re.compile(r'[a-z]{2}(-gov)?-[a-z]+-[0-9]')
+
+
+def import_aws(value):
+    """A dedicated least-privilege principal's keys; the proxy re-signs cell requests with them."""
+    fields(
+        value,
+        ('access_key_id', 'secret_access_key', 'session_token', 'region'),
+        ('access_key_id', 'secret_access_key', 'region'),
+    )
+    key_id, secret = value['access_key_id'], value['secret_access_key']
+    session = value.get('session_token')
+    if not isinstance(key_id, str) or not AWS_KEY_ID.fullmatch(key_id):
+        raise Denied('BAD_AWS_ACCESS_KEY_ID')
+    if not isinstance(secret, str) or not re.fullmatch(r'[A-Za-z0-9/+=]{20,128}', secret):
+        raise Denied('BAD_AWS_SECRET')
+    if session is not None and (not isinstance(session, str) or not re.fullmatch(r'[A-Za-z0-9/+=]{16,4096}', session)):
+        raise Denied('BAD_AWS_SESSION_TOKEN')
+    if key_id.startswith('ASIA') != (session is not None):
+        raise Denied('AWS_SESSION_TOKEN_MISMATCH')
+    if not isinstance(value['region'], str) or not AWS_REGION.fullmatch(value['region']):
+        raise Denied('BAD_AWS_REGION')
+    stored = {
+        'access_key_id': key_id,
+        'secret_access_key': secret,
+        'region': value['region'],
+        'generation': uuid.uuid4().hex,
+        'imported_at': time.time(),
+    }
+    if session is not None:
+        stored['session_token'] = session
+    write(AWS_FILE, stored)
+    return aws_status()
+
+
+def remove_aws():
+    vault.remove(STORE, AWS_FILE)
+    return aws_status()
+
+
 def set_account(connector, label):
-    name = GOOGLE[connector]['tokens'] if connector in GOOGLE else TOKENS[connector]['file']
+    if connector == 'aws':
+        name = AWS_FILE
+    else:
+        name = GOOGLE[connector]['tokens'] if connector in GOOGLE else TOKENS[connector]['file']
     if not isinstance(label, str) or not 1 <= len(label) <= 200:
         raise Denied('BAD_ACCOUNT_LABEL')
     value = read(name)
     value['account'] = label
     write(name, value)
-    return connector_status(connector)
+    return status(connector)
 
 
 def remove_token(connector):
@@ -274,10 +346,21 @@ def remove_token(connector):
     return connector_status(connector)
 
 
+def egress_credential(connector):
+    """Credential the egress proxy injects for one connector; secrets only, no labels."""
+    if connector not in EGRESS_CONNECTORS:
+        raise Denied('UNKNOWN_CONNECTOR')
+    value = read(EGRESS_CONNECTORS[connector])
+    keys = ('access_key_id', 'secret_access_key', 'session_token', 'region') if connector == 'aws' else ('token',)
+    return {**{k: value[k] for k in keys if k in value}, 'generation': value['generation']}
+
+
 def handle(request, caller):
-    fields(request, ('op',), ('op',))
+    fields(request, ('op', 'connector'), ('op',))
     with locked():
         op = request['op']
+        if op == 'egress_credential' and caller == 'egress':
+            return egress_credential(request.get('connector'))
         if op == 'status':
             return status()
         if op == 'access_token' and caller in GOOGLE:
@@ -286,7 +369,10 @@ def handle(request, caller):
         if op == 'token' and caller in TOKENS:
             value = read(TOKENS[caller]['file'])
             return {'token': value['token'], 'account_generation': value['generation']}
-        if op == 'codex_token' and caller == 'inference':
+        if op == 'codex_account' and caller == 'egress':
+            # An identifier, not an authenticator: cells need it even when the token has expired.
+            return {'account_id': read('codex.json')['account_id']}
+        if op == 'codex_token' and caller in ('inference', 'egress'):
             credential = read('codex.json')
             if credential['expires_at'] <= time.time() + 30:
                 raise Denied('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
