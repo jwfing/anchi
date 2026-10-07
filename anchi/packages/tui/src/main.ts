@@ -248,7 +248,9 @@ setup.command('disconnect <id>').action(async (id: string) => {
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString('utf8').trim();
+  const text = Buffer.concat(chunks).toString('utf8').trim();
+  if (!text) fail('no secret on stdin: run this in a terminal to be prompted, or redirect a file');
+  return text;
 }
 
 const daemon = program.command('daemon').description('Manage the background daemon');
