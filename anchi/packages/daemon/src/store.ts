@@ -47,6 +47,9 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     finishedAt: (r.finished_at as number | null) ?? null,
     result: (r.result as string | null) ?? null,
     links: JSON.parse((r.links as string) || '[]') as string[],
+    parentId: (r.parent_id as string | null) ?? null,
+    rootId: ((r.root_id as string | null) ?? r.id) as string,
+    depth: (r.depth as number | null) ?? 0,
   };
 }
 
@@ -64,21 +67,73 @@ export class Store {
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Columns added after phase 1; existing databases gain them in place. */
+  private migrate() {
+    const have = new Set(
+      this.db
+        .prepare('PRAGMA table_info(tasks)')
+        .all()
+        .map((c) => c.name as string),
+    );
+    const add: [string, string][] = [
+      ['parent_id', 'TEXT'],
+      ['root_id', 'TEXT'],
+      ['depth', 'INTEGER NOT NULL DEFAULT 0'],
+      ['turns', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [name, type] of add) {
+      if (!have.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
+    }
+    this.db.exec(
+      'CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_id); CREATE INDEX IF NOT EXISTS tasks_root ON tasks(root_id);',
+    );
   }
 
   close(): void {
     this.db.close();
   }
 
-  createTask(t: { agentId: string; trigger: string; title: string }): TaskRow {
+  createTask(t: { agentId: string; trigger: string; title: string; parent?: TaskRow }): TaskRow {
     // Task ids name cells and guest units: lowercase, digits and "-".
     const id = `t-${randomBytes(5).toString('hex')}`;
     this.db
       .prepare(
-        "INSERT INTO tasks (id, agent_id, trigger, title, status, created_at) VALUES (?, ?, ?, ?, 'queued', ?)",
+        "INSERT INTO tasks (id, agent_id, trigger, title, status, created_at, parent_id, root_id, depth) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)",
       )
-      .run(id, t.agentId, t.trigger, t.title.replace(/\s+/g, ' ').slice(0, 120), Date.now());
+      .run(
+        id,
+        t.agentId,
+        t.trigger,
+        t.title.replace(/\s+/g, ' ').slice(0, 120),
+        Date.now(),
+        t.parent?.id ?? null,
+        t.parent?.rootId ?? id,
+        t.parent ? t.parent.depth + 1 : 0,
+      );
     return this.getTask(id)!;
+  }
+
+  children(id: string): TaskRow[] {
+    return this.db
+      .prepare('SELECT * FROM tasks WHERE parent_id = ? ORDER BY created_at')
+      .all(id)
+      .map(rowToTask);
+  }
+
+  /** Counts a turn against the task's delegation tree. */
+  countTurn(id: string): void {
+    this.db.prepare('UPDATE tasks SET turns = turns + 1 WHERE id = ?').run(id);
+  }
+
+  /** Turns run so far by every task in a delegation tree. */
+  treeTurns(rootId: string): number {
+    const r = this.db
+      .prepare('SELECT COALESCE(SUM(turns), 0) AS n FROM tasks WHERE root_id = ? OR id = ?')
+      .get(rootId, rootId);
+    return (r?.n as number) ?? 0;
   }
 
   getTask(id: string): TaskRow | undefined {

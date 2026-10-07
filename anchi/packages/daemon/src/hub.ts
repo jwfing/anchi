@@ -42,6 +42,12 @@ interface LiveCell {
 
 export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
 
+/**
+ * Delegation limits. They stop runaway loops and cost; they are not a security control (the
+ * `delegates` allowlist is).
+ */
+export const DELEGATION = { maxDepth: 3, maxChildren: 10, maxTreeTurns: 60 };
+
 export interface HubOptions {
   layout: HomeLayout;
   store: Store;
@@ -82,7 +88,14 @@ export class Hub extends EventEmitter<HubEvents> {
   constructor(private opts: HubOptions) {
     super();
     this.log = opts.log ?? (() => {});
-    this.tools = new ToolDispatcher({ agents: () => this.summaries() });
+    this.tools = new ToolDispatcher({
+      agents: () => this.summaries(),
+      delegate: (parent, agent, target, text) => this.delegate(parent, agent, target, text),
+      sendTask: (id, text) => this.sendTask(id, text),
+      getTask: (id) => this.getTask(id),
+      children: (id) => this.children(id),
+      wait: (id) => this.wait(id),
+    });
     this.reload();
   }
 
@@ -191,8 +204,58 @@ export class Hub extends EventEmitter<HubEvents> {
     return task;
   }
 
+  /**
+   * Starts a task for `targetId` on behalf of a running task. The parent agent must list the
+   * target in `delegates`, and the target must not already work on an ancestor of this task:
+   * that agent would wait for itself.
+   */
+  delegate(parent: TaskRow, parentAgent: ResolvedAgent, targetId: string, text: string): TaskRow {
+    if (!parentAgent.delegates.includes(targetId)) {
+      throw new Error(`@${parentAgent.id} may not delegate to @${targetId}; see list_agents`);
+    }
+    if (parent.depth + 1 > DELEGATION.maxDepth) {
+      throw new Error(`delegation is limited to ${DELEGATION.maxDepth} levels`);
+    }
+    if (this.opts.store.children(parent.id).length >= DELEGATION.maxChildren) {
+      throw new Error(`a task may start at most ${DELEGATION.maxChildren} delegated tasks`);
+    }
+    if (this.opts.store.treeTurns(parent.rootId) >= DELEGATION.maxTreeTurns) {
+      throw new Error(`this task tree used its ${DELEGATION.maxTreeTurns} turns`);
+    }
+    for (
+      let t: TaskRow | undefined = parent;
+      t;
+      t = t.parentId ? this.opts.store.getTask(t.parentId) : undefined
+    ) {
+      if (t.agentId === targetId) {
+        throw new Error(`@${targetId} is already working on a task above this one`);
+      }
+    }
+    const state = this.state(targetId);
+    if (!state.agent) throw new Error(`agent "${targetId}" has a config error: ${state.error}`);
+    if (!text.trim()) throw new Error('empty task');
+    const task = this.opts.store.createTask({
+      agentId: targetId,
+      trigger: 'delegation',
+      title: text,
+      parent,
+    });
+    this.emit('task', task);
+    this.record(parent, { type: 'notice', text: `↳ delegated to @${targetId} as ${task.id}` });
+    this.enqueue(state, { taskId: task.id, text });
+    return task;
+  }
+
+  children(taskId: string): TaskRow[] {
+    return this.opts.store.children(taskId);
+  }
+
   cancelTask(taskId: string): void {
     const task = this.getTask(taskId);
+    // Delegated work goes with the task that asked for it.
+    for (const child of this.opts.store.children(taskId)) {
+      if (child.status === 'running' || child.status === 'queued') this.cancelTask(child.id);
+    }
     const state = this.states.get(task.agentId);
     if (state) {
       const before = state.queue.length;
@@ -252,6 +315,15 @@ export class Hub extends EventEmitter<HubEvents> {
     const row = this.opts.store.setStatus(taskId, status);
     this.emit('task', row);
     if (status === 'done') this.emit('turnEnded', { task: row, reply: result ?? '' });
+    if (row.parentId) {
+      const parent = this.opts.store.getTask(row.parentId);
+      const outcome = row.links[0] ?? (row.result ?? '').replace(/\s+/g, ' ').slice(0, 120);
+      if (parent)
+        this.record(parent, {
+          type: 'notice',
+          text: `↳ ${row.id} (@${row.agentId}) ${status}: ${outcome}`,
+        });
+    }
     for (const resolve of this.waiters.get(taskId) ?? []) resolve(row);
     this.waiters.delete(taskId);
   }
@@ -260,9 +332,21 @@ export class Hub extends EventEmitter<HubEvents> {
     let task = this.getTask(job.taskId);
     const agent = this.resolve(state.id);
     state.agent = agent;
+    if (task.depth > 0 && this.opts.store.treeTurns(task.rootId) >= DELEGATION.maxTreeTurns) {
+      return this.finish(
+        task.id,
+        'failed',
+        `this task tree used its ${DELEGATION.maxTreeTurns} turns`,
+      );
+    }
+    this.opts.store.countTurn(task.id);
     task = this.opts.store.setStatus(task.id, 'running');
     this.emit('task', task);
-    this.record(task, { type: 'input', text: job.text.slice(0, 64_000), source: 'user' });
+    this.record(task, {
+      type: 'input',
+      text: job.text.slice(0, 64_000),
+      source: task.trigger === 'user' ? 'user' : 'task',
+    });
 
     let reply = '';
     let failure: string | undefined;

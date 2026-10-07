@@ -11,7 +11,7 @@ export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface TaskRow {
   id: string;
   agentId: string;
-  /** What started the task: `user` in phase 1. */
+  /** What started the task: `user`, `delegation`, `schedule` or `poll`. */
   trigger: string;
   title: string;
   status: TaskStatus;
@@ -24,6 +24,10 @@ export interface TaskRow {
   result: string | null;
   /** URLs found in the result, for the task list. */
   links: string[];
+  /** Delegation: the task that started this one, the root of its tree and its depth (root 0). */
+  parentId: string | null;
+  rootId: string;
+  depth: number;
 }
 
 export interface StoredEvent {

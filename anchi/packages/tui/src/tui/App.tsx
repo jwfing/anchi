@@ -679,7 +679,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   }
 
   const header = detail
-    ? `${detail.id} · @${detail.agentId} · ${detail.status}`
+    ? `${detail.id} · @${detail.agentId} · ${detail.status}${detail.parentId ? ` · delegated by ${detail.parentId}` : ''}${detail.trigger !== 'user' && detail.trigger !== 'delegation' ? ` · ${detail.trigger}` : ''}`
     : agent
       ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}${
           task ? ` · ${task.id} (${task.status})` : ' · new task'
@@ -827,7 +827,12 @@ function Sidebar(props: {
               : t.status === 'cancelled'
                 ? '–'
                 : '◇';
-      return { glyph, color: TASK_COLOR[t.status], text: `@${t.agentId} ${sanitizeLine(t.title)}` };
+      const branch = t.depth > 0 ? '↳' : '';
+      return {
+        glyph,
+        color: TASK_COLOR[t.status],
+        text: `${branch}@${t.agentId} ${sanitizeLine(t.title)}`,
+      };
     }
     if (key === BUILDER) {
       return { glyph: running(BUILDER) ? spin : '✎', color: 'magenta', text: 'Agent builder' };

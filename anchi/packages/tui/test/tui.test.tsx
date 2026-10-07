@@ -33,6 +33,9 @@ const task = (id: string, agentId: string, over: Partial<TaskRow> = {}): TaskRow
   finishedAt: 2,
   result: 'ok',
   links: [],
+  parentId: null,
+  rootId: id,
+  depth: 0,
   ...over,
 });
 

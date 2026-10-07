@@ -357,6 +357,59 @@ describe('daemon tasks', () => {
     });
   });
 
+  it('delegates to allowed agents, links the tree and enforces the limits', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev, qa]\n');
+    write('agents/qa.yaml', 'runtime: codex\ndelegates: [lead]\n');
+    const { client } = await start();
+    const turn = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      const done = await client.call('tasks.wait', { taskId: task.id });
+      return {
+        task: done,
+        answer: JSON.parse(done.result!) as { ok: boolean; result?: any; error?: string },
+      };
+    };
+    const lead = await turn('lead', 'call anchi_delegate_task {"agent":"dev","task":"fix it"}');
+    expect(lead.answer.ok).toBe(true);
+    const child = lead.answer.result;
+    expect(child).toMatchObject({
+      agent: 'dev',
+      status: 'done',
+      links: ['https://github.com/o/r/pull/1'],
+    });
+    const row = await client.call('tasks.get', { taskId: child.task });
+    expect(row).toMatchObject({
+      parentId: lead.task.id,
+      rootId: lead.task.id,
+      depth: 1,
+      trigger: 'delegation',
+    });
+    const notices = (await client.call('tasks.events', { taskId: lead.task.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices[0]).toBe(`↳ delegated to @dev as ${child.task}`);
+    expect(notices[1]).toContain(`↳ ${child.task} (@dev) done: https://github.com/o/r/pull/1`);
+    // Not in delegates, and dev may not delegate at all (the tool is not offered).
+    expect(
+      (await turn('lead', 'call anchi_delegate_task {"agent":"lead","task":"x"}')).answer.error,
+    ).toMatch(/may not delegate/);
+    expect(
+      (await turn('dev', 'call anchi_delegate_task {"agent":"lead","task":"x"}')).answer.error,
+    ).toMatch(/unknown tool/);
+    // Status only for the task's own children.
+    expect(
+      (await turn('lead', `call anchi_task_status {"task":"${child.task}"}`)).answer.error,
+    ).toMatch(/not delegated by this task/);
+    // qa -> lead -> qa would wait for itself.
+    const inner = JSON.stringify({ agent: 'qa', task: 'x' });
+    const qa = await turn(
+      'qa',
+      `call anchi_delegate_task ${JSON.stringify({ agent: 'lead', task: `call anchi_delegate_task ${inner}` })}`,
+    );
+    expect(qa.answer.ok).toBe(true);
+    expect(qa.answer.result.result).toContain('already working on a task above this one');
+  });
+
   it('accepts a task for an agent file written just before it', async () => {
     const { client } = await start();
     write('agents/fresh.yaml', 'runtime: codex\n');

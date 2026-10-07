@@ -52,6 +52,8 @@ CODEX_CONFIG = '''cli_auth_credentials_store = "file"
 command = "/opt/node/bin/node"
 args = ["/opt/anchi/mcp.mjs"]
 startup_timeout_sec = 10
+# Delegation tools wait for another agent's turn; the daemon bounds the wait (55 minutes).
+tool_timeout_sec = 3600
 '''
 SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
 CONNECTORS = PROXY_CONNECTORS + SERVICE_CONNECTORS
@@ -466,6 +468,8 @@ def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
         # No auto-update (the image is pinned) and no telemetry or error reporting.
         env['DISABLE_AUTOUPDATER'] = '1'
         env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
+        # Delegation tools wait for another agent's turn (bounded by the daemon at 55 minutes).
+        env['MCP_TOOL_TIMEOUT'] = '3600000'
     if 'github' in connectors:
         env['GH_TOKEN'] = f'{PLACEHOLDER}-github'
         env['GH_PROMPT_DISABLED'] = '1'
