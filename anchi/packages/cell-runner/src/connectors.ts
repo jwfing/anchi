@@ -12,7 +12,8 @@ import { createConnection } from 'node:net';
  * services/connectors.py.
  */
 
-export const CONNECTOR_DIR = '/run/anchi-connectors';
+/** The proxy's per-cell bridge sockets, one per connector of the agent (inside /run/anchi). */
+export const CONNECTOR_DIR = '/run/anchi/connectors';
 export const socketFor = (connector: string, dir = CONNECTOR_DIR) => `${dir}/${connector}/api.sock`;
 
 type Json = Record<string, unknown>;

@@ -132,7 +132,10 @@ export const agentLayerSchema = z.strictObject({
   triggers: z.array(triggerSchema).max(20).optional(),
   /** Skill ids in `skills/`, copied into the cell at task start. */
   skills: z.array(idSchema).max(50).optional(),
-  /** Per connector: `ask` holds writes for approval in the TUI. Reads are never held. */
+  /**
+   * Per connector, `ask` holds the agent's writes for approval: through the proxy for github,
+   * aws and linear, through the policy service (per agent) for gmail, drive, notion and slack.
+   */
   approvals: z.partialRecord(connectorSchema, approvalModeSchema).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
   /** Hosts the agent's cells may reach (plus its runtime and connectors); omitted: any. */
@@ -174,15 +177,6 @@ export const resolvedAgentSchema = z
     message: 'sandbox codex-workspace-write needs runtime codex',
     path: ['sandbox'],
   })
-  .refine(
-    (a) =>
-      Object.keys(a.approvals).every((c) => (PROXY_CONNECTORS as readonly string[]).includes(c)),
-    {
-      message:
-        'approvals apply to github, aws and linear; writes to gmail, drive, notion and slack follow their connector policy',
-      path: ['approvals'],
-    },
-  )
   .refine((a) => !a.delegates.includes(a.id), {
     message: 'an agent cannot delegate to itself',
     path: ['delegates'],

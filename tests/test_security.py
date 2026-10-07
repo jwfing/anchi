@@ -53,6 +53,46 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(policy.inspect_rules()['rules']['gmail'], 'ask')
         self.assertEqual(policy.inspect_rules()['rules']['drive'], 'auto')
 
+    def test_agent_principals_follow_their_connector_until_they_have_a_rule(self):
+        post = {
+            'operation': 'notion.create_page',
+            'account': 'n',
+            'params': {'parent_page_id': 'p1', 'title': 't', 'paragraphs': ['x']},
+        }
+        self.assertEqual(policy.authorize(post, 'notion:dev')['decision'], 'allow')
+        policy.set_mode('notion', 'ask')
+        self.assertEqual(policy.authorize(post, 'notion:dev')['decision'], 'ask')
+        policy.set_mode('notion:dev', 'auto')
+        self.assertEqual(policy.authorize(post, 'notion:dev')['decision'], 'allow')
+        self.assertEqual(policy.authorize(post, 'notion:ops')['decision'], 'ask')
+        self.assertEqual(policy.inspect_rules()['rules']['notion:dev'], 'auto')
+        policy.clear_mode('notion:dev')
+        self.assertEqual(policy.authorize(post, 'notion:dev')['decision'], 'ask')
+        for bad in ('notion:Dev', 'jira:dev', 'notion:dev:x'):
+            with self.assertRaises(Denied):
+                policy.set_mode(bad, 'ask')
+        # handle() scopes by the agent the connector service names.
+        self.assertEqual(
+            policy.handle({'op': 'authorize', 'action': post, 'agent': 'ops'}, 'notion')['decision'], 'ask'
+        )
+        with self.assertRaises(Denied):
+            policy.handle({'op': 'authorize', 'action': post, 'agent': '../x'}, 'notion')
+
+    def test_an_agent_rule_holds_writes_and_reads_follow_the_connector(self):
+        post = {
+            'operation': 'notion.create_page',
+            'account': 'n',
+            'params': {'parent_page_id': 'p1', 'title': 't', 'paragraphs': ['x']},
+        }
+        search = {'operation': 'notion.search', 'account': 'n', 'params': {'query': 'q', 'limit': 1}}
+        policy.set_mode('notion:writer', 'ask')
+        self.assertEqual(policy.authorize(search, 'notion:writer')['decision'], 'allow')
+        self.assertEqual(policy.authorize(post, 'notion:writer')['decision'], 'ask')
+        self.assertEqual(policy.authorize(post, 'notion:reader')['decision'], 'allow')
+        policy.set_mode('notion', 'ask')
+        policy.set_mode('notion:reader', 'auto')
+        self.assertEqual(policy.authorize(search, 'notion:reader')['decision'], 'ask')
+
     def test_policy_reads_do_not_require_a_write_lock(self):
         import sqlite3
 

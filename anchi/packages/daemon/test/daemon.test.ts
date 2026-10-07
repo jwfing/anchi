@@ -93,7 +93,7 @@ class FakeTransport implements GuestTransport {
               id: args[3],
               digest: 'd'.repeat(64),
               state: 'PENDING',
-              principal: 'notion',
+              principal: 'notion:writer',
               created: Date.now() / 1000,
               expires: Date.now() / 1000 + 600,
               action: { operation: 'notion.create_page', params: { title: 'Notes' } },

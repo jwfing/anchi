@@ -67,8 +67,15 @@ class ServerTests(unittest.TestCase):
     def test_kernel_uid_gates_every_mode(self):
         gmail = self.service('gmail', lambda request: {'echo': request})
         self.assertEqual(self.request(gmail, CELL_UID, {'op': 'x'}), {'ok': True, 'result': {'echo': {'op': 'x'}}})
-        for uid in (GMAIL_UID, EGRESS_UID, STRANGER_UID, 0):
+        for uid in (GMAIL_UID, STRANGER_UID, 0):
             self.assertEqual(self.request(gmail, uid, {'op': 'x'})['error'], 'CALLER_DENIED')
+        # The egress bridge may call connector services, always naming the agent it serves.
+        self.assertEqual(self.request(gmail, EGRESS_UID, {'op': 'x'})['error'], 'BAD_AGENT')
+        self.assertEqual(
+            self.request(gmail, EGRESS_UID, {'op': 'x', 'agent': 'dev'}), {'ok': True, 'result': {'echo': {'op': 'x'}}}
+        )
+        # A cell cannot claim an agent: the field reaches the handler untouched and is rejected there.
+        self.assertEqual(self.request(gmail, CELL_UID, {'op': 'x', 'agent': 'dev'})['result']['echo']['agent'], 'dev')
         policy = self.service('policy', lambda request, caller: {'caller': caller})
         self.assertEqual(self.request(policy, EGRESS_UID, {'op': 'x'})['result'], {'caller': 'egress'})
         self.assertEqual(self.request(policy, CELL_UID, {'op': 'x'})['error'], 'CALLER_DENIED')
@@ -117,7 +124,7 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(self.request(auth, 1003, {'op': 'access_token'})['ok'])
         self.assertEqual(seen, [('token', 'notion'), ('access_token', 'drive')])
         drive = server.Service('drive', uids, cell_uid=CELL_UID, clock=Clock())
-        self.assertEqual(drive.allowed_uids, {CELL_UID})
+        self.assertEqual(drive.allowed_uids, {CELL_UID, 1002})
 
     def test_utf8_wire_is_bounded_by_bytes_not_escapes(self):
         service = self.service('gmail', lambda request: {'text': request['text']})

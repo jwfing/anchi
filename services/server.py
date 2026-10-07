@@ -2,6 +2,7 @@
 
 import os
 import pwd
+import re
 import socket
 import sqlite3
 import sys
@@ -12,6 +13,7 @@ import importlib
 
 import auth
 import connectors
+import policy_client
 import policy
 from common import CELL_AGENT_HOST_UID, Denied, peer_uid, recv_json, send_json
 
@@ -59,6 +61,10 @@ class Service:
             raise ValueError('Unknown service')
         self.mode, self.service_uids, self.clock, self.peer = mode, service_uids, clock, peer
         self.allowed_uids = set(service_uids) if mode in ('auth', 'policy') else {cell_uid}
+        # Agent cells reach connector services through the egress bridge, which names the agent.
+        self.bridge_uids = {uid for uid, name in service_uids.items() if name == 'egress'}
+        if mode in connectors.CONNECTORS:
+            self.allowed_uids |= self.bridge_uids
         self.writes_ready = True
         self._handler = None
         self.recent = deque()
@@ -89,6 +95,11 @@ class Service:
                 raise Denied('CALLER_DENIED')
             self.throttle()
             request = recv_json(conn)
+            agent = None
+            if uid in self.bridge_uids and self.mode in connectors.CONNECTORS and isinstance(request, dict):
+                agent = request.pop('agent', None)
+                if not isinstance(agent, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', agent):
+                    raise Denied('BAD_AGENT')
             connector = connectors.CONNECTORS.get(self.mode)
             if (
                 connector
@@ -99,7 +110,11 @@ class Service:
             caller = self.service_uids.get(uid)
             if self.mode == 'auth' and request.get('op') not in credential_ops(caller):
                 raise Denied('CREDENTIAL_SCOPE_DENIED')
-            result = self.handler(request, caller) if self.mode in ('auth', 'policy') else self.handler(request)
+            policy_client.AGENT = agent
+            try:
+                result = self.handler(request, caller) if self.mode in ('auth', 'policy') else self.handler(request)
+            finally:
+                policy_client.AGENT = None
             send_json(conn, {'ok': True, 'result': result})
         except Denied as exc:
             self.reply_error(conn, str(exc))

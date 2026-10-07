@@ -54,8 +54,10 @@ export class ApprovalWatcher extends EventEmitter<{
   ) {
     if (this.policy.has(id)) return;
     const g = await guest.policyShow(id);
-    if (g.state !== 'PENDING' || g.principal !== connector)
+    // The bridge names the agent: the policy principal is `<connector>:<agent>`.
+    if (g.state !== 'PENDING' || g.principal !== `${connector}:${task.agentId}`) {
       throw new Error('no such pending approval');
+    }
     const approval: Approval = {
       id,
       kind: 'policy',

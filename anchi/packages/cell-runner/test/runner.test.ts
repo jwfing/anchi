@@ -293,7 +293,7 @@ describe('connector tools', () => {
       { parent_page_id: 'p1', title: 'Notes', paragraphs: ['a'], extra: 'dropped' },
       {
         call: async (path, request) => {
-          expect(path).toBe('/run/anchi-connectors/notion/api.sock');
+          expect(path).toBe('/run/anchi/connectors/notion/api.sock');
           requests.push(request);
           if (++n < 3) throw new Error('APPROVAL_REQUIRED:' + 'f'.repeat(32));
           return { page_id: 'new' };

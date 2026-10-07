@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import socket
 import struct
 import time
@@ -34,6 +35,11 @@ AUTH_SOCKET = os.environ.get('ANCHI_EGRESS_AUTH', '/run/secure-auth/token.sock')
 CREDENTIAL_TTL = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
+SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+SERVICE_SOCKET = '/run/secure-{}/api.sock'
+SERVICE_MAX = 256 * 1024
+# Writes held by the policy service return at once; this bounds a slow upstream.
+SERVICE_TIMEOUT = 150
 APPROVAL_TIMEOUT = 300
 SETTINGS = Path(os.environ.get('ANCHI_EGRESS_STATE', '/var/lib/anchi-egress')) / 'settings.json'
 
@@ -198,6 +204,9 @@ class Cell:
         self.egress = rules.egress_allowlist(egress, self.grants)
         self.server = None
         self.writers = set()
+        # Connector services this cell reaches through the bridge, and their sockets.
+        self.services = frozenset()
+        self.service_servers = []
 
     @property
     def directory(self):
@@ -227,6 +236,9 @@ class Registry:
         ask = request.get('ask', [])
         if not isinstance(ask, list) or not all(c in connectors for c in ask):
             raise ValueError('BAD_APPROVALS')
+        services = request.get('services', [])
+        if not isinstance(services, list) or not all(s in SERVICE_CONNECTORS for s in services):
+            raise ValueError('BAD_SERVICES')
         egress = request.get('egress')
         if egress is not None and (
             not isinstance(egress, list)
@@ -249,6 +261,19 @@ class Registry:
         cell.server = await asyncio.start_unix_server(lambda r, w: self.bridge(cell, r, w), path=str(path))
         # Only this cell has the directory bound in; the agent user must be able to connect.
         os.chmod(path, 0o666)
+        cell.services = frozenset(request.get('services', []))
+        for service in sorted(cell.services):
+            directory = cell.directory / 'connectors' / service
+            directory.mkdir(parents=True)
+            os.chmod(directory.parent, 0o755)
+            os.chmod(directory, 0o755)
+            server = await asyncio.start_unix_server(
+                lambda r, w, s=service: self.service_bridge(cell, s, r, w),
+                path=str(directory / 'api.sock'),
+                limit=SERVICE_MAX,
+            )
+            os.chmod(directory / 'api.sock', 0o666)
+            cell.service_servers.append(server)
         self.cells[task] = cell
         audit(
             {
@@ -258,20 +283,57 @@ class Registry:
                 'grants': sorted(grants),
                 'ask': sorted(cell.ask),
                 'egress': None if cell.egress is None else sorted(cell.egress),
+                'services': sorted(cell.services),
             }
         )
         return {'directory': str(cell.directory)}
+
+    async def service_bridge(self, cell, service, reader, writer):
+        """One request from the cell to a connector service, naming the cell's agent. The
+        service accepts an agent only from this UID; the cell's own `agent` field is replaced."""
+        try:
+            line = await asyncio.wait_for(reader.readline(), 30)
+            request = json.loads(line) if line.endswith(b'\n') else None
+            if not isinstance(request, dict):
+                raise ValueError('BAD_REQUEST')
+            request['agent'] = cell.agent
+            up_reader, up_writer = await asyncio.open_unix_connection(SERVICE_SOCKET.format(service), limit=SERVICE_MAX)
+            try:
+                up_writer.write(json.dumps(request, ensure_ascii=False).encode() + b'\n')
+                await up_writer.drain()
+                answer = await asyncio.wait_for(up_reader.readline(), SERVICE_TIMEOUT)
+            finally:
+                up_writer.close()
+            audit(
+                {
+                    'event': 'service',
+                    'service': service,
+                    'op': str(request.get('op'))[:40],
+                    'task': cell.task,
+                    'agent': cell.agent,
+                }
+            )
+            writer.write(answer if answer.endswith(b'\n') else b'{"ok":false,"error":"SERVICE_UNAVAILABLE"}\n')
+        except (ValueError, asyncio.LimitOverrunError, asyncio.IncompleteReadError):
+            writer.write(b'{"ok":false,"error":"BAD_REQUEST"}\n')
+        except (OSError, TimeoutError):
+            writer.write(b'{"ok":false,"error":"SERVICE_UNAVAILABLE"}\n')
+        try:
+            await writer.drain()
+        except ConnectionError:
+            pass
+        writer.close()
 
     async def unregister(self, task):
         cell = self.cells.pop(task, None)
         if cell is None:
             return {'removed': False}
         cell.server.close()
+        for server in cell.service_servers:
+            server.close()
         for writer in list(cell.writers):
             writer.close()
-        for path in cell.directory.glob('*'):
-            path.unlink(missing_ok=True)
-        cell.directory.rmdir()
+        shutil.rmtree(cell.directory, ignore_errors=True)
         audit({'event': 'unregister', 'task': task, 'agent': cell.agent})
         return {'removed': True}
 

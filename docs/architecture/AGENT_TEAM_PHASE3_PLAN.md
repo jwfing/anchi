@@ -70,6 +70,7 @@
 - A trusted bridge in the egress service owns per-cell connector sockets, as in the original E2: it forwards to the service and adds `agent:<id>` (and the task origin) as principal; the services accept a principal only from the bridge UID.
 - Policy modes, grants, write ledgers and the daily limit become per agent; the TUI shows them per agent.
 - Replaces the direct socket binds of phase 2; `make verify-anchi` checks that a cell cannot reach a service socket except through its bridge.
+- As built: policy modes and grants are per agent; an agent's `ask` holds its writes only, its reads follow the service's mode. Write ledgers and the daily limit stay per service. The task origin is not sent to the services: the daemon matches a held request to its task by agent and shows the origin from the task.
 
 ### P5 — Codex token re-import (S)
 
@@ -103,6 +104,20 @@ Confirmed on 2026-10-07:
 - **F3:** P4 replaces the direct connector socket binds with the bridge now.
 - **F4:** Codex token re-import is on by default.
 - **F5:** order P1, P2, P5, P8, then P3, P4, P6, P7; P9 when accounts are ready.
+
+## Status
+
+| # | State |
+|---|---|
+| P1 | Done. Live: scan before close, `scan: clean (1935 files)` |
+| P2 | Done. Live: a merge held for an agent without `approvals` |
+| P3 | Done. Live: listed host 200, other host refused and audited |
+| P4 | Done. Live: `reader` and `writer` read Notion through the bridge; a `writer` write is held as `notion:writer`; `make verify-anchi` 32/32 |
+| P5 | Done |
+| P6 | Not started |
+| P7 | Not started |
+| P8 | Done. CI workflow added; not yet run on the Linux runner |
+| P9 | Waiting for accounts: Claude token, Drive sign-in, a valid GitHub token |
 
 ## Risks
 

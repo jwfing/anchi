@@ -181,7 +181,7 @@ def main():
             out.startswith('401') and rows and rows[-1]['decision'] == 'pass:not-granted',
             f'{out[:20]} {rows[-1]["decision"] if rows else "no audit row"}',
         )
-        _, none = sh('chk-a', 'ls /run/anchi-connectors 2>&1 || true')
+        _, none = sh('chk-a', 'ls /run/anchi/connectors 2>&1 || true')
         check('a cell without service connectors has no connector sockets', 'No such file' in none, none[:80])
         text = AUDIT.read_text()
         check('audit log carries no placeholder or header values', 'anchi-placeholder-github' not in text)
@@ -189,15 +189,17 @@ def main():
         stop(a)
         stop(b)
 
-    # ── phase 2: service connector sockets are bound per agent ──
+    # ── service connectors are reached through the per-cell bridge ──
     c, ready_c = start('chk-c', 'chk-gamma', 'gmail')
     try:
         _, listing = sh(
-            'chk-c', 'ls /run/anchi-connectors; test -S /run/anchi-connectors/gmail/api.sock && echo socket'
+            'chk-c',
+            'ls /run/anchi/connectors; test -S /run/anchi/connectors/gmail/api.sock && echo socket; '
+            'ls -d /run/secure-* /run/anchi-connectors 2>/dev/null | wc -l',
         )
         check(
-            'a cell gets only its own connector sockets',
-            ready_c and listing.split() == ['gmail', 'socket'],
+            'a cell reaches only its own connector services, through the bridge',
+            ready_c and listing.split() == ['gmail', 'socket', '0'],
             listing[:80],
         )
     finally:

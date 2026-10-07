@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -484,6 +485,50 @@ class RegistryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     registry.validate({'task': 'tf', 'agent': 'a', 'connectors': [], 'egress': bad})
             await registry.unregister('te')
+
+        asyncio.run(scenario())
+
+    def test_connector_bridge_names_the_cell_agent(self):
+        async def scenario():
+            seen = []
+
+            async def service(reader, writer):
+                seen.append(json.loads(await reader.readline()))
+                writer.write(b'{"ok": true, "result": {"pages": []}}\n')
+                await writer.drain()
+                writer.close()
+
+            sock = Path(self.tmp, 'notion.sock')
+            server = await asyncio.start_unix_server(service, path=str(sock))
+            # Unix socket paths are short (104 bytes on macOS); the default temporary directory is long.
+            short = tempfile.mkdtemp(prefix='ae', dir='/tmp')
+            self.addCleanup(shutil.rmtree, short, True)
+            with (
+                patch.object(self.module, 'SERVICE_SOCKET', str(Path(self.tmp, '{}.sock'))),
+                patch.object(self.module, 'CELLS', Path(short)),
+            ):
+                registry = self.module.Registry(('127.0.0.1', 1))
+                result = await registry.register(
+                    {'task': 'tb', 'agent': 'dev', 'connectors': [], 'services': ['notion']}
+                )
+                bridge = Path(result['directory'], 'connectors', 'notion', 'api.sock')
+                self.assertEqual(sorted(p.name for p in Path(result['directory'], 'connectors').iterdir()), ['notion'])
+                reader, writer = await asyncio.open_unix_connection(str(bridge))
+                writer.write(b'{"op": "search", "query": "x", "limit": 1, "agent": "someone-else"}\n')
+                await writer.drain()
+                self.assertEqual(json.loads(await reader.readline()), {'ok': True, 'result': {'pages': []}})
+                writer.close()
+                self.assertEqual(seen, [{'op': 'search', 'query': 'x', 'limit': 1, 'agent': 'dev'}])
+                reader, writer = await asyncio.open_unix_connection(str(bridge))
+                writer.write(b'[1, 2]\n')
+                await writer.drain()
+                self.assertEqual(json.loads(await reader.readline())['error'], 'BAD_REQUEST')
+                writer.close()
+                with self.assertRaises(ValueError):
+                    registry.validate({'task': 'tc', 'agent': 'dev', 'connectors': [], 'services': ['github']})
+                await registry.unregister('tb')
+                self.assertFalse(bridge.exists())
+            server.close()
 
         asyncio.run(scenario())
 

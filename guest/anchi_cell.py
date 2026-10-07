@@ -627,6 +627,22 @@ def parse_workspaces(arg):
     return out
 
 
+def sync_policy_modes(agent, services, ask):
+    """The agent's own write mode per connector service: `ask` when its approvals ask, else its
+    rule is cleared and the connector's mode applies. Changed only when needed, since every
+    policy rule change revokes outstanding grants."""
+    if not services:
+        return
+    admin = ['/usr/bin/python3', str(SERVICES / 'policy_admin.py')]
+    rules = json.loads(run(*admin, 'rules').stdout).get('rules', {})
+    for service in services:
+        principal = f'{service}:{agent}'
+        if service in ask and rules.get(principal) != 'ask':
+            run(*admin, 'mode', principal, 'ask')
+        elif service not in ask and principal in rules:
+            run(*admin, 'clear', principal)
+
+
 def parse_egress(arg):
     """The agent's egress host patterns (base64url JSON list), or None for open egress."""
     import base64
@@ -735,9 +751,12 @@ def cell_start(
                 'runtime': RUNTIMES[runtime],
                 'ask': [c for c in ask if c in PROXY_CONNECTORS],
                 'egress': egress_hosts,
+                # Connector services reached through the proxy's bridge, which names the agent.
+                'services': [c for c in connectors if c in SERVICE_CONNECTORS],
             }
         )
         identifiers = registration.get('identifiers', {})
+        sync_policy_modes(agent, [c for c in connectors if c in SERVICE_CONNECTORS], ask)
         home = agent_home(agent, uid)
         if runtime == 'codex':
             if not identifiers.get('codex_account_id'):
@@ -798,12 +817,6 @@ def cell_start(
             ),
             # The agent's directories of the Mac, with the code-running paths of rw ones read-only.
             *workspace_binds(workspaces),
-            # Only the agent's own connector services; their sockets check policy themselves.
-            *[
-                f'--bind-ro=/run/secure-{c}:/run/anchi-connectors/{c}'
-                for c in connectors
-                if c in SERVICE_CONNECTORS and Path(f'/run/secure-{c}').is_dir()
-            ],
             '--tmpfs=/tmp:mode=1777,size=512M',
             '--tmpfs=/var/tmp:mode=1777,size=512M',
             '--system-call-filter=~io_uring_setup io_uring_enter io_uring_register bpf perf_event_open',

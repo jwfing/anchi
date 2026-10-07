@@ -46,6 +46,8 @@ fi
 id anchi-egress >/dev/null 2>&1 ||
   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin anchi-egress
 usermod -a -G secure-auth-clients anchi-egress
+# The connector bridge forwards agent cells' requests to the connector service sockets.
+usermod -a -G secure-cell-peer anchi-egress
 
 venv=/opt/anchi-egress/venv
 want="$ANCHI_MITMPROXY_VERSION $ANCHI_BOTOCORE_VERSION"

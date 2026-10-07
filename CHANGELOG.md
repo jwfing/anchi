@@ -10,7 +10,7 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 
 - Daemon, TUI and CLI (`scripts/anchi`) for a team of Codex and Claude Code agents, each task in a disposable nspawn cell on layered images, with an agent builder.
 - Egress proxy that keeps credentials out of cells: replace-only runtime tokens, GitHub, AWS (re-signing, SSO profiles) and Linear injection, credential-minting denials, destination filtering against SSRF and DNS rebinding, connector verification at import.
-- Gmail, Drive, Notion and Slack for agents through sockets bound per agent; Google sign-in, tokens and write modes set up from the daemon.
+- Gmail, Drive, Notion and Slack for agents through a per-cell bridge that names the agent to the service, so `approvals` holds one agent's writes; Google sign-in, tokens and write modes set up from the daemon.
 - Delegation between agents, approvals of held writes, schedule and polling triggers, skills, task search, trees, deletion and retention.
 - Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
 

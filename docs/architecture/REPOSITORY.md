@@ -32,7 +32,7 @@ TUI or CLI → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-ima
 
 Cell runtime → in-cell MCP server → runner → daemon, for Anchi tools (delegation, task status). The daemon decides from the task and agent it attached to the cell.
 
-Cell → its proxy socket → `anchi-egress` → `secure-auth` (credentials) → upstream. Cell → its agent's bound connector sockets → connector service → auth + policy → upstream. Never expose auth sockets, policy administration or other agents' sockets to a cell.
+Cell → its proxy socket → `anchi-egress` → `secure-auth` (credentials) → upstream. Cell → its bridge sockets → `anchi-egress` (names the agent) → connector service → auth + policy (per agent) → upstream. Never expose service sockets, auth sockets, policy administration or other agents' sockets to a cell.
 
 Daemon → `anchi-cell approvals watch` ← proxy approval queue; decisions return through `anchi-cell approvals decide` or `policy_admin.py`. Google sign-in: daemon loopback callback → code over stdin → VM exchanges and stores the tokens.
 
@@ -49,4 +49,4 @@ A dependency check (`anchi/scripts/check-deps.mjs`) keeps runtime SDKs and the c
 
 ## Future work
 
-Remote machines are not planned. Candidates: per-agent policy for connector services, a GUI client on the same protocol, signed releases.
+Remote machines are not planned. Candidates: a GUI client on the same protocol, signed releases.
