@@ -9,7 +9,7 @@ import {
   tryConnect,
   uninstallLaunchd,
 } from '@anchi/daemon';
-import type { ConnectorId, ConnectorSecret, TaskRow } from '@anchi/protocol';
+import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeLine } from './sanitize.ts';
@@ -202,11 +202,70 @@ setup
     }),
   );
 
+/** Runs a setup step in the daemon and prints its output as it arrives. */
+function runSetup(action: SetupAction, yes: boolean, consent: string) {
+  return withClient(async (client) => {
+    if (!yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+    const off = client.on('setup', (n) => {
+      if (n.action === action) console.log(sanitizeLine(n.line));
+    });
+    const s = await client.call('setup.run', { action });
+    off();
+    console.log(
+      `VM ${s.vm} · vault ${s.vaultUnlocked ? 'unlocked' : 'locked'} · base image ${s.installed ? 'built' : 'not built'}`,
+    );
+  });
+}
+
+setup
+  .command('vm')
+  .description('Start the VM')
+  .action(() => runSetup('vm-start', true, ''));
+
+setup
+  .command('install')
+  .description('Create or update the VM, install the services and build the base image')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action((opts: { yes?: boolean }) =>
+    runSetup(
+      'install',
+      Boolean(opts.yes),
+      'Create or update the secure-vm VM, install the trusted services and the agent team, and build the base image (several minutes)?',
+    ),
+  );
+
+setup
+  .command('vault <action>')
+  .description('init or unlock the VM vault with the key in ~/.config/secure-vm/vault.key')
+  .action((action: string) => {
+    if (action !== 'init' && action !== 'unlock') fail('vault action must be init or unlock');
+    return runSetup(action === 'init' ? 'vault-init' : 'vault-unlock', true, '');
+  });
+
 setup
   .command('connector <id>')
   .description('Connect github, aws or linear (secrets are read without echo)')
-  .action((id: string) =>
+  .option('--from-gh', 'github: import the token the gh CLI is logged in with')
+  .option('--profile <name>', 'aws: use a host profile (SSO); the daemon keeps it refreshed')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action((id: string, opts: { fromGh?: boolean; profile?: string; yes?: boolean }) =>
     withClient(async (client) => {
+      if (opts.fromGh) {
+        if (id !== 'github') fail('--from-gh applies to github');
+        const consent =
+          'Read the token of the gh CLI (`gh auth token`) and store it in the VM vault? ' +
+          'It carries all the scopes of your gh login; a fine-grained token is narrower.';
+        if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+        const status = await client.call('connectors.importGh');
+        return console.log(`github connected (${sanitizeLine(status.account ?? '?')})`);
+      }
+      if (opts.profile) {
+        if (id !== 'aws') fail('--profile applies to aws');
+        const status = await client.call('connectors.awsProfile', { profile: opts.profile });
+        return console.log(
+          `aws connected (${sanitizeLine(status.account ?? '?')}) through profile ${sanitizeLine(opts.profile)}; refreshed before expiry`,
+        );
+      }
       let secret: ConnectorSecret;
       if (id === 'github' || id === 'linear') {
         // Tokens may also come on stdin for scripts: `anchi setup connector github < token-file`.

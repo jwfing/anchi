@@ -39,11 +39,15 @@ interface LiveCell {
   lastUsed: number;
 }
 
+export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
+
 export interface HubOptions {
   layout: HomeLayout;
   store: Store;
   guest: Guest;
   idleMs?: number;
+  /** Longest a single turn may run before it is cancelled and the task fails. */
+  turnTimeoutMs?: number;
   log?(msg: string): void;
   /** Agents defined by Anchi itself (the builder); their ids are reserved. */
   builtins?: ResolvedAgent[];
@@ -258,6 +262,7 @@ export class Hub extends EventEmitter<HubEvents> {
 
     let reply = '';
     let failure: string | undefined;
+    let timedOut = false;
     try {
       const hash = await this.ensureImage(agent, task);
       if (signal.aborted) throw new Error('cancelled');
@@ -265,6 +270,13 @@ export class Hub extends EventEmitter<HubEvents> {
       const turnId = `turn-${Date.now().toString(36)}`;
       const onAbort = () => cell.session.cancel(turnId);
       signal.addEventListener('abort', onAbort, { once: true });
+      const limit = this.opts.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        cell.session.cancel(turnId);
+        // A runner that ignores the cancel loses its cell.
+        setTimeout(() => this.closeCell(task.id, 'turn timed out'), 10_000).unref();
+      }, limit);
       const prompt = instructions(agent);
       try {
         for await (const event of cell.session.run({
@@ -289,6 +301,7 @@ export class Hub extends EventEmitter<HubEvents> {
           this.record(task, event);
         }
       } finally {
+        clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
         cell.lastUsed = Date.now();
         this.armIdle(task.id);
@@ -300,6 +313,12 @@ export class Hub extends EventEmitter<HubEvents> {
     if (signal.aborted) {
       this.closeCell(task.id, 'task cancelled');
       return this.finish(task.id, 'cancelled', reply || 'cancelled');
+    }
+    if (timedOut) {
+      const minutes = Math.round((this.opts.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000);
+      const message = `turn timed out after ${minutes} min`;
+      this.record(task, { type: 'error', message, fatal: true });
+      return this.finish(task.id, 'failed', reply ? `${reply}\n\n(${message})` : message);
     }
     if (failure !== undefined && !reply) return this.finish(task.id, 'failed', failure);
     this.finish(task.id, failure === undefined ? 'done' : 'failed', reply || failure || '');

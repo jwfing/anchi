@@ -43,8 +43,10 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
 - **Agents and builder:** `agents.list`, `agents.reload`, `builder.proposal`, `builder.apply`, `builder.discard`. `builder.apply` is the only method that writes agent or image files. The TUI calls it only after a confirmation modal.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;
+  - `setup.run` runs one setup step at a time: `vm-start`, `install`, `vault-init` or `vault-unlock`. Each is a fixed host command from the checkout (`limactl start`, `scripts/up.sh` then `scripts/install-anchi.sh` then the base image build, `scripts/vault.py`). The vault key is read by `vault.py`, not by the daemon. Output lines arrive as `setup` notifications;
+  - `connectors.importGh` imports the token of the host `gh` CLI; `connectors.awsProfile` imports the temporary credentials of a host AWS profile and keeps them refreshed (the profile name is kept in `~/.anchi/data/connectors.json`, no secret);
   - `connectors.set` carries a secret. The daemon writes it to the guest administration command's stdin and never stores or logs it. It then verifies the connector, records the account it reports, and removes a credential the service refuses.
-- **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`.
+- **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`, `setup` (a line of setup output).
 
 Every string in a runtime event is agent-originated. Clients must strip control characters and escape sequences before display.
 

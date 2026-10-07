@@ -58,7 +58,23 @@ export interface ConnectorStatus {
   connected: boolean;
   /** Non-secret label, such as the GitHub login or AWS account id. */
   account: string | null;
+  /** AWS only: the host profile whose temporary credentials the daemon keeps refreshed. */
+  profile?: string | null;
 }
+
+/**
+ * Setup steps the daemon runs for the user, each a fixed host command from the checkout:
+ * `vm-start` starts the existing VM; `install` creates or updates the VM, installs the trusted
+ * services and the agent team, and builds the base image; `vault-init` and `vault-unlock` use
+ * the host-held vault key (read by `scripts/vault.py`, never by the daemon).
+ */
+export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock';
+export const SETUP_ACTIONS: readonly SetupAction[] = [
+  'vm-start',
+  'install',
+  'vault-init',
+  'vault-unlock',
+];
 
 export interface RuntimeAccountStatus {
   runtime: 'codex';
@@ -132,7 +148,16 @@ export interface Methods {
   'setup.status': [Record<string, never>, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
+  /** Runs a setup step; the caller has the user's consent. Progress arrives as `setup`. */
+  'setup.run': [{ action: SetupAction }, SetupStatus];
   'connectors.set': [ConnectorSecret, ConnectorStatus];
+  /** Imports the token of the host GitHub CLI (`gh auth token`); the caller has consent. */
+  'connectors.importGh': [Record<string, never>, ConnectorStatus];
+  /**
+   * Connects AWS through a host profile (SSO or any credential process): the daemon exports
+   * its temporary credentials with the host AWS CLI and imports them again before they expire.
+   */
+  'connectors.awsProfile': [{ profile: string }, ConnectorStatus];
   'connectors.remove': [{ id: ConnectorId }, ConnectorStatus];
   /** Builder output for an agent, validated; nothing is written. */
   'builder.proposal': [{ proposalId: string }, BuilderProposal];
@@ -147,6 +172,8 @@ export interface Notifications {
   tasks: { task: TaskRow };
   agents: { agents: AgentSummary[] };
   proposal: { proposal: BuilderProposal };
+  /** One line of a running setup step's output (host command output; sanitize for display). */
+  setup: { action: SetupAction; line: string };
 }
 
 export type MethodName = keyof Methods;

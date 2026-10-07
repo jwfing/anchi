@@ -2,9 +2,27 @@ import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import type { HomeLayout } from '@anchi/core';
-import type { ConnectorSecret, MethodName, Methods } from '@anchi/protocol';
+import {
+  type ConnectorSecret,
+  type ConnectorStatus,
+  type MethodName,
+  type Methods,
+  SETUP_ACTIONS,
+  type SetupAction,
+} from '@anchi/protocol';
 import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
+import {
+  AWS_PROFILE,
+  awsExport,
+  ghToken,
+  hostConnectorsFile,
+  hostOutput,
+  readHostConnectors,
+  SetupRunner,
+  SETUP_STEPS,
+  writeHostConnectors,
+} from './host.ts';
 import { Hub } from './hub.ts';
 import { tryConnect } from './launch.ts';
 import { desktopNotify } from './notify.ts';
@@ -18,6 +36,9 @@ import {
 } from './setup.ts';
 import { Store } from './store.ts';
 
+const AWS_REFRESH_EVERY_MS = 5 * 60_000;
+const AWS_REFRESH_AHEAD_MS = 15 * 60_000;
+
 export interface DaemonOptions {
   layout: HomeLayout;
   guest?: Guest;
@@ -26,6 +47,10 @@ export interface DaemonOptions {
   /** Skip desktop notifications (tests). */
   quiet?: boolean;
   idleMs?: number;
+  turnTimeoutMs?: number;
+  /** Host commands of setup steps and of connector imports (tests replace them). */
+  setupSteps?: Record<SetupAction, string[][]>;
+  hostRun?: typeof hostOutput;
   /** Reap guest cells at start (default true). */
   reap?: boolean;
 }
@@ -76,6 +101,10 @@ export class Daemon {
   private clients = new Map<string, Peer>();
   private startedAt = Date.now();
   private log: (msg: string) => void;
+  private setup: SetupRunner;
+  private hostRun: typeof hostOutput;
+  private awsTimer?: NodeJS.Timeout;
+  private awsRefreshFailing = false;
 
   constructor(private opts: DaemonOptions) {
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
@@ -83,11 +112,14 @@ export class Daemon {
     this.guest = opts.guest ?? new Guest(this.lima);
     this.store = new Store(opts.layout.dbFile);
     this.proposals = new Proposals(opts.layout);
+    this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
+    this.hostRun = opts.hostRun ?? hostOutput;
     this.hub = new Hub({
       layout: opts.layout,
       store: this.store,
       guest: this.guest,
       idleMs: opts.idleMs,
+      turnTimeoutMs: opts.turnTimeoutMs,
       log: this.log,
       builtins: [builderAgent()],
     });
@@ -154,24 +186,35 @@ export class Daemon {
       await this.guest.importCodex(login.accessToken, login.accountId);
       return codexStatus(this.guest);
     },
+    'setup.run': async ({ action }) => {
+      if (!SETUP_ACTIONS.includes(action)) throw new Error('unknown setup step');
+      this.log(`setup ${action} started`);
+      await this.setup.run(action, (line) => this.broadcast('setup', { action, line }));
+      this.log(`setup ${action} done`);
+      return setupStatus(this.guest, this.lima);
+    },
     'connectors.set': async (params) => {
       const secret = connectorSecret(params);
-      await this.guest.setConnector(secret);
-      let account: string;
-      try {
-        account = await this.guest.verifyConnector(secret.id);
-      } catch (err) {
-        // A credential the service refuses is removed rather than left to fail inside tasks.
-        await this.guest.removeConnector(secret.id).catch(() => {});
-        throw new Error(`${secret.id} did not accept the credential: ${(err as Error).message}`);
-      }
-      await this.guest.setConnectorAccount(secret.id, account);
-      return (await connectorStatuses(this.guest)).find((c) => c.id === secret.id)!;
+      // Keys entered by hand replace a profile the daemon was refreshing.
+      if (secret.id === 'aws') this.setAwsProfile(undefined);
+      return this.connect(secret);
+    },
+    'connectors.importGh': async () =>
+      this.connect({ id: 'github', token: await ghToken(this.hostRun) }),
+    'connectors.awsProfile': async ({ profile }) => {
+      const name = str(profile, 'profile', 64);
+      if (!AWS_PROFILE.test(name)) throw new Error('invalid AWS profile name');
+      const exported = await awsExport(name, this.hostRun);
+      const { expiresAt, ...secret } = exported;
+      const status = await this.connect({ id: 'aws', ...secret });
+      this.setAwsProfile({ profile: name, expiresAt });
+      return { ...status, profile: name };
     },
     'connectors.remove': async ({ id }) => {
       if (!CONNECTOR_IDS.includes(id)) throw new Error('unknown connector');
       await this.guest.removeConnector(id);
-      return (await connectorStatuses(this.guest)).find((c) => c.id === id)!;
+      if (id === 'aws') this.setAwsProfile(undefined);
+      return this.connectorStatus(id);
     },
     'builder.proposal': ({ proposalId }) => this.proposals.get(str(proposalId, 'proposal', 20)),
     'builder.apply': ({ proposalId }) => {
@@ -185,6 +228,63 @@ export class Daemon {
       return null;
     },
   };
+
+  /** Stores a credential, verifies it with the service and records the account it reports. */
+  private async connect(secret: ConnectorSecret): Promise<ConnectorStatus> {
+    await this.guest.setConnector(secret);
+    let account: string;
+    try {
+      account = await this.guest.verifyConnector(secret.id);
+    } catch (err) {
+      // A credential the service refuses is removed rather than left to fail inside tasks.
+      await this.guest.removeConnector(secret.id).catch(() => {});
+      throw new Error(`${secret.id} did not accept the credential: ${(err as Error).message}`);
+    }
+    await this.guest.setConnectorAccount(secret.id, account);
+    return this.connectorStatus(secret.id);
+  }
+
+  private async connectorStatus(id: ConnectorStatus['id']): Promise<ConnectorStatus> {
+    const status = (await connectorStatuses(this.guest)).find((c) => c.id === id)!;
+    if (id !== 'aws') return status;
+    return { ...status, profile: this.hostConnectors().aws?.profile ?? null };
+  }
+
+  private hostConnectors() {
+    return readHostConnectors(hostConnectorsFile(this.opts.layout.root));
+  }
+
+  private setAwsProfile(aws: { profile: string; expiresAt: number | null } | undefined) {
+    const value = this.hostConnectors();
+    if (aws) value.aws = aws;
+    else delete value.aws;
+    writeHostConnectors(hostConnectorsFile(this.opts.layout.root), value);
+  }
+
+  /**
+   * Re-imports the AWS profile's temporary credentials before they expire. The host AWS CLI
+   * refreshes the SSO token while the SSO session lasts; after that the user logs in again.
+   */
+  async refreshAws(now = Date.now()): Promise<void> {
+    const aws = this.hostConnectors().aws;
+    if (!aws || aws.expiresAt === null || aws.expiresAt - now > AWS_REFRESH_AHEAD_MS) return;
+    try {
+      const { expiresAt, ...secret } = await awsExport(aws.profile, this.hostRun);
+      await this.connect({ id: 'aws', ...secret });
+      this.setAwsProfile({ profile: aws.profile, expiresAt });
+      this.awsRefreshFailing = false;
+      this.log(`aws credentials of profile ${aws.profile} refreshed`);
+    } catch (err) {
+      this.log(`aws refresh failed: ${(err as Error).message}`);
+      if (!this.awsRefreshFailing && !this.opts.quiet) {
+        void desktopNotify(
+          'Anchi: AWS credentials expire soon',
+          `Run \`aws sso login --profile ${aws.profile}\` on this Mac.`,
+        );
+      }
+      this.awsRefreshFailing = true;
+    }
+  }
 
   async start(): Promise<void> {
     const { layout } = this.opts;
@@ -226,6 +326,8 @@ export class Daemon {
     });
     chmodSync(layout.socketFile, 0o600);
     this.watchConfig();
+    this.awsTimer = setInterval(() => void this.refreshAws(), AWS_REFRESH_EVERY_MS);
+    this.awsTimer.unref();
     this.log(`daemon ${process.pid} listening on ${layout.socketFile}`);
   }
 
@@ -251,6 +353,7 @@ export class Daemon {
 
   async stop(): Promise<void> {
     this.hub.shutdown();
+    clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();
     for (const p of this.clients.values()) p.close();
     await new Promise<void>((resolve) =>

@@ -75,7 +75,14 @@ type Modal =
       values: Record<string, string>;
       input: string;
     }
-  | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> };
+  | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
+  | {
+      kind: 'text';
+      title: string;
+      label: string;
+      input: string;
+      submit: (value: string) => Promise<unknown>;
+    };
 
 export interface AppProps {
   client: DaemonClient;
@@ -122,6 +129,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const [verbose, setVerbose] = useState(false);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
+  const [setupLog, setSetupLog] = useState<string[]>([]);
   const [proposals, setProposals] = useState<BuilderProposal[]>([]);
   const [flash, setFlash] = useState('');
   const loading = useRef(new Set<string>());
@@ -163,6 +171,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           return { ...all, [taskId]: [...cur, { seq, ts: Date.now(), event }] };
         });
       }),
+      client.on('setup', ({ line }) => setSetupLog((log) => [...log, line].slice(-8))),
       client.on('proposal', ({ proposal }) => {
         setProposals((p) => [...p.filter((x) => x.agentId !== proposal.agentId), proposal]);
         setModal({ kind: 'proposal', proposal, scroll: 0 });
@@ -260,7 +269,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   };
 
   usePaste((text) => {
-    if (modal?.kind === 'secret') setModal({ ...modal, input: modal.input + text.trim() });
+    if (modal?.kind === 'secret' || modal?.kind === 'text')
+      setModal({ ...modal, input: modal.input + text.trim() });
     else if (!modal && agent) setInput((v) => v + text);
   });
 
@@ -304,6 +314,20 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           () => client.call('connectors.set', secret),
           `${modal.connector} connected`,
         );
+      }
+      if (ch && !key.ctrl && !key.meta)
+        setModal({ ...modal, input: modal.input + ch.replace(/[\r\n]/g, '') });
+      return;
+    }
+    if (modal?.kind === 'text') {
+      if (key.escape) return setModal(null);
+      if (key.backspace || key.delete)
+        return setModal({ ...modal, input: [...modal.input].slice(0, -1).join('') });
+      if (key.return) {
+        if (!modal.input) return;
+        const { submit, input, title } = modal;
+        setModal(null);
+        return runAction(() => submit(input), `${title}: done`);
       }
       if (ch && !key.ctrl && !key.meta)
         setModal({ ...modal, input: modal.input + ch.replace(/[\r\n]/g, '') });
@@ -355,6 +379,28 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           return setConnectorCursor((c) => Math.min(ids.length - 1, c + 1));
         const id = ids[connectorCursor]!;
         if (key.return || ch === 'c') return openConnector(id);
+        if (ch === 'g' && id === 'github') {
+          return setModal({
+            kind: 'confirm',
+            title: 'Import the gh CLI token',
+            body:
+              'Read the token the GitHub CLI on this Mac is logged in with (`gh auth token`) and store ' +
+              'it in the VM vault. It carries every scope of your gh login, usually broader than a ' +
+              'fine-grained token limited to the repositories the agents need.',
+            action: () => client.call('connectors.importGh'),
+          });
+        }
+        if (ch === 'p' && id === 'aws') {
+          return setModal({
+            kind: 'text',
+            title: 'Connect AWS through a profile',
+            label:
+              'AWS profile on this Mac (for SSO, run `aws sso login --profile …` first). Anchi ' +
+              'exports its temporary credentials and refreshes them before they expire.',
+            input: '',
+            submit: (profile) => client.call('connectors.awsProfile', { profile }),
+          });
+        }
         if (ch === 'd') {
           return setModal({
             kind: 'confirm',
@@ -363,6 +409,35 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
             action: () => client.call('connectors.remove', { id }),
           });
         }
+      }
+      if (current === 'runtimes' && (ch === 's' || ch === 'I' || ch === 'u')) {
+        const step = (
+          {
+            s: ['vm-start', 'Start the VM', 'Start the secure-vm VM.'],
+            I: [
+              'install',
+              'Install or update',
+              'Create or update the secure-vm VM, install the trusted services and the agent ' +
+                'team, and build the base image. This takes several minutes.',
+            ],
+            u: [
+              'vault-unlock',
+              'Unlock the vault',
+              'Send the vault key from ~/.config/secure-vm/vault.key on this Mac to the VM, ' +
+                'where it is kept in memory only.',
+            ],
+          } as const
+        )[ch];
+        const [action, title, body] = step;
+        return setModal({
+          kind: 'confirm',
+          title,
+          body,
+          action: () => {
+            setSetupLog([]);
+            return client.call('setup.run', { action });
+          },
+        });
       }
       if (current === 'runtimes' && ch === 'i') {
         return setModal({
@@ -446,9 +521,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     (agent
       ? '^N/^P select · Enter send · ^X new task · Esc cancel · ^E editor · ^V verbose · PgUp/PgDn scroll'
       : current === 'connectors'
-        ? '↑↓ choose · Enter connect · d disconnect · ^N/^P select · q quit'
+        ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · q quit'
         : current === 'runtimes'
-          ? 'i import Codex login · r refresh · ^N/^P select · q quit'
+          ? 's start VM · I install · u unlock vault · i import Codex login · r refresh · q quit'
           : current === 'tasks'
             ? '↑↓ choose · Enter open · c cancel · ^N/^P select · q quit'
             : '^N/^P select · q quit') + (proposals.length ? ' · ^O proposal' : '');
@@ -513,7 +588,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           ) : current === 'connectors' ? (
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
-            <RuntimesView setup={setup} />
+            <RuntimesView setup={setup} log={setupLog} />
           ) : (
             <Box flexDirection="column">
               <Text>Skills are planned for a later phase.</Text>
@@ -627,6 +702,7 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
             <Text color={c.connected ? 'green' : 'gray'}>{c.connected ? '●' : '○'}</Text>{' '}
             {c.id.padEnd(8)}
             {c.connected ? sanitizeLine(c.account ?? 'connected') : 'not connected'}
+            {c.profile ? ` · profile ${sanitizeLine(c.profile)}` : ''}
           </Text>
           <Text dimColor>{`  ${notes[c.id]}`}</Text>
         </Box>
@@ -639,7 +715,7 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
   );
 }
 
-function RuntimesView({ setup }: { setup: SetupStatus | null }) {
+function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[] }) {
   if (!setup) return <Text dimColor>Loading…</Text>;
   const c = setup.codex;
   const expired = c.expiresAt !== null && c.expiresAt < Date.now();
@@ -668,6 +744,15 @@ function RuntimesView({ setup }: { setup: SetupStatus | null }) {
         )}
       </Text>
       <Text dimColor>Claude Code arrives in phase 2.</Text>
+      {log.length ? (
+        <Box flexDirection="column" marginTop={1}>
+          {log.map((line, i) => (
+            <Text key={i} dimColor wrap="truncate">
+              {sanitizeLine(line)}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -699,6 +784,30 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
         <Box flexGrow={1} />
         <Text dimColor>
           Enter next · Esc cancel · this screen is drawn by Anchi, not by an agent
+        </Text>
+      </Box>
+    );
+  }
+  if (modal.kind === 'text') {
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          {modal.title}
+        </Text>
+        <Text>{modal.label}</Text>
+        <Box borderStyle="single" paddingX={1}>
+          <Text>{sanitizeLine(modal.input)}█</Text>
+        </Box>
+        <Box flexGrow={1} />
+        <Text dimColor>
+          Enter confirm · Esc cancel · this screen is drawn by Anchi, not by an agent
         </Text>
       </Box>
     );

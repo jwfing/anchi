@@ -214,6 +214,9 @@ Decisions taken during implementation:
 - **Cell identity (M2):** the proxy hosts each cell's socket itself. Its in-process bridge binds a loopback port, maps the port to the cell, and only then connects to mitmproxy, so every client connection is attributed before its first byte. Connections that do not come from a bridge are refused.
 - **Codex account (M3):** the vault receives the access token and the account id only. The refresh token stays with the Codex CLI on the Mac, which refreshes it. When the vault's token expires, the user imports it again, and the proxy refuses to serve an expired token. This keeps a rotating refresh token from being shared by two refreshers.
 - **Linear client (M6):** agents call the GraphQL API with `curl`, using the placeholder `LINEAR_API_KEY`; the environment note in every agent's instructions explains this. There is no extra package to pin.
+- **Setup in the daemon (M4):** setup steps reuse the existing scripts (`up.sh`, `install-anchi.sh`, `vault.py`) as fixed host commands rather than reimplementing them, so the CLI, the TUI and the scripts share one path. The vault key stays with `vault.py`.
+- **GitHub from gh, AWS profiles (M5, M6):** both read the host CLI's credential with consent. AWS profiles are refreshed by the daemon, on the host, with the host AWS CLI; the VM only ever holds temporary credentials. Every import is verified against the service's identity endpoint.
+- **Turn timeout (M3):** 60 minutes by default; a runner that ignores the cancel loses its cell 10 s later.
 - **Builder output (M7):** the builder ends its reply with fenced `anchi-agent` and `anchi-image` blocks. The daemon parses and validates them and shows a diff. It writes the files only after a `y` in the full-screen dialog.
 
 ## Porting my-bot

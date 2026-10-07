@@ -243,6 +243,56 @@ describe('App', () => {
     ui.unmount();
   });
 
+  it('imports from gh and connects an AWS profile only after confirmation', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    await tick();
+    for (const _ of [1, 2, 3]) ui.stdin.write('\u0010'); // ^P ×3 → connectors
+    await tick();
+    ui.stdin.write('g');
+    await tick();
+    expect(ui.lastFrame()).toContain('gh auth token');
+    ui.stdin.write('n');
+    await tick();
+    expect(calls.some(([m]) => m === 'connectors.importGh')).toBe(false);
+    ui.stdin.write('g');
+    await tick();
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m]) => m === 'connectors.importGh')).toBe(true);
+    ui.stdin.write('j'); // aws
+    await tick();
+    ui.stdin.write('p');
+    await tick();
+    ui.stdin.write('dev-sso');
+    await tick();
+    expect(ui.lastFrame()).toContain('dev-sso');
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'connectors.awsProfile')?.[1]).toEqual({ profile: 'dev-sso' });
+    ui.unmount();
+  });
+
+  it('runs setup steps from the runtimes screen after confirmation', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    await tick();
+    for (const _ of [1, 2, 3, 4, 5]) ui.stdin.write('\u0010'); // ^P ×5 → runtimes
+    await tick();
+    expect(ui.lastFrame()).toContain('start VM');
+    ui.stdin.write('u');
+    await tick();
+    expect(ui.lastFrame()).toContain('vault.key');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.find(([m]) => m === 'setup.run')?.[1]).toEqual({ action: 'vault-unlock' });
+    emit('setup', { action: 'vault-unlock', line: '\u001b]52;c;AAAA\u0007{"unlocked": true}' });
+    await tick();
+    expect(ui.lastFrame()).toContain('{"unlocked": true}');
+    expect(ui.lastFrame()).not.toContain(']52;');
+    ui.unmount();
+  });
+
   it('shows builder proposals in a full-screen modal and applies only on y', async () => {
     const { client, calls, emit } = fakeClient();
     const ui = render(<App client={client} initialAgents={[agent('builder')]} initialTasks={[]} />);

@@ -50,20 +50,25 @@ class FakeTransport implements GuestTransport {
       return ok({ connector: args[2], account: 'octo' });
     }
     if (args[1]?.endsWith('admin.py')) {
-      const [action, id] = args.slice(2);
-      if (action === 'status')
-        return ok({ github: { connected: this.connected, account: this.account } });
-      if (action === 'import-token') this.connected = true;
-      if (action === 'disconnect') [this.connected, this.account] = [false, null];
-      if (action === 'set-account') this.account = JSON.parse(stdin).account;
-      return ok({ [id ?? 'x']: { connected: this.connected } });
+      const [action, id] = args.slice(2) as [string, string];
+      if (action === 'status') return ok(this.vault);
+      if (action === 'import-token' || action === 'import-aws') {
+        this.vault[id] = { connected: true, account: null };
+        this.imported.push({ id, value: JSON.parse(stdin) });
+      }
+      if (action === 'disconnect') delete this.vault[id];
+      if (action === 'set-account') this.vault[id]!.account = JSON.parse(stdin).account;
+      return ok({});
     }
     return { code: 1, stdout: '{"error":"UNEXPECTED"}', stderr: '' };
   }
 
   rejectCredential = false;
-  connected = false;
-  account: string | null = null;
+  vault: Record<string, { connected: boolean; account: string | null }> = {};
+  imported: { id: string; value: Record<string, string> }[] = [];
+  get connected() {
+    return Boolean(this.vault.github?.connected);
+  }
 }
 
 let root: string;
@@ -77,9 +82,31 @@ function write(rel: string, content: string) {
   writeFileSync(file, content);
 }
 
-async function start(idleMs = 60_000) {
+// Host commands the daemon runs for connector imports (gh, aws).
+let hostCalls: string[][];
+let hostAnswers: Record<string, string>;
+const hostRun = async (cmd: string, args: string[]) => {
+  hostCalls.push([cmd, ...args]);
+  const answer = hostAnswers[`${cmd} ${args.slice(0, 2).join(' ')}`];
+  if (answer === undefined) throw new Error(`${cmd} failed: not logged in`);
+  return answer;
+};
+const SETUP_STEPS = {
+  'vm-start': [[process.execPath, '-e', 'console.log("vm started")']],
+  install: [
+    [process.execPath, '-e', 'console.log("step one")'],
+    [process.execPath, '-e', 'console.error("broken"); process.exit(3)'],
+  ],
+  'vault-init': [],
+  'vault-unlock': [[process.execPath, '-e', 'console.log("{\\"unlocked\\": true}")']],
+};
+
+async function start(idleMs = 60_000, turnTimeoutMs?: number) {
   const layout = homeLayout(root);
   const d = new Daemon({
+    turnTimeoutMs,
+    hostRun,
+    setupSteps: SETUP_STEPS,
     layout,
     guest: new Guest(transport),
     lima: new LimaTransport(),
@@ -95,6 +122,8 @@ async function start(idleMs = 60_000) {
 }
 
 beforeEach(() => {
+  hostCalls = [];
+  hostAnswers = {};
   root = mkdtempSync(join(tmpdir(), 'anchi-daemon-'));
   transport = new FakeTransport();
   write('agents/dev.yaml', 'runtime: codex\nconnectors: [github]\n');
@@ -170,6 +199,15 @@ describe('daemon tasks', () => {
     },
   );
 
+  it('fails a turn that runs past the turn timeout', async () => {
+    transport.mode = 'slow';
+    const { client } = await start(60_000, 300);
+    const task = await client.call('tasks.create', { agentId: 'dev', text: 'forever' });
+    const done = await client.call('tasks.wait', { taskId: task.id });
+    expect(done.status).toBe('failed');
+    expect(done.result).toMatch(/turn timed out/);
+  });
+
   it('cancels a running task', async () => {
     transport.mode = 'slow';
     const { client, daemon } = await start();
@@ -226,6 +264,68 @@ describe('daemon tasks', () => {
     );
     expect(transport.connected).toBe(false);
     expect(transport.execs.some((e) => e.args.join(' ').includes('ghp_'))).toBe(false);
+  });
+
+  it('imports the gh CLI token and verifies it', async () => {
+    const { client } = await start();
+    await expect(client.call('connectors.importGh')).rejects.toThrow(/not logged in/);
+    hostAnswers['gh auth token'] = 'gho_fakefakefakefakefakefake\n';
+    const status = await client.call('connectors.importGh');
+    expect(status).toMatchObject({ id: 'github', connected: true, account: 'octo' });
+    expect(transport.imported.at(-1)).toEqual({
+      id: 'github',
+      value: { token: 'gho_fakefakefakefakefakefake' },
+    });
+  });
+
+  it('connects AWS through a host profile and refreshes it before expiry', async () => {
+    const { client, daemon } = await start();
+    const soon = new Date(Date.now() + 5 * 60_000).toISOString();
+    hostAnswers['aws configure export-credentials'] = JSON.stringify({
+      Version: 1,
+      AccessKeyId: 'ASIAFAKE0000000000001',
+      SecretAccessKey: 'fake/secret',
+      SessionToken: 'fake-session',
+      Expiration: soon,
+    });
+    hostAnswers['aws configure get'] = 'us-west-2\n';
+    await expect(client.call('connectors.awsProfile', { profile: 'bad name' })).rejects.toThrow(
+      /invalid AWS profile/,
+    );
+    const status = await client.call('connectors.awsProfile', { profile: 'dev-sso' });
+    expect(status).toMatchObject({ id: 'aws', connected: true, profile: 'dev-sso' });
+    expect(transport.imported.at(-1)!.value).toEqual({
+      access_key_id: 'ASIAFAKE0000000000001',
+      secret_access_key: 'fake/secret',
+      session_token: 'fake-session',
+      region: 'us-west-2',
+    });
+    const before = transport.imported.length;
+    await daemon.refreshAws();
+    expect(transport.imported.length).toBe(before + 1);
+    // Keys entered by hand end the profile refresh.
+    await client.call('connectors.set', {
+      id: 'aws',
+      accessKeyId: 'AKIAFAKE000000000000',
+      secretAccessKey: 's',
+      region: 'us-east-1',
+    });
+    hostCalls = [];
+    await daemon.refreshAws();
+    expect(hostCalls).toEqual([]);
+  });
+
+  it('runs setup steps one at a time and streams their output', async () => {
+    const { client } = await start();
+    const lines: string[] = [];
+    client.on('setup', ({ line }) => lines.push(line));
+    await expect(client.call('setup.run', { action: 'install' })).rejects.toThrow(
+      /install failed: .* exited with 3: broken/,
+    );
+    expect(lines).toContain('step one');
+    await expect(client.call('setup.run', { action: 'nope' as never })).rejects.toThrow(
+      /unknown setup step/,
+    );
   });
 
   it('accepts a task for an agent file written just before it', async () => {

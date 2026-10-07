@@ -4,18 +4,17 @@ Anchi runs a team of Codex agents. Each task runs in a disposable cell inside th
 
 ## Install
 
-Prerequisites:
-
-- the VM and trusted services from [Getting started](GETTING_STARTED.md): `scripts/up.sh` and `scripts/install-pi.sh`;
-- an unlocked vault: `python3 scripts/vault.py unlock`;
-- Node 22+ and pnpm on the Mac.
+Prerequisites: Lima (`brew install lima`), Node 22+ and pnpm on the Mac.
 
 ```bash
 pnpm --dir anchi install
-bash scripts/install-anchi.sh                         # egress proxy, cell manager, cell runner
-limactl shell secure-vm -- sudo anchi-image build codex base   # base image, about 4 minutes
-make verify-anchi                                     # live isolation checks, no credentials used
+scripts/anchi setup install        # VM, trusted services, agent team and base image (minutes)
+scripts/anchi setup vault init     # first time only: creates ~/.config/secure-vm/vault.key
+scripts/anchi setup vault unlock   # after each VM start
+make verify-anchi                  # live isolation checks, no credentials used
 ```
+
+`setup install` runs `scripts/up.sh`, `scripts/install-anchi.sh` and the base image build, and is safe to run again to update. `scripts/anchi setup vm` starts a stopped VM. In the TUI, **Runtimes** has the same steps: `I` install, `s` start the VM, `u` unlock the vault. Keep a backup of the vault key: without it, the stored credentials cannot be recovered.
 
 `scripts/anchi` runs the CLI from the checkout. With no arguments it opens the TUI and starts the daemon if needed. `scripts/anchi daemon install` starts the daemon at login.
 
@@ -32,10 +31,14 @@ This stores the access token and account id in the vault. The refresh token stay
 Connectors:
 
 ```bash
-scripts/anchi setup connector github     # fine-grained token, prompted without echo
-scripts/anchi setup connector linear     # API key
-scripts/anchi setup connector aws        # keys of a dedicated IAM principal and a region
+scripts/anchi setup connector github             # fine-grained token, prompted without echo
+scripts/anchi setup connector github --from-gh   # or the token of the gh CLI (broader scopes)
+scripts/anchi setup connector linear             # API key
+scripts/anchi setup connector aws                # keys of a dedicated IAM principal and a region
+scripts/anchi setup connector aws --profile dev  # or a profile on this Mac, such as AWS SSO
 ```
+
+With `--profile`, the daemon exports the profile's temporary credentials with the AWS CLI on the Mac (`aws configure export-credentials`) and imports them again before they expire. The AWS CLI refreshes the SSO token while the SSO session lasts; when it ends, the daemon shows a notification and you run `aws sso login --profile dev`. In the TUI, **Connectors** offers `g` (GitHub from gh) and `p` (AWS profile).
 
 Each command checks the credential with the service and prints the account it belongs to. A credential the service refuses is not kept. Run these commands in a terminal: they prompt for the secret without echo. They also read the secret from stdin when stdin is not a terminal. For AWS, stdin takes JSON: `{"accessKeyId", "secretAccessKey", "region", "sessionToken"?}`. In the TUI, the same setup is under **Connectors** and **Runtimes**.
 
@@ -90,6 +93,7 @@ Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. I
 ## Limits
 
 - One turn at a time per agent and at most four live cells. The longest-idle cell is closed to make room.
+- A turn that runs longer than 60 minutes is cancelled and the task fails.
 - Credential isolation is not data isolation: agents can send what they read to any public host.
 - S3 uploads signed as streaming payloads (`aws-chunked`, used by the AWS CLI for large objects) are refused.
 - Phase 1 has no scheduled triggers and no agent-to-agent delegation.
