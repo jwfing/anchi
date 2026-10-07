@@ -43,7 +43,18 @@ APPARMOR_PROFILE = Path('/etc/apparmor.d/anchi-cell-bwrap')
 MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '4'))
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 HASH = re.compile(r'^(base|[0-9a-f]{16})$')
-CONNECTORS = ('github', 'aws', 'linear')
+# Credentials injected by the egress proxy, and services reached through per-cell sockets.
+PROXY_CONNECTORS = ('github', 'aws', 'linear')
+# Codex reads its MCP servers from config.toml; `anchi` is the in-cell Anchi tool server.
+CODEX_CONFIG = '''cli_auth_credentials_store = "file"
+
+[mcp_servers.anchi]
+command = "/opt/node/bin/node"
+args = ["/opt/anchi/mcp.mjs"]
+startup_timeout_sec = 10
+'''
+SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+CONNECTORS = PROXY_CONNECTORS + SERVICE_CONNECTORS
 SANDBOXES = ('cell', 'codex-workspace-write')
 BASE_IMAGE = 'codex'
 PROXY = 'http://127.0.0.1:3128'
@@ -527,13 +538,14 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
         root = work / 'root'
         root.mkdir()
         run('mount', '-t', 'overlay', 'overlay', '-o', f'ro,lowerdir={lower}', str(root))
-        registration = egress({'op': 'register', 'task': task, 'agent': agent, 'connectors': connectors})
+        proxied = [c for c in connectors if c in PROXY_CONNECTORS]
+        registration = egress({'op': 'register', 'task': task, 'agent': agent, 'connectors': proxied})
         identifiers = registration.get('identifiers', {})
         if not identifiers.get('codex_account_id'):
             raise Failure('CODEX_NOT_CONFIGURED')
         home = agent_home(agent, uid)
         write_owned(home / '.codex/auth.json', codex_placeholder(identifiers['codex_account_id']), uid)
-        write_owned(home / '.codex/config.toml', 'cli_auth_credentials_store = "file"\n', uid)
+        write_owned(home / '.codex/config.toml', CODEX_CONFIG, uid)
         if sandbox == 'codex-workspace-write':
             ensure_bwrap_profile()
         cell = cell_environment(task, agent, connectors, identifiers)
@@ -783,7 +795,7 @@ def main(argv):
         return cell_reap(rest)
     if command == 'scan' and len(rest) == 1:
         return cell_scan(*rest)
-    if command == 'verify' and len(rest) == 1 and rest[0] in CONNECTORS:
+    if command == 'verify' and len(rest) == 1 and rest[0] in PROXY_CONNECTORS:
         return emit(egress({'op': 'verify', 'connector': rest[0]}, timeout=40))
     if command == 'exec' and len(rest) >= 3 and rest[1] == '--':
         return cell_exec(rest[0], rest[2:])

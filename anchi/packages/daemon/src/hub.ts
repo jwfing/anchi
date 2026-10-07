@@ -10,6 +10,7 @@ import {
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
 import { CellSession } from './cell.ts';
+import { ToolDispatcher } from './tools.ts';
 import type { Guest } from './guest.ts';
 import { instructions, WORKDIR } from './prompt.ts';
 import type { Store } from './store.ts';
@@ -76,9 +77,12 @@ export class Hub extends EventEmitter<HubEvents> {
   private builds = new Map<string, Promise<void>>();
   private log: (msg: string) => void;
 
+  readonly tools: ToolDispatcher;
+
   constructor(private opts: HubOptions) {
     super();
     this.log = opts.log ?? (() => {});
+    this.tools = new ToolDispatcher({ agents: () => this.summaries() });
     this.reload();
   }
 
@@ -383,6 +387,9 @@ export class Hub extends EventEmitter<HubEvents> {
       sandbox: agent.sandbox,
     });
     const session = new CellSession(task.id, child);
+    // The cell belongs to this task; its tool calls act as this task's agent.
+    session.toolHandler = ({ tool, args }) =>
+      this.tools.call({ task: this.getTask(task.id), agent: this.resolve(agent.id) }, tool, args);
     const cell: LiveCell = { session, agentId: agent.id, key, lastUsed: Date.now() };
     this.cells.set(task.id, cell);
     session.on('exit', (reason) => {

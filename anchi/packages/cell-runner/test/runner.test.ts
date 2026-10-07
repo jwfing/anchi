@@ -1,3 +1,7 @@
+import { mkdtempSync } from 'node:fs';
+import { createConnection } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   type CellMessage,
@@ -6,9 +10,10 @@ import {
   type RuntimeEvent,
 } from '@anchi/protocol';
 import { codexOptions, mapCodexEvent } from '../src/codex.ts';
+import { handle } from '../src/mcp.ts';
 import { startRunner, type RunTurn } from '../src/runner.ts';
 
-function harness(runTurn: RunTurn) {
+function harness(runTurn: RunTurn, toolsSocket: string | null = null) {
   const out: CellMessage[] = [];
   let data: (b: Buffer) => void = () => {};
   let end: () => void = () => {};
@@ -23,6 +28,8 @@ function harness(runTurn: RunTurn) {
     },
     runTurn,
     'codex-cli 0.0.0',
+    'codex',
+    toolsSocket,
   );
   const send = (v: unknown) => data(Buffer.from(encodeFrame(v)));
   return { out, send, end: () => end(), exits };
@@ -41,7 +48,7 @@ describe('cell runner', () => {
     const h = harness(async function* (t) {
       yield { type: 'message', text: `echo ${t.input}` } satisfies RuntimeEvent;
     });
-    expect(h.out[0]).toMatchObject({ type: 'ready', protocol: 1, runtime: 'codex' });
+    expect(h.out[0]).toMatchObject({ type: 'ready', protocol: 2, runtime: 'codex' });
     h.send(run('t1', 'x'));
     await tick();
     expect(h.out.slice(1)).toEqual([
@@ -115,5 +122,89 @@ describe('codex mapping', () => {
       );
     }
     expect(events.map((e) => e.type)).toEqual(['tool.call', 'tool.result']);
+  });
+});
+
+describe('tool relay', () => {
+  it('relays MCP tool calls of the running turn to the daemon and back', async () => {
+    const socket = join(mkdtempSync(join(tmpdir(), 'anchi-tools-')), 'tools.sock');
+    let release: () => void = () => {};
+    const h = harness(async function* () {
+      await new Promise<void>((r) => (release = r));
+      yield { type: 'message', text: 'done' };
+    }, socket);
+    const ask = (req: unknown) =>
+      new Promise<unknown>((resolve) => {
+        const conn = createConnection(socket, () => conn.write(`${JSON.stringify(req)}\n`));
+        conn.on('data', (d) => {
+          resolve(JSON.parse(d.toString('utf8')));
+          conn.end();
+        });
+      });
+    await new Promise((r) => setTimeout(r, 20));
+    // No turn yet: refused without reaching the daemon.
+    expect(await ask({ tool: 'anchi_whoami', args: {} })).toEqual({
+      ok: false,
+      error: 'no turn is running',
+    });
+    h.send({ type: 'run', turn: 't1', input: 'go', options: { workdir: tmpdir() } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await ask({ tool: 'Bad Name', args: {} })).toMatchObject({ ok: false });
+    const answer = ask({ tool: 'anchi_whoami', args: { x: 1 } });
+    await new Promise((r) => setTimeout(r, 20));
+    const req = h.out.find((m) => m.type === 'tool.request');
+    expect(req).toMatchObject({ turn: 't1', tool: 'anchi_whoami', args: { x: 1 } });
+    h.send({
+      type: 'tool.response',
+      id: (req as { id: string }).id,
+      ok: true,
+      result: { agent: 'dev' },
+    });
+    expect(await answer).toEqual({ ok: true, result: { agent: 'dev' } });
+    release();
+    h.end();
+  });
+});
+
+describe('MCP server', () => {
+  it('lists and calls Anchi tools through the runner', async () => {
+    const calls: [string, unknown][] = [];
+    const call = async (tool: string, args: Record<string, unknown>) => {
+      calls.push([tool, args]);
+      if (tool === 'anchi.tools')
+        return { ok: true, result: { tools: [{ name: 'anchi_whoami' }] } };
+      if (tool === 'anchi_whoami') return { ok: true, result: { agent: 'dev' } };
+      return { ok: false, error: 'unknown tool nope' };
+    };
+    const init = await handle(
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } },
+      call,
+    );
+    expect(init).toMatchObject({
+      result: { protocolVersion: '2025-03-26', capabilities: { tools: {} } },
+    });
+    expect(
+      await handle({ jsonrpc: '2.0', method: 'notifications/initialized' }, call),
+    ).toBeUndefined();
+    expect(await handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, call)).toMatchObject({
+      result: { tools: [{ name: 'anchi_whoami' }] },
+    });
+    expect(
+      await handle(
+        {
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'tools/call',
+          params: { name: 'anchi_whoami', arguments: {} },
+        },
+        call,
+      ),
+    ).toMatchObject({ result: { isError: false, structuredContent: { agent: 'dev' } } });
+    expect(
+      await handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'nope' } }, call),
+    ).toMatchObject({ result: { isError: true, content: [{ text: 'unknown tool nope' }] } });
+    expect(await handle({ jsonrpc: '2.0', id: 5, method: 'resources/list' }, call)).toMatchObject({
+      error: { code: -32601 },
+    });
   });
 });

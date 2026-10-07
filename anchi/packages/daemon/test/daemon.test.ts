@@ -328,6 +328,34 @@ describe('daemon tasks', () => {
     );
   });
 
+  it('answers Anchi tool calls as the task and agent of the cell', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    const { client } = await start();
+    const reply = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      const done = await client.call('tasks.wait', { taskId: task.id });
+      return { task, answer: JSON.parse(done.result!) as Record<string, unknown> };
+    };
+    const who = await reply('lead', 'call anchi_whoami');
+    expect(who.answer).toMatchObject({ ok: true, result: { agent: 'lead', task: who.task.id } });
+    const list = await reply('lead', 'call anchi.tools');
+    const names = (list.answer.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['anchi_whoami', 'anchi_list_agents']));
+    const agents = await reply('lead', 'call anchi_list_agents');
+    expect(agents.answer).toMatchObject({ ok: true, result: { agents: [{ id: 'dev' }] } });
+    // dev may not delegate: its list is empty.
+    expect((await reply('dev', 'call anchi_list_agents')).answer).toMatchObject({
+      result: { agents: [] },
+    });
+    expect((await reply('dev', 'call no_such_tool')).answer).toMatchObject({
+      ok: false,
+      error: 'unknown tool no_such_tool',
+    });
+    expect((await reply('dev', 'call anchi_whoami {"extra":1}')).answer).toMatchObject({
+      ok: false,
+    });
+  });
+
   it('accepts a task for an agent file written just before it', async () => {
     const { client } = await start();
     write('agents/fresh.yaml', 'runtime: codex\n');
@@ -379,7 +407,7 @@ describe('builder', () => {
     const { client, daemon } = await start();
     for (const bad of [
       '```anchi-agent id=builder\nruntime: codex\n```',
-      '```anchi-agent id=x\nruntime: codex\nconnectors: [gmail]\n```',
+      '```anchi-agent id=x\nruntime: codex\nconnectors: [jira]\n```',
       '```anchi-agent id=x\nruntime: codex\nimage: missing\n```',
       '```anchi-agent id=x\nruntime: codex\nextends: base\n```',
       '```anchi-agent id=x\nruntime: codex\nprompt: { file: /etc/passwd }\n```',

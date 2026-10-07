@@ -8,7 +8,7 @@ src=$(cd "$(dirname "$0")" && pwd)
 source "$src/cell.env"
 rootfs=/var/lib/secure-vm/rootfs
 [[ -x $rootfs/opt/node/bin/node ]] || { echo 'Cell Node missing; run install-pi.sh first' >&2; exit 1; }
-for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi_cell.py anchi-build-base.sh check-anchi.py; do
+for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_cell.py anchi-build-base.sh check-anchi.py; do
   [[ -f $src/$f ]] || { echo "missing $f in bootstrap bundle" >&2; exit 1; }
 done
 if ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
@@ -32,7 +32,7 @@ fi
 
 install -d -m 0755 /opt/secure-vm/services /opt/secure-vm/anchi
 install -m 0644 "$src"/services/egress_rules.py "$src"/services/egress_proxy.py /opt/secure-vm/services/
-install -m 0644 "$src/anchi-cell/runner.mjs" "$src/anchi-cell/forward.mjs" /opt/secure-vm/anchi/
+install -m 0644 "$src/anchi-cell/runner.mjs" "$src/anchi-cell/forward.mjs" "$src/anchi-cell/mcp.mjs" /opt/secure-vm/anchi/
 install -m 0644 "$src/anchi-build-base.sh" /opt/secure-vm/anchi/build-base.sh
 install -m 0755 "$src/anchi_cell.py" /opt/secure-vm/anchi/anchi_cell.py
 install -m 0755 "$src/check-anchi.py" /opt/secure-vm/check-anchi.py
