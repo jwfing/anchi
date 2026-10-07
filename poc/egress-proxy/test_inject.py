@@ -12,6 +12,8 @@ from mitmproxy.test import tflow, tutils
 
 import anchi_inject as ai
 
+REAL_BLOCKED_DESTINATION = ai.blocked_destination
+
 FAKE_ENV = {
     "ANCHI_POC_CLAUDE_TOKEN": "fake-claude",
     "ANCHI_POC_CODEX_ACCESS_TOKEN": "fake-codex",
@@ -27,6 +29,8 @@ def env(monkeypatch, tmp_path):
     for k, v in FAKE_ENV.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setattr(ai, "LOG_PATH", tmp_path / "flows.jsonl")
+    # Keep tests offline; destination filtering has its own tests below.
+    monkeypatch.setattr(ai, "blocked_destination", lambda host: None)
     return tmp_path / "flows.jsonl"
 
 
@@ -162,3 +166,16 @@ def test_missing_credential_fails_closed(monkeypatch):
     f = flow("POST", "api.anthropic.com", "/v1/messages", [("authorization", "Bearer x")])
     ai.AnchiInject().request(f)
     assert f.response.status_code == 502
+
+
+@pytest.mark.parametrize("ip", ["127.0.0.1", "10.0.0.5", "192.168.5.2", "169.254.169.254", "100.64.0.1", "::1", "fd00::1"])
+def test_private_destinations_refused(ip):
+    assert REAL_BLOCKED_DESTINATION(ip) is not None
+    assert REAL_BLOCKED_DESTINATION("1.1.1.1") is None
+
+
+def test_private_destination_gets_403(monkeypatch):
+    monkeypatch.setattr(ai, "blocked_destination", lambda host: "non-public destination 127.0.0.1")
+    f = flow("GET", "127.0.0.1", "/")
+    ai.AnchiInject().request(f)
+    assert f.response.status_code == 403

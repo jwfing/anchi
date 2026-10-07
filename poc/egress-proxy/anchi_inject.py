@@ -195,6 +195,26 @@ def inject(rule: Rule, headers: dict[str, str], env) -> dict[str, str]:
     return out
 
 
+def blocked_destination(host: str) -> str | None:
+    """Refuse destinations that are not public, so the proxy cannot be used to
+    reach VM-local services, the Lima host or link-local metadata (SSRF).
+    PoC limit: checks resolution here; mitmproxy resolves again on connect, so
+    DNS rebinding remains open until the proxy connects to the checked address.
+    """
+    import ipaddress
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as exc:
+        return f"cannot resolve {host}: {exc}"
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%", 1)[0])
+        if not ip.is_global:
+            return f"non-public destination {ip}"
+    return None
+
+
 def log(entry: dict) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     entry["ts"] = round(time.time(), 3)
@@ -203,9 +223,25 @@ def log(entry: dict) -> None:
 
 
 class AnchiInject:
+    def http_connect(self, flow) -> None:
+        self._refuse_private(flow)
+
+    def _refuse_private(self, flow) -> bool:
+        from mitmproxy import http
+
+        host = flow.request.host
+        reason = blocked_destination(host)
+        if reason is None:
+            return False
+        log({"method": flow.request.method, "host": host, "decision": "blocked-destination", "reason": reason})
+        flow.response = http.Response.make(403, f"anchi: {reason}\n".encode(), {"content-type": "text/plain"})
+        return True
+
     def request(self, flow) -> None:
         from mitmproxy import http
 
+        if self._refuse_private(flow):
+            return
         req = flow.request
         host = req.pretty_host
         rule = find_rule(host)

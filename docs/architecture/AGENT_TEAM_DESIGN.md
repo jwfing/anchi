@@ -45,8 +45,8 @@ The implementation starts from the `my-bot` daemon (scheduler, team, permissions
 ### VM and cells
 
 - The VM is **long-running**. Trusted services stay up, and the vault is unlocked once per VM boot, as it is today.
-- Each task gets a **new nspawn cell** that is destroyed when the task ends. Cell images are layered: one shared base image plus a per-agent overlay (nspawn `--overlay` or filesystem snapshots), so starting a task does not copy a full rootfs.
-- Each cell has a **distinct identity** (dedicated veth address or mapped UID). When the daemon starts a cell, it registers the mapping `cell identity → agent → allowed rule set` with the proxy and policy; it removes the mapping when the cell is destroyed.
+- Each task gets a **new nspawn cell** that is destroyed when the task ends. Cell images are layered: one shared base image plus a per-agent overlay, with a discarded tmpfs layer on top (`--volatile=overlay`). Starting a task never copies a rootfs. The PoC measured about 30 ms to start and exit such a cell; `--ephemeral` full copies on ext4 took 1.6–9.2 s.
+- Each cell has a **distinct identity**: its own proxy socket path (for example `/run/anchi/cells/<task>/proxy.sock`), bound only into that cell. When the daemon starts a cell, it registers the mapping `socket → agent → allowed rule set` with the proxy and policy; it removes the mapping when the cell is destroyed.
 - Agents can run concurrently. The daemon enforces a per-host concurrency limit.
 
 ### Runtimes
@@ -70,12 +70,20 @@ This is a deliberate change from the current boundary: today the cell has **no I
 
 ### Mechanism
 
-1. The cell network namespace routes only to the proxy (`HTTPS_PROXY`, or an nftables redirect). Raw TCP, UDP and DNS from the cell are blocked.
+1. The cell keeps `--private-network` (loopback only). A forwarder inside the cell listens on `127.0.0.1` and relays to the cell's proxy Unix socket, and `HTTPS_PROXY` points at it. The cell has no other route: raw TCP, UDP and DNS fail, and clients that ignore `HTTPS_PROXY` fail closed.
 2. The cell image trusts an Anchi CA. The image configures `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `AWS_CA_BUNDLE` and git `http.sslCAInfo` to use it. Clients that pin certificates cannot be intercepted; they are either passed through or blocked.
 3. The proxy terminates TLS and matches each request against **injection rules** (`host + method + path`). A matching request has its credential injected or replaced, then the proxy forwards it upstream over a new TLS connection.
 4. Requests that match no injection rule are forwarded unchanged.
 5. The cell holds **placeholder credentials** (for example `GH_TOKEN=anchi-placeholder`), because tools such as `gh` and `aws` refuse to run without one. The proxy replaces the placeholder.
 6. git uses HTTPS only: the cell image sets `url."https://github.com/".insteadOf git@github.com:`.
+
+### Destination filtering
+
+Passthrough must not turn the proxy into a path to private networks. The PoC showed the proxy reaching the VM's sshd and the Lima host gateway on the cell's behalf. The proxy therefore:
+
+- refuses every destination whose resolved address is not public (loopback, RFC 1918, link-local, CGNAT, ULA);
+- connects to the exact address it checked, which closes DNS rebinding;
+- runs under its own UID with an nftables rule that rejects private ranges, as a kernel-level backstop.
 
 ### Rules every injection rule must satisfy
 
