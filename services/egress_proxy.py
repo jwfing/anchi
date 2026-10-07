@@ -299,6 +299,21 @@ class EgressProxy:
             data.server.sni = host
         data.server.address = (address, port)
 
+    def server_connect_error(self, data):
+        """Upstream failures (DNS, refused, timeout) are otherwise only a bare 502 in the cell."""
+        cell = self.registry.client_cell(data.client)
+        if cell is None or str(data.server.error or '').startswith('anchi: '):
+            return
+        audit(
+            {
+                'decision': 'upstream-error',
+                'host': data.server.sni or str(data.server.address and data.server.address[0]),
+                'reason': str(data.server.error)[:200],
+                'task': cell.task,
+                'agent': cell.agent,
+            }
+        )
+
     def http_connect(self, flow):
         cell = self.registry.client_cell(flow.client_conn)
         if cell is None:

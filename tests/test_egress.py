@@ -278,6 +278,20 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 registry.validate(request)
 
+    def test_upstream_errors_are_audited_once(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+        cell = self.module.Cell('t1', 'dev', frozenset({'codex'}))
+        proxy.registry.client_cell = lambda client: cell
+        for error in ('connection refused', 'anchi: private address'):
+            proxy.server_connect_error(NS(client=None, server=NS(error=error, sni='deb.debian.org', address=None)))
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertEqual(
+            [(r['decision'], r['host'], r['reason'], r['task']) for r in rows],
+            [('upstream-error', 'deb.debian.org', 'connection refused', 't1')],
+        )
+
     def test_audit_never_contains_credentials(self):
         self.module.audit({'decision': 'inject', 'host': 'api.github.com'})
         text = Path(self.tmp, 'audit.jsonl').read_text()
