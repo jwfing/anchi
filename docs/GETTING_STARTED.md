@@ -45,4 +45,12 @@ The target is x86_64 Ubuntu 22.04+ or Debian 12+ with CPU virtualization and `/d
 
 1. Install QEMU yourself: Debian/Ubuntu `sudo apt-get install -y qemu-system-x86 qemu-utils`, Arch `sudo pacman -S --needed qemu-base`, Fedora `sudo dnf install -y qemu-system-x86 qemu-img`. If `/dev/kvm` is not readable and writable, run `sudo usermod -aG kvm "$USER"` and log in again.
 2. Install Lima from its [release page](https://github.com/lima-vm/lima/releases) and verify the published SHA-256; the CI workflow pins version 2.2.0.
-3. Install Node 22+, pnpm and Python 3.11+, then follow the macOS steps from step 2. The master key is in `~/.config/secure-vm/vault.key` and the VM in `~/.lima/secure-vm`.
+3. Install Node 22+, pnpm and Python 3.11+, then follow the macOS steps from step 2; `setup install` stops early if `/dev/kvm` or QEMU is missing. The master key is in `~/.config/secure-vm/vault.key` and the VM in `~/.lima/secure-vm`.
+
+Differences from macOS:
+
+- **Codex login:** run `codex login` on this machine; Anchi reads `~/.codex/auth.json` as on the Mac. Codex must store its login in that file, not in a keyring.
+- **Notifications** use `notify-send` (Debian/Ubuntu `libnotify-bin`); without it they are skipped.
+- **Google sign-in** opens the browser with `xdg-open` and also prints the URL. Google redirects to a port on `127.0.0.1`, so the browser must run on the same machine; over SSH, forward the printed port or sign in on a desktop session.
+- **`scripts/anchi daemon install`** writes a systemd user unit (`~/.config/systemd/user/anchi-daemon.service`). To keep it running after you log out, run `loginctl enable-linger "$USER"`.
+- **Workspaces** (`~/AnchiWorkspaces`) are macOS only until the Linux mount is verified.

@@ -6,9 +6,9 @@ import { homeLayout } from '@anchi/core';
 import {
   connectOrStart,
   type DaemonClient,
-  installLaunchd,
+  installAutostart,
   tryConnect,
-  uninstallLaunchd,
+  uninstallAutostart,
 } from '@anchi/daemon';
 import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow } from '@anchi/protocol';
 import { Command } from 'commander';
@@ -520,10 +520,10 @@ daemon.command('status').action(async () => {
 });
 daemon
   .command('install')
-  .description('Run the daemon at login (launchd)')
-  .action(() => console.log(`installed ${installLaunchd(layout)}`));
+  .description('Run the daemon at login (launchd on macOS, a systemd user unit on Linux)')
+  .action(() => console.log(`installed ${installAutostart(layout)}`));
 daemon
   .command('uninstall')
-  .action(() => console.log(uninstallLaunchd() ? 'uninstalled' : 'not installed'));
+  .action(() => console.log(uninstallAutostart() ? 'uninstalled' : 'not installed'));
 
 await program.parseAsync();

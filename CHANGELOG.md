@@ -13,6 +13,7 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 - Gmail, Drive, Notion and Slack for agents through a per-cell bridge that names the agent to the service, so `approvals` holds one agent's writes; Google sign-in, tokens and write modes set up from the daemon.
 - Delegation between agents, approvals of held writes, schedule and polling triggers, skills, task search, trees, deletion and retention.
 - S3 `aws-chunked` uploads, signed or unsigned, re-signed by the proxy, also when streamed. S3 multi-object deletes, expiry rules, bucket policies and ACLs always ask.
+- Linux hosts (experimental): notifications through `notify-send`, Google sign-in through `xdg-open`, `daemon install` as a systemd user unit, `/dev/kvm` and QEMU checks before installing.
 - Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
 
 ### Fixed

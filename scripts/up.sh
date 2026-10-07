@@ -3,10 +3,19 @@ set -euo pipefail
 vm_name=${QISUO_INSTALL_VM:-${ANCHI_INSTALL_VM:-secure-vm}}
 [[ "$vm_name" =~ ^secure-vm(-[a-z0-9-]+)?$ ]] || { echo "Invalid VM name" >&2; exit 1; }
 cd "$(dirname "$0")/.."
-command -v limactl >/dev/null || { echo 'Install Lima first: brew install lima' >&2; exit 1; }
 # shellcheck source=guest/arch.sh
 source guest/arch.sh
 vm_type=$(host_vm_type "$(uname -s)")
+if [[ $vm_type == qemu ]]; then
+  command -v limactl >/dev/null || { echo 'Install Lima 2.2.0+ from https://github.com/lima-vm/lima/releases (see docs/GETTING_STARTED.md)' >&2; exit 1; }
+  # Lima falls back to slow software emulation without KVM; refuse instead.
+  # shellcheck disable=SC2016  # $USER is for the user to type
+  [[ -r /dev/kvm && -w /dev/kvm ]] || { echo '/dev/kvm is missing or not accessible: enable CPU virtualization, then: sudo usermod -aG kvm "$USER" and log in again' >&2; exit 1; }
+  qemu=qemu-system-$(uname -m)
+  command -v "$qemu" >/dev/null || { echo "Install QEMU first ($qemu), for example: sudo apt-get install -y qemu-system-x86 qemu-utils" >&2; exit 1; }
+else
+  command -v limactl >/dev/null || { echo 'Install Lima first: brew install lima' >&2; exit 1; }
+fi
 # The version of the checkout, recorded in the VM's installed.json.
 runtime_version=$(python3 - <<'PY'
 import json

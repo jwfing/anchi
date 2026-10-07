@@ -4,7 +4,7 @@ Anchi runs a team of Codex and Claude Code agents. Each task runs in a disposabl
 
 ## Install
 
-Prerequisites: Lima (`brew install lima`), Node 22+ and pnpm on the Mac.
+Prerequisites: Lima (`brew install lima`), Node 22+ and pnpm on the Mac. On a Linux host (experimental), "the Mac" in this guide means that machine; its prerequisites and differences are in [Getting started](GETTING_STARTED.md#linux).
 
 ```bash
 pnpm --dir anchi install

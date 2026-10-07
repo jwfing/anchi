@@ -37,6 +37,17 @@ async function json(exec: Exec, args: string[], stdin = ''): Promise<Record<stri
   return value;
 }
 
+/** Opens the sign-in page in the default browser; `anchi setup service` also prints the URL. */
+export function openInBrowser(url: string): void {
+  const cmd =
+    process.platform === 'darwin' ? 'open' : process.platform === 'linux' ? 'xdg-open' : undefined;
+  if (!cmd) return;
+  // A missing command must not take the daemon down.
+  const child = spawn(cmd, [url], { stdio: 'ignore', detached: true });
+  child.on('error', () => {});
+  child.unref();
+}
+
 export class ServiceSetup {
   private logins = new Map<ServiceConnectorId, Server>();
 
@@ -47,10 +58,7 @@ export class ServiceSetup {
       ok: boolean;
       error?: string;
     }) => void = () => {},
-    private openUrl: (url: string) => void = (url) => {
-      if (process.platform === 'darwin')
-        spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
-    },
+    private openUrl: (url: string) => void = openInBrowser,
   ) {}
 
   private get exec(): Exec {

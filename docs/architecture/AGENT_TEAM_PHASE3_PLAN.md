@@ -83,6 +83,14 @@
 - As built: `STREAMING-UNSIGNED-PAYLOAD-TRAILER` (the AWS CLI's default) needs only the headers re-signed; signed chunks and their trailer are recomputed with the body's length unchanged. Chunk signatures are tested against the worked examples of the S3 reference; the trailer signature follows MinIO's verifier and still needs the live bucket check.
 - Found on the way: mitmproxy sends a streamed body's headers before the `request` hook, so bodies over 8 MiB were never injected yet were audited as injected. Streamed requests are now decided in `requestheaders`; only S3 is injected there, since its operation comes from method and path. A git push over 8 MiB still fails (follow-up: decide pushes from their ref commands, or raise the limit for git). S3 operations now name their subresource, so `POST ?delete`, `PUT ?lifecycle`, `?policy` and `?acl` are high-risk.
 
+### Linux hosts (before P7)
+
+Added on 2026-10-07 at your request: run the whole agent team on a Linux host first, then P7.
+
+- The VM side already runs on Linux (QEMU/KVM; the `linux-live` workflow runs `make verify-anchi`).
+- Host side: notifications through `notify-send`, Google sign-in through `xdg-open`, `daemon install` as a systemd user unit, a `/dev/kvm` and QEMU check in `up.sh`, Linux notes in Getting started.
+- Confirmation on your Linux machine: `pnpm --dir anchi install`, `scripts/anchi setup install`, `setup vault init`, `setup codex`, `make verify-anchi`, a task in the TUI, a notification (an approval), `daemon install` and a reboot, Google sign-in.
+
 ### P7 — Linux workspaces (M)
 
 - Spike on 9p in Lima/QEMU: ownership mapping into the user-namespaced cell, performance of `git status` on a large repository. If 9p fails the checks, try virtiofs on Linux hosts.
@@ -117,7 +125,8 @@ Confirmed on 2026-10-07:
 | P4 | Done. Live: `reader` and `writer` read Notion through the bridge; a `writer` write is held as `notion:writer`; `make verify-anchi` 32/32 |
 | P5 | Done |
 | P6 | Done offline and in `make verify-anchi` (streamed path, without an AWS account); a live upload to a dedicated bucket is part of P9 |
-| P7 | Not started |
+| Linux hosts | Implemented; offline tests pass on macOS; waiting for confirmation on your Linux machine |
+| P7 | Not started; after the Linux host confirmation |
 | P8 | Done. CI workflow added; not yet run on the Linux runner |
 | P9 | Waiting for accounts: Claude token, Drive sign-in, a valid GitHub token |
 
