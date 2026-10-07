@@ -87,6 +87,8 @@ The cell runs as `agent`, uid 1000, with no capabilities, a read-only `layer:bas
 
 Direct `codex sandbox` probes: `read-only` blocked all writes; `workspace-write` allowed the workdir and `/tmp`, and blocked `/etc`.
 
+**Control run, cell isolation only** (`ANCHI_POC_BWRAP_PROFILE=0 ANCHI_POC_SANDBOX=danger-full-access`, real credentials): the same task succeeded. `report.txt` was written, and `/etc/anchi-probe` failed with `Permission denied`, because the agent user does not own `/etc`. The turn used 2,557 tokens; the cell took 15.6 s. Without Codex's sandbox, the agent can still write anywhere the agent user owns: its home, `/tmp`, and the overlay's writable layer, all of which are discarded with the cell.
+
 **Trade-off still open:** with the bwrap profile, the agent can call `bwrap` itself to get a nested user namespace (uid 0 inside it). Plain `unshare` stays blocked. The profile narrows nested user namespaces to bwrap but does not remove the kernel attack surface. The alternative is to rely on the cell alone and run `--sandbox danger-full-access` with `ANCHI_POC_BWRAP_PROFILE=0`.
 
 ## Findings for the design
