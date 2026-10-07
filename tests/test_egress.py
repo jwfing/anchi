@@ -22,7 +22,9 @@ AWS = {
     'secret_access_key': 'fake/secret/key/0000000000',
     'region': 'us-east-1',
 }
-ALL = {'github', 'aws', 'linear', 'codex'}
+CLAUDE_OAUTH = {'token': 'sk-ant-oat01-fakefakefakefakefakefakefakefake', 'kind': 'oauth'}
+CLAUDE_KEY = {'token': 'sk-ant-api03-fakefakefakefakefakefakefakefake', 'kind': 'api_key'}
+ALL = {'github', 'aws', 'linear', 'codex', 'claude'}
 
 
 def decide(method, host, path, headers=None, body=b'', grants=ALL):
@@ -60,6 +62,26 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(decide('GET', 'chatgpt.com', '/backend-api/plugins').reason, 'no-placeholder')
         other = decide('GET', 'chatgpt.com', '/x', {'authorization': 'Bearer someone-else'})
         self.assertEqual((other.action, other.reason), ('pass', 'no-placeholder'))
+
+    def test_claude_is_replace_only_for_either_credential_kind(self):
+        oauth = {'authorization': f'Bearer {rules.PLACEHOLDER_CLAUDE_OAUTH}', 'anthropic-beta': 'oauth-2025-04-20'}
+        decision = decide('POST', 'api.anthropic.com', '/v1/messages', oauth)
+        self.assertEqual(decision.action, 'inject')
+        headers = rules.apply(decision, 'POST', 'https://api.anthropic.com/v1/messages', oauth, b'', CLAUDE_OAUTH)
+        self.assertEqual(headers['authorization'], f'Bearer {CLAUDE_OAUTH["token"]}')
+        self.assertEqual(headers['anthropic-beta'], 'oauth-2025-04-20')
+        key = {'x-api-key': rules.PLACEHOLDER_CLAUDE_KEY}
+        decision = decide('POST', 'api.anthropic.com', '/v1/messages', key)
+        headers = rules.apply(decision, 'POST', 'https://api.anthropic.com/v1/messages', key, b'', CLAUDE_KEY)
+        self.assertEqual(headers['x-api-key'], CLAUDE_KEY['token'])
+        self.assertNotIn('authorization', headers)
+        # No placeholder, no credential; a Codex agent gets nothing here either.
+        self.assertEqual(decide('GET', 'api.anthropic.com', '/mcp-registry/v0/servers').reason, 'no-placeholder')
+        codex_only = decide('POST', 'api.anthropic.com', '/v1/messages', oauth, grants={'codex'})
+        self.assertEqual((codex_only.action, codex_only.reason), ('pass', 'not-granted'))
+        self.assertEqual(decide('POST', 'api.anthropic.com', '/v1/organizations/api_keys', oauth).action, 'deny')
+        self.assertEqual(decide('POST', 'console.anthropic.com', '/v1/oauth/token').action, 'deny')
+        self.assertEqual(decide('POST', 'claude.ai', '/v1/oauth/token').action, 'deny')
 
     def test_token_refresh_is_denied_for_everyone(self):
         for grants in (ALL, set()):
@@ -293,6 +315,34 @@ class RegistryTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_register_grants_only_the_cell_runtime(self):
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            await registry.register({'task': 'tc', 'agent': 'a', 'connectors': [], 'runtime': 'claude'})
+            await registry.register({'task': 'tx', 'agent': 'a', 'connectors': ['github']})
+            self.assertEqual(registry.cells['tc'].grants, frozenset({'claude'}))
+            self.assertEqual(registry.cells['tx'].grants, frozenset({'github', 'codex'}))
+            with self.assertRaises(ValueError):
+                registry.validate({'task': 'ty', 'agent': 'a', 'connectors': [], 'runtime': 'gpt'})
+            for task in ('tc', 'tx'):
+                await registry.unregister(task)
+
+        asyncio.run(scenario())
+
+    def test_claude_import_accepts_tokens_and_keys_only(self):
+        import claude_admin
+
+        self.assertEqual(claude_admin.validate({'token': CLAUDE_OAUTH['token']})['kind'], 'oauth')
+        self.assertEqual(claude_admin.validate({'token': CLAUDE_KEY['token']})['kind'], 'api_key')
+        for bad in (
+            'sk-ant-sid01-' + 'x' * 40,
+            'short',
+            rules.PLACEHOLDER_CLAUDE_OAUTH,
+            'sk-ant-oat01-' + 'x' * 40 + ' ',
+        ):
+            with self.assertRaises(Exception):
+                claude_admin.validate({'token': bad})
+
     def test_register_validates_names_and_connectors(self):
         registry = self.module.Registry(('127.0.0.1', 1))
         for request in (
@@ -375,7 +425,9 @@ class AuthEgressScopeTests(unittest.TestCase):
     def test_only_the_egress_caller_reads_connector_credentials(self):
         import server
 
-        self.assertEqual(server.credential_ops('egress'), ('egress_credential', 'codex_token', 'codex_account'))
+        self.assertEqual(
+            server.credential_ops('egress'), ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
+        )
         self.assertNotIn('egress_credential', server.credential_ops('inference'))
         self.assertEqual(server.credential_ops(None), ())
 

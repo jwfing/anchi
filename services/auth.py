@@ -377,6 +377,10 @@ def handle(request, caller):
             if credential['expires_at'] <= time.time() + 30:
                 raise Denied('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
             return credential
+        if op == 'claude_token' and caller == 'egress':
+            # A `claude setup-token` token or an API key; no refresh on either side.
+            value = read('claude.json')
+            return {'token': value['token'], 'kind': value['kind'], 'generation': value['generation']}
         if op == 'model_key' and caller == 'inference':
             return read('model.json')
         raise Denied('OPERATION_DENIED')

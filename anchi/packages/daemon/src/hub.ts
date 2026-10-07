@@ -63,7 +63,7 @@ export interface HubEvents {
 }
 
 function cellKey(agent: ResolvedAgent, imageHash: string): string {
-  return JSON.stringify([agent.image, imageHash, agent.connectors, agent.sandbox]);
+  return JSON.stringify([agent.runtime, agent.image, imageHash, agent.connectors, agent.sandbox]);
 }
 
 /**
@@ -385,6 +385,7 @@ export class Hub extends EventEmitter<HubEvents> {
       hash,
       connectors: agent.connectors,
       sandbox: agent.sandbox,
+      runtime: agent.runtime,
     });
     const session = new CellSession(task.id, child);
     // The cell belongs to this task; its tool calls act as this task's agent.

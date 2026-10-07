@@ -132,6 +132,7 @@ export interface CellStart {
   hash: string;
   connectors: string[];
   sandbox: 'cell' | 'codex-workspace-write';
+  runtime: 'codex' | 'claude-code';
 }
 
 export interface ImageMeta {
@@ -163,6 +164,7 @@ export class Guest {
       c.hash,
       connectors,
       c.sandbox,
+      c.runtime,
     ]);
   }
 
@@ -271,6 +273,22 @@ export class Guest {
     return parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/codex_admin.py`, 'status']),
     ) as { configured: boolean; account_id: string | null; expires_at: number | null };
+  }
+
+  async claudeStatus(): Promise<{ configured: boolean; kind: 'oauth' | 'api_key' | null }> {
+    return parse(
+      await this.transport.exec(['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'status']),
+    ) as { configured: boolean; kind: 'oauth' | 'api_key' | null };
+  }
+
+  /** A `claude setup-token` token or an API key, on stdin only. */
+  async importClaude(token: string): Promise<void> {
+    parse(
+      await this.transport.exec(
+        ['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'import-token'],
+        JSON.stringify({ token }),
+      ),
+    );
   }
 
   async importCodex(accessToken: string, accountId: string): Promise<{ expires_at: number }> {

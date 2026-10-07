@@ -16,15 +16,17 @@ from xml.sax.saxutils import escape
 PLACEHOLDER_MARK = 'anchi-placeholder'
 PLACEHOLDER_AWS_KEY = 'AKIAANCHIPLACEHOLDER'
 CONNECTORS = ('github', 'aws', 'linear')
-# Runtime credentials every agent of that runtime gets; injected replace-only.
-RUNTIMES = ('codex',)
+# Runtime credentials an agent of that runtime gets; injected replace-only.
+RUNTIMES = ('codex', 'claude')
+PLACEHOLDER_CLAUDE_OAUTH = 'sk-ant-oat01-anchi-placeholder-' + '0' * 40
+PLACEHOLDER_CLAUDE_KEY = 'sk-ant-api03-anchi-placeholder-' + '0' * 40
 
 
 @dataclass(frozen=True)
 class Rule:
     name: str
     hosts: tuple[str, ...]
-    # bearer | basic | raw | aws_sigv4 | none (deny-only)
+    # bearer | basic | raw | aws_sigv4 | anthropic | none (deny-only)
     kind: str
     # Connector or runtime that grants this rule; None applies to every agent.
     grant: str | None
@@ -40,6 +42,24 @@ RULES: tuple[Rule, ...] = (
     # Token refresh happens on the trusted side; a refresh from a cell would return a new
     # credential in the response body.
     Rule(name='openai-auth', hosts=('auth.openai.com',), kind='none', grant=None, deny=(r'.*',)),
+    # Claude Code: a subscription token (Authorization: Bearer) or an API key (x-api-key),
+    # whichever the vault holds; organization administration (API key management) is denied.
+    Rule(
+        name='anthropic',
+        hosts=('api.anthropic.com',),
+        kind='anthropic',
+        grant='claude',
+        replace_only=True,
+        deny=(r'^\S+ /v1/organizations(/|$)',),
+    ),
+    # OAuth token exchange would return a new credential to the cell.
+    Rule(
+        name='anthropic-auth',
+        hosts=('console.anthropic.com', 'platform.claude.com', 'claude.ai'),
+        kind='none',
+        grant=None,
+        deny=(r'(?i)/oauth/token',),
+    ),
     Rule(
         name='github-api',
         hosts=('api.github.com',),
@@ -115,7 +135,7 @@ def find_rule(host):
 
 def classify_credential(headers):
     """What kind of credential the client sent, without revealing it."""
-    auth = headers.get('authorization', '')
+    auth = headers.get('authorization', '') or headers.get('x-api-key', '')
     if not auth:
         return 'none'
     if PLACEHOLDER_MARK in auth or PLACEHOLDER_AWS_KEY in auth:
@@ -241,6 +261,12 @@ def apply(decision, method, url, headers, body, credential):
         out['authorization'] = 'Basic ' + base64.b64encode(f'x-access-token:{credential["token"]}'.encode()).decode()
     elif rule.kind == 'raw':
         out['authorization'] = credential['token']
+    elif rule.kind == 'anthropic':
+        out.pop('x-api-key', None)
+        if credential['kind'] == 'api_key':
+            out['x-api-key'] = credential['token']
+        else:
+            out['authorization'] = f'Bearer {credential["token"]}'
     else:
         raise ValueError(f'rule {rule.name} does not inject')
     if rule.name == 'codex':

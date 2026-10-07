@@ -36,6 +36,21 @@ ln -sf /opt/codex/bin/codex /usr/local/bin/codex
 ln -sf /opt/codex/bin/codex-linux-sandbox /usr/local/bin/codex-linux-sandbox
 echo "base: $(codex --version)"
 
+# Claude Code: the native binary from its npm platform package, pinned by version and hash.
+case $(uname -m) in
+  aarch64) cc_pkg=claude-code-linux-arm64 cc_sha=$ANCHI_CLAUDE_SHA256_ARM64 ;;
+  x86_64) cc_pkg=claude-code-linux-x64 cc_sha=$ANCHI_CLAUDE_SHA256_X64 ;;
+esac
+curl -fsSL --retry 3 -o /var/tmp/claude.tgz \
+  "https://registry.npmjs.org/@anthropic-ai/$cc_pkg/-/$cc_pkg-$ANCHI_CLAUDE_VERSION.tgz"
+echo "$cc_sha  /var/tmp/claude.tgz" | sha256sum -c - >/dev/null
+rm -rf /opt/claude && install -d /opt/claude/bin
+tar -xzf /var/tmp/claude.tgz -C /var/tmp package/claude
+install -m 0755 /var/tmp/package/claude /opt/claude/bin/claude
+rm -rf /var/tmp/claude.tgz /var/tmp/package
+ln -sf /opt/claude/bin/claude /usr/local/bin/claude
+echo "base: $(claude --version 2>&1 | head -1)"
+
 # Agent home mount point; Codex refuses to create helpers under /tmp.
 install -d -o 1000 -g 1000 -m 0700 /home/agent
 usermod -d /home/agent agent 2>/dev/null || true

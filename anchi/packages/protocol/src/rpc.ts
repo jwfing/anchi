@@ -83,11 +83,19 @@ export interface RuntimeAccountStatus {
   expiresAt: number | null;
 }
 
+/** Claude Code credential in the vault: a subscription token or an API key. */
+export interface ClaudeAccountStatus {
+  runtime: 'claude-code';
+  connected: boolean;
+  kind: 'oauth' | 'api_key' | null;
+}
+
 export interface SetupStatus {
   vm: 'missing' | 'stopped' | 'running' | 'unknown';
   vaultUnlocked: boolean;
   installed: boolean;
   codex: RuntimeAccountStatus;
+  claude: ClaudeAccountStatus;
   connectors: ConnectorStatus[];
 }
 
@@ -148,6 +156,8 @@ export interface Methods {
   'setup.status': [Record<string, never>, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
+  /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */
+  'setup.importClaude': [{ token: string }, ClaudeAccountStatus];
   /** Runs a setup step; the caller has the user's consent. Progress arrives as `setup`. */
   'setup.run': [{ action: SetupAction }, SetupStatus];
   'connectors.set': [ConnectorSecret, ConnectorStatus];

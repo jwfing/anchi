@@ -155,6 +155,7 @@ describe('daemon tasks', () => {
       'base',
       'github',
       'cell',
+      'codex',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([

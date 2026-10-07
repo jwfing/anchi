@@ -218,6 +218,21 @@ function runSetup(action: SetupAction, yes: boolean, consent: string) {
 }
 
 setup
+  .command('claude')
+  .description('Store a `claude setup-token` token or an Anthropic API key in the VM vault')
+  .action(() =>
+    withClient(async (client) => {
+      const token = process.stdin.isTTY
+        ? await askSecret('Claude Code token (from `claude setup-token`) or API key: ')
+        : await readStdin();
+      const s = await client.call('setup.importClaude', { token });
+      console.log(
+        `Claude Code connected (${s.kind === 'api_key' ? 'API key' : 'subscription token'})`,
+      );
+    }),
+  );
+
+setup
   .command('vm')
   .description('Start the VM')
   .action(() => runSetup('vm-start', true, ''));

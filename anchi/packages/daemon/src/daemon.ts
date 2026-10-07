@@ -28,6 +28,7 @@ import { tryConnect } from './launch.ts';
 import { desktopNotify } from './notify.ts';
 import { Peer } from './rpc.ts';
 import {
+  claudeStatus,
   codexStatus,
   CONNECTOR_IDS,
   connectorStatuses,
@@ -181,6 +182,10 @@ export class Daemon {
       return this.guest.scan(task);
     },
     'setup.status': () => setupStatus(this.guest, this.lima),
+    'setup.importClaude': async ({ token }) => {
+      await this.guest.importClaude(str(token, 'token', 500).trim());
+      return claudeStatus(this.guest);
+    },
     'setup.importCodex': async () => {
       const login = readHostCodexLogin();
       await this.guest.importCodex(login.accessToken, login.accountId);

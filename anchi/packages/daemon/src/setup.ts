@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
+  ClaudeAccountStatus,
   ConnectorId,
   ConnectorStatus,
   RuntimeAccountStatus,
@@ -34,6 +35,11 @@ export function readHostCodexLogin(
   return { accessToken, accountId };
 }
 
+export async function claudeStatus(guest: Guest): Promise<ClaudeAccountStatus> {
+  const s = await guest.claudeStatus();
+  return { runtime: 'claude-code', connected: s.configured, kind: s.kind };
+}
+
 export async function codexStatus(guest: Guest): Promise<RuntimeAccountStatus> {
   const s = await guest.codexStatus();
   return {
@@ -60,17 +66,19 @@ export async function setupStatus(guest: Guest, lima: LimaTransport): Promise<Se
     vaultUnlocked: false,
     installed: false,
     codex: { runtime: 'codex', connected: false, accountId: null, expiresAt: null },
+    claude: { runtime: 'claude-code', connected: false, kind: null },
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
   };
   if (vm !== 'running') return empty;
   try {
-    const [vault, codex, connectors, base] = await Promise.all([
+    const [vault, codex, claude, connectors, base] = await Promise.all([
       guest.vaultStatus(),
       codexStatus(guest),
+      claudeStatus(guest),
       connectorStatuses(guest),
       guest.imageStatus('codex', 'base').catch(() => false),
     ]);
-    return { vm, vaultUnlocked: vault.unlocked, installed: base, codex, connectors };
+    return { vm, vaultUnlocked: vault.unlocked, installed: base, codex, claude, connectors };
   } catch {
     return empty;
   }

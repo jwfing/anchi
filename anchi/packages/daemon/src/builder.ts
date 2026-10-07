@@ -23,14 +23,19 @@ the user reviews your proposal in a confirmation dialog, and only then is it wri
 
 An agent is a YAML file. Fields:
 - name: display name; description: one line.
-- runtime: codex (required).
-- model (optional, e.g. gpt-5.5) and effort (low | medium | high | xhigh).
+- runtime: codex or claude-code (required). Use claude-code when the user asks for Claude.
+- model (optional; e.g. gpt-5.5 for codex, claude-opus-5-5 or claude-sonnet-5-5 for
+  claude-code) and effort (low | medium | high | xhigh; codex only).
 - prompt: { mode: append, text: | ... } — the agent's system instructions. Be specific about
   its job, how it should work, and what it must not do.
-- connectors: any of github, aws, linear. Credentials for these are injected outside the
-  agent's cell; never put tokens anywhere. Grant only what the job needs.
-- image: id of an image recipe (or omit for the base image, which has git, gh, curl, jq and
-  Codex on Debian 12).
+- connectors: any of github, aws, linear (credentials injected outside the agent's cell) and
+  gmail, drive, notion, slack (served by trusted services). Never put tokens anywhere. Grant
+  only what the job needs.
+- delegates: ids of agents this agent may hand tasks to (optional).
+- approvals: per connector, ask to hold its writes for the user's approval (optional), e.g.
+  { github: ask }.
+- image: id of an image recipe (or omit for the base image, which has git, gh, curl, jq,
+  Codex and Claude Code on Debian 12).
 - sandbox: cell (default).
 
 An image recipe is a YAML file with:

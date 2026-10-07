@@ -132,7 +132,8 @@ def egress(request, timeout=15):
 
 
 def base_version():
-    return 'codex-' + cell_env()['ANCHI_CODEX_VERSION']
+    env = cell_env()
+    return f'codex-{env["ANCHI_CODEX_VERSION"]}-claude-{env["ANCHI_CLAUDE_VERSION"]}'
 
 
 def layer_dir(image, digest):
@@ -250,7 +251,9 @@ def image_build(image, digest):
     (build_dir / 'build.sh').write_text(script)
     env = cell_env()
     (build_dir / 'env').write_text(
-        ''.join(f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith('ANCHI_CODEX'))
+        ''.join(
+            f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith(('ANCHI_CODEX', 'ANCHI_CLAUDE'))
+        )
         + ''.join(f'export {k}={shell_quote(v)}\n' for k, v in proxy_env().items())
     )
     log_path = building / 'build.log'
@@ -438,7 +441,7 @@ def codex_placeholder(account):
     return json.dumps({'OPENAI_API_KEY': None, 'tokens': tokens, 'last_refresh': now})
 
 
-def cell_environment(task, agent, connectors, identifiers):
+def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
     env = {
         'HOME': '/home/agent',
         'USER': 'agent',
@@ -452,8 +455,17 @@ def cell_environment(task, agent, connectors, identifiers):
         'GIT_COMMITTER_NAME': f'{agent} (Anchi agent)',
         'GIT_COMMITTER_EMAIL': f'{agent}@agents.anchi.invalid',
         'GIT_TERMINAL_PROMPT': '0',
+        'ANCHI_RUNTIME': runtime,
         **proxy_env(),
     }
+    if runtime == 'claude-code':
+        name, placeholder = CLAUDE_PLACEHOLDERS[identifiers['claude_kind']]
+        env[name] = placeholder
+        env['PATH'] = '/opt/claude/bin:' + env['PATH']
+        env['CLAUDE_CONFIG_DIR'] = '/home/agent/.claude'
+        # No auto-update (the image is pinned) and no telemetry or error reporting.
+        env['DISABLE_AUTOUPDATER'] = '1'
+        env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
     if 'github' in connectors:
         env['GH_TOKEN'] = f'{PLACEHOLDER}-github'
         env['GH_PROMPT_DISABLED'] = '1'
@@ -498,7 +510,14 @@ def cleanup(task):
     shutil.rmtree(work, ignore_errors=True)
 
 
-def cell_start(task, agent, image, digest, connectors_arg, sandbox):
+RUNTIMES = {'codex': 'codex', 'claude-code': 'claude'}  # agent runtime -> proxy grant
+CLAUDE_PLACEHOLDERS = {
+    'oauth': ('CLAUDE_CODE_OAUTH_TOKEN', 'sk-ant-oat01-anchi-placeholder-' + '0' * 40),
+    'api_key': ('ANTHROPIC_API_KEY', 'sk-ant-api03-anchi-placeholder-' + '0' * 40),
+}
+
+
+def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='codex'):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
     name(image, 'BAD_IMAGE')
@@ -509,6 +528,8 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
         raise Failure('BAD_CONNECTORS')
     if sandbox not in SANDBOXES:
         raise Failure('BAD_SANDBOX')
+    if runtime not in RUNTIMES or (runtime != 'codex' and sandbox != 'cell'):
+        raise Failure('BAD_RUNTIME')
     env = cell_env()
     uid = int(env['SECURE_CELL_UID_BASE']) + int(env['SECURE_CELL_AGENT_UID'])
     work = CELLS / task
@@ -530,6 +551,7 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
                     'hash': digest,
                     'connectors': connectors,
                     'sandbox': sandbox,
+                    'runtime': runtime,
                     'started_at': time.time(),
                 }
             )
@@ -539,16 +561,21 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
         root.mkdir()
         run('mount', '-t', 'overlay', 'overlay', '-o', f'ro,lowerdir={lower}', str(root))
         proxied = [c for c in connectors if c in PROXY_CONNECTORS]
-        registration = egress({'op': 'register', 'task': task, 'agent': agent, 'connectors': proxied})
+        registration = egress(
+            {'op': 'register', 'task': task, 'agent': agent, 'connectors': proxied, 'runtime': RUNTIMES[runtime]}
+        )
         identifiers = registration.get('identifiers', {})
-        if not identifiers.get('codex_account_id'):
-            raise Failure('CODEX_NOT_CONFIGURED')
         home = agent_home(agent, uid)
-        write_owned(home / '.codex/auth.json', codex_placeholder(identifiers['codex_account_id']), uid)
-        write_owned(home / '.codex/config.toml', CODEX_CONFIG, uid)
+        if runtime == 'codex':
+            if not identifiers.get('codex_account_id'):
+                raise Failure('CODEX_NOT_CONFIGURED')
+            write_owned(home / '.codex/auth.json', codex_placeholder(identifiers['codex_account_id']), uid)
+            write_owned(home / '.codex/config.toml', CODEX_CONFIG, uid)
+        elif identifiers.get('claude_kind') not in CLAUDE_PLACEHOLDERS:
+            raise Failure('CLAUDE_NOT_CONFIGURED')
         if sandbox == 'codex-workspace-write':
             ensure_bwrap_profile()
-        cell = cell_environment(task, agent, connectors, identifiers)
+        cell = cell_environment(task, agent, connectors, identifiers, runtime)
         command = [
             'systemd-run',
             '--quiet',
@@ -719,6 +746,7 @@ def real_secrets():
             ('linear', 'linear.json', ('token',)),
             ('aws', 'aws.json', ('access_key_id', 'secret_access_key', 'session_token')),
             ('codex', 'codex.json', ('access_token',)),
+            ('claude', 'claude.json', ('token',)),
         ):
             if not vault.exists(auth.STORE, file):
                 continue
@@ -785,7 +813,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) == 6:
+    if command == 'start' and len(rest) in (6, 7):
         return cell_start(*rest)
     if command == 'stop' and len(rest) == 1:
         return cell_stop(*rest)

@@ -10,6 +10,7 @@ import {
   type RuntimeEvent,
 } from '@anchi/protocol';
 import { codexOptions, mapCodexEvent } from '../src/codex.ts';
+import { claudeOptions, mapClaudeMessage } from '../src/claude.ts';
 import { handle } from '../src/mcp.ts';
 import { startRunner, type RunTurn } from '../src/runner.ts';
 
@@ -205,6 +206,77 @@ describe('MCP server', () => {
     ).toMatchObject({ result: { isError: true, content: [{ text: 'unknown tool nope' }] } });
     expect(await handle({ jsonrpc: '2.0', id: 5, method: 'resources/list' }, call)).toMatchObject({
       error: { code: -32601 },
+    });
+  });
+});
+
+describe('Claude Code mapping', () => {
+  it('maps SDK messages to runtime events', () => {
+    const events = [
+      { type: 'system', subtype: 'init', session_id: 'sess-1' },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'Running it.' },
+            { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: 'a.txt' }] },
+          ],
+        },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+      {
+        type: 'result',
+        subtype: 'error_max_turns',
+        is_error: true,
+        errors: ['too many turns'],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ].flatMap((m) => [...mapClaudeMessage(m as never)]);
+    expect(events).toEqual([
+      { type: 'session.started', resumeId: 'sess-1' },
+      { type: 'message', text: 'Running it.' },
+      { type: 'tool.call', id: 'tu1', name: 'Bash', input: '{"command":"ls"}' },
+      { type: 'tool.result', id: 'tu1', output: 'a.txt', isError: false },
+      { type: 'usage', inputTokens: 10, outputTokens: 5 },
+      { type: 'turn.completed' },
+      { type: 'usage', inputTokens: 1, outputTokens: 1 },
+      { type: 'error', message: 'Claude stopped: error_max_turns (too many turns)', fatal: true },
+      { type: 'turn.completed' },
+    ]);
+  });
+
+  it('bypasses permissions inside the cell and loads no settings files', () => {
+    const o = claudeOptions(
+      {
+        workdir: '/home/agent/work',
+        instructions: 'Be brief',
+        instructionsMode: 'append',
+        sandbox: 'cell',
+      },
+      {},
+      new AbortController(),
+      'sess-1',
+    );
+    expect(o).toMatchObject({
+      pathToClaudeCodeExecutable: '/opt/claude/bin/claude',
+      permissionMode: 'bypassPermissions',
+      settingSources: [],
+      resume: 'sess-1',
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: 'Be brief' },
+      mcpServers: { anchi: { type: 'stdio', args: ['/opt/anchi/mcp.mjs'] } },
     });
   });
 });

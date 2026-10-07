@@ -76,7 +76,9 @@ class Credentials:
         hit = self.cache.get(grant)
         if hit and hit[0] > self.clock():
             return hit[1]
-        if grant == 'codex':
+        if grant == 'claude':
+            value = self.fetch({'op': 'claude_token'})
+        elif grant == 'codex':
             value = self.fetch({'op': 'codex_token'})
             if value.get('expires_at', 0) <= time.time() + 30:
                 raise LookupError('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
@@ -125,6 +127,9 @@ class Registry:
 
     def validate(self, request):
         task, agent, connectors = request.get('task'), request.get('agent'), request.get('connectors')
+        runtime = request.get('runtime', 'codex')
+        if runtime not in rules.RUNTIMES:
+            raise ValueError('BAD_RUNTIME')
         if not isinstance(task, str) or not NAME.fullmatch(task):
             raise ValueError('BAD_TASK')
         if not isinstance(agent, str) or not NAME.fullmatch(agent):
@@ -133,7 +138,8 @@ class Registry:
             raise ValueError('BAD_CONNECTORS')
         if task in self.cells:
             raise ValueError('CELL_EXISTS')
-        return task, agent, set(connectors) | set(rules.RUNTIMES)
+        # The cell gets its own runtime's credential only.
+        return task, agent, set(connectors) | {runtime}
 
     async def register(self, request):
         task, agent, grants = self.validate(request)
@@ -248,7 +254,7 @@ class EgressProxy:
             op = request.get('op') if isinstance(request, dict) else None
             if op == 'register':
                 result = await self.registry.register(request)
-                result['identifiers'] = self.identifiers(set(request.get('connectors', [])))
+                result['identifiers'] = self.identifiers(self.registry.cells[request['task']].grants)
             elif op == 'unregister':
                 task = request.get('task')
                 if not isinstance(task, str) or not NAME.fullmatch(task):
@@ -292,6 +298,11 @@ class EgressProxy:
             out['codex_account_id'] = self.credentials.fetch({'op': 'codex_account'})['account_id']
         except (LookupError, OSError, ValueError, KeyError):
             pass
+        if 'claude' in grants:
+            try:
+                out['claude_kind'] = self.credentials.get('claude')['kind']
+            except (LookupError, OSError, ValueError, KeyError):
+                pass
         if 'aws' in grants:
             try:
                 out['aws_region'] = self.credentials.get('aws')['region']

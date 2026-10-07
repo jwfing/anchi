@@ -63,7 +63,16 @@ const TONE: Record<Tone, { color?: string; dimColor?: boolean; bold?: boolean }>
 };
 
 type SecretField = { key: string; label: string; masked: boolean; optional?: boolean };
-const SECRET_FIELDS: Record<ConnectorId, SecretField[]> = {
+/** Masked inputs: connector credentials, and the Claude Code token (`claude`). */
+type SecretTarget = ConnectorId | 'claude';
+const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
+  claude: [
+    {
+      key: 'token',
+      label: 'Claude Code token from `claude setup-token` (sk-ant-oat01-…), or an API key',
+      masked: true,
+    },
+  ],
   github: [{ key: 'token', label: 'GitHub fine-grained token (github_pat_…)', masked: true }],
   linear: [{ key: 'token', label: 'Linear API key (lin_api_…)', masked: true }],
   aws: [
@@ -83,7 +92,7 @@ type Modal =
   | { kind: 'proposal'; proposal: BuilderProposal; scroll: number }
   | {
       kind: 'secret';
-      connector: ConnectorId;
+      connector: SecretTarget;
       index: number;
       values: Record<string, string>;
       input: string;
@@ -417,6 +426,12 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           return setModal({ ...modal, index: modal.index + 1, values, input: '' });
         }
         setModal(null);
+        if (modal.connector === 'claude') {
+          return runAction(
+            () => client.call('setup.importClaude', { token: values.token ?? '' }),
+            'Claude Code connected',
+          );
+        }
         const secret = { id: modal.connector, ...values } as ConnectorSecret;
         return runAction(
           () => client.call('connectors.set', secret),
@@ -582,6 +597,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           },
         });
       }
+      if (current === 'runtimes' && ch === 'c') {
+        return setModal({ kind: 'secret', connector: 'claude', index: 0, values: {}, input: '' });
+      }
       if (current === 'runtimes' && ch === 'i') {
         return setModal({
           kind: 'confirm',
@@ -679,7 +697,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           : current === 'connectors'
             ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · Esc sidebar'
             : current === 'runtimes'
-              ? 's start VM · I install · u unlock vault · i import Codex login · r refresh · Esc sidebar'
+              ? 's start VM · I install · u unlock vault · i Codex login · c Claude token · r refresh · Esc sidebar'
               : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
 
   return (
@@ -935,7 +953,18 @@ function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[]
           <Text color="yellow">not connected — run `codex login` on this Mac, then press i</Text>
         )}
       </Text>
-      <Text dimColor>Claude Code arrives in phase 2.</Text>
+      <Text>
+        Claude Code:{' '}
+        {setup.claude?.connected ? (
+          <Text color="green">
+            connected ({setup.claude.kind === 'api_key' ? 'API key' : 'subscription token'})
+          </Text>
+        ) : (
+          <Text color="yellow">
+            not connected — run `claude setup-token` on this Mac, then press c
+          </Text>
+        )}
+      </Text>
       {log.length ? (
         <Box flexDirection="column" marginTop={1}>
           {log.map((line, i) => (

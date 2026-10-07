@@ -36,7 +36,7 @@ def credential_ops(caller):
     if caller == 'inference':
         return ('model_key', 'codex_token')
     if caller == 'egress':
-        return ('egress_credential', 'codex_token', 'codex_account')
+        return ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
     connector = connectors.CONNECTORS.get(caller)
     if connector is None:
         return ()
