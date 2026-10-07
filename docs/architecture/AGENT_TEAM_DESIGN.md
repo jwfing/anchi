@@ -53,7 +53,7 @@ The implementation starts from the `my-bot` daemon (scheduler, team, permissions
 
 | Runtime | Phase | Model authentication |
 |---|---|---|
-| Codex | 1 | Existing `codex_transport` gateway; `auth.json` never enters the cell |
+| Codex | 1 | The cell holds a placeholder `auth.json` that carries the real account id (an identifier) and placeholder tokens. The proxy injects the access token on `chatgpt.com`, including the WebSocket model stream, and the trusted side owns refresh. Verified end to end in the PoC |
 | Claude Code | 2 | Subscription by default via a `claude setup-token` token. The cell holds a placeholder `CLAUDE_CODE_OAUTH_TOKEN`; the proxy substitutes the real token on requests to Anthropic hosts. API key or Bedrock remain optional alternatives. |
 
 Pi is replaced by the runtime SDKs. Connectors are exposed to both runtimes through a single **Anchi MCP server** inside the cell, which forwards to the existing connector sockets. Each connector is integrated once and both runtimes can use it.
@@ -64,7 +64,7 @@ Skills (`SKILL.md` directories) are managed centrally, sourced from GitHub or cr
 
 ## Credential boundary: egress proxy
 
-**Invariant: upstream credentials never enter the cell.** This includes model subscription tokens, GitHub tokens and AWS keys. Credentials that an API would mint for the agent are covered by the same invariant (see rule 4 below).
+**Invariant: upstream credentials never enter the cell.** "Credential" means anything that authenticates (tokens, keys, refresh tokens). Account identifiers that clients check locally, such as the ChatGPT account id, may enter the cell. This includes model subscription tokens, GitHub tokens and AWS keys. Credentials that an API would mint for the agent are covered by the same invariant (see rule 4 below).
 
 This is a deliberate change from the current boundary: today the cell has **no IP egress**. Under this design, cells reach the network only through a trusted proxy, which runs as its own UID inside the VM.
 

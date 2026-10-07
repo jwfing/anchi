@@ -61,8 +61,23 @@ The cell runs as `agent`, uid 1000, with no capabilities, a read-only `layer:bas
 | git | `info/refs` injected (`client=none`); GitHub rejected the fake token, then git asked for a username and failed | Injection works without any client credential. The real-credential run should clone |
 | Cell wall time | 22 s | Dominated by Codex reconnect retries |
 
+## Results with real credentials (2026-10-06, run by the user)
+
+**Codex completed a turn: it replied `hi` (1,855 tokens). git cloned `openai/codex` in 5 s.** Cell wall time was 11.9 s, including the clone.
+
+| Check | Outcome |
+|---|---|
+| Credentials in the cell | Placeholders only. Every `chatgpt.com` request arrived with `client=placeholder` and was injected; git requests arrived with `client=none` and were injected on `info/refs` and `git-upload-pack` |
+| Token refresh | No `auth.openai.com` request. The earlier refresh storm was caused only by the fake token's 401s |
+| WebSocket | `GET /backend-api/codex/responses` was injected. This is the WebSocket upgrade for the model stream, and it works through mitmproxy |
+| Account id | The first real run failed with "selected workspace missing from routing discovery". Codex checks the selected account locally against `wham/accounts/check`. Fixed by giving the cell the real account id, which is an identifier and not an authenticator |
+| Telemetry | `ab.chatgpt.com/otlp/v1/metrics` passed through **without** a credential, because injection matches `chatgpt.com` exactly and not its subdomains |
+| Warnings | No system `bwrap`, so Codex used its bundled copy; `codex-code-mode-host` is missing from the release tarball; Codex refuses to create PATH helpers under `/tmp`. None of these blocked the turn |
+
 ## Findings for the design
 
 1. **The proxy must own token refresh for subscription runtimes.** Codex refreshes after any 401. The cell must never perform a refresh, and the PoC denial works. The trusted side therefore has to keep the injected access token fresh, using the refresh token it holds and never the cell.
 2. **The Codex injection scope is a whole host, not one API.** Model calls, plugins, MCP and analytics all share `chatgpt.com`. Per-path allowlists are possible but brittle across Codex releases. Prefer host-wide injection, plus an explicit deny list (analytics, account settings writes).
-3. **Building an image layer in a build cell is practical.** No credentials are involved and every fetch is logged, so the build is auditable. Layers are large (373 MB with the Codex binary); share common tools in a base layer.
+3. **Identifiers may enter the cell; authenticators may not.** Codex needs the real ChatGPT account id locally. The invariant should be phrased in terms of credentials that authenticate (tokens, keys, refresh tokens), not every account attribute.
+4. **Codex's own sandbox inside the cell is untested.** The bundled bubblewrap was not exercised by a read-only "hi" turn. Next: run a tool-using turn, and decide whether to rely on the cell alone (`--sandbox danger-full-access`) or make nested bubblewrap work.
+5. **Building an image layer in a build cell is practical.** No credentials are involved and every fetch is logged, so the build is auditable. Layers are large (373 MB with the Codex binary); share common tools in a base layer.
