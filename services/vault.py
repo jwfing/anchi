@@ -22,6 +22,9 @@ NAMES = {
     'slack.json',
     'model.json',
     'codex.json',
+    'github.json',
+    'linear.json',
+    'aws.json',
 }
 
 

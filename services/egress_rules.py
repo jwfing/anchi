@@ -1,0 +1,269 @@
+"""Egress proxy decisions for agent-team cells, independent of mitmproxy.
+
+A cell holds placeholders. For each request the proxy asks `decide()` what to do given the
+agent's connectors, then `apply()` builds the outgoing headers from the real credential.
+Nothing here logs or returns credential values.
+"""
+
+import base64
+import ipaddress
+import json
+import re
+from dataclasses import dataclass, field
+from urllib.parse import parse_qs
+from xml.sax.saxutils import escape
+
+PLACEHOLDER_MARK = 'anchi-placeholder'
+PLACEHOLDER_AWS_KEY = 'AKIAANCHIPLACEHOLDER'
+CONNECTORS = ('github', 'aws', 'linear')
+# Runtime credentials every agent of that runtime gets; injected replace-only.
+RUNTIMES = ('codex',)
+
+
+@dataclass(frozen=True)
+class Rule:
+    name: str
+    hosts: tuple[str, ...]
+    # bearer | basic | raw | aws_sigv4 | none (deny-only)
+    kind: str
+    # Connector or runtime that grants this rule; None applies to every agent.
+    grant: str | None
+    deny: tuple[str, ...] = field(default=())
+    # When set, only matching paths are injected; others pass through untouched.
+    path: str | None = None
+    # Inject only when the client sent a placeholder, never into an unauthenticated request.
+    replace_only: bool = False
+
+
+RULES: tuple[Rule, ...] = (
+    Rule(name='codex', hosts=('chatgpt.com',), kind='bearer', grant='codex', replace_only=True),
+    # Token refresh happens on the trusted side; a refresh from a cell would return a new
+    # credential in the response body.
+    Rule(name='openai-auth', hosts=('auth.openai.com',), kind='none', grant=None, deny=(r'.*',)),
+    Rule(
+        name='github-api',
+        hosts=('api.github.com',),
+        kind='bearer',
+        grant='github',
+        deny=(
+            r'^POST /user/keys$',
+            r'^POST /user/gpg_keys$',
+            r'^POST /user/ssh_signing_keys$',
+            r'^POST /repos/[^/]+/[^/]+/keys$',
+            r'^POST /app/installations/[^/]+/access_tokens$',
+            r'^POST /applications/[^/]+/token',
+            r'^POST /authorizations',
+            r'^(GET|PUT|DELETE|POST) /repos/[^/]+/[^/]+/(actions|codespaces|dependabot)/secrets',
+            r'^(GET|PUT|DELETE|POST) /orgs/[^/]+/(actions|codespaces|dependabot)/secrets',
+            r'^(GET|PUT|DELETE|POST) /repos/[^/]+/[^/]+/environments/[^/]+/secrets',
+            r'^(GET|PUT|DELETE|POST) /user/codespaces/secrets',
+        ),
+    ),
+    Rule(
+        name='github-git',
+        hosts=('github.com',),
+        kind='basic',
+        grant='github',
+        # Git smart HTTP only; release downloads and web pages pass through.
+        path=r'^/[^/]+/[^/]+?(\.git)?/(info/refs|git-upload-pack|git-receive-pack)$',
+    ),
+    Rule(
+        name='aws',
+        hosts=('*.amazonaws.com',),
+        kind='aws_sigv4',
+        grant='aws',
+        deny=(
+            r'^iam:(?!Get|List|Simulate).*',
+            r'^sts:(?!GetCallerIdentity$).*',
+            r'^sso:.*',
+            r'^sso-oauth:.*',
+            r'^signin:.*',
+        ),
+    ),
+    Rule(
+        name='linear',
+        hosts=('api.linear.app',),
+        kind='raw',
+        grant='linear',
+        deny=(r'\b(apiKeyCreate|apiKeyDelete|oauthClient\w*|oauthToken\w*)\b',),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class Decision:
+    # pass | inject | deny
+    action: str
+    rule: Rule | None = None
+    op: str | None = None
+    reason: str | None = None
+
+
+def host_matches(pattern, host):
+    host = host.lower().rstrip('.')
+    if pattern.startswith('*.'):
+        return host.endswith(pattern[1:])
+    return host == pattern
+
+
+def find_rule(host):
+    for rule in RULES:
+        if any(host_matches(p, host) for p in rule.hosts):
+            return rule
+    return None
+
+
+def classify_credential(headers):
+    """What kind of credential the client sent, without revealing it."""
+    auth = headers.get('authorization', '')
+    if not auth:
+        return 'none'
+    if PLACEHOLDER_MARK in auth or PLACEHOLDER_AWS_KEY in auth:
+        return 'placeholder'
+    if auth.lower().startswith('basic '):
+        try:
+            if PLACEHOLDER_MARK in base64.b64decode(auth[6:]).decode('utf-8', 'replace'):
+                return 'placeholder'
+        except ValueError:
+            pass
+    return 'other'
+
+
+AWS_SCOPE = re.compile(r'Credential=[^/]+/\d{8}/([^/]+)/([^/]+)/aws4_request')
+
+
+def aws_scope(headers):
+    match = AWS_SCOPE.search(headers.get('authorization', ''))
+    return (match.group(1), match.group(2)) if match else None
+
+
+def aws_operation(service, headers, body, method, path):
+    target = headers.get('x-amz-target')
+    if target:
+        return f'{service}:{target.rsplit(".", 1)[-1]}'
+    if 'x-www-form-urlencoded' in headers.get('content-type', ''):
+        action = parse_qs(body.decode('utf-8', 'replace')).get('Action')
+        if action:
+            return f'{service}:{action[0]}'
+    if '?' in path:
+        action = parse_qs(path.split('?', 1)[1]).get('Action')
+        if action:
+            return f'{service}:{action[0]}'
+    return f'{service}:{method} {path.split("?", 1)[0]}'
+
+
+def operation(rule, method, path, headers, body):
+    if rule.kind == 'aws_sigv4':
+        scope = aws_scope(headers)
+        return aws_operation(scope[1] if scope else 'unknown', headers, body, method, path)
+    if rule.name == 'linear':
+        # GraphQL: the operation is in the body. Bounded so the audit log stays small.
+        try:
+            query = json.loads(body or b'{}').get('query', '')
+        except (ValueError, AttributeError):
+            query = ''
+        names = re.findall(r'\b([a-z][A-Za-z]+)\s*[({]', query if isinstance(query, str) else '')
+        return 'graphql:' + ','.join(dict.fromkeys(names))[:300]
+    return f'{method} {path.split("?", 1)[0]}'
+
+
+def decide(method, host, path, headers, body, grants):
+    """`headers` has lowercase keys. `grants` holds the agent's connectors and runtime."""
+    rule = find_rule(host)
+    if rule is None:
+        return Decision('pass')
+    clean_path = path.split('?', 1)[0]
+    if rule.path and not re.search(rule.path, clean_path):
+        return Decision('pass')
+    if rule.grant is not None and rule.grant not in grants:
+        # No connector, no injection. The request leaves with whatever the client sent.
+        return Decision('pass', rule, reason='not-granted')
+    # AWS: only SigV4-signed calls are re-signed; unsigned public downloads pass through.
+    if rule.kind == 'aws_sigv4' and aws_scope(headers) is None:
+        return Decision('pass', rule, reason='unsigned')
+    op = operation(rule, method, path, headers, body)
+    if any(re.search(p, op) for p in rule.deny):
+        return Decision('deny', rule, op)
+    if rule.kind == 'none':
+        return Decision('pass', rule, op)
+    if rule.replace_only and classify_credential(headers) != 'placeholder':
+        return Decision('pass', rule, op, reason='no-placeholder')
+    return Decision('inject', rule, op)
+
+
+def deny_response(decision, headers):
+    """(status, body, headers) for a denial, in the service's own error shape for AWS so SDKs
+    surface it cleanly and do not treat it as a retryable parse failure."""
+    message = f'anchi: {decision.op} denied'
+    if decision.rule is not None and decision.rule.kind == 'aws_sigv4':
+        if headers.get('x-amz-target'):
+            body = json.dumps({'__type': 'AccessDeniedException', 'message': message}).encode()
+            return 403, body, {'content-type': 'application/x-amz-json-1.1'}
+        body = (
+            '<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code>'
+            f'<Message>{escape(message)}</Message></Error><RequestId>anchi</RequestId></ErrorResponse>'
+        ).encode()
+        return 403, body, {'content-type': 'text/xml'}
+    return 403, (message + '\n').encode(), {'content-type': 'text/plain'}
+
+
+# Signed with the placeholder and recomputed, or proxy/hop-by-hop headers that must not be signed.
+AWS_STRIP = {'authorization', 'x-amz-date', 'x-amz-security-token', 'proxy-connection', 'connection'}
+
+
+def aws_resign(method, url, headers, body, region, service, credential):
+    """New header set signed with the real credential."""
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.credentials import Credentials
+
+    if headers.get('x-amz-content-sha256', '').startswith('STREAMING-'):
+        raise ValueError('aws-chunked streaming payloads are not re-signed')
+    creds = Credentials(
+        credential['access_key_id'], credential['secret_access_key'], credential.get('session_token') or None
+    )
+    kept = {k: v for k, v in headers.items() if k.lower() not in AWS_STRIP}
+    request = AWSRequest(method=method, url=url, data=body, headers=kept)
+    SigV4Auth(creds, service, region).add_auth(request)
+    return {k.lower(): v for k, v in request.headers.items()}
+
+
+def apply(decision, method, url, headers, body, credential):
+    """Outgoing headers (lowercase keys) for an `inject` decision."""
+    rule = decision.rule
+    if rule.kind == 'aws_sigv4':
+        region, service = aws_scope(headers)
+        return aws_resign(method, url, headers, body, region, service, credential)
+    out = {k: v for k, v in headers.items() if k not in ('authorization', 'proxy-authorization')}
+    if rule.kind == 'bearer':
+        out['authorization'] = f'Bearer {credential["token"]}'
+    elif rule.kind == 'basic':
+        out['authorization'] = 'Basic ' + base64.b64encode(f'x-access-token:{credential["token"]}'.encode()).decode()
+    elif rule.kind == 'raw':
+        out['authorization'] = credential['token']
+    else:
+        raise ValueError(f'rule {rule.name} does not inject')
+    if rule.name == 'codex':
+        out['chatgpt-account-id'] = credential['account_id']
+    return out
+
+
+def public_address(infos):
+    """First address from getaddrinfo results if every one is public, else (None, reason).
+
+    The proxy connects to the returned address itself, so a second resolution (DNS
+    rebinding) cannot change the destination after the check.
+    """
+    chosen = None
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(str(info[4][0]).split('%', 1)[0])
+        except ValueError:
+            return None, 'unparsable address'
+        if not ip.is_global or ip.is_multicast:
+            return None, f'non-public destination {ip}'
+        if chosen is None or (chosen.version == 6 and ip.version == 4):
+            chosen = ip
+    if chosen is None:
+        return None, 'no address'
+    return str(chosen), None

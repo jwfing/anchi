@@ -35,6 +35,8 @@ def credential_ops(caller):
     """Which auth operations a trusted service identity may request; the kernel UID picks the caller."""
     if caller == 'inference':
         return ('model_key', 'codex_token')
+    if caller == 'egress':
+        return ('egress_credential', 'codex_token', 'codex_account')
     connector = connectors.CONNECTORS.get(caller)
     if connector is None:
         return ()
@@ -123,6 +125,10 @@ def main():
         raise SystemExit('Unknown service')
     service_uids = {pwd.getpwnam(c.user).pw_uid: c.id for c in connectors.CONNECTORS.values()}
     service_uids[pwd.getpwnam('secure-inference').pw_uid] = 'inference'
+    try:
+        service_uids[pwd.getpwnam('anchi-egress').pw_uid] = 'egress'
+    except KeyError:
+        pass  # Agent-team egress proxy not installed.
     if os.environ.get('LISTEN_PID') != str(os.getpid()) or os.environ.get('LISTEN_FDS') != '1':
         raise SystemExit('Socket activation required')
     listener = socket.socket(fileno=3)
