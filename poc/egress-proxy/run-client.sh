@@ -40,6 +40,7 @@ case $target in
     ;;
   git)
     repo=${ANCHI_POC_REPO:-jwfing/secure-vm}
+    repo=${repo#https://github.com/}; repo=${repo%.git}
     export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL="$home/.gitconfig"
     git config --global url."https://github.com/".insteadOf git@github.com:
     git -c credential.helper= clone --depth 1 "git@github.com:$repo.git" "$home/clone" && git -C "$home/clone" log --oneline -1
