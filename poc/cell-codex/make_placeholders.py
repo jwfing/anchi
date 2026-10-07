@@ -3,6 +3,7 @@
 import base64
 import datetime as dt
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -18,13 +19,16 @@ def fake_jwt(claims: dict) -> str:
 def codex(home: Path) -> None:
     home.mkdir(parents=True, exist_ok=True)
     exp = int(time.time()) + 30 * 86400
-    auth_claims = {"chatgpt_plan_type": "plus", "chatgpt_account_id": "anchi-placeholder"}
+    # The account id is an identifier, not an authenticator: Codex checks it
+    # locally against routing discovery, so the cell gets the real value.
+    account = os.environ.get("ANCHI_POC_CODEX_ACCOUNT_ID") or "anchi-placeholder"
+    auth_claims = {"chatgpt_plan_type": "plus", "chatgpt_account_id": account}
     tokens = {
         "id_token": fake_jwt({"email": "anchi-placeholder@example.invalid", "exp": exp,
                               "https://api.openai.com/auth": auth_claims}),
         "access_token": fake_jwt({"exp": exp, "https://api.openai.com/auth": auth_claims}),
         "refresh_token": "anchi-placeholder",
-        "account_id": "anchi-placeholder",
+        "account_id": account,
     }
     now = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     (home / "auth.json").write_text(json.dumps({"OPENAI_API_KEY": None, "tokens": tokens, "last_refresh": now}))

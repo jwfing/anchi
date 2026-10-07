@@ -27,6 +27,7 @@ t0=$(date +%s%N)
   --tmpfs=/tmp:mode=1777,size=256M --setenv=HOME=/tmp/home \
   --setenv=ANCHI_POC_PROMPT="${ANCHI_POC_PROMPT:-Reply with exactly: hi}" \
   --setenv=ANCHI_POC_REPO="${ANCHI_POC_REPO:-openai/codex}" \
+  --setenv=ANCHI_POC_CODEX_ACCOUNT_ID="${ANCHI_POC_CODEX_ACCOUNT_ID:-}" \
   -- /bin/sh -c "$FWD sh $RUN/cell-run-codex.sh" || echo "== cell exited non-zero"
 echo "== cell wall time: $(( ($(date +%s%N) - t0) / 1000000 )) ms"
 echo "== proxy log"
