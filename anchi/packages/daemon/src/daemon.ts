@@ -205,6 +205,15 @@ export class Daemon {
     );
     this.hub.on('event', (e) => this.broadcast('event', e));
     this.hub.on('agents', (agents) => this.broadcast('agents', { agents }));
+    this.hub.on('scanFinding', ({ taskId, agentId, labels }) => {
+      this.log(`credential scan of ${taskId} found ${labels.join(', ')}`);
+      if (!this.opts.quiet) {
+        void desktopNotify(
+          `Anchi: credential found in @${agentId}'s cell`,
+          `${taskId}: ${labels.join(', ')}`,
+        );
+      }
+    });
     this.hub.on('task', (task) => {
       this.broadcast('tasks', { task });
       if (task.status === 'done' || task.status === 'failed') {
@@ -255,8 +264,8 @@ export class Daemon {
         offset: typeof q.offset === 'number' ? q.offset : undefined,
       }),
     'tasks.tree': ({ taskId: id }) => this.store.tree(this.hub.getTask(taskId(id)).rootId),
-    'tasks.delete': ({ taskId: id }) => {
-      const deleted = this.hub.deleteTask(taskId(id));
+    'tasks.delete': async ({ taskId: id }) => {
+      const deleted = await this.hub.deleteTask(taskId(id));
       this.broadcast('tasksDeleted', {});
       return { deleted };
     },
@@ -505,7 +514,7 @@ export class Daemon {
   }
 
   async stop(): Promise<void> {
-    this.hub.shutdown();
+    await this.hub.shutdown();
     this.approvals.stop();
     this.triggers.stop();
     this.services.stop();

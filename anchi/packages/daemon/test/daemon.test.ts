@@ -58,6 +58,12 @@ class FakeTransport implements GuestTransport {
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'scan') {
+      this.scans.push(args[2]!);
+      return this.scanResult
+        ? ok(this.scanResult)
+        : { code: 1, stdout: '{"error":"CELL_NOT_RUNNING"}', stderr: '' };
+    }
     if (args[0] === 'anchi-cell' && args[1] === 'skills') {
       this.skillSets.push({ agent: args[3]!, files: Object.keys(JSON.parse(stdin).files) });
       return ok({});
@@ -103,6 +109,12 @@ class FakeTransport implements GuestTransport {
   rejectCredential = false;
   pollItems: { id: string; title: string; url: string }[] = [];
   skillSets: { agent: string; files: string[] }[] = [];
+  scans: string[] = [];
+  scanResult: { clean: boolean; findings: unknown[]; files: number } | null = {
+    clean: true,
+    findings: [],
+    files: 3,
+  };
   vault: Record<string, { connected: boolean; account: string | null }> = {};
   imported: { id: string; value: Record<string, string> }[] = [];
   get connected() {
@@ -673,6 +685,41 @@ describe('daemon tasks', () => {
     expect(notices).toEqual([
       `⚠ workspace app: ${join('.git', 'hooks', 'post-checkout')}: git hook added or changed`,
     ]);
+  });
+
+  it('scans every cell before closing it and reports findings', async () => {
+    const { client, daemon } = await start(100);
+    const found: unknown[] = [];
+    daemon.hub.on('scanFinding', (f) => found.push(f));
+    const run = async () => {
+      const t = await client.call('tasks.create', { agentId: 'dev', text: 'go' });
+      await client.call('tasks.wait', { taskId: t.id });
+      await new Promise((r) => setTimeout(r, 400)); // idle timeout closes the cell
+      return (await client.call('tasks.events', { taskId: t.id })).map((e) => e.event);
+    };
+    const clean = await run();
+    expect(clean.at(-1)).toEqual({
+      type: 'notice',
+      text: 'credential scan before closing the cell: clean (3 files)',
+    });
+    transport.scanResult = {
+      clean: false,
+      findings: [{ credential: 'github.token', where: 'process 12 environ' }],
+      files: 3,
+    };
+    const dirty = await run();
+    expect(dirty.at(-1)).toMatchObject({
+      type: 'error',
+      message: expect.stringContaining('github.token in process 12 environ'),
+    });
+    expect(found).toHaveLength(1);
+    transport.scanResult = null;
+    const failed = await run();
+    expect(failed.at(-1)).toMatchObject({
+      type: 'notice',
+      text: expect.stringContaining('did not complete'),
+    });
+    expect(transport.scans).toHaveLength(3);
   });
 
   it('accepts a task for an agent file written just before it', async () => {

@@ -45,6 +45,8 @@ interface LiveCell {
 }
 
 export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
+const SCAN_TIMEOUT_MS = 120_000;
+const SHUTDOWN_SCAN_MS = 30_000;
 
 /**
  * Delegation limits. They stop runaway loops and cost; they are not a security control (the
@@ -57,6 +59,8 @@ export interface HubOptions {
   store: Store;
   guest: Guest;
   idleMs?: number;
+  /** Scan each cell for real credential values before closing it (default true). */
+  scanOnClose?: boolean;
   /** Skills copied into an agent's cells. */
   skills?: SkillStore;
   /** ~/AnchiWorkspaces on the Mac, where writable workspaces are audited after each turn. */
@@ -76,6 +80,8 @@ export interface HubEvents {
   agents: [AgentSummary[]];
   /** A turn ended; `reply` is the final message (agent-originated). */
   turnEnded: [{ task: TaskRow; reply: string }];
+  /** The credential scan taken before a cell closed found real credential values. */
+  scanFinding: [{ taskId: string; agentId: string; labels: string[] }];
 }
 
 function cellKey(agent: ResolvedAgent, imageHash: string): string {
@@ -278,7 +284,7 @@ export class Hub extends EventEmitter<HubEvents> {
    * Deletes a task with the tasks it delegated (and theirs), once none of them is running.
    * The task's cell, if still idle, goes too.
    */
-  deleteTask(taskId: string): number {
+  async deleteTask(taskId: string): Promise<number> {
     const task = this.getTask(taskId);
     const ids: string[] = [];
     const walk = (t: TaskRow) => {
@@ -289,7 +295,7 @@ export class Hub extends EventEmitter<HubEvents> {
       for (const child of this.opts.store.children(t.id)) walk(child);
     };
     walk(task);
-    for (const id of ids) this.closeCell(id, 'task deleted');
+    await Promise.all(ids.map((id) => this.closeCell(id, 'task deleted')));
     return this.opts.store.deleteTasks(ids);
   }
 
@@ -547,13 +553,13 @@ export class Hub extends EventEmitter<HubEvents> {
       clearTimeout(existing.idle);
       return existing;
     }
-    if (existing) this.closeCell(task.id, 'agent settings changed');
+    if (existing) await this.closeCell(task.id, 'agent settings changed');
     // The guest limits concurrent cells; make room by closing the longest-idle one.
     if (this.cells.size >= MAX_CELLS) {
       const idle = [...this.cells.entries()]
         .filter(([, c]) => c.idle)
         .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (idle) this.closeCell(idle[0], 'making room for another task');
+      if (idle) await this.closeCell(idle[0], 'making room for another task');
     }
     const child = this.opts.guest.startCell({
       task: task.id,
@@ -599,12 +605,70 @@ export class Hub extends EventEmitter<HubEvents> {
     cell.idle.unref();
   }
 
-  closeCell(taskId: string, reason: string): void {
+  /**
+   * Closes a task's cell. A live cell is scanned for real credential values first (the
+   * credential invariant, checked on every cell rather than on request); the result goes to
+   * the task's transcript, and a finding is reported. No longer reusable from the start.
+   */
+  closeCell(taskId: string, reason: string): Promise<void> {
     const cell = this.cells.get(taskId);
-    if (!cell) return;
+    if (!cell) return Promise.resolve();
     clearTimeout(cell.idle);
     this.cells.delete(taskId);
-    cell.session.close(reason);
+    const closing = this.scanBeforeClose(taskId, cell).finally(() => {
+      cell.session.close(reason);
+      this.closing.delete(closing);
+    });
+    this.closing.add(closing);
+    return closing;
+  }
+
+  private closing = new Set<Promise<void>>();
+
+  private async scanBeforeClose(taskId: string, cell: LiveCell): Promise<void> {
+    if (this.opts.scanOnClose === false || cell.session.closed) return;
+    const task = this.opts.store.getTask(taskId);
+    if (!task) return;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('timed out')), SCAN_TIMEOUT_MS);
+    });
+    try {
+      const r = await Promise.race([this.opts.guest.scan(taskId), timeout]);
+      if (!this.opts.store.getTask(taskId)) return; // deleted meanwhile
+      if (r.clean) {
+        this.record(task, {
+          type: 'notice',
+          text: `credential scan before closing the cell: clean (${r.files} files)`,
+        });
+      } else {
+        const labels = [
+          ...new Set(
+            (r.findings as { credential?: unknown; where?: unknown }[]).map(
+              (f) =>
+                `${String(f.credential ?? 'credential').slice(0, 40)} in ${String(f.where ?? '?').slice(0, 80)}`,
+            ),
+          ),
+        ].slice(0, 10);
+        this.record(task, {
+          type: 'error',
+          message: `credential scan before closing the cell found real credential values: ${labels.join(', ')}`,
+          fatal: false,
+        });
+        this.emit('scanFinding', { taskId, agentId: task.agentId, labels });
+      }
+    } catch (err) {
+      if (!this.opts.store.getTask(taskId)) return;
+      this.record(task, {
+        type: 'notice',
+        text: `credential scan before closing the cell did not complete: ${(err as Error).message}`.slice(
+          0,
+          500,
+        ),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Marks tasks interrupted by a daemon restart as failed; their cells were reaped. */
@@ -619,7 +683,14 @@ export class Hub extends EventEmitter<HubEvents> {
     }
   }
 
-  shutdown(): void {
-    for (const id of [...this.cells.keys()]) this.closeCell(id, 'daemon stopping');
+  /** Closes every cell, waiting for their scans up to SHUTDOWN_SCAN_MS. */
+  async shutdown(): Promise<void> {
+    for (const id of [...this.cells.keys()]) void this.closeCell(id, 'daemon stopping');
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      Promise.allSettled([...this.closing]),
+      new Promise((r) => (timer = setTimeout(r, SHUTDOWN_SCAN_MS))),
+    ]);
+    clearTimeout(timer);
   }
 }
