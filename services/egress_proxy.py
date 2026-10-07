@@ -211,6 +211,8 @@ class EgressProxy:
         self.credentials = credentials or Credentials()
         self.call = call
         self.control = None
+        # Server connection id → the (host, port) the client asked for, while it is being opened.
+        self.requested = {}
 
     # ── lifecycle ────────────────────────────────────────────
 
@@ -334,10 +336,28 @@ class EgressProxy:
             return
         if not data.server.sni and not host.replace('.', '').isdigit():
             data.server.sni = host
+        self.requested[data.server.id] = data.server.address
         data.server.address = (address, port)
+
+    def server_connected(self, data):
+        """Name the connection by the requested host again once it is open to the checked address.
+
+        mitmproxy reuses a server connection only when its address equals the request's (host,
+        port), and allows five connections per address. Left as the IP, every keep-alive request
+        would open a new connection, and the sixth would wait for one of the five to time out.
+        The socket stays connected to the address checked in server_connect (`peername`).
+
+        mitmproxy's Server.__setattr__ refuses address changes on open connections to protect
+        addons from rerouting one; here the route is already fixed, so the guard is bypassed for
+        this single field. Pinned mitmproxy version; `make verify-anchi` checks keep-alive reuse.
+        """
+        requested = self.requested.pop(data.server.id, None)
+        if requested is not None:
+            object.__setattr__(data.server, 'address', requested)
 
     def server_connect_error(self, data):
         """Upstream failures (DNS, refused, timeout) are otherwise only a bare 502 in the cell."""
+        self.requested.pop(data.server.id, None)
         cell = self.registry.client_cell(data.client)
         if cell is None or str(data.server.error or '').startswith('anchi: '):
             return

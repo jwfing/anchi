@@ -304,6 +304,28 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 registry.validate(request)
 
+    def test_connects_to_the_checked_address_and_keeps_the_host_for_reuse(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+        server = NS(id='s1', address=('deb.debian.org', 80), sni=None, error=None)
+        data = NS(client=NS(id='c1'), server=server)
+
+        async def resolve(host, port, type):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('151.101.2.132', port))]
+
+        async def scenario():
+            with patch.object(asyncio.get_running_loop(), 'getaddrinfo', resolve):
+                await proxy.server_connect(data)
+
+        asyncio.run(scenario())
+        # mitmproxy opens the socket to this address...
+        self.assertEqual(server.address, ('151.101.2.132', 80))
+        proxy.server_connected(data)
+        # ...and matches later requests for the same host against this one.
+        self.assertEqual(server.address, ('deb.debian.org', 80))
+        self.assertEqual(proxy.requested, {})
+
     def test_upstream_errors_are_audited_once(self):
         from types import SimpleNamespace as NS
 
@@ -311,7 +333,9 @@ class RegistryTests(unittest.TestCase):
         cell = self.module.Cell('t1', 'dev', frozenset({'codex'}))
         proxy.registry.client_cell = lambda client: cell
         for error in ('connection refused', 'anchi: private address'):
-            proxy.server_connect_error(NS(client=None, server=NS(error=error, sni='deb.debian.org', address=None)))
+            proxy.server_connect_error(
+                NS(client=None, server=NS(id='s', error=error, sni='deb.debian.org', address=None))
+            )
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertEqual(
             [(r['decision'], r['host'], r['reason'], r['task']) for r in rows],

@@ -66,6 +66,23 @@ def proxied(task, url, extra=''):
     return out
 
 
+# Eight plain-HTTP requests on one client connection. mitmproxy allows five upstream connections
+# per address; if it stopped reusing them, the sixth request would stall.
+KEEPALIVE_PROBE = '''python3 - <<'EOF'
+import http.client
+conn = http.client.HTTPConnection('127.0.0.1', 3128, timeout=5)
+n = 0
+try:
+    for _ in range(8):
+        conn.request('GET', 'http://example.com/', headers={'Host': 'example.com'})
+        conn.getresponse().read()
+        n += 1
+    print('ok', n)
+except OSError as exc:
+    print('stalled after', n, type(exc).__name__)
+EOF'''
+
+
 def stop(proc):
     if proc.poll() is None:
         proc.stdin.close()
@@ -128,6 +145,8 @@ def main():
         )
         out = proxied('chk-a', 'https://example.com/')
         check('public HTTPS through the proxy', out.startswith('200'), out[:40])
+        _, reuse = sh('chk-a', KEEPALIVE_PROBE)
+        check('keep-alive requests reuse one upstream connection', reuse == 'ok 8', reuse[:120])
         for url in (
             'http://127.0.0.1:22/',
             'http://10.0.2.2/',
