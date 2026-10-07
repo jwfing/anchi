@@ -4,6 +4,7 @@ import type {
   Approval,
   BuilderProposal,
   ConnectorId,
+  SkillInfo,
   ConnectorSecret,
   SetupStatus,
   StoredEvent,
@@ -184,6 +185,14 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const [input, setInput] = useState('');
   const [scroll, setScroll] = useState(0);
   const [connectorCursor, setConnectorCursor] = useState(0);
+  const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  const [skillCursor, setSkillCursor] = useState(0);
+  const refreshSkills = useCallback(() => {
+    void client
+      .call('skills.list')
+      .then((list) => setSkills(list ?? []))
+      .catch(() => setSkills([]));
+  }, [client]);
   const [verbose, setVerbose] = useState(false);
   // Tool-call groups the user expanded, by group id (`<task>:g<seq>`).
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -281,6 +290,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
 
   useEffect(() => {
     if (current === 'runtimes' || current === 'connectors') refreshSetup();
+    if (current === 'skills') refreshSkills();
     setScroll(0);
   }, [current, refreshSetup]);
 
@@ -634,6 +644,38 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       if (ch === 'q') return exit();
       if (ch === '?') return setModal({ kind: 'help' });
       if (key.escape || key.leftArrow || ch === 'h') return back();
+      if (current === 'skills') {
+        const list = skills ?? [];
+        if (key.upArrow || ch === 'k') return setSkillCursor((c) => Math.max(0, c - 1));
+        if (key.downArrow || ch === 'j')
+          return setSkillCursor((c) => Math.min(list.length - 1, c + 1));
+        if (ch === 'a') {
+          return setModal({
+            kind: 'text',
+            title: 'Add a skill',
+            label:
+              'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit)',
+            input: '',
+            submit: async (source) => {
+              const skill = await client.call('skills.add', { source: source.trim() });
+              refreshSkills();
+              say(`skill ${skill.id} added; assign it with skills: [${skill.id}] in an agent`);
+            },
+          });
+        }
+        const skill = list[skillCursor];
+        if (ch === 'd' && skill) {
+          return setModal({
+            kind: 'confirm',
+            title: `Remove skill ${skill.id}`,
+            body: 'Agents that list this skill fail to start until it is added again or removed from them.',
+            action: async () => {
+              await client.call('skills.remove', { id: skill.id });
+              refreshSkills();
+            },
+          });
+        }
+      }
       if (current === 'connectors') {
         const ids: ConnectorId[] = ['github', 'aws', 'linear'];
         if (key.upArrow || ch === 'k') return setConnectorCursor((c) => Math.max(0, c - 1));
@@ -800,9 +842,11 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           ? 'Enter send · ^X new task · Esc cancel/sidebar · ^E editor · ^T tools · ^V verbose · PgUp/PgDn · Tab sidebar'
           : current === 'connectors'
             ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · Esc sidebar'
-            : current === 'runtimes'
-              ? 's start VM · I install · u unlock vault · i Codex login · c Claude token · r refresh · Esc sidebar'
-              : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
+            : current === 'skills'
+              ? '↑↓ choose · a add · d remove · Esc sidebar'
+              : current === 'runtimes'
+                ? 's start VM · I install · u unlock vault · i Codex login · c Claude token · r refresh · Esc sidebar'
+                : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
   const statusLine = approvals.length
     ? `⏸ ${approvals.length} write${approvals.length === 1 ? '' : 's'} waiting for approval (^A) · ${status}`
     : status;
@@ -900,10 +944,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           ) : current === 'runtimes' ? (
             <RuntimesView setup={setup} log={setupLog} />
           ) : (
-            <Box flexDirection="column">
-              <Text>Skills are planned for a later phase.</Text>
-              <Text dimColor>Agents get their instructions from their prompt for now.</Text>
-            </Box>
+            <SkillsView skills={skills} cursor={skillCursor} />
           )}
         </Box>
       </Box>
@@ -1041,6 +1082,29 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
       <Text dimColor>
         Secrets go from this screen to the VM vault. They are never stored on this Mac or shown
         again.
+      </Text>
+    </Box>
+  );
+}
+
+function SkillsView({ skills, cursor }: { skills: SkillInfo[] | null; cursor: number }) {
+  if (!skills) return <Text dimColor>Loading…</Text>;
+  return (
+    <Box flexDirection="column">
+      {skills.length ? null : <Text dimColor>No skills yet. Press a to add one.</Text>}
+      {skills.map((s, i) => (
+        <Box key={s.id} flexDirection="column">
+          <Text inverse={i === cursor} wrap="truncate">
+            {`${s.id.padEnd(20)}${sanitizeLine(s.name)}`}
+          </Text>
+          <Text dimColor wrap="truncate">
+            {`  ${sanitizeLine(s.description)}${s.commit ? ` · ${sanitizeLine(s.source)} @ ${s.commit.slice(0, 10)}` : ' · local'}`}
+          </Text>
+        </Box>
+      ))}
+      <Text dimColor>
+        Agents use skills listed in their `skills:` field. Skill content is untrusted, like any
+        agent input.
       </Text>
     </Box>
   );

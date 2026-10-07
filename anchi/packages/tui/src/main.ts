@@ -183,6 +183,36 @@ program
     });
   });
 
+const skillsCmd = program.command('skills').description('Skills agents can use');
+skillsCmd.action(() =>
+  withClient(async (client) => {
+    const list = await client.call('skills.list');
+    if (!list.length)
+      return console.log('no skills; add one with `anchi skills add <dir or GitHub URL>`');
+    for (const s of list) {
+      console.log(
+        `${s.id.padEnd(20)} ${sanitizeLine(s.description).slice(0, 60)}  ${s.commit ? `${sanitizeLine(s.source)} @ ${s.commit.slice(0, 10)}` : 'local'}`,
+      );
+    }
+  }),
+);
+skillsCmd
+  .command('add <source>')
+  .description('From a local directory with SKILL.md, or a GitHub tree URL (pinned to its commit)')
+  .option('--id <id>')
+  .action((source: string, opts: { id?: string }) =>
+    withClient(async (client) => {
+      const s = await client.call('skills.add', { source, id: opts.id });
+      console.log(`added ${s.id}${s.commit ? ` at ${s.commit.slice(0, 10)}` : ''}`);
+    }),
+  );
+skillsCmd.command('rm <id>').action((id: string) =>
+  withClient(async (client) => {
+    await client.call('skills.remove', { id });
+    console.log('removed');
+  }),
+);
+
 program
   .command('triggers')
   .description("Agents' schedules and polls, with their next run and last result")

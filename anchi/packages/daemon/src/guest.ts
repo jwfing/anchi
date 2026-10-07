@@ -284,6 +284,18 @@ export class Guest {
     ) as { configured: boolean; account_id: string | null; expires_at: number | null };
   }
 
+  /** Replaces an agent's skill bundle in the VM (files base64-encoded, on stdin). */
+  async setSkills(agent: string, files: Record<string, string>): Promise<void> {
+    check(agent, 'agent');
+    parse(
+      await this.transport.exec(
+        ['anchi-cell', 'skills', 'set', agent],
+        JSON.stringify({ files }),
+        60_000,
+      ),
+    );
+  }
+
   /** Runs a polling trigger's fixed query in the egress service; returns the items found. */
   async poll(kind: string, params: Record<string, unknown>): Promise<PollItem[]> {
     const r = parse(

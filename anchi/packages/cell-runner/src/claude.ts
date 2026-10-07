@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { type Options, query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import {
   MAX_EVENT_TEXT,
@@ -8,6 +9,7 @@ import {
 } from '@anchi/protocol';
 
 export const CLAUDE_PATH = '/opt/claude/bin/claude';
+export const SKILLS_PLUGIN = '/opt/anchi-skills';
 /** The in-cell Anchi MCP server, as in Codex's config.toml. */
 export const ANCHI_MCP = { command: '/opt/node/bin/node', args: ['/opt/anchi/mcp.mjs'] };
 
@@ -33,6 +35,10 @@ export function claudeOptions(
     // Settings files in the work directory are agent-writable; they must not change behaviour.
     settingSources: [],
     mcpServers: { anchi: { type: 'stdio', ...ANCHI_MCP } },
+    // Skills assigned by Anchi, bound read-only as a plugin; no settings files are read.
+    ...(existsSync(SKILLS_PLUGIN)
+      ? { plugins: [{ type: 'local' as const, path: SKILLS_PLUGIN }] }
+      : {}),
     systemPrompt:
       instructions && options.instructionsMode === 'replace'
         ? instructions

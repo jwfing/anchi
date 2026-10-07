@@ -47,6 +47,7 @@ import {
   setupStatus,
 } from './setup.ts';
 import { Store } from './store.ts';
+import { SkillStore } from './skills.ts';
 import { TriggerRunner } from './triggers.ts';
 import { parse as parseYaml } from 'yaml';
 
@@ -118,6 +119,7 @@ export class Daemon {
   readonly proposals: Proposals;
   readonly approvals: ApprovalWatcher;
   readonly triggers: TriggerRunner;
+  readonly skills: SkillStore;
   private server?: Server;
   private watchers: FSWatcher[] = [];
   private clients = new Map<string, Peer>();
@@ -148,6 +150,7 @@ export class Daemon {
     this.guest = opts.guest ?? new Guest(this.lima);
     this.store = new Store(opts.layout.dbFile);
     this.proposals = new Proposals(opts.layout);
+    this.skills = new SkillStore(join(opts.layout.root, 'skills'));
     this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log);
     this.approvals.on('changed', (approvals) => this.broadcast('approvals', { approvals }));
@@ -170,6 +173,7 @@ export class Daemon {
       guest: this.guest,
       idleMs: opts.idleMs,
       turnTimeoutMs: opts.turnTimeoutMs,
+      skills: this.skills,
       onPolicyApproval: (task, connector, id) =>
         this.approvals.addPolicy(this.guest, task, connector, id),
       log: this.log,
@@ -306,6 +310,20 @@ export class Daemon {
     },
     'approvals.list': () => this.approvals.list(),
     'triggers.list': () => this.triggers.list(),
+    'skills.list': () => this.skills.list(),
+    'skills.add': async ({ source, id }) => {
+      const skill = await this.skills.add(
+        str(source, 'source', 500),
+        id ? str(id, 'id', 40) : undefined,
+      );
+      this.hub.reload();
+      return skill;
+    },
+    'skills.remove': ({ id }) => {
+      this.skills.remove(str(id, 'id', 40));
+      this.hub.reload();
+      return null;
+    },
     'approvals.decide': async ({ id, allow }) => {
       const a = this.approvals.list().find((x) => x.id === id);
       await this.approvals.decide(str(id, 'approval', 40), allow === true, this.guest);

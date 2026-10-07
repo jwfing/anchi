@@ -166,6 +166,16 @@ export interface TriggerInfo {
   lastResult: string | null;
 }
 
+export interface SkillInfo {
+  id: string;
+  name: string;
+  description: string;
+  /** `local`, or the GitHub URL it was fetched from. */
+  source: string;
+  /** The commit a GitHub skill was fetched at. */
+  commit: string | null;
+}
+
 export interface BuilderProposal {
   id: string;
   agentId: string;
@@ -236,6 +246,10 @@ export interface Methods {
   'builder.discard': [{ proposalId: string }, null];
   'approvals.list': [Record<string, never>, Approval[]];
   'triggers.list': [Record<string, never>, TriggerInfo[]];
+  'skills.list': [Record<string, never>, SkillInfo[]];
+  /** Adds a skill from a local directory or a GitHub tree URL (pinned to its commit). */
+  'skills.add': [{ source: string; id?: string }, SkillInfo];
+  'skills.remove': [{ id: string }, null];
   /** The caller showed the approval in a full-screen dialog and the user decided. */
   'approvals.decide': [{ id: string; allow: boolean }, null];
 }

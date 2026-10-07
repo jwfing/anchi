@@ -130,6 +130,45 @@ def egress(request, timeout=15):
     return response['result']
 
 
+SKILLS = Path('/var/lib/anchi/skills')
+SKILL_PATH = re.compile(r'^(\.claude-plugin/plugin\.json|skills/[a-z0-9][a-z0-9-]{0,39}/[A-Za-z0-9._ /-]{1,200})$')
+
+
+def skills_set(agent):
+    """Replaces the agent's skill bundle: {"files": {path: base64}} on stdin. Root-owned and
+    bound read-only into the agent's cells; the content is untrusted like any cell input."""
+    import base64
+
+    name(agent, 'BAD_AGENT')
+    raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
+        raise Failure('INPUT_TOO_LARGE')
+    files = json.loads(raw).get('files')
+    if not isinstance(files, dict) or len(files) > 2000:
+        raise Failure('BAD_SKILLS')
+    SKILLS.mkdir(parents=True, exist_ok=True, mode=0o755)
+    target, staged = SKILLS / agent, SKILLS / f'.{agent}.new'
+    shutil.rmtree(staged, ignore_errors=True)
+    total = 0
+    for path, data in files.items():
+        if not isinstance(path, str) or not SKILL_PATH.fullmatch(path) or '..' in path.split('/') or '//' in path:
+            raise Failure('BAD_SKILL_PATH')
+        content = base64.b64decode(data, validate=True)
+        total += len(content)
+        if total > 6 * 1024 * 1024:
+            raise Failure('SKILLS_TOO_LARGE')
+        out = staged / path
+        out.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        out.write_bytes(content)
+        out.chmod(0o644)
+    shutil.rmtree(target, ignore_errors=True)
+    if files:
+        staged.rename(target)
+    else:
+        shutil.rmtree(staged, ignore_errors=True)
+    emit({'agent': agent, 'files': len(files)})
+
+
 def approvals_watch():
     """Relays the proxy's approval stream to stdout (the daemon's watcher) until it ends."""
     try:
@@ -643,6 +682,15 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
             f'--bind-ro={EGRESS_CELLS / task}:/run/anchi',
             f'--bind-ro={LIB}:/opt/anchi',
             f'--bind-ro={CA_BUNDLE}:{CA_IN_CELL}',
+            # The agent's skills: a Claude Code plugin root, whose skills/ Codex reads too.
+            *(
+                [
+                    f'--bind-ro={SKILLS / agent}:/opt/anchi-skills',
+                    f'--bind-ro={SKILLS / agent}/skills:/home/agent/.codex/skills',
+                ]
+                if (SKILLS / agent / 'skills').is_dir()
+                else []
+            ),
             # Only the agent's own connector services; their sockets check policy themselves.
             *[
                 f'--bind-ro=/run/secure-{c}:/run/anchi-connectors/{c}'
@@ -855,6 +903,8 @@ def main(argv):
         raise Failure('USAGE')
     if command == 'start' and len(rest) in (6, 7, 8):
         return cell_start(*rest)
+    if command == 'skills' and len(rest) == 2 and rest[0] == 'set':
+        return skills_set(rest[1])
     if command == 'poll' and not rest:
         # The trigger spec arrives on stdin: {"kind": ..., "params": {...}}.
         spec = json.loads(sys.stdin.read(4096) or '{}')

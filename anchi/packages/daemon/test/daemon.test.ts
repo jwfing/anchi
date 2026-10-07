@@ -58,6 +58,10 @@ class FakeTransport implements GuestTransport {
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'skills') {
+      this.skillSets.push({ agent: args[3]!, files: Object.keys(JSON.parse(stdin).files) });
+      return ok({});
+    }
     if (args[0] === 'anchi-cell' && args[1] === 'poll') return ok({ items: this.pollItems });
     if (args[0] === 'anchi-cell' && args[1] === 'approvals')
       return ok({ id: args[3], allowed: args[4] === 'allow' });
@@ -98,6 +102,7 @@ class FakeTransport implements GuestTransport {
 
   rejectCredential = false;
   pollItems: { id: string; title: string; url: string }[] = [];
+  skillSets: { agent: string; files: string[] }[] = [];
   vault: Record<string, { connected: boolean; account: string | null }> = {};
   imported: { id: string; value: Record<string, string> }[] = [];
   get connected() {
@@ -617,6 +622,27 @@ describe('daemon tasks', () => {
     // Retention removes finished tasks older than the limit.
     expect(daemon.hub.purge(30, Date.now() + 31 * 86_400_000)).toBe(1);
     expect(daemon.store.getTask(plain.id)).toBeUndefined();
+  });
+
+  it('sends an agent its skills before a cell starts, only when they change', async () => {
+    write('skills/triage/SKILL.md', '---\nname: Triage\ndescription: d\n---\n');
+    write('agents/sk.yaml', 'runtime: codex\nskills: [triage]\n');
+    write('agents/nosk.yaml', 'runtime: codex\nskills: [missing]\n');
+    const { client } = await start();
+    const run = async (agentId: string) => {
+      const t = await client.call('tasks.create', { agentId, text: 'go' });
+      return client.call('tasks.wait', { taskId: t.id });
+    };
+    await run('sk');
+    await run('sk');
+    expect(transport.skillSets).toEqual([
+      { agent: 'sk', files: ['.claude-plugin/plugin.json', 'skills/triage/SKILL.md'] },
+    ]);
+    const failed = await run('nosk');
+    expect(failed).toMatchObject({
+      status: 'failed',
+      result: expect.stringMatching(/skill "missing" is not installed/),
+    });
   });
 
   it('accepts a task for an agent file written just before it', async () => {

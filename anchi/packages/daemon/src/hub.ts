@@ -10,6 +10,7 @@ import {
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
 import { CellSession } from './cell.ts';
+import type { SkillStore } from './skills.ts';
 import { ToolDispatcher } from './tools.ts';
 import type { Guest } from './guest.ts';
 import { instructions, WORKDIR } from './prompt.ts';
@@ -53,6 +54,8 @@ export interface HubOptions {
   store: Store;
   guest: Guest;
   idleMs?: number;
+  /** Skills copied into an agent's cells. */
+  skills?: SkillStore;
   /** A connector service holds a cell's write for approval (see ApprovalWatcher.addPolicy). */
   onPolicyApproval?(task: TaskRow, connector: string, id: string): Promise<void>;
   /** Longest a single turn may run before it is cancelled and the task fails. */
@@ -398,6 +401,7 @@ export class Hub extends EventEmitter<HubEvents> {
     let timedOut = false;
     try {
       const hash = await this.ensureImage(agent, task);
+      await this.syncSkills(agent);
       if (signal.aborted) throw new Error('cancelled');
       const cell = await this.cellFor(task, agent, hash);
       const turnId = `turn-${Date.now().toString(36)}`;
@@ -458,6 +462,18 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   // ── images and cells ─────────────────────────────────────
+
+  private skillDigests = new Map<string, string>();
+
+  /** Sends the agent's skills to the VM when they changed since the last cell. */
+  private async syncSkills(agent: ResolvedAgent): Promise<void> {
+    if (!this.opts.skills) return;
+    if (!agent.skills.length && !this.skillDigests.has(agent.id)) return;
+    const { files, digest } = this.opts.skills.bundle(agent.skills);
+    if (this.skillDigests.get(agent.id) === digest) return;
+    await this.opts.guest.setSkills(agent.id, agent.skills.length ? files : {});
+    this.skillDigests.set(agent.id, digest);
+  }
 
   private async ensureImage(agent: ResolvedAgent, task: TaskRow): Promise<string> {
     const image = loadImage(agent.image, this.opts.layout);
