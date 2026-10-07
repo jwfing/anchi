@@ -1317,7 +1317,8 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
         <Text bold color="red">
           Approve a write by @{sanitizeLine(a.agent)}?
         </Text>
-        <Text>{`task       ${sanitizeLine(a.task)}`}</Text>
+        {a.reason ? <Text color="yellow">{`why        ${sanitizeLine(a.reason)}`}</Text> : null}
+        <Text wrap="truncate">{`started by ${sanitizeLine(a.origin || a.task)}`}</Text>
         <Text>{`connector  ${sanitizeLine(a.connector)} (${sanitizeLine(a.host)})`}</Text>
         <Text wrap="truncate">{`operation  ${sanitizeLine(a.operation)}`}</Text>
         <Text dimColor>{`refused automatically in about ${left} s`}</Text>

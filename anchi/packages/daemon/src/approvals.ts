@@ -30,6 +30,8 @@ export class ApprovalWatcher extends EventEmitter<{
   constructor(
     private transport: GuestTransport,
     private log: (m: string) => void = () => {},
+    /** The origin chain of a task, for the dialog. */
+    private origin: (taskId: string) => string = () => '',
   ) {
     super();
   }
@@ -65,6 +67,8 @@ export class ApprovalWatcher extends EventEmitter<{
       summary: JSON.stringify(g.action.params ?? {}, null, 2).slice(0, 4000),
       createdAt: g.created * 1000,
       timeout: Math.max(0, Math.round(g.expires - g.created)),
+      reason: `${connector} writes ask for approval`,
+      origin: this.origin(task.id),
     };
     const timer = setTimeout(
       () => this.dropPolicy(id, false),
@@ -147,6 +151,7 @@ export class ApprovalWatcher extends EventEmitter<{
     if (event.type === 'pending' && event.approval) {
       const a = parse(event.approval);
       if (!a) return;
+      a.origin = this.origin(a.task);
       this.pending.set(a.id, a);
       this.emit('added', a);
       this.emit('changed', this.list());
@@ -176,5 +181,7 @@ function parse(v: Record<string, unknown>): Approval | undefined {
     summary: str(v.summary, 4000),
     createdAt: typeof v.created_at === 'number' ? v.created_at * 1000 : Date.now(),
     timeout: typeof v.timeout === 'number' ? v.timeout : 300,
+    reason: str(v.reason, 200),
+    origin: '',
   };
 }

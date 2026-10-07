@@ -143,6 +143,32 @@ export class Daemon {
   private awsTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
 
+  private settings(): Record<string, unknown> {
+    try {
+      const value = parseYaml(
+        readFileSync(join(this.opts.layout.root, 'settings.yaml'), 'utf8'),
+      ) as unknown;
+      return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Sends the user's high-risk exceptions (`highRisk: {disable: [ids]}`) to the egress proxy. */
+  async pushEgressSettings(): Promise<void> {
+    const highRisk = this.settings().highRisk as { disable?: unknown } | undefined;
+    const disabled = Array.isArray(highRisk?.disable) ? highRisk.disable.map(String) : [];
+    try {
+      const r = await this.guest.transport.exec(
+        ['anchi-cell', 'egress-settings'],
+        JSON.stringify({ high_risk_disabled: disabled }),
+      );
+      if (r.code !== 0) this.log(`egress settings not applied: ${r.stdout.trim().slice(0, 200)}`);
+    } catch (err) {
+      this.log(`egress settings not applied: ${(err as Error).message}`);
+    }
+  }
+
   /** Days finished tasks are kept: `retentionDays` in ~/.anchi/settings.yaml, default 90. */
   retentionDays(): number {
     const file = join(this.opts.layout.root, 'settings.yaml');
@@ -166,10 +192,15 @@ export class Daemon {
     this.skills = new SkillStore(join(opts.layout.root, 'skills'));
     this.services = new ServiceSetup(this.guest, (r) => this.broadcast('oauth', r), opts.openUrl);
     this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
-    this.approvals = new ApprovalWatcher(this.guest.transport, this.log);
+    this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
+      this.hub.origin(id),
+    );
     this.approvals.on('changed', (approvals) => this.broadcast('approvals', { approvals }));
     this.approvals.on('added', (a) => {
-      this.hub.notice(a.task, `⏸ waiting for your approval: ${a.operation} (${a.connector})`);
+      this.hub.notice(
+        a.task,
+        `⏸ waiting for your approval: ${a.operation} (${a.reason || a.connector})`,
+      );
       if (!this.opts.quiet && this.clients.size === 0) {
         void desktopNotify(
           `Anchi: @${a.agent} asks for approval`,
@@ -480,6 +511,7 @@ export class Daemon {
     this.watchConfig();
     if (this.opts.approvals !== false) this.approvals.start();
     if (this.opts.triggers !== false) this.triggers.start();
+    void this.pushEgressSettings();
     // Retention: finished tasks older than the configured number of days.
     const purge = () => {
       const n = this.hub.purge(this.retentionDays());
@@ -510,6 +542,18 @@ export class Daemon {
       } catch {
         // Watching is a convenience; `agents.reload` still works.
       }
+    }
+    let settingsTimer: NodeJS.Timeout | undefined;
+    try {
+      this.watchers.push(
+        watch(layout.root, (_e, name) => {
+          if (String(name) !== 'settings.yaml') return;
+          clearTimeout(settingsTimer);
+          settingsTimer = setTimeout(() => void this.pushEgressSettings(), 300);
+        }),
+      );
+    } catch {
+      // Settings also apply at the next start.
     }
   }
 

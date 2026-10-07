@@ -228,6 +228,40 @@ class DecisionTests(unittest.TestCase):
         host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
         self.assertTrue(write('POST', host, '/', headers=headers))
 
+    def test_high_risk_operations_are_recognized_for_every_agent(self):
+        def risk(method, host, path, body=b'', headers=None, disabled=()):
+            d = decide(method, host, path, headers or {}, body)
+            found = rules.high_risk(d, method, path, body, disabled)
+            return found and found[0]
+
+        push = lambda ref, new=b'1' * 40: b'00a8' + b'2' * 40 + b' ' + new + b' ' + ref + b'\x00 report-status\n0000'  # noqa: E731
+        self.assertEqual(risk('PUT', 'api.github.com', '/repos/o/r/pulls/7/merge'), 'github-merge')
+        self.assertEqual(risk('DELETE', 'api.github.com', '/repos/o/r'), 'github-repo-delete')
+        self.assertEqual(
+            risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/main')), 'git-default-branch'
+        )
+        self.assertEqual(
+            risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/fix', b'0' * 40)),
+            'git-ref-delete',
+        )
+        self.assertIsNone(risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/fix')))
+        self.assertEqual(
+            risk('POST', 'api.github.com', '/graphql', b'{"query":"mutation { mergePullRequest(input: {}) { x } }"}'),
+            'github-graphql',
+        )
+        self.assertIsNone(risk('POST', 'api.github.com', '/graphql', b'{"query":"query { viewer { login } }"}'))
+        self.assertIsNone(risk('POST', 'api.github.com', '/repos/o/r/pulls'))
+        host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
+        self.assertEqual(risk('POST', host, '/', headers=headers), 'aws-destroy')
+        host, headers = signed('logs', target='Logs_20140328.FilterLogEvents')
+        self.assertIsNone(risk('POST', host, '/', headers=headers))
+        self.assertEqual(
+            risk('POST', 'api.linear.app', '/graphql', b'{"query":"mutation { issueDelete(id: 1) { success } }"}'),
+            'linear-delete',
+        )
+        # The user can switch an entry off.
+        self.assertIsNone(risk('PUT', 'api.github.com', '/repos/o/r/pulls/7/merge', disabled=('github-merge',)))
+
     def test_git_push_summary_names_the_refs(self):
         import egress_proxy
 
@@ -423,6 +457,16 @@ class RegistryTests(unittest.TestCase):
                 approvals.decide('0' * 16, True)
 
         asyncio.run(scenario())
+
+    def test_settings_accept_known_high_risk_ids_only(self):
+        proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+        with patch.object(self.module, 'SETTINGS', Path(self.tmp, 'settings.json')):
+            self.assertEqual(
+                proxy.set_settings({'high_risk_disabled': ['github-merge']}), {'high_risk_disabled': ['github-merge']}
+            )
+            self.assertEqual(self.module.load_settings(), {'high_risk_disabled': ['github-merge']})
+            with self.assertRaises(ValueError):
+                proxy.set_settings({'high_risk_disabled': ['everything']})
 
     def test_register_validates_names_and_connectors(self):
         registry = self.module.Registry(('127.0.0.1', 1))

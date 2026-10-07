@@ -447,3 +447,81 @@ def poll_items(kind, status, body):
         for i, t, u in rows[:POLL_LIMIT]
         if i
     ]
+
+
+# ── high-risk operations ────────────────────────────────────
+# Held for the user's approval for every agent and every task origin, whatever the agent's
+# `approvals` setting (phase 3, F1). Each entry: id, rule, pattern on the operation (or on git
+# ref updates), and what the dialog says. The user can disable entries by id.
+
+HIGH_RISK = (
+    ('github-merge', 'github-api', r'^PUT /repos/[^/]+/[^/]+/pulls/\d+/merge$', 'merge a pull request'),
+    ('github-repo-delete', 'github-api', r'^DELETE /repos/[^/]+/[^/]+$', 'delete a repository'),
+    ('github-repo-settings', 'github-api', r'^PATCH /repos/[^/]+/[^/]+$', 'change repository settings'),
+    ('github-repo-transfer', 'github-api', r'^POST /repos/[^/]+/[^/]+/transfer$', 'transfer a repository'),
+    (
+        'github-protection',
+        'github-api',
+        r'^(PUT|POST|PATCH|DELETE) /repos/[^/]+/[^/]+/(branches/[^/]+/protection|rulesets)',
+        'change branch protection',
+    ),
+    (
+        'github-access',
+        'github-api',
+        r'^(PUT|POST|PATCH|DELETE) /repos/[^/]+/[^/]+/(collaborators|hooks|keys|deployments)',
+        'change repository access or hooks',
+    ),
+    ('github-ref-delete', 'github-api', r'^DELETE /repos/[^/]+/[^/]+/git/refs/', 'delete a branch or tag'),
+    (
+        'github-graphql',
+        'github-api',
+        r'graphql-mutation:.*\b(mergePullRequest|deleteRepository|updateRepository|'
+        r'(create|update|delete)BranchProtectionRule|(create|update|delete)Ruleset|deleteRef)\b',
+        'a high-risk GitHub mutation',
+    ),
+    ('git-default-branch', 'github-git', r'refs/heads/(main|master)$', 'push to main or master'),
+    ('git-ref-delete', 'github-git', r'^delete ', 'delete a branch or tag on push'),
+    (
+        'aws-destroy',
+        'aws',
+        r'^[a-z0-9-]+:(Delete|Terminate|Remove|Revoke|Detach|Disable|ScheduleKeyDeletion|Put\w*Policy)',
+        'delete, terminate or change access to an AWS resource',
+    ),
+    ('aws-s3-delete', 'aws', r'^s3:DELETE ', 'delete S3 objects or buckets'),
+    ('linear-delete', 'linear', r'graphql:.*\b\w+(Delete|Archive)\b', 'delete or archive in Linear'),
+)
+ZERO_SHA = b'0' * 40
+GIT_UPDATE = re.compile(rb'([0-9a-f]{40}) ([0-9a-f]{40}) (refs/[^\x00\s]{1,200})')
+
+
+def graphql_mutation_names(body):
+    try:
+        query = json.loads(body or b'{}').get('query', '')
+    except (ValueError, AttributeError):
+        return ''
+    if not isinstance(query, str) or not GRAPHQL_MUTATION.match(query):
+        return ''
+    return ','.join(dict.fromkeys(re.findall(r'\b([a-z][A-Za-z]+)\s*[({]', query)))
+
+
+def high_risk(decision, method, path, body, disabled=()):
+    """(id, description) of the first high-risk entry this injected request matches, or None."""
+    rule = decision.rule
+    if rule is None:
+        return None
+    if rule.name == 'github-git':
+        if not path.split('?', 1)[0].endswith('/git-receive-pack'):
+            return None
+        subjects = []
+        for old, new, ref in GIT_UPDATE.findall(body[:65536]):
+            subjects.append(('delete ' if new == ZERO_SHA else 'update ') + ref.decode())
+    elif rule.name == 'github-api' and path.split('?', 1)[0] == '/graphql':
+        subjects = [f'graphql-mutation:{graphql_mutation_names(body)}']
+    else:
+        subjects = [decision.op or '']
+    for entry_id, rule_name, pattern, text in HIGH_RISK:
+        if rule_name != rule.name or entry_id in disabled:
+            continue
+        if any(re.search(pattern, s) for s in subjects):
+            return entry_id, text
+    return None

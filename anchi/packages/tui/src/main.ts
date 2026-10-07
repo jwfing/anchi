@@ -241,6 +241,8 @@ program
         console.log(
           `${a.id}  @${sanitizeLine(a.agent)} ${sanitizeLine(a.task)}  ${sanitizeLine(a.connector)}: ${sanitizeLine(a.operation)}`,
         );
+        if (a.reason) console.log(`    why: ${sanitizeLine(a.reason)}`);
+        if (a.origin) console.log(`    started by: ${sanitizeLine(a.origin)}`);
         for (const line of sanitizeLine(a.summary).slice(0, 300).split('\n'))
           console.log(`    ${line}`);
       }

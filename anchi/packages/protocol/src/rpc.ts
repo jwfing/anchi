@@ -174,6 +174,10 @@ export interface Approval {
   createdAt: number;
   /** Seconds after `createdAt` when the proxy refuses the write. */
   timeout: number;
+  /** Why it is held: a high-risk operation (held for every agent) or the agent's settings. */
+  reason: string;
+  /** How the task came to exist: the user, a trigger, and the delegation chain. */
+  origin: string;
 }
 
 /** A schedule or polling trigger of an agent, with when it last and next runs. */

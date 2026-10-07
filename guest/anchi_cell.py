@@ -982,6 +982,9 @@ def main(argv):
         raise Failure('USAGE')
     if command == 'start' and len(rest) in (6, 7, 8, 9):
         return cell_start(*rest)
+    if command == 'egress-settings' and not rest:
+        # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.
+        return emit(egress({'op': 'settings.set', 'settings': json.loads(sys.stdin.read(65536) or '{}')}))
     if command == 'skills' and len(rest) == 2 and rest[0] == 'set':
         return skills_set(rest[1])
     if command == 'poll' and not rest:

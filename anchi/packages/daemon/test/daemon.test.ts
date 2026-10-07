@@ -487,6 +487,7 @@ describe('daemon tasks', () => {
           summary: 'git push: refs/heads/fix',
           created_at: 1,
           timeout: 300,
+          reason: 'high-risk: push to main or master',
         },
       }),
       'not json',
@@ -500,13 +501,15 @@ describe('daemon tasks', () => {
         id: 'a'.repeat(16),
         summary: 'git push: refs/heads/fix',
         createdAt: 1000,
+        reason: 'high-risk: push to main or master',
+        origin: `you → @dev (${task.id})`,
       }),
     ]);
     const notices = (await client.call('tasks.events', { taskId: task.id }))
       .filter((e) => e.event.type === 'notice')
       .map((e) => (e.event as { text: string }).text);
     expect(notices).toContain(
-      '⏸ waiting for your approval: POST /o/r.git/git-receive-pack (github)',
+      '⏸ waiting for your approval: POST /o/r.git/git-receive-pack (high-risk: push to main or master)',
     );
     await client.call('approvals.decide', { id: 'a'.repeat(16), allow: true });
     expect(transport.execs.at(-1)!.args).toEqual([

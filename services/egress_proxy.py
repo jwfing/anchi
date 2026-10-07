@@ -35,6 +35,18 @@ CREDENTIAL_TTL = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
 APPROVAL_TIMEOUT = 300
+SETTINGS = Path(os.environ.get('ANCHI_EGRESS_STATE', '/var/lib/anchi-egress')) / 'settings.json'
+
+
+def load_settings():
+    try:
+        value = json.loads(SETTINGS.read_text())
+        known = {entry[0] for entry in rules.HIGH_RISK}
+        return {'high_risk_disabled': [d for d in value.get('high_risk_disabled', []) if d in known]}
+    except (OSError, ValueError, AttributeError):
+        return {'high_risk_disabled': []}
+
+
 APPROVALS_PENDING_MAX = 32
 GIT_REF_UPDATE = re.compile(rb'[0-9a-f]{40} [0-9a-f]{40} (refs/[^\x00\s]{1,200})')
 log = logging.getLogger('anchi-egress')
@@ -293,6 +305,7 @@ class EgressProxy:
         self.registry = registry or Registry(('127.0.0.1', 18080))
         self.credentials = credentials or Credentials()
         self.approvals = Approvals()
+        self.settings = load_settings()
         self.call = call
         self.control = None
         # Server connection id → the (host, port) the client asked for, while it is being opened.
@@ -345,6 +358,8 @@ class EgressProxy:
                 result = await self.registry.unregister(task)
             elif op == 'verify':
                 result = await self.verify(request.get('connector'))
+            elif op == 'settings.set':
+                result = self.set_settings(request.get('settings'))
             elif op == 'poll':
                 result = await self.poll(request.get('kind'), request.get('params'))
             elif op == 'list':
@@ -375,6 +390,22 @@ class EgressProxy:
             raise ValueError('VERIFY_UNREACHABLE') from None
         audit({'event': 'verify', 'connector': connector, 'status': status})
         return {'connector': connector, 'account': rules.verify_account(connector, status, content)}
+
+    def set_settings(self, value):
+        """Settings the daemon owns (the user's high-risk exceptions), kept across restarts."""
+        if not isinstance(value, dict):
+            raise ValueError('BAD_SETTINGS')
+        known = {entry[0] for entry in rules.HIGH_RISK}
+        disabled = value.get('high_risk_disabled', [])
+        if not isinstance(disabled, list) or not all(d in known for d in disabled):
+            raise ValueError('BAD_SETTINGS')
+        self.settings = {'high_risk_disabled': sorted(set(disabled))}
+        SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        temporary = SETTINGS.with_suffix('.tmp')
+        temporary.write_text(json.dumps(self.settings))
+        os.replace(temporary, SETTINGS)
+        audit({'event': 'settings', 'high_risk_disabled': self.settings['high_risk_disabled']})
+        return self.settings
 
     async def poll(self, kind, params):
         """One fixed read-only query for a polling trigger, with the connector's credential."""
@@ -520,7 +551,11 @@ class EgressProxy:
         if decision.action == 'pass':
             audit(entry)
             return
-        if decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body):
+        # High-risk operations wait for the user for every agent (phase 3, F1); other writes
+        # wait when the agent's approvals ask for its connector.
+        risk = rules.high_risk(decision, req.method, req.path, body, self.settings['high_risk_disabled'])
+        if risk or (decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body)):
+            entry['risk'] = risk[0] if risk else None
             outcome = await self.approvals.ask(
                 {
                     'task': cell.task,
@@ -529,6 +564,7 @@ class EgressProxy:
                     'operation': entry['op'],
                     'host': host,
                     'summary': write_summary(decision, req.method, path, body),
+                    'reason': f'high-risk: {risk[1]}' if risk else f'approvals: {decision.rule.grant} asks',
                 }
             )
             entry['approval'] = outcome

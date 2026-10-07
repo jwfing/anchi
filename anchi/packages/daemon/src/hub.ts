@@ -274,6 +274,21 @@ export class Hub extends EventEmitter<HubEvents> {
     return task;
   }
 
+  /**
+   * How a task came to exist, root first: `you`, `schedule`, `poll`, then each delegation,
+   * e.g. `poll → @lead (t-1) → @developer (t-2)`.
+   */
+  origin(taskId: string): string {
+    const chain: TaskRow[] = [];
+    for (let t = this.opts.store.getTask(taskId); t && chain.length < 10;) {
+      chain.unshift(t);
+      t = t.parentId ? this.opts.store.getTask(t.parentId) : undefined;
+    }
+    if (!chain.length) return '';
+    const root = chain[0]!.trigger === 'user' ? 'you' : chain[0]!.trigger;
+    return [root, ...chain.map((t) => `@${t.agentId} (${t.id})`)].join(' → ');
+  }
+
   /** A line from Anchi in a task's transcript (approvals, delegation). */
   notice(taskId: string, text: string): void {
     const task = this.opts.store.getTask(taskId);

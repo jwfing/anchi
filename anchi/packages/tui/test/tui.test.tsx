@@ -566,11 +566,15 @@ describe('App', () => {
       summary: `git push: refs/heads/fix${ESC}]52;c;AAAA\u0007`,
       createdAt: Date.now(),
       timeout: 300,
+      reason: 'high-risk: push to main or master',
+      origin: 'poll → @lead (t-a000000000) → @dev (t-a000000001)',
     };
     emit('approvals', { approvals: [approval] });
     await tick();
     const frame = ui.lastFrame() ?? '';
     expect(frame).toContain('Approve a write by @dev?');
+    expect(frame).toContain('why        high-risk: push to main or master');
+    expect(frame).toContain('started by poll → @lead (t-a000000000) → @dev (t-a000000001)');
     expect(frame).toContain('git push: refs/heads/fix');
     expect(frame).not.toContain(']52;');
     ui.stdin.write('\u001b'); // later
