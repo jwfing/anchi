@@ -135,6 +135,11 @@ export class Hub extends EventEmitter<HubEvents> {
     return this.emitAgents();
   }
 
+  /** Agents that loaded without errors, as configured (triggers, connectors…). */
+  resolvedAgents(): ResolvedAgent[] {
+    return [...this.states.values()].flatMap((s) => (s.agent ? [s.agent] : []));
+  }
+
   summaries(): AgentSummary[] {
     return [...this.states.values()]
       .sort((a, b) => a.id.localeCompare(b.id))
@@ -151,6 +156,8 @@ export class Hub extends EventEmitter<HubEvents> {
           sandbox: s.agent?.sandbox,
           status,
           queued: s.queue.length,
+          triggers: s.agent?.triggers.length ?? 0,
+          delegates: s.agent?.delegates ?? [],
           error: s.error,
           file: s.agent?.sourceFiles.at(-1) ?? agentFile(this.opts.layout, s.id),
         };

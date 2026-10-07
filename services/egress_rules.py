@@ -387,3 +387,63 @@ def is_write(decision, method, path, body):
             return not op.split(':', 1)[1].startswith(('GET ', 'HEAD '))
         return not AWS_READ.match(op)
     return False
+
+
+# ── trigger polling ─────────────────────────────────────────
+# The daemon's polling triggers run one fixed, read-only query per type in this service, with
+# the vault's credential; cells are not involved. New item ids go back to the daemon.
+
+POLL_LIMIT = 20
+LINEAR_POLL_QUERY = (
+    'query($filter: IssueFilter) { issues(filter: $filter, first: 20, orderBy: createdAt) '
+    '{ nodes { id identifier title url } } }'
+)
+
+
+def poll_request(kind, params, credential):
+    """(method, url, headers, body, connector) of the query for a polling trigger."""
+    if kind == 'linear-issues':
+        filters = {}
+        if params.get('team'):
+            filters['team'] = {'key': {'eq': str(params['team'])[:40]}}
+        if params.get('label'):
+            filters['labels'] = {'name': {'eq': str(params['label'])[:80]}}
+        if params.get('state'):
+            filters['state'] = {'name': {'eq': str(params['state'])[:80]}}
+        body = json.dumps({'query': LINEAR_POLL_QUERY, 'variables': {'filter': filters}}).encode()
+        headers = {'authorization': credential['token'], 'content-type': 'application/json'}
+        return 'POST', 'https://api.linear.app/graphql', headers, body
+    if kind == 'github-issues':
+        from urllib.parse import urlencode
+
+        q = str(params.get('query', ''))[:300]
+        if not q:
+            raise ValueError('BAD_POLL')
+        url = 'https://api.github.com/search/issues?' + urlencode(
+            {'q': q, 'sort': 'created', 'order': 'desc', 'per_page': POLL_LIMIT}
+        )
+        headers = {'authorization': f'Bearer {credential["token"]}', 'accept': 'application/vnd.github+json'}
+        return 'GET', url, headers, b''
+    raise ValueError('BAD_POLL')
+
+
+POLL_CONNECTOR = {'linear-issues': 'linear', 'github-issues': 'github'}
+
+
+def poll_items(kind, status, body):
+    """Items found by a poll: [{id, title, url}], bounded."""
+    if status in (401, 403):
+        raise ValueError('CREDENTIAL_REJECTED')
+    if status != 200:
+        raise ValueError(f'POLL_HTTP_{status}')
+    data = json.loads(body.decode('utf-8', 'replace'))
+    if kind == 'linear-issues':
+        nodes = ((data.get('data') or {}).get('issues') or {}).get('nodes') or []
+        rows = [(n.get('id'), f'{n.get("identifier", "")} {n.get("title", "")}'.strip(), n.get('url')) for n in nodes]
+    else:
+        rows = [(i.get('node_id') or i.get('id'), i.get('title'), i.get('html_url')) for i in data.get('items') or []]
+    return [
+        {'id': str(i)[:100], 'title': str(t or '')[:300], 'url': str(u or '')[:500]}
+        for i, t, u in rows[:POLL_LIMIT]
+        if i
+    ]

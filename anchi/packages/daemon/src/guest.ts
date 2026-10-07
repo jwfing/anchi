@@ -137,6 +137,12 @@ export interface CellStart {
   ask: string[];
 }
 
+export interface PollItem {
+  id: string;
+  title: string;
+  url: string;
+}
+
 export interface ImageMeta {
   image: string;
   hash: string;
@@ -276,6 +282,21 @@ export class Guest {
     return parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/codex_admin.py`, 'status']),
     ) as { configured: boolean; account_id: string | null; expires_at: number | null };
+  }
+
+  /** Runs a polling trigger's fixed query in the egress service; returns the items found. */
+  async poll(kind: string, params: Record<string, unknown>): Promise<PollItem[]> {
+    const r = parse(
+      await this.transport.exec(['anchi-cell', 'poll'], JSON.stringify({ kind, params }), 60_000),
+    ) as { items?: unknown };
+    if (!Array.isArray(r.items)) throw new GuestError('GUEST_BAD_OUTPUT');
+    return r.items
+      .filter((i): i is PollItem => typeof i?.id === 'string')
+      .map((i) => ({
+        id: i.id.slice(0, 100),
+        title: String(i.title ?? '').slice(0, 300),
+        url: String(i.url ?? '').slice(0, 500),
+      }));
   }
 
   /** A pending connector-service write, as the policy service recorded it. */

@@ -58,6 +58,7 @@ class FakeTransport implements GuestTransport {
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'poll') return ok({ items: this.pollItems });
     if (args[0] === 'anchi-cell' && args[1] === 'approvals')
       return ok({ id: args[3], allowed: args[4] === 'allow' });
     if (args[0] === 'anchi-cell' && args[1] === 'verify') {
@@ -96,6 +97,7 @@ class FakeTransport implements GuestTransport {
   }
 
   rejectCredential = false;
+  pollItems: { id: string; title: string; url: string }[] = [];
   vault: Record<string, { connected: boolean; account: string | null }> = {};
   imported: { id: string; value: Record<string, string> }[] = [];
   get connected() {
@@ -137,6 +139,8 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number) {
   const layout = homeLayout(root);
   const d = new Daemon({
     turnTimeoutMs,
+    // Tests drive triggers with their own clock through daemon.triggers.tick().
+    triggers: false,
     hostRun,
     setupSteps: SETUP_STEPS,
     layout,
@@ -529,6 +533,52 @@ describe('daemon tasks', () => {
       'd'.repeat(64),
     ]);
     expect(await client.call('approvals.list')).toEqual([]);
+  });
+
+  it('fires schedules once per due minute and once after a missed run', async () => {
+    write(
+      'agents/cron.yaml',
+      "runtime: codex\ntriggers: [{ schedule: '0 9 * * *', text: 'daily summary' }]\n",
+    );
+    const { daemon } = await start();
+    const at = (h: number, m = 0, d = 7) => new Date(2026, 9, d, h, m).getTime();
+    await daemon.triggers.tick(at(8));
+    expect(daemon.store.listTasks('cron')).toHaveLength(0);
+    await daemon.triggers.tick(at(9, 0));
+    await daemon.triggers.tick(at(9, 0, 7) + 20_000);
+    expect(daemon.store.listTasks('cron').map((t) => t.trigger)).toEqual(['schedule']);
+    // Asleep for two days: one catch-up run, not two.
+    await daemon.triggers.tick(at(10, 0, 9));
+    expect(daemon.store.listTasks('cron')).toHaveLength(2);
+    const [info] = daemon.triggers.list();
+    expect(info).toMatchObject({ kind: 'schedule', spec: '0 9 * * *', nextRun: at(9, 0, 10) });
+  });
+
+  it('starts one task per new polled item, after a silent first poll', async () => {
+    write(
+      'agents/triage.yaml',
+      "runtime: codex\nconnectors: [linear]\ntriggers: [{ poll: { type: linear-issues, label: agent }, text: 'Handle {title} {url}', every: 1 }]\n",
+    );
+    const { daemon } = await start();
+    const issue = (n: number) => ({
+      id: `u${n}`,
+      title: `ENG-${n} Bug`,
+      url: `https://linear.app/x/issue/ENG-${n}`,
+    });
+    transport.pollItems = [issue(1)];
+    await daemon.triggers.tick(1_000_000);
+    expect(daemon.store.listTasks('triage')).toHaveLength(0);
+    transport.pollItems = [issue(3), issue(2), issue(1)];
+    await daemon.triggers.tick(1_000_000 + 30_000); // not due yet
+    await daemon.triggers.tick(1_000_000 + 61_000);
+    const titles = daemon.store.listTasks('triage').map((t) => t.title);
+    expect(titles.sort()).toEqual([
+      'Handle ENG-2 Bug https://linear.app/x/issue/ENG-2',
+      'Handle ENG-3 Bug https://linear.app/x/issue/ENG-3',
+    ]);
+    await daemon.triggers.tick(1_000_000 + 130_000);
+    expect(daemon.store.listTasks('triage')).toHaveLength(2);
+    expect(daemon.triggers.list()[0]).toMatchObject({ kind: 'poll', lastResult: 'nothing new' });
   });
 
   it('accepts a task for an agent file written just before it', async () => {

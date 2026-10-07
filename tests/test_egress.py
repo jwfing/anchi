@@ -235,6 +235,33 @@ class DecisionTests(unittest.TestCase):
         body = b'00a8' + b'0' * 40 + b' ' + b'1' * 40 + b' refs/heads/fix-12\x00 report-status\n0000PACK...'
         self.assertEqual(egress_proxy.write_summary(d, 'POST', '/o/r', body), 'git push: refs/heads/fix-12')
 
+    def test_polls_run_fixed_read_only_queries(self):
+        method, url, headers, body = rules.poll_request('linear-issues', {'team': 'ENG', 'label': 'agent'}, LINEAR)
+        self.assertEqual((method, url), ('POST', 'https://api.linear.app/graphql'))
+        query = json.loads(body)
+        self.assertTrue(query['query'].startswith('query'))
+        self.assertEqual(query['variables']['filter']['labels'], {'name': {'eq': 'agent'}})
+        self.assertEqual(headers['authorization'], LINEAR['token'])
+        method, url, headers, _ = rules.poll_request('github-issues', {'query': 'repo:o/r is:open label:x'}, GITHUB)
+        self.assertEqual(method, 'GET')
+        self.assertTrue(url.startswith('https://api.github.com/search/issues?q=repo%3Ao%2Fr'))
+        with self.assertRaises(ValueError):
+            rules.poll_request('jira', {}, GITHUB)
+        items = rules.poll_items(
+            'linear-issues',
+            200,
+            b'{"data":{"issues":{"nodes":[{"id":"u1","identifier":"ENG-1","title":"Crash","url":"https://linear.app/x/issue/ENG-1"}]}}}',
+        )
+        self.assertEqual(items, [{'id': 'u1', 'title': 'ENG-1 Crash', 'url': 'https://linear.app/x/issue/ENG-1'}])
+        items = rules.poll_items(
+            'github-issues',
+            200,
+            b'{"items":[{"node_id":"I_1","title":"Bug","html_url":"https://github.com/o/r/issues/1"}]}',
+        )
+        self.assertEqual(items[0]['id'], 'I_1')
+        with self.assertRaisesRegex(ValueError, 'CREDENTIAL_REJECTED'):
+            rules.poll_items('github-issues', 401, b'{}')
+
     def test_credential_classification_reveals_nothing(self):
         self.assertEqual(rules.classify_credential({}), 'none')
         self.assertEqual(rules.classify_credential({'authorization': 'Bearer anchi-placeholder-x'}), 'placeholder')

@@ -345,6 +345,8 @@ class EgressProxy:
                 result = await self.registry.unregister(task)
             elif op == 'verify':
                 result = await self.verify(request.get('connector'))
+            elif op == 'poll':
+                result = await self.poll(request.get('kind'), request.get('params'))
             elif op == 'list':
                 result = {t: {'agent': c.agent, 'grants': sorted(c.grants)} for t, c in self.registry.cells.items()}
             else:
@@ -373,6 +375,25 @@ class EgressProxy:
             raise ValueError('VERIFY_UNREACHABLE') from None
         audit({'event': 'verify', 'connector': connector, 'status': status})
         return {'connector': connector, 'account': rules.verify_account(connector, status, content)}
+
+    async def poll(self, kind, params):
+        """One fixed read-only query for a polling trigger, with the connector's credential."""
+        connector = rules.POLL_CONNECTOR.get(kind)
+        if connector is None or not isinstance(params, dict):
+            raise ValueError('BAD_POLL')
+        loop = asyncio.get_running_loop()
+        try:
+            credential = await loop.run_in_executor(None, self.credentials.get, connector)
+        except LookupError as exc:
+            raise ValueError(f'NO_CREDENTIAL:{exc}') from None
+        method, url, headers, body = rules.poll_request(kind, params, credential)
+        try:
+            status, content = await loop.run_in_executor(None, self.call, method, url, headers, body)
+        except OSError:
+            raise ValueError('POLL_UNREACHABLE') from None
+        items = rules.poll_items(kind, status, content)
+        audit({'event': 'poll', 'kind': kind, 'status': status, 'items': len(items)})
+        return {'items': items}
 
     def identifiers(self, grants):
         """Non-secret values a cell needs locally, such as the Codex account id."""

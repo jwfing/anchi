@@ -37,6 +37,7 @@ import {
   setupStatus,
 } from './setup.ts';
 import { Store } from './store.ts';
+import { TriggerRunner } from './triggers.ts';
 
 const AWS_REFRESH_EVERY_MS = 5 * 60_000;
 const AWS_REFRESH_AHEAD_MS = 15 * 60_000;
@@ -53,6 +54,8 @@ export interface DaemonOptions {
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
   hostRun?: typeof hostOutput;
+  /** Run schedule and polling triggers (default true). */
+  triggers?: boolean;
   /** Watch the egress proxy's approval queue (default true). */
   approvals?: boolean;
   /** Reap guest cells at start (default true). */
@@ -101,6 +104,7 @@ export class Daemon {
   readonly lima: LimaTransport;
   readonly proposals: Proposals;
   readonly approvals: ApprovalWatcher;
+  readonly triggers: TriggerRunner;
   private server?: Server;
   private watchers: FSWatcher[] = [];
   private clients = new Map<string, Peer>();
@@ -144,6 +148,15 @@ export class Daemon {
       log: this.log,
       builtins: [builderAgent()],
     });
+    this.triggers = new TriggerRunner(
+      {
+        agents: () => this.hub.resolvedAgents(),
+        start: (agentId, text, trigger) => this.hub.createTask(agentId, text, trigger),
+      },
+      this.store,
+      this.guest,
+      this.log,
+    );
     this.hub.on('event', (e) => this.broadcast('event', e));
     this.hub.on('agents', (agents) => this.broadcast('agents', { agents }));
     this.hub.on('task', (task) => {
@@ -249,6 +262,7 @@ export class Daemon {
       return agents;
     },
     'approvals.list': () => this.approvals.list(),
+    'triggers.list': () => this.triggers.list(),
     'approvals.decide': async ({ id, allow }) => {
       const a = this.approvals.list().find((x) => x.id === id);
       await this.approvals.decide(str(id, 'approval', 40), allow === true, this.guest);
@@ -360,6 +374,7 @@ export class Daemon {
     chmodSync(layout.socketFile, 0o600);
     this.watchConfig();
     if (this.opts.approvals !== false) this.approvals.start();
+    if (this.opts.triggers !== false) this.triggers.start();
     this.awsTimer = setInterval(() => void this.refreshAws(), AWS_REFRESH_EVERY_MS);
     this.awsTimer.unref();
     this.log(`daemon ${process.pid} listening on ${layout.socketFile}`);
@@ -388,6 +403,7 @@ export class Daemon {
   async stop(): Promise<void> {
     this.hub.shutdown();
     this.approvals.stop();
+    this.triggers.stop();
     clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();
     for (const p of this.clients.values()) p.close();

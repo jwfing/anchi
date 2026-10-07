@@ -50,6 +50,9 @@ export interface AgentSummary {
   status: AgentStatus;
   /** Tasks waiting behind the running one. */
   queued: number;
+  /** Number of schedule and polling triggers. */
+  triggers?: number;
+  delegates?: string[];
   /** Configuration error; the agent cannot run until it is fixed. */
   error?: string;
   file: string;
@@ -135,6 +138,17 @@ export interface Approval {
   timeout: number;
 }
 
+/** A schedule or polling trigger of an agent, with when it last and next runs. */
+export interface TriggerInfo {
+  agentId: string;
+  key: string;
+  kind: 'schedule' | 'poll';
+  spec: string;
+  nextRun: number | null;
+  lastRun: number | null;
+  lastResult: string | null;
+}
+
 export interface BuilderProposal {
   id: string;
   agentId: string;
@@ -199,6 +213,7 @@ export interface Methods {
   'builder.apply': [{ proposalId: string }, AgentSummary[]];
   'builder.discard': [{ proposalId: string }, null];
   'approvals.list': [Record<string, never>, Approval[]];
+  'triggers.list': [Record<string, never>, TriggerInfo[]];
   /** The caller showed the approval in a full-screen dialog and the user decided. */
   'approvals.decide': [{ id: string; allow: boolean }, null];
 }

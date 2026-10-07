@@ -20,6 +20,21 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS tasks_agent ON tasks(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS tasks_created ON tasks(created_at DESC);
+CREATE TABLE IF NOT EXISTS trigger_state (
+  key TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  next_run INTEGER,
+  last_run INTEGER,
+  last_result TEXT,
+  baseline INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS trigger_seen (
+  key TEXT NOT NULL,
+  item TEXT NOT NULL,
+  task_id TEXT,
+  seen_at INTEGER NOT NULL,
+  PRIMARY KEY (key, item)
+);
 CREATE TABLE IF NOT EXISTS events (
   task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
@@ -57,6 +72,16 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
 export function extractLinks(text: string): string[] {
   const found = text.match(/https?:\/\/[^\s<>()"'`\]]+/g) ?? [];
   return [...new Set(found.map((u) => u.replace(/[.,;:!?]+$/, '')))].slice(0, 10);
+}
+
+export interface TriggerState {
+  key: string;
+  agentId: string;
+  nextRun: number | null;
+  lastRun: number | null;
+  lastResult: string | null;
+  /** Polls: the first poll recorded what already existed, without starting tasks. */
+  baseline: boolean;
 }
 
 export class Store {
@@ -114,6 +139,62 @@ export class Store {
         t.parent ? t.parent.depth + 1 : 0,
       );
     return this.getTask(id)!;
+  }
+
+  // ── triggers ────────────────────────────────────────────
+
+  triggerState(key: string): TriggerState | undefined {
+    const r = this.db.prepare('SELECT * FROM trigger_state WHERE key = ?').get(key);
+    return r
+      ? {
+          key,
+          agentId: r.agent_id as string,
+          nextRun: (r.next_run as number | null) ?? null,
+          lastRun: (r.last_run as number | null) ?? null,
+          lastResult: (r.last_result as string | null) ?? null,
+          baseline: r.baseline === 1,
+        }
+      : undefined;
+  }
+
+  saveTriggerState(s: TriggerState): void {
+    this.db
+      .prepare(
+        `INSERT INTO trigger_state (key, agent_id, next_run, last_run, last_result, baseline)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET next_run = excluded.next_run, last_run = excluded.last_run,
+           last_result = excluded.last_result, baseline = excluded.baseline`,
+      )
+      .run(
+        s.key,
+        s.agentId,
+        s.nextRun,
+        s.lastRun,
+        s.lastResult?.slice(0, 500) ?? null,
+        s.baseline ? 1 : 0,
+      );
+  }
+
+  /** Records an item; false if this trigger saw it before (each item starts one task at most). */
+  markSeen(key: string, item: string, taskId: string | null = null): boolean {
+    const r = this.db
+      .prepare(
+        'INSERT OR IGNORE INTO trigger_seen (key, item, task_id, seen_at) VALUES (?, ?, ?, ?)',
+      )
+      .run(key, item, taskId, Date.now());
+    return r.changes === 1;
+  }
+
+  seen(key: string, item: string): boolean {
+    return Boolean(
+      this.db.prepare('SELECT 1 FROM trigger_seen WHERE key = ? AND item = ?').get(key, item),
+    );
+  }
+
+  setSeenTask(key: string, item: string, taskId: string): void {
+    this.db
+      .prepare('UPDATE trigger_seen SET task_id = ? WHERE key = ? AND item = ?')
+      .run(taskId, key, item);
   }
 
   children(id: string): TaskRow[] {

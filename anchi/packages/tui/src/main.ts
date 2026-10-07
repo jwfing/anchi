@@ -158,6 +158,22 @@ program
   });
 
 program
+  .command('triggers')
+  .description("Agents' schedules and polls, with their next run and last result")
+  .action(() =>
+    withClient(async (client) => {
+      const list = await client.call('triggers.list');
+      if (!list.length) return console.log('no triggers; add `triggers:` to an agent');
+      const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : '-');
+      for (const t of list) {
+        console.log(
+          `@${t.agentId.padEnd(12)} ${t.kind.padEnd(9)} ${sanitizeLine(t.spec).padEnd(24)} next ${when(t.nextRun)}  last ${when(t.lastRun)}  ${sanitizeLine(t.lastResult ?? '')}`,
+        );
+      }
+    }),
+  );
+
+program
   .command('approvals')
   .description('Writes waiting for your approval')
   .action(() =>

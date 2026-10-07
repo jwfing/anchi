@@ -855,6 +855,10 @@ def main(argv):
         raise Failure('USAGE')
     if command == 'start' and len(rest) in (6, 7, 8):
         return cell_start(*rest)
+    if command == 'poll' and not rest:
+        # The trigger spec arrives on stdin: {"kind": ..., "params": {...}}.
+        spec = json.loads(sys.stdin.read(4096) or '{}')
+        return emit(egress({'op': 'poll', 'kind': spec.get('kind'), 'params': spec.get('params')}, timeout=40))
     if command == 'approvals' and rest == ['watch']:
         return approvals_watch()
     if command == 'approvals' and len(rest) == 3 and rest[0] == 'decide':

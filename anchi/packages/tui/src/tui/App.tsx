@@ -719,8 +719,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     ? `${detail.id} · @${detail.agentId} · ${detail.status}${detail.parentId ? ` · delegated by ${detail.parentId}` : ''}${detail.trigger !== 'user' && detail.trigger !== 'delegation' ? ` · ${detail.trigger}` : ''}`
     : agent
       ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}${
-          task ? ` · ${task.id} (${task.status})` : ' · new task'
-        }`
+          agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
+        }${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
   const status =
