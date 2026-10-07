@@ -80,6 +80,8 @@
 ### P6 — `aws-chunked` uploads (M)
 
 - Re-sign chained chunk signatures (`STREAMING-AWS4-HMAC-SHA256-PAYLOAD`): the proxy re-signs the seed request and recomputes each chunk signature while streaming. Tests against recorded AWS CLI uploads; live check with a dedicated bucket.
+- As built: `STREAMING-UNSIGNED-PAYLOAD-TRAILER` (the AWS CLI's default) needs only the headers re-signed; signed chunks and their trailer are recomputed with the body's length unchanged. Chunk signatures are tested against the worked examples of the S3 reference; the trailer signature follows MinIO's verifier and still needs the live bucket check.
+- Found on the way: mitmproxy sends a streamed body's headers before the `request` hook, so bodies over 8 MiB were never injected yet were audited as injected. Streamed requests are now decided in `requestheaders`; only S3 is injected there, since its operation comes from method and path. A git push over 8 MiB still fails (follow-up: decide pushes from their ref commands, or raise the limit for git). S3 operations now name their subresource, so `POST ?delete`, `PUT ?lifecycle`, `?policy` and `?acl` are high-risk.
 
 ### P7 — Linux workspaces (M)
 
@@ -114,7 +116,7 @@ Confirmed on 2026-10-07:
 | P3 | Done. Live: listed host 200, other host refused and audited |
 | P4 | Done. Live: `reader` and `writer` read Notion through the bridge; a `writer` write is held as `notion:writer`; `make verify-anchi` 32/32 |
 | P5 | Done |
-| P6 | Not started |
+| P6 | Done offline and in `make verify-anchi` (streamed path, without an AWS account); a live upload to a dedicated bucket is part of P9 |
 | P7 | Not started |
 | P8 | Done. CI workflow added; not yet run on the Linux runner |
 | P9 | Waiting for accounts: Claude token, Drive sign-in, a valid GitHub token |

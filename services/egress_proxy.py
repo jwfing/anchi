@@ -606,14 +606,41 @@ class EgressProxy:
         if cell is None:
             self.respond(flow, 403, b'anchi: unknown cell\n')
 
-    async def request(self, flow):
+    async def requestheaders(self, flow):
+        """A streamed body (over 8 MiB) follows its headers upstream before `request` runs, so
+        streamed requests are decided here. Only S3 calls are injected on this path: their
+        operation and risk come from the method and path. Other streamed requests leave without
+        injection. A refusal here can only drop the connection."""
         req = flow.request
+        if not req.stream:
+            return
+        flow.metadata['anchi-streamed'] = True
+        cell = self.registry.client_cell(flow.client_conn)
+        if cell is None:
+            return flow.kill()
+        refusal = await self.handle(flow, cell, b'', streamed=True)
+        if refusal is not None:
+            flow.kill()
+
+    async def request(self, flow):
+        if flow.metadata.get('anchi-streamed'):
+            return
         cell = self.registry.client_cell(flow.client_conn)
         if cell is None:
             return self.respond(flow, 403, b'anchi: unknown cell\n')
+        # A body without a length that grew past 8 MiB switched to streaming after
+        # `requestheaders`: its headers have left unchanged, and only the audit remains.
+        late = bool(flow.request.stream)
+        body = b'' if late else (flow.request.get_content(strict=False) or b'')
+        refusal = await self.handle(flow, cell, body, streamed=late, late=late)
+        if refusal is not None:
+            self.respond(flow, *refusal)
+
+    async def handle(self, flow, cell, body, streamed, late=False):
+        """Decide, hold for approval and inject. Returns None, or (status, content, headers) to refuse."""
+        req = flow.request
         req.headers.pop('proxy-authorization', None)
         headers = {k.lower(): v for k, v in req.headers.items()}
-        body = b'' if req.stream else (req.get_content(strict=False) or b'')
         host = req.pretty_host
         path = req.path.split('?', 1)[0]
         decision = rules.decide(req.method, host, req.path, headers, body, cell.grants)
@@ -628,13 +655,20 @@ class EgressProxy:
             'op': decision.op,
             'decision': decision.action if decision.reason is None else f'{decision.action}:{decision.reason}',
         }
+        if late and decision.action != 'pass':
+            entry['decision'] = 'pass:streamed'
+            audit(entry)
+            return None
         if decision.action == 'deny':
             audit(entry)
-            status, content, extra = rules.deny_response(decision, headers)
-            return self.respond(flow, status, content, extra)
+            return rules.deny_response(decision, headers)
         if decision.action == 'pass':
             audit(entry)
-            return
+            return None
+        if streamed and not (decision.rule.kind == 'aws_sigv4' and (decision.op or '').startswith('s3:')):
+            entry['decision'] = 'pass:streamed'
+            audit(entry)
+            return None
         # High-risk operations wait for the user for every agent (phase 3, F1); other writes
         # wait when the agent's approvals ask for its connector.
         risk = rules.high_risk(decision, req.method, req.path, body, self.settings['high_risk_disabled'])
@@ -656,26 +690,41 @@ class EgressProxy:
                 entry['decision'] = 'held-' + outcome
                 audit(entry)
                 reason = 'timed out' if outcome == 'timeout' else 'was denied'
-                return self.respond(flow, 403, f'anchi: approval for this write {reason}\n'.encode())
+                return 403, f'anchi: approval for this write {reason}\n'.encode(), None
         try:
             credential = await asyncio.get_running_loop().run_in_executor(
                 None, self.credentials.get, decision.rule.grant
             )
             new = rules.apply(decision, req.method, req.url, headers, body, credential)
+            resigner = rules.aws_chunk_resigner(new, credential) if decision.rule.kind == 'aws_sigv4' else None
+            if resigner is not None and not streamed:
+                req.raw_content = resigner.feed(req.raw_content or b'') + resigner.feed(b'')
         except LookupError as exc:
             entry['decision'] = 'missing-credential'
             entry['reason'] = str(exc)[:100]
             audit(entry)
-            return self.respond(flow, 502, f'anchi: credential unavailable ({exc})\n'.encode())
+            return 502, f'anchi: credential unavailable ({exc})\n'.encode(), None
         except ValueError as exc:
             entry['decision'] = 'rejected'
             entry['reason'] = str(exc)[:200]
             audit(entry)
-            return self.respond(flow, 403, f'anchi: {exc}\n'.encode())
+            return 403, f'anchi: {exc}\n'.encode(), None
+        if resigner is not None and streamed:
+
+            def stream(data):
+                # Raising ends the connection, so upstream gets a truncated body, never a forged one.
+                try:
+                    return resigner.feed(data)
+                except ValueError as exc:
+                    audit({**entry, 'decision': 'rejected', 'reason': str(exc)[:200]})
+                    raise
+
+            req.stream = stream
         req.headers.clear()
         for key, value in new.items():
             req.headers[key] = value
         audit(entry)
+        return None
 
     @staticmethod
     def respond(flow, status, content, headers=None):

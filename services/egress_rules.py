@@ -6,6 +6,8 @@ Nothing here logs or returns credential values.
 """
 
 import base64
+import hashlib
+import hmac
 import ipaddress
 import json
 import re
@@ -169,7 +171,33 @@ def aws_operation(service, headers, body, method, path):
         action = parse_qs(path.split('?', 1)[1]).get('Action')
         if action:
             return f'{service}:{action[0]}'
-    return f'{service}:{method} {path.split("?", 1)[0]}'
+    clean = path.split('?', 1)[0]
+    if service == 's3' and '?' in path:
+        # Subresources decide what an S3 call does: `POST /b?delete` deletes objects.
+        keys = parse_qs(path.split('?', 1)[1], keep_blank_values=True)
+        sub = next((k for k in S3_SUBRESOURCES if k in keys), None)
+        if sub:
+            return f'{service}:{method} {clean}?{sub}'
+    return f'{service}:{method} {clean}'
+
+
+S3_SUBRESOURCES = (
+    'delete',
+    'policy',
+    'acl',
+    'publicAccessBlock',
+    'ownershipControls',
+    'lifecycle',
+    'replication',
+    'encryption',
+    'versioning',
+    'cors',
+    'website',
+    'notification',
+    'object-lock',
+    'retention',
+    'legal-hold',
+)
 
 
 def operation(rule, method, path, headers, body):
@@ -237,8 +265,9 @@ def aws_resign(method, url, headers, body, region, service, credential):
     from botocore.awsrequest import AWSRequest
     from botocore.credentials import Credentials
 
-    if headers.get('x-amz-content-sha256', '').startswith('STREAMING-'):
-        raise ValueError('aws-chunked streaming payloads are not re-signed')
+    payload = headers.get('x-amz-content-sha256', '')
+    if payload.startswith('STREAMING-') and payload not in AWS_STREAMING:
+        raise ValueError(f'{payload[:60]} payloads are not re-signed')
     creds = Credentials(
         credential['access_key_id'], credential['secret_access_key'], credential.get('session_token') or None
     )
@@ -246,6 +275,118 @@ def aws_resign(method, url, headers, body, region, service, credential):
     request = AWSRequest(method=method, url=url, data=body, headers=kept)
     SigV4Auth(creds, service, region).add_auth(request)
     return {k.lower(): v for k, v in request.headers.items()}
+
+
+# ── aws-chunked uploads ─────────────────────────────────────
+# botocore signs the headers with x-amz-content-sha256 as given, so the seed is re-signed like any
+# request. Unsigned-chunk uploads (the AWS CLI's) need nothing more. Signed chunks chain from the
+# seed signature: each is recomputed with the real key as the body passes, keeping its length.
+
+AWS_STREAMING = {
+    'STREAMING-UNSIGNED-PAYLOAD-TRAILER': None,
+    'STREAMING-AWS4-HMAC-SHA256-PAYLOAD': 'chunks',
+    'STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER': 'trailer',
+}
+AWS_SIGNATURE = re.compile(r'Credential=[^/]+/(\d{8}/[^/]+/[^/]+/aws4_request),.*Signature=([0-9a-f]{64})$')
+CHUNK_LINE = re.compile(rb'([0-9a-fA-F]{1,8});chunk-signature=[0-9a-f]{64}')
+TRAILER = re.compile(rb'((?:[A-Za-z0-9-]{1,64}:[^\r\n]{0,256}\r\n){1,8})x-amz-trailer-signature:[0-9a-f]{64}\r\n\r\n')
+EMPTY_SHA256 = hashlib.sha256(b'').hexdigest()
+
+
+class ChunkResigner:
+    """Re-signs an aws-chunked body fed in arbitrary slices; `feed(b'')` ends it. Malformed or
+    truncated input raises ValueError. Holds at most one chunk (16 MiB, S3's limit)."""
+
+    MAX_CHUNK = 16 << 20
+    MAX_LINE = 100
+    MAX_TRAILER = 4096
+
+    def __init__(self, key, timestamp, scope, seed, trailer):
+        self.key, self.prefix, self.previous = key, f'{timestamp}\n{scope}\n', seed
+        self.trailer = trailer
+        self.buf = bytearray()
+        self.state, self.size, self.size_text = 'head', 0, b''
+
+    def sign(self, algorithm, *hashes):
+        text = f'{algorithm}\n{self.prefix}{self.previous}\n' + '\n'.join(hashes)
+        self.previous = hmac.new(self.key, text.encode(), hashlib.sha256).hexdigest()
+        return self.previous
+
+    def feed(self, data):
+        if not data:
+            if self.state != 'end' or self.buf:
+                raise ValueError('truncated aws-chunked body')
+            return b''
+        if self.state == 'end':
+            raise ValueError('data after the final aws-chunked chunk')
+        self.buf += data
+        out = bytearray()
+        while True:
+            if self.state == 'head':
+                end = self.buf.find(b'\r\n')
+                if end < 0:
+                    if len(self.buf) > self.MAX_LINE:
+                        raise ValueError('malformed aws-chunked chunk header')
+                    break
+                match = CHUNK_LINE.fullmatch(bytes(self.buf[:end]))
+                if match is None:
+                    raise ValueError('malformed aws-chunked chunk header')
+                self.size_text, self.size = match.group(1), int(match.group(1), 16)
+                if self.size > self.MAX_CHUNK:
+                    raise ValueError('aws-chunked chunk larger than 16 MiB')
+                del self.buf[: end + 2]
+                if self.size == 0 and self.trailer:
+                    out += self.size_text + b';chunk-signature=' + self.sign_chunk(b'').encode() + b'\r\n'
+                    self.state = 'trailer'
+                else:
+                    self.state = 'data'
+            elif self.state == 'data':
+                if len(self.buf) < self.size + 2:
+                    break
+                chunk = bytes(self.buf[: self.size])
+                if self.buf[self.size : self.size + 2] != b'\r\n':
+                    raise ValueError('malformed aws-chunked chunk')
+                del self.buf[: self.size + 2]
+                out += self.size_text + b';chunk-signature=' + self.sign_chunk(chunk).encode() + b'\r\n'
+                out += chunk + b'\r\n'
+                self.state = 'head' if self.size else 'end'
+            elif self.state == 'trailer':
+                match = TRAILER.fullmatch(bytes(self.buf))
+                if match is None:
+                    if len(self.buf) > self.MAX_TRAILER:
+                        raise ValueError('malformed aws-chunked trailer')
+                    break
+                lines = match.group(1)
+                signature = self.sign(
+                    'AWS4-HMAC-SHA256-TRAILER', hashlib.sha256(lines.replace(b'\r\n', b'\n')).hexdigest()
+                )
+                out += lines + b'x-amz-trailer-signature:' + signature.encode() + b'\r\n\r\n'
+                self.buf.clear()
+                self.state = 'end'
+            else:
+                if self.buf:
+                    raise ValueError('data after the final aws-chunked chunk')
+                break
+        return bytes(out)
+
+    def sign_chunk(self, chunk):
+        return self.sign('AWS4-HMAC-SHA256-PAYLOAD', EMPTY_SHA256, hashlib.sha256(chunk).hexdigest())
+
+
+def aws_chunk_resigner(headers, credential):
+    """A ChunkResigner for re-signed `headers` whose chunks are signed, else None."""
+    kind = AWS_STREAMING.get(headers.get('x-amz-content-sha256', ''))
+    if kind is None:
+        return None
+    match = AWS_SIGNATURE.search(headers['authorization'])
+    if match is None:
+        raise ValueError('re-signed request has no signature')
+    scope, seed = match.groups()
+    date, region, service, _ = scope.split('/')
+    key = ('AWS4' + credential['secret_access_key']).encode()
+    for part in (date, region, service, 'aws4_request'):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    return ChunkResigner(key, headers['x-amz-date'], scope, seed, kind == 'trailer')
 
 
 def apply(decision, method, url, headers, body, credential):
@@ -487,7 +628,18 @@ HIGH_RISK = (
         r'^[a-z0-9-]+:(Delete|Terminate|Remove|Revoke|Detach|Disable|ScheduleKeyDeletion|Put\w*Policy)',
         'delete, terminate or change access to an AWS resource',
     ),
-    ('aws-s3-delete', 'aws', r'^s3:DELETE ', 'delete S3 objects or buckets'),
+    (
+        'aws-s3-delete',
+        'aws',
+        r'^s3:(DELETE |POST \S*\?delete$|PUT \S*\?lifecycle$)',
+        'delete S3 objects or buckets, or set expiry rules',
+    ),
+    (
+        'aws-s3-access',
+        'aws',
+        r'^s3:PUT \S*\?(policy|acl|publicAccessBlock|ownershipControls)$',
+        'change who can access an S3 bucket or object',
+    ),
     ('linear-delete', 'linear', r'graphql:.*\b\w+(Delete|Archive)\b', 'delete or archive in Linear'),
 )
 ZERO_SHA = b'0' * 40

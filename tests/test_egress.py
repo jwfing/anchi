@@ -47,6 +47,17 @@ def signed(service, region='us-east-1', target=None, body=b'', path='/', host=No
     return host, {k.lower(): v for k, v in request.headers.items()}
 
 
+def example_resigner(seed, trailer):
+    """A ChunkResigner keyed like the S3 reference's streaming examples (the documented example secret)."""
+    import hashlib
+    import hmac
+
+    key = b'AWS4wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+    for part in ('20130524', 'us-east-1', 's3', 'aws4_request'):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    return rules.ChunkResigner(key, '20130524T000000Z', '20130524/us-east-1/s3/aws4_request', seed, trailer)
+
+
 class DecisionTests(unittest.TestCase):
     def test_unmatched_hosts_pass_through(self):
         self.assertEqual(decide('GET', 'example.com', '/').action, 'pass')
@@ -173,12 +184,119 @@ class DecisionTests(unittest.TestCase):
         host, headers = signed('iam', body=b'Action=ListUsers&Version=2010-05-08')
         self.assertEqual(decide('POST', host, '/', headers, b'Action=ListUsers&Version=2010-05-08').action, 'inject')
 
-    def test_aws_streaming_uploads_rejected(self):
-        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
-        headers['x-amz-content-sha256'] = 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD'
-        decision = decide('PUT', host, '/key', headers)
+    def test_aws_chunk_signatures_match_the_aws_example(self):
+        # The worked example of "Signature Calculations for the Authorization Header: Transferring
+        # Payload in Multiple Chunks" in the S3 API reference: its seed and chunk signatures.
+        seed = '4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9'
+        expected = (
+            'ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648',
+            '0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497',
+            'b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9',
+        )
+        placeholder = '0' * 64
+        body = b''.join(
+            f'{len(c):x};chunk-signature={placeholder}\r\n'.encode() + c + b'\r\n'
+            for c in (b'a' * 65536, b'a' * 1024, b'')
+        )
+        for step in (len(body), 1, 7, 4096):
+            resigner = example_resigner(seed, trailer=False)
+            out = b''.join(resigner.feed(body[i : i + step]) for i in range(0, len(body), step))
+            out += resigner.feed(b'')
+            self.assertEqual(len(out), len(body))
+            self.assertEqual(
+                [line.split(b'=')[1].decode() for line in out.split(b'\r\n') if b'chunk-signature' in line],
+                list(expected),
+            )
+            self.assertEqual(out.replace(b'a', b'').count(b'\r\n'), 6)
+
+    def test_aws_chunked_trailer_is_re_signed(self):
+        seed = '106e2a8a18243abcf37539882f36619c00e2dfc72633413f02d3b74544bfeb8e'
+        placeholder = '0' * 64
+        body = (
+            f'10000;chunk-signature={placeholder}\r\n'.encode()
+            + b'a' * 65536
+            + f'\r\n400;chunk-signature={placeholder}\r\n'.encode()
+            + b'a' * 1024
+            + f'\r\n0;chunk-signature={placeholder}\r\n'.encode()
+            + f'x-amz-checksum-crc32c:sOO8/Q==\r\nx-amz-trailer-signature:{placeholder}\r\n\r\n'.encode()
+        )
+        resigner = example_resigner(seed, trailer=True)
+        out = resigner.feed(body[:70000]) + resigner.feed(body[70000:]) + resigner.feed(b'')
+        self.assertEqual(len(out), len(body))
+        signatures = [line.split(b'=', 1)[1] for line in out.split(b'\r\n') if b'chunk-signature' in line]
+        # Chunk signatures of the trailer example in the same reference.
+        self.assertEqual(
+            [s.decode() for s in signatures],
+            [
+                'b474d8862b1487a5145d686f57f013e54db672cee1c953b3010fb58501ef5aa2',
+                '1c1344b170168f8e65b41376b44b20fe354e373826ccbbe2c1d40a8cae51e5c7',
+                '2ca2aba2005185cf7159c6277faf83795951dd77a3a99e6e65d5c9f85863f992',
+            ],
+        )
+        trailer = out.split(b'x-amz-trailer-signature:')[1]
+        self.assertRegex(trailer, rb'^[0-9a-f]{64}\r\n\r\n$')
+        self.assertNotIn(placeholder.encode(), out)
+
+    def test_malformed_aws_chunked_bodies_are_refused(self):
+        sig = '0' * 64
+        cases = (
+            b'zz;chunk-signature=' + sig.encode() + b'\r\n',
+            b'1000001;chunk-signature=' + sig.encode() + b'\r\n',
+            b'1;chunk-signature=' + sig.encode() + b'\r\naXX',
+            b'x' * 200,
+        )
+        for body in cases:
+            with self.assertRaises(ValueError, msg=body[:30]):
+                example_resigner(sig, trailer=False).feed(body)
+        resigner = example_resigner(sig, trailer=False)
+        resigner.feed(b'1;chunk-signature=' + sig.encode() + b'\r\na\r\n')
         with self.assertRaises(ValueError):
-            rules.apply(decision, 'PUT', f'https://{host}/key', headers, b'', AWS)
+            resigner.feed(b'')
+        with self.assertRaises(ValueError):
+            example_resigner(sig, trailer=False).feed(b'')
+        resigner = example_resigner(sig, trailer=False)
+        resigner.feed(b'0;chunk-signature=' + sig.encode() + b'\r\n\r\n')
+        with self.assertRaises(ValueError):
+            resigner.feed(b'more')
+
+    def test_aws_streaming_payloads_are_re_signed(self):
+        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
+        for payload, chunked in (
+            ('STREAMING-UNSIGNED-PAYLOAD-TRAILER', False),
+            ('STREAMING-AWS4-HMAC-SHA256-PAYLOAD', True),
+            ('STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER', True),
+        ):
+            sent = {**headers, 'x-amz-content-sha256': payload, 'content-encoding': 'aws-chunked'}
+            decision = decide('PUT', host, '/key', sent)
+            new = rules.apply(decision, 'PUT', f'https://{host}/key', sent, b'', AWS)
+            self.assertEqual(new['x-amz-content-sha256'], payload)
+            self.assertIn('x-amz-content-sha256', new['authorization'])
+            self.assertIn(f'Credential={AWS["access_key_id"]}/', new['authorization'])
+            resigner = rules.aws_chunk_resigner(new, AWS)
+            self.assertEqual(resigner is not None, chunked)
+            if resigner:
+                self.assertEqual(resigner.previous, new['authorization'].rsplit('Signature=', 1)[1])
+        sent = {**headers, 'x-amz-content-sha256': 'STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD'}
+        decision = decide('PUT', host, '/key', sent)
+        with self.assertRaises(ValueError):
+            rules.apply(decision, 'PUT', f'https://{host}/key', sent, b'', AWS)
+
+    def test_s3_subresources_name_the_operation_and_risk(self):
+        host, headers = signed('s3', host='s3.us-east-1.amazonaws.com')
+        cases = (
+            ('POST', '/bucket?delete', 's3:POST /bucket?delete', 'aws-s3-delete'),
+            ('PUT', '/bucket?lifecycle', 's3:PUT /bucket?lifecycle', 'aws-s3-delete'),
+            ('PUT', '/bucket?policy', 's3:PUT /bucket?policy', 'aws-s3-access'),
+            ('PUT', '/bucket/key?acl', 's3:PUT /bucket/key?acl', 'aws-s3-access'),
+            ('DELETE', '/bucket/key', 's3:DELETE /bucket/key', 'aws-s3-delete'),
+            ('PUT', '/bucket/key?partNumber=1&uploadId=x', 's3:PUT /bucket/key', None),
+            ('GET', '/bucket?list-type=2', 's3:GET /bucket', None),
+        )
+        for method, path, op, risk in cases:
+            decision = decide(method, host, path, headers)
+            self.assertEqual(decision.op, op)
+            found = rules.high_risk(decision, method, path, b'')
+            self.assertEqual(found and found[0], risk, path)
 
     def test_proxy_authorization_never_forwarded(self):
         decision = decide('GET', 'api.github.com', '/user')
@@ -603,6 +721,86 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             asyncio.run(proxy.verify('gmail'))
         self.assertNotIn(GITHUB['token'], Path(self.tmp, 'audit.jsonl').read_text())
+
+    def proxy_flow(self, method, host, path, headers, stream, content=b''):
+        from types import SimpleNamespace as NS
+
+        killed = []
+        request = NS(
+            method=method,
+            path=path,
+            url=f'https://{host}{path}',
+            pretty_host=host,
+            headers=dict(headers),
+            stream=stream,
+            raw_content=content,
+            get_content=lambda strict=False: content,
+        )
+        flow = NS(request=request, client_conn=NS(id='c1'), metadata={}, response=None, kill=lambda: killed.append(1))
+        return flow, killed
+
+    def proxy_with_cell(self, grants=frozenset({'aws', 'github'})):
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)),
+            credentials=self.module.Credentials(lambda r: {'aws': AWS, 'github': GITHUB}[r['connector']]),
+        )
+        cell = self.module.Cell('t1', 'dev', grants)
+        proxy.registry.client_cell = lambda client: cell
+        return proxy
+
+    def test_streamed_s3_uploads_are_re_signed_before_their_headers_leave(self):
+        proxy = self.proxy_with_cell()
+        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
+        headers.update(
+            {'x-amz-content-sha256': 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD', 'content-encoding': 'aws-chunked'}
+        )
+        flow, killed = self.proxy_flow('PUT', host, '/key', headers, stream=True)
+        asyncio.run(proxy.requestheaders(flow))
+        self.assertEqual(killed, [])
+        self.assertIn(f'Credential={AWS["access_key_id"]}/', flow.request.headers['authorization'])
+        self.assertTrue(callable(flow.request.stream))
+        body = b'1;chunk-signature=' + b'0' * 64 + b'\r\na\r\n0;chunk-signature=' + b'0' * 64 + b'\r\n\r\n'
+        out = flow.request.stream(body) + flow.request.stream(b'')
+        self.assertEqual(len(out), len(body))
+        self.assertNotIn(b'0' * 64, out)
+        # The request hook comes after the body: it must not touch the request again.
+        before = dict(flow.request.headers)
+        asyncio.run(proxy.request(flow))
+        self.assertEqual(flow.request.headers, before)
+        # The buffered path re-signs the whole body.
+        flow, killed = self.proxy_flow('PUT', host, '/key', headers, stream=False, content=body)
+        asyncio.run(proxy.requestheaders(flow))
+        asyncio.run(proxy.request(flow))
+        self.assertEqual((len(flow.request.raw_content), flow.response), (len(body), None))
+        self.assertNotIn(b'0' * 64, flow.request.raw_content)
+        flow, killed = self.proxy_flow('PUT', host, '/key', headers, stream=False, content=b'garbage')
+        responses = []
+        with patch.object(self.module.EgressProxy, 'respond', staticmethod(lambda f, *a: responses.append(a[0]))):
+            asyncio.run(proxy.request(flow))
+        self.assertEqual(responses, [403])
+
+    def test_other_streamed_requests_leave_uninjected_and_say_so(self):
+        proxy = self.proxy_with_cell()
+        flow, killed = self.proxy_flow('POST', 'api.github.com', '/repos/o/r/releases', {'authorization': 'x'}, True)
+        asyncio.run(proxy.requestheaders(flow))
+        self.assertEqual((killed, flow.request.headers), ([], {'authorization': 'x'}))
+        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
+        flow, killed = self.proxy_flow('POST', host, '/bucket?delete', headers, True)
+
+        async def denied(request):
+            return 'denied'
+
+        with patch.object(proxy.approvals, 'ask', denied):
+            asyncio.run(proxy.requestheaders(flow))
+        self.assertEqual(killed, [1])
+        # Streaming that starts after the headers hook (a chunked body past 8 MiB): too late to inject.
+        flow, killed = self.proxy_flow('POST', 'github.com', '/o/r.git/git-receive-pack', {'authorization': 'x'}, False)
+        asyncio.run(proxy.requestheaders(flow))
+        flow.request.stream = True
+        asyncio.run(proxy.request(flow))
+        self.assertEqual((flow.request.headers, flow.response), ({'authorization': 'x'}, None))
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertEqual([r['decision'] for r in rows], ['pass:streamed', 'held-denied', 'pass:streamed'])
 
     def test_audit_never_contains_credentials(self):
         self.module.audit({'decision': 'inject', 'host': 'api.github.com'})

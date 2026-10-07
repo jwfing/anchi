@@ -166,5 +166,4 @@ Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. I
 - Finished tasks are deleted after 90 days; set `retentionDays` in `~/.anchi/settings.yaml` to change it.
 - Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content; use `approvals` for its writes.
 - Credential isolation is not data isolation: agents can send what they read to any public host.
-- S3 uploads signed as streaming payloads (`aws-chunked`, used by the AWS CLI for large objects) are refused.
-- Phase 1 has no scheduled triggers and no agent-to-agent delegation.
+- Request bodies over 8 MiB stream through the proxy. S3 calls are re-signed on that path, including `aws-chunked` uploads with signed or unsigned chunks; other large requests, such as a git push of more than 8 MiB, leave without credentials and fail upstream. The audit log records them as `pass:streamed`.

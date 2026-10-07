@@ -100,7 +100,7 @@ Passthrough must not turn the proxy into a path to private networks. The PoC sho
 The cell holds a placeholder access key pair, and the AWS CLI signs requests with it. The proxy strips that SigV4 signature, checks the request against the allowlist and re-signs it with the real credentials.
 
 - **Action extraction** depends on the service protocol. For query-protocol services (IAM, STS), the action is the `Action=` body parameter. For JSON-protocol services, it is the `X-Amz-Target` header. For REST services such as S3, it is the method and path.
-- **Phase 1 scope:** a per-service allowlist, with STS and IAM writes denied. S3 uploads must use `UNSIGNED-PAYLOAD`; chained `aws-chunked` signatures are not re-signed.
+- **Phase 1 scope:** a per-service allowlist, with STS and IAM writes denied. S3 uploads must use `UNSIGNED-PAYLOAD`; chained `aws-chunked` signatures are not re-signed. Phase 3 re-signs `aws-chunked` uploads (unsigned chunks with trailers, as the AWS CLI sends them, and signed chunks, recomputed while streaming).
 - SSO refresh and role assumption run on the trusted side, using credentials sourced from the host profile.
 - Presigned URLs generated inside the cell carry the placeholder signature and are invalid. This is expected.
 - **PoC status:** verified from a task cell with real credentials. Query (STS, EC2), JSON (CloudWatch Logs) and REST (S3 list) calls re-signed correctly. Minting calls returned an AWS-shaped `AccessDenied`. Unsigned requests (public downloads) pass through. S3 uploads with streaming checksums are untested.

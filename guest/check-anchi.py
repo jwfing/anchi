@@ -224,6 +224,58 @@ def main():
     finally:
         stop(e)
 
+    # ── phase 3: streamed bodies (over 8 MiB) are decided before their headers leave ──
+    since = time.time()
+    f, ready_f = start('chk-f', 'chk-alpha', 'github,aws')
+    try:
+        big = 'head -c 9437184 /dev/zero > /tmp/big; '
+        github = (
+            sh(
+                'chk-f',
+                big + "curl -sS -m 60 -o /dev/null -w '%{http_code}' -X POST --data-binary @/tmp/big "
+                "-H 'Authorization: Bearer anchi-placeholder-github' https://api.github.com/markdown/raw",
+                timeout=90,
+            )[1]
+            if ready_f
+            else ''
+        )
+        signature = (
+            'Credential=AKIAI44QH8DHBEXAMPLE/20260101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature='
+            + '0' * 64
+        )
+        s3 = (
+            sh(
+                'chk-f',
+                big + "curl -sS -m 60 -o /dev/null -w '%{http_code}' -X PUT --data-binary @/tmp/big "
+                f"-H 'Authorization: AWS4-HMAC-SHA256 {signature}' "
+                "-H 'x-amz-content-sha256: STREAMING-AWS4-HMAC-SHA256-PAYLOAD' -H 'content-encoding: aws-chunked' "
+                'https://anchi-check-nonexistent.s3.amazonaws.com/key',
+                timeout=90,
+            )[1]
+            if ready_f
+            else ''
+        )
+        if ready_f:
+            # No length: buffered first, streamed once past 8 MiB, after the headers hook.
+            sh(
+                'chk-f',
+                "curl -sS -m 60 -o /dev/null -X POST --data-binary @/tmp/big -H 'Transfer-Encoding: chunked' "
+                "-H 'Authorization: Basic eDphbmNoaS1wbGFjZWhvbGRlcg==' https://github.com/o/r.git/git-receive-pack",
+                timeout=90,
+            )
+        rows = audit_since(since, 'chk-f')
+        decisions = {r.get('rule'): r.get('decision') for r in rows}
+        check(
+            'streamed requests are decided before their headers leave',
+            decisions.get('github-api') == 'pass:streamed'
+            and decisions.get('github-git') == 'pass:streamed'
+            and decisions.get('aws') in ('missing-credential', 'rejected')
+            and s3.startswith('000'),
+            f'{decisions} / github {github[:3]} / s3 {s3[:60]}',
+        )
+    finally:
+        stop(f)
+
     # ── host workspaces (macOS, when ~/AnchiWorkspaces is shared) ──
     if os.path.ismount('/mnt/anchi-host'):
         check_workspaces()
