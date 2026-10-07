@@ -21,6 +21,7 @@ Start with the [project overview](../README.md) and [Getting started](GETTING_ST
 | [Security foundation](SECURITY_FOUNDATION.md) | Credential, policy, and inference services |
 | [Repository architecture](architecture/REPOSITORY.md) | Module responsibilities and dependency direction |
 | [Agent team design](architecture/AGENT_TEAM_DESIGN.md) | Planned v2 design: daemon, per-task cells, credential-injecting proxy (not implemented) |
+| [Agent team phase 1 plan](architecture/AGENT_TEAM_PHASE1_PLAN.md) | Milestones, decisions and acceptance for phase 1 (not implemented) |
 
 ## Development and releases
 

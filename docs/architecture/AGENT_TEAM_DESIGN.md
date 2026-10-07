@@ -169,27 +169,25 @@ The Electron desktop app is frozen. Its setup, OAuth and vault logic moves into 
 
 ## Phases
 
-**Phase 0 (spikes, first week):**
-
-1. CJK IME input and long-transcript rendering in the Ink TUI.
-2. Claude Code running with a placeholder `CLAUDE_CODE_OAUTH_TOKEN` behind the proxy. Determine local token-format checks and every Anthropic host the CLI contacts.
+The phase 0 spikes are complete; see the [PoC summary](../../poc/README.md). Phase 1 is broken down in the [phase 1 implementation plan](AGENT_TEAM_PHASE1_PLAN.md).
 
 **Phase 1:**
 
-1. Daemon extraction and per-task cells.
-2. Egress proxy with GitHub injection rules. This proves the credential invariant end to end.
-3. Codex runtime and the Anchi MCP server.
-4. Agent builder.
-5. Linear connector.
-6. AWS re-signing proxy.
-7. Minimal task list (status, times, final result).
+- daemon and TUI;
+- per-task cells;
+- the credential-injecting egress proxy;
+- Codex runtime;
+- GitHub, AWS and Linear connectors;
+- agent builder;
+- a minimal task list.
 
 **Phase 2:**
 
-- Claude Code runtime
-- cron and polling triggers
-- `@` delegation and orchestration
-- full task list
+- Claude Code runtime (verified in the PoC);
+- cron and polling triggers;
+- `@` delegation and orchestration through the Anchi MCP server;
+- full task list;
+- exposing the existing Gmail/Drive/Notion/Slack connectors to the new runtimes.
 
 **Not planned:** remote machines.
 
