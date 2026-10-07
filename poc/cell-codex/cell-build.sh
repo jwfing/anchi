@@ -20,7 +20,9 @@ apt-get install -y -qq --no-install-recommends git bubblewrap >/dev/null
 rm -rf /var/lib/apt/lists/* /var/cache/apt/*.bin
 echo "build: $(git --version); $(bwrap --version)"
 
-url="https://github.com/openai/codex/releases/download/rust-v$CODEX_VERSION/codex-$CODEX_TARGET.tar.gz"
+# The full package carries codex plus its helpers (code-mode host, bundled
+# bwrap); the bare codex tarball lacks them and tool calls then fail.
+url="https://github.com/openai/codex/releases/download/rust-v$CODEX_VERSION/codex-package-$CODEX_TARGET.tar.gz"
 python3 - "$url" <<'EOF'
 import sys, urllib.request
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({"https": "http://127.0.0.1:3128"}))
@@ -28,13 +30,21 @@ with opener.open(sys.argv[1], timeout=120) as r, open("/var/tmp/codex.tgz", "wb"
     while chunk := r.read(1 << 20):
         f.write(chunk)
 EOF
-tar -xzf /var/tmp/codex.tgz -C /var/tmp
-install -m 0755 "/var/tmp/codex-$CODEX_TARGET" /usr/local/bin/codex
-rm -f /var/tmp/codex.tgz "/var/tmp/codex-$CODEX_TARGET"
-echo "build: $(codex --version)"
+rm -rf /opt/codex && install -d /opt/codex
+tar -xzf /var/tmp/codex.tgz -C /opt/codex
+rm -f /var/tmp/codex.tgz
+echo "build: package layout:"
+find /opt/codex -maxdepth 4 \( -type f -o -type l \) | sed 's|^|  |' | head -30
+codex_bin=$(find /opt/codex -maxdepth 4 -type f -name 'codex*' ! -name '*code-mode*' ! -name '*.*' | head -1)
+[ -n "$codex_bin" ] || { echo "build: codex binary not found in package" >&2; exit 1; }
+# Link the real binary: Codex looks for its helpers next to its own resolved
+# path, so they stay together inside /opt/codex.
+ln -sf "$codex_bin" /usr/local/bin/codex
+echo "build: $(codex --version) from $codex_bin"
 # Codex re-executes itself as codex-linux-sandbox (argv[0] dispatch). Ship
-# the alias in the image instead of letting Codex create it at runtime.
-ln -sf codex /usr/local/bin/codex-linux-sandbox
+# the alias next to the real binary instead of creating it at runtime.
+ln -sf "$(basename "$codex_bin")" "$(dirname "$codex_bin")/codex-linux-sandbox"
+ln -sf "$(dirname "$codex_bin")/codex-linux-sandbox" /usr/local/bin/codex-linux-sandbox
 # A non-tmp home: Codex refuses to create helper binaries under /tmp.
 install -d -o 1000 -g 1000 -m 0700 /home/agent
 
