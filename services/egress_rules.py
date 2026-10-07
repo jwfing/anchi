@@ -267,3 +267,55 @@ def public_address(infos):
     if chosen is None:
         return None, 'no address'
     return str(chosen), None
+
+
+# ── connector verification ──────────────────────────────────
+# The proxy itself calls one fixed, read-only identity endpoint per connector after an import,
+# so a bad credential is reported at setup instead of as a 401 in the middle of a task.
+
+VERIFY_ENDPOINTS = {
+    'github': ('GET', 'https://api.github.com/user', b''),
+    'linear': ('POST', 'https://api.linear.app/graphql', b'{"query":"{ viewer { email name } }"}'),
+    'aws': ('POST', 'https://sts.{region}.amazonaws.com/', b'Action=GetCallerIdentity&Version=2011-06-15'),
+}
+
+
+def verify_request(connector, credential):
+    """(method, url, headers, body) of the identity call for `connector`."""
+    method, url, body = VERIFY_ENDPOINTS[connector]
+    headers = {'user-agent': 'anchi-egress-verify', 'accept': 'application/json'}
+    if connector == 'github':
+        headers['authorization'] = f'Bearer {credential["token"]}'
+    elif connector == 'linear':
+        headers['authorization'] = credential['token']
+        headers['content-type'] = 'application/json'
+    else:
+        url = url.format(region=credential['region'])
+        headers = {'content-type': 'application/x-www-form-urlencoded'}
+        headers = aws_resign(method, url, headers, body, credential['region'], 'sts', credential)
+    return method, url, headers, body
+
+
+def verify_account(connector, status, body):
+    """Account label from the identity call's response; ValueError when the credential is refused."""
+    if status in (401, 403):
+        raise ValueError('CREDENTIAL_REJECTED')
+    if status != 200:
+        raise ValueError(f'VERIFY_HTTP_{status}')
+    text = body.decode('utf-8', 'replace')
+    try:
+        if connector == 'github':
+            return str(json.loads(text)['login'])[:100]
+        if connector == 'linear':
+            data = json.loads(text)
+            if data.get('errors'):
+                raise ValueError('CREDENTIAL_REJECTED')
+            viewer = data['data']['viewer']
+            return str(viewer.get('email') or viewer.get('name'))[:100]
+        arn = re.search(r'<Arn>([^<]{1,300})</Arn>', text)
+        if arn:
+            return arn.group(1)
+    except (ValueError, KeyError, TypeError) as exc:
+        if str(exc) == 'CREDENTIAL_REJECTED':
+            raise
+    raise ValueError('VERIFY_UNEXPECTED_RESPONSE')

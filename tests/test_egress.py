@@ -162,6 +162,32 @@ class DecisionTests(unittest.TestCase):
         headers = rules.apply(decision, 'GET', 'https://api.github.com/user', {'proxy-authorization': 'x'}, b'', GITHUB)
         self.assertNotIn('proxy-authorization', headers)
 
+    def test_verification_requests_and_accounts(self):
+        method, url, headers, _ = rules.verify_request('linear', LINEAR)
+        self.assertEqual(
+            (method, url, headers['authorization']), ('POST', 'https://api.linear.app/graphql', LINEAR['token'])
+        )
+        method, url, headers, body = rules.verify_request('aws', AWS)
+        self.assertEqual(url, 'https://sts.us-east-1.amazonaws.com/')
+        self.assertIn(f'Credential={AWS["access_key_id"]}/', headers['authorization'])
+        self.assertEqual(body, b'Action=GetCallerIdentity&Version=2011-06-15')
+        self.assertEqual(rules.verify_account('github', 200, b'{"login":"octo"}'), 'octo')
+        self.assertEqual(
+            rules.verify_account('linear', 200, b'{"data":{"viewer":{"email":"a@b.c","name":"A"}}}'), 'a@b.c'
+        )
+        self.assertEqual(
+            rules.verify_account('aws', 200, b'<R><Arn>arn:aws:iam::1:user/bot</Arn></R>'), 'arn:aws:iam::1:user/bot'
+        )
+        for connector, status, body in (
+            ('github', 401, b'{"message":"Bad credentials"}'),
+            ('aws', 403, b'<Error/>'),
+            ('linear', 200, b'{"errors":[{"message":"Authentication required"}]}'),
+        ):
+            with self.assertRaisesRegex(ValueError, 'CREDENTIAL_REJECTED'):
+                rules.verify_account(connector, status, body)
+        with self.assertRaisesRegex(ValueError, 'VERIFY_UNEXPECTED_RESPONSE'):
+            rules.verify_account('github', 200, b'<html>')
+
     def test_credential_classification_reveals_nothing(self):
         self.assertEqual(rules.classify_credential({}), 'none')
         self.assertEqual(rules.classify_credential({'authorization': 'Bearer anchi-placeholder-x'}), 'placeholder')
@@ -291,6 +317,28 @@ class RegistryTests(unittest.TestCase):
             [(r['decision'], r['host'], r['reason'], r['task']) for r in rows],
             [('upstream-error', 'deb.debian.org', 'connection refused', 't1')],
         )
+
+    def test_verify_reads_the_credential_afresh_and_calls_only_the_identity_endpoint(self):
+        calls, fetched = [], []
+
+        def fetch(request):
+            fetched.append(request)
+            return GITHUB
+
+        def call(method, url, headers, body):
+            calls.append((method, url, headers['authorization']))
+            return 200, b'{"login": "octo"}'
+
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)), credentials=self.module.Credentials(fetch), call=call
+        )
+        self.assertEqual(asyncio.run(proxy.verify('github')), {'connector': 'github', 'account': 'octo'})
+        asyncio.run(proxy.verify('github'))
+        self.assertEqual(len(fetched), 2)
+        self.assertEqual(calls[0], ('GET', 'https://api.github.com/user', f'Bearer {GITHUB["token"]}'))
+        with self.assertRaises(ValueError):
+            asyncio.run(proxy.verify('gmail'))
+        self.assertNotIn(GITHUB['token'], Path(self.tmp, 'audit.jsonl').read_text())
 
     def test_audit_never_contains_credentials(self):
         self.module.audit({'decision': 'inject', 'host': 'api.github.com'})

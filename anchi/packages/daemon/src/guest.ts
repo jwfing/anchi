@@ -251,6 +251,12 @@ export class Guest {
     );
   }
 
+  /** Has the egress proxy call the connector's identity endpoint; returns the account. */
+  async verifyConnector(id: ConnectorId): Promise<string> {
+    const r = parse(await this.transport.exec(['anchi-cell', 'verify', id])) as { account: string };
+    return r.account;
+  }
+
   async removeConnector(id: ConnectorId): Promise<void> {
     parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/admin.py`, 'disconnect', id]),

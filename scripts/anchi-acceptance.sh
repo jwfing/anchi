@@ -21,8 +21,10 @@ write_if_missing() {
   [[ -f $1 ]] || { cat >"$1"; echo "created $1"; }
 }
 
+# run_scenario NAME AGENT LINK-REGEX TEXT: the task must finish, reply with a link matching
+# LINK-REGEX (the pull request, issue or comment it created) and pass the credential scan.
 run_scenario() {
-  local name=$1 agent=$2 text=$3 out task
+  local name=$1 agent=$2 link=$3 text=$4 out task
   echo "== $name"
   if ! out=$($anchi run "$agent" "$text"); then
     echo "$out" | tail -20
@@ -32,11 +34,14 @@ run_scenario() {
   fi
   echo "$out" | tail -8
   task=$(echo "$out" | grep -Eo 't-[0-9a-f]{10}' | tail -1)
-  if $anchi scan "$task"; then
-    echo "PASS $name ($task)"
-  else
+  if ! $anchi scan "$task"; then
     echo "FAIL $name: credential scan of $task"
     failures=$((failures + 1))
+  elif ! echo "$out" | grep -Eq "$link"; then
+    echo "FAIL $name: no link matching $link in the reply ($task)"
+    failures=$((failures + 1))
+  else
+    echo "PASS $name ($task)"
   fi
 }
 
@@ -57,7 +62,7 @@ prompt:
     practical, commit, push the branch and open a pull request with `gh pr create` that
     references the issue. Reply with the pull request URL.
 EOF
-  run_scenario 'scenario 1: developer agent' developer \
+  run_scenario 'scenario 1: developer agent' developer "github\.com/$ANCHI_REPO/pull/[0-9]+" \
     "Fix issue #$ANCHI_ISSUE in https://github.com/$ANCHI_REPO (private repository)."
 fi
 
@@ -80,7 +85,7 @@ prompt:
     errors, and file one GitHub issue with `gh issue create` summarizing them with counts,
     examples and likely causes. Reply with the issue URL.
 EOF
-  run_scenario 'scenario 2: devops agent' devops \
+  run_scenario 'scenario 2: devops agent' devops "github\.com/$ANCHI_ISSUE_REPO/issues/[0-9]+" \
     "Summarize the errors of the last 24 hours in log group $ANCHI_LOG_GROUP and file an issue in https://github.com/$ANCHI_ISSUE_REPO."
 fi
 
@@ -95,7 +100,7 @@ prompt:
     using curl with `Authorization: $LINEAR_API_KEY`. Read the issue you are given and add a
     helpful comment (commentCreate). Reply with the comment URL.
 EOF
-  run_scenario 'scenario 3: Linear agent' linear \
+  run_scenario 'scenario 3: Linear agent' linear 'linear\.app/[^ ]+/issue/[^ ]+#comment-' \
     "Read Linear issue $ANCHI_LINEAR_ISSUE and add a comment that summarizes it and proposes next steps."
 fi
 

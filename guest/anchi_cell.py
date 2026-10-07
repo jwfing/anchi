@@ -97,10 +97,10 @@ def mounted(path):
 # ── egress proxy control ────────────────────────────────────
 
 
-def egress(request):
+def egress(request, timeout=15):
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-            conn.settimeout(15)
+            conn.settimeout(timeout)
             conn.connect(str(EGRESS_CONTROL))
             conn.sendall(json.dumps(request).encode() + b'\n')
             data = b''
@@ -783,6 +783,8 @@ def main(argv):
         return cell_reap(rest)
     if command == 'scan' and len(rest) == 1:
         return cell_scan(*rest)
+    if command == 'verify' and len(rest) == 1 and rest[0] in CONNECTORS:
+        return emit(egress({'op': 'verify', 'connector': rest[0]}, timeout=40))
     if command == 'exec' and len(rest) >= 3 and rest[1] == '--':
         return cell_exec(rest[0], rest[2:])
     raise Failure('USAGE')

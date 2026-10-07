@@ -86,6 +86,22 @@ class Credentials:
         self.cache[grant] = (self.clock() + CREDENTIAL_TTL, value)
         return value
 
+    def invalidate(self, grant):
+        self.cache.pop(grant, None)
+
+
+def https_call(method, url, headers, body):
+    """(status, body) of one request to a fixed public endpoint; used only for verification."""
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(url, data=body or None, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status, response.read(65536)
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(65536)
+
 
 class Cell:
     def __init__(self, task, agent, grants):
@@ -190,9 +206,10 @@ def peer_uid(sock):
 
 
 class EgressProxy:
-    def __init__(self, registry=None, credentials=None):
+    def __init__(self, registry=None, credentials=None, call=https_call):
         self.registry = registry or Registry(('127.0.0.1', 18080))
         self.credentials = credentials or Credentials()
+        self.call = call
         self.control = None
 
     # ── lifecycle ────────────────────────────────────────────
@@ -235,6 +252,8 @@ class EgressProxy:
                 if not isinstance(task, str) or not NAME.fullmatch(task):
                     raise ValueError('BAD_TASK')
                 result = await self.registry.unregister(task)
+            elif op == 'verify':
+                result = await self.verify(request.get('connector'))
             elif op == 'list':
                 result = {t: {'agent': c.agent, 'grants': sorted(c.grants)} for t, c in self.registry.cells.items()}
             else:
@@ -245,6 +264,24 @@ class EgressProxy:
         writer.write(json.dumps(response).encode() + b'\n')
         await writer.drain()
         writer.close()
+
+    async def verify(self, connector):
+        """Calls the connector's identity endpoint with the stored credential, read afresh."""
+        if connector not in rules.CONNECTORS:
+            raise ValueError('BAD_CONNECTOR')
+        self.credentials.invalidate(connector)
+        loop = asyncio.get_running_loop()
+        try:
+            credential = await loop.run_in_executor(None, self.credentials.get, connector)
+        except LookupError as exc:
+            raise ValueError(f'NO_CREDENTIAL:{exc}') from None
+        method, url, headers, body = rules.verify_request(connector, credential)
+        try:
+            status, content = await loop.run_in_executor(None, self.call, method, url, headers, body)
+        except OSError:
+            raise ValueError('VERIFY_UNREACHABLE') from None
+        audit({'event': 'verify', 'connector': connector, 'status': status})
+        return {'connector': connector, 'account': rules.verify_account(connector, status, content)}
 
     def identifiers(self, grants):
         """Non-secret values a cell needs locally, such as the Codex account id."""

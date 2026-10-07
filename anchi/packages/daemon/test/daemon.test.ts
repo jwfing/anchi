@@ -44,8 +44,26 @@ class FakeTransport implements GuestTransport {
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'verify') {
+      if (this.rejectCredential)
+        return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
+      return ok({ connector: args[2], account: 'octo' });
+    }
+    if (args[1]?.endsWith('admin.py')) {
+      const [action, id] = args.slice(2);
+      if (action === 'status')
+        return ok({ github: { connected: this.connected, account: this.account } });
+      if (action === 'import-token') this.connected = true;
+      if (action === 'disconnect') [this.connected, this.account] = [false, null];
+      if (action === 'set-account') this.account = JSON.parse(stdin).account;
+      return ok({ [id ?? 'x']: { connected: this.connected } });
+    }
     return { code: 1, stdout: '{"error":"UNEXPECTED"}', stderr: '' };
   }
+
+  rejectCredential = false;
+  connected = false;
+  account: string | null = null;
 }
 
 let root: string;
@@ -196,6 +214,18 @@ describe('daemon tasks', () => {
     await expect(client.call('tasks.create', { agentId: 'nope', text: 'x' })).rejects.toThrow(
       /unknown agent/,
     );
+  });
+
+  it('verifies a connector after import and removes a refused credential', async () => {
+    const { client } = await start();
+    const status = await client.call('connectors.set', { id: 'github', token: 'ghp_good' });
+    expect(status).toMatchObject({ id: 'github', connected: true, account: 'octo' });
+    transport.rejectCredential = true;
+    await expect(client.call('connectors.set', { id: 'github', token: 'ghp_bad' })).rejects.toThrow(
+      /github did not accept the credential: CREDENTIAL_REJECTED/,
+    );
+    expect(transport.connected).toBe(false);
+    expect(transport.execs.some((e) => e.args.join(' ').includes('ghp_'))).toBe(false);
   });
 
   it('accepts a task for an agent file written just before it', async () => {

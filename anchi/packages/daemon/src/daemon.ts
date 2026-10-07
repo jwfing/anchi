@@ -157,6 +157,15 @@ export class Daemon {
     'connectors.set': async (params) => {
       const secret = connectorSecret(params);
       await this.guest.setConnector(secret);
+      let account: string;
+      try {
+        account = await this.guest.verifyConnector(secret.id);
+      } catch (err) {
+        // A credential the service refuses is removed rather than left to fail inside tasks.
+        await this.guest.removeConnector(secret.id).catch(() => {});
+        throw new Error(`${secret.id} did not accept the credential: ${(err as Error).message}`);
+      }
+      await this.guest.setConnectorAccount(secret.id, account);
       return (await connectorStatuses(this.guest)).find((c) => c.id === secret.id)!;
     },
     'connectors.remove': async ({ id }) => {

@@ -43,7 +43,7 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
 - **Agents and builder:** `agents.list`, `agents.reload`, `builder.proposal`, `builder.apply`, `builder.discard`. `builder.apply` is the only method that writes agent or image files. The TUI calls it only after a confirmation modal.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;
-  - `connectors.set` carries a secret. The daemon writes it to the guest administration command's stdin and never stores or logs it.
+  - `connectors.set` carries a secret. The daemon writes it to the guest administration command's stdin and never stores or logs it. It then verifies the connector, records the account it reports, and removes a credential the service refuses.
 - **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`.
 
 Every string in a runtime event is agent-originated. Clients must strip control characters and escape sequences before display.
@@ -59,6 +59,7 @@ The daemon runs only fixed commands: `limactl shell secure-vm -- sudo <command>`
 | `anchi-cell list` | Running cells, as JSON |
 | `anchi-cell reap [TASK...]` | Stop every cell not named, and unmount stale overlays |
 | `anchi-cell scan TASK` | Credential-invariant scan of a running cell: environment, process list and writable layer |
+| `anchi-cell verify CONNECTOR` | Has the egress proxy call the connector's identity endpoint (GitHub `/user`, Linear `viewer`, AWS `GetCallerIdentity`) with the stored credential. Prints the account, or `CREDENTIAL_REJECTED` |
 | `anchi-cell exec TASK -- COMMAND...` | Run a command as the agent user in a running cell, for live checks |
 | `anchi-image status ID HASH` | Whether a built layer exists for this recipe hash (and the current base) |
 | `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin (`codex base` builds the built-in image). Prints metadata and the build log path |
