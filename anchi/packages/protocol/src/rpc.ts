@@ -122,6 +122,11 @@ export interface Methods {
   'tasks.send': [{ taskId: string; text: string }, TaskRow];
   'tasks.cancel': [{ taskId: string }, null];
   'tasks.events': [{ taskId: string; afterSeq?: number }, StoredEvent[]];
+  /**
+   * Credential-invariant scan of the task's live cell (before its idle timeout destroys it):
+   * process environments, command lines and files, compared against the vault's real values.
+   */
+  'tasks.scan': [{ taskId: string }, { clean: boolean; findings: unknown[]; files: number }];
   /** Waits until the task's current turn ends (CLI). */
   'tasks.wait': [{ taskId: string }, TaskRow];
   'setup.status': [Record<string, never>, SetupStatus];

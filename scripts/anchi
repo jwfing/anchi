@@ -1,0 +1,5 @@
+#!/bin/bash
+# Runs the Anchi CLI/TUI from this checkout (TypeScript via tsx; `pnpm --dir anchi install` first).
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+exec node --import "$root/anchi/node_modules/tsx/dist/loader.mjs" "$root/anchi/packages/tui/src/main.ts" "$@"

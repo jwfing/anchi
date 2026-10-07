@@ -39,7 +39,7 @@ The recipe's content hash names the built layer. A changed recipe is a new image
 
 JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON frames of at most 8 MiB. Request `{id, method, params}`, response `{id, result}` or `{id, error: {message}}`, notification `{method, params}`. The method table is `Methods` in `protocol/src/rpc.ts`.
 
-- **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`.
+- **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, and `tasks.scan` (credential-invariant scan of the task's live cell).
 - **Agents and builder:** `agents.list`, `agents.reload`, `builder.proposal`, `builder.apply`, `builder.discard`. `builder.apply` is the only method that writes agent or image files. The TUI calls it only after a confirmation modal.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;
@@ -54,18 +54,20 @@ The daemon runs only fixed commands: `limactl shell secure-vm -- sudo <command>`
 
 | Command | Purpose |
 |---|---|
-| `anchi-cell start TASK AGENT IMAGE CONNECTORS` | Start a task cell and run the cell runner in it. Stdin and stdout are channel (3). Blocks until the cell exits |
+| `anchi-cell start TASK AGENT IMAGE HASH CONNECTORS SANDBOX` | Start a task cell and run the cell runner in it. Stdin and stdout are channel (3). Blocks until the cell exits, then releases its overlay, sockets and proxy registration |
 | `anchi-cell stop TASK` | Stop a cell and release its overlay, sockets and proxy registration |
 | `anchi-cell list` | Running cells, as JSON |
 | `anchi-cell reap [TASK...]` | Stop every cell not named, and unmount stale overlays |
 | `anchi-cell scan TASK` | Credential-invariant scan of a running cell: environment, process list and writable layer |
 | `anchi-cell exec TASK -- COMMAND...` | Run a command as the agent user in a running cell, for live checks |
-| `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin. Prints the build log path |
+| `anchi-image status ID HASH` | Whether a built layer exists for this recipe hash (and the current base) |
+| `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin (`codex base` builds the built-in image). Prints metadata and the build log path |
 | `anchi-image list` / `anchi-image remove ID` | Image layers and their metadata |
 | `python3 /opt/secure-vm/services/admin.py import-token\|import-aws\|disconnect\|status CONNECTOR` | Connector credentials into and out of the vault |
-| `python3 /opt/secure-vm/services/codex_admin.py import` | Codex access token and account id into the vault |
+| `python3 /opt/secure-vm/services/codex_admin.py import-token\|status` | Codex access token and account id into the vault; status without secrets |
+| `python3 /opt/secure-vm/services/vault_admin.py status` | Whether the vault is unlocked |
 
-`TASK` and `AGENT` match `^[a-z0-9][a-z0-9-]{0,39}$`. `CONNECTORS` is a comma-separated subset of `github,aws,linear`, or `-` for none.
+`TASK`, `AGENT` and `IMAGE` match `^[a-z0-9][a-z0-9-]{0,39}$`. `HASH` is `base` or the recipe's 16-hex content hash. `CONNECTORS` is a comma-separated subset of `github,aws,linear`, or `-` for none. `SANDBOX` is `cell` or `codex-workspace-write`.
 
 ## (3) Cell runner ⇄ daemon
 

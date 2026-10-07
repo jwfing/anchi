@@ -45,6 +45,17 @@ Approval waits retain the same request. Frozen actions persist; target preparati
 
 Drive text updates require a nonempty revision and recheck it immediately before writing. `If-Match` is sent only when a strong ETag exists; ETags are not mandatory. Without an ETag, the revision precheck has a check/write race. Notion's edit-time check has the same limitation. Neither is atomic concurrency control. Google Docs overwrite is refused; read and create remain available.
 
+## Agent team: task cells and the egress proxy
+
+The agent team (`anchi/`, `guest/anchi_cell.py`, `services/egress_*.py`) runs Codex agents in per-task cells. Its boundaries differ from the Pi cell:
+
+- **Credentials never enter a task cell.** Cells hold placeholders and the Codex account id, which is an identifier rather than an authenticator. The `anchi-egress` proxy reads GitHub, AWS, Linear and Codex credentials from `secure-auth`, whose kernel-UID check limits them to that service, and injects or re-signs them on matching requests. It never adds a runtime credential to a request that did not carry a placeholder. Token refresh happens on the trusted side.
+- **Credential isolation is not data isolation.** Unmatched traffic passes through the proxy unchanged so agents can install packages and read the web. An agent can send anything it can read to any public host. Connectors grant their full upstream authority, minus the deny lists, so use a dedicated least-privilege principal for AWS and a fine-grained, repository-scoped token for GitHub.
+- **Destinations are filtered.** The proxy refuses non-public addresses and connects to the address it checked, so DNS rebinding cannot redirect it. The nftables rules for the proxy UID reject private ranges as a backstop. Cells have loopback-only networking and reach the proxy only through their own socket. That socket also identifies the cell, and so its agent and connectors.
+- **The cell is the boundary for Codex.** Codex runs in `danger-full-access` inside an unprivileged, user-namespaced, capability-free nspawn cell with a volatile root and a persistent per-agent home. The per-agent `codex-workspace-write` opt-in loads an AppArmor profile that lets `bwrap` create user namespaces VM-wide.
+- **The daemon treats the cell runner as untrusted.** Frames are size-limited and schema-checked, and events must belong to the running turn; the first violation ends the cell. Clients strip escape sequences and control characters from all agent text. Builder proposals are written only after a full-screen confirmation.
+- **Audit.** `/var/log/anchi-egress/audit.jsonl` records method, host, path, operation, decision, task and agent, never header values or query strings. `make verify-anchi` runs the live isolation checks, and `anchi scan TASK` checks a live cell for real credential values.
+
 ## Isolation and platform limits
 
 Linux and macOS share the same trust boundaries: services and the cell run inside a Lima VM. Linux uses QEMU/KVM and QEMU user-mode NAT. The host administrator grants `/dev/kvm` access; the app displays privileged commands but does not execute them. Lima and Codex downloads verify the pinned SHA-256 in `desktop/host-tools.json`, not Lima GPG or Codex sigstore signatures. Downloads accept only HTTPS GitHub release hosts.

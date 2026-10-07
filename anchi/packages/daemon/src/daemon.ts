@@ -141,6 +141,13 @@ export class Daemon {
     'tasks.events': ({ taskId: id, afterSeq }) =>
       this.store.events(taskId(id), Number(afterSeq) || 0),
     'tasks.wait': ({ taskId: id }) => this.hub.wait(taskId(id)),
+    'tasks.scan': async ({ taskId: id }) => {
+      const task = taskId(id);
+      if (!this.hub.liveTasks().includes(task)) {
+        throw new Error('the task has no live cell; scan within the idle timeout after a turn');
+      }
+      return this.guest.scan(task);
+    },
     'setup.status': () => setupStatus(this.guest, this.lima),
     'setup.importCodex': async () => {
       const login = readHostCodexLogin();

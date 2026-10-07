@@ -139,6 +139,24 @@ program
     }),
   );
 
+program
+  .command('scan <task>')
+  .description("Credential-invariant scan of a task's live cell")
+  .action(async (taskId: string) => {
+    await withClient(async (client) => {
+      const r = await client.call('tasks.scan', { taskId });
+      console.log(
+        r.clean
+          ? styleText(
+              'green',
+              `clean: no real credential in ${r.files} files or the cell's processes`,
+            )
+          : styleText('red', `FOUND: ${JSON.stringify(r.findings)}`),
+      );
+      if (!r.clean) process.exitCode = 1;
+    });
+  });
+
 program.command('cancel <task>').action(async (taskId: string) => {
   await withClient((client) => client.call('tasks.cancel', { taskId }));
 });
@@ -194,6 +212,16 @@ setup
         // Tokens may also come on stdin for scripts: `anchi setup connector github < token-file`.
         const token = process.stdin.isTTY ? await askSecret(`${id} token: `) : await readStdin();
         secret = { id, token };
+      } else if (id === 'aws' && !process.stdin.isTTY) {
+        // Scripts: {"accessKeyId", "secretAccessKey", "region", "sessionToken"?} on stdin.
+        const v = JSON.parse(await readStdin()) as Record<string, string>;
+        secret = {
+          id: 'aws',
+          accessKeyId: v.accessKeyId ?? '',
+          secretAccessKey: v.secretAccessKey ?? '',
+          region: v.region ?? '',
+          ...(v.sessionToken ? { sessionToken: v.sessionToken } : {}),
+        };
       } else if (id === 'aws') {
         secret = {
           id: 'aws',

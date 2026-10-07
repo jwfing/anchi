@@ -1,6 +1,6 @@
 # Agent team phase 1 implementation plan
 
-**Status: planned.** This plan implements phase 1 of the [agent team design](AGENT_TEAM_DESIGN.md). The technical unknowns were retired by the [PoC](../../poc/README.md); this plan builds on those results.
+**Status: implemented; live acceptance in progress** (see [Status](#status)). This plan implements phase 1 of the [agent team design](AGENT_TEAM_DESIGN.md). The technical unknowns were retired by the [PoC](../../poc/README.md); this plan builds on those results.
 
 ## Goal and scope
 
@@ -192,6 +192,29 @@ M0 ─┬─ M1 cells ────┬─ M3 Codex runtime ─┬─ M5 TUI ─�
 - The builder cannot modify any agent configuration directly, including its own.
 
 **Acceptance:** scenario 1 starts from a builder conversation, with no hand-edited YAML.
+
+## Status
+
+All milestones are implemented on the `feat/agent-team-phase1` branch. The [agent team guide](../AGENT_TEAM.md) covers usage.
+
+| Milestone | State | Evidence |
+|---|---|---|
+| M0 | Done | `anchi/` workspace in `make check`; trust-zone dependency check; [contracts](AGENT_TEAM_CONTRACTS.md) |
+| M1 | Done | `make verify-anchi`: concurrent isolated cells; nspawn start-to-exec about 36 ms (60–75 ms including the manager); no overlay left after the reaper |
+| M2 | Done; private push pending | `make verify-anchi`: no direct egress, SSRF and DNS rebinding refused, minting denied, no injection without a connector. `tests/test_egress.py` holds the ported PoC checks |
+| M3 | Done; live Codex turn pending | Runner protocol tested offline and live up to the credential check |
+| M4 | Done | Daemon tests: task store, cell reuse and idle timeout, restart recovery and reaping |
+| M5 | Done; IME check pending | TUI tests: OSC 52, OSC 8, clear screen and a fake approval prompt are neutralized; secrets are masked |
+| M6 | Done; live checks pending | AWS re-signing and denials tested offline; Linear injection rule |
+| M7 | Done; live builder conversation pending | Builder proposals validated, diffed and written only on confirmation |
+
+Decisions taken during implementation:
+
+- **Runner control channel (M1, M3):** the runner's stdin and stdout, carried by `anchi-cell start` over `limactl shell`, replace a per-cell control socket. This is the same pattern as the Pi bridge. Closing the channel ends the cell, so a lost daemon cannot leave a runner waiting.
+- **Cell identity (M2):** the proxy hosts each cell's socket itself. Its in-process bridge binds a loopback port, maps the port to the cell, and only then connects to mitmproxy, so every client connection is attributed before its first byte. Connections that do not come from a bridge are refused.
+- **Codex account (M3):** the vault receives the access token and the account id only. The refresh token stays with the Codex CLI on the Mac, which refreshes it. When the vault's token expires, the user imports it again, and the proxy refuses to serve an expired token. This keeps a rotating refresh token from being shared by two refreshers.
+- **Linear client (M6):** agents call the GraphQL API with `curl`, using the placeholder `LINEAR_API_KEY`; the environment note in every agent's instructions explains this. There is no extra package to pin.
+- **Builder output (M7):** the builder ends its reply with fenced `anchi-agent` and `anchi-image` blocks. The daemon parses and validates them and shows a diff. It writes the files only after a `y` in the full-screen dialog.
 
 ## Porting my-bot
 
