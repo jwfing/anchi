@@ -167,7 +167,7 @@ N0 ─┬─ N1 Claude Code ─────────────────�
 | N6 | Done | Search, tree, usage, delete and retention with tests; TUI filter and task detail |
 | N7 | Done | Live: a per-minute schedule started a task each minute; poll baseline and exactly-once in tests |
 | N8 | Done | Live: Codex found and used a skill from `~/.codex/skills` |
-| N9 | Setup done; removal pending | Google sign-in, Notion/Slack tokens and write modes in the daemon, CLI and TUI; `desktop/` and `pi/` still present |
+| N9 | Done | Google sign-in, Notion/Slack tokens and write modes in the daemon, CLI and TUI; `desktop/`, `pi/` and the inference gateway removed; live `make verify-vm` 102/102 and `make verify-anchi` 23/23 after the removal |
 
 Decisions taken during implementation:
 
