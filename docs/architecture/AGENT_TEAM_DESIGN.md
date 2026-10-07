@@ -1,6 +1,6 @@
 # Agent team design (version 2)
 
-**Status: planned. Nothing in this document is implemented yet.** The current implementation is described in the [project overview](../../README.md), the [security model](../../SECURITY.md) and the [security foundation](../SECURITY_FOUNDATION.md). Where this design changes an existing boundary, the change is called out explicitly.
+**Status: phases 1 and 2 are implemented**; see the [phase 1](AGENT_TEAM_PHASE1_PLAN.md#status) and [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status) plans for what differs from this design and what still needs live acceptance. The [agent team guide](../AGENT_TEAM.md), the [contracts](AGENT_TEAM_CONTRACTS.md) and the [security model](../../SECURITY.md) describe the implementation.
 
 Positioning: **a secure, controllable agent team.** Anchi runs a team of Codex and Claude Code agents on the user's machine. Each agent runs in a disposable cell, and upstream credentials stay outside the cell.
 
@@ -38,7 +38,7 @@ TUI client ──┐
 
 ### Daemon
 
-The daemon is the control plane. Clients only render state and forward user input, so the UI can be closed while scheduled tasks keep running. Setup, OAuth loopback, vault unlock and VM administration move from `desktop/src/main` into the daemon. The protocol is client-agnostic so a GUI client can be added later without changing the daemon.
+The daemon is the control plane. Clients only render state and forward user input, so the UI can be closed while scheduled tasks keep running. Setup, OAuth loopback, vault unlock and VM administration, formerly in the Electron app, live in the daemon. The protocol is client-agnostic so a GUI client can be added later without changing the daemon.
 
 The implementation ports parts of the `my-bot` daemon (queue, scheduler, notifications) and its Ink TUI, refactored to the boundaries below; see the [phase 1 plan](AGENT_TEAM_PHASE1_PLAN.md#porting-my-bot).
 
@@ -148,7 +148,7 @@ A task is one execution of an agent. The task store records:
 - final result
 - a summary of key steps
 
-The current desktop activity log deliberately omits chat and approval bodies. Task history needs bodies, so the task store is a new, explicit decision: it lives on the host under the daemon's data directory, and the user can delete it.
+The retired desktop app's activity log deliberately omitted chat and approval bodies. Task history needs bodies, so the task store is an explicit decision: it lives on the host under the daemon's data directory, and the user can delete it.
 
 ## Client
 
@@ -165,7 +165,7 @@ TUI-specific requirements:
 - **Secret input** uses masked input that agent content cannot draw over.
 - **Notifications.** The daemon notifies the user about approvals and task completion while the TUI is closed (system notification or Telegram).
 
-The Electron desktop app is frozen. Its setup, OAuth and vault logic moves into the daemon.
+The Electron desktop app and Pi were retired in phase 2, after their setup, OAuth and vault logic moved into the daemon.
 
 ## Phases
 

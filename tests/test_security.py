@@ -51,7 +51,7 @@ class SecurityTests(unittest.TestCase):
         self.assertTrue(all(mode == 'auto' for mode in policy.inspect_rules()['rules'].values()))
         policy.set_mode('gmail', 'ask')
         self.assertEqual(policy.inspect_rules()['rules']['gmail'], 'ask')
-        self.assertEqual(policy.inspect_rules()['rules']['inference'], 'auto')
+        self.assertEqual(policy.inspect_rules()['rules']['drive'], 'auto')
 
     def test_policy_reads_do_not_require_a_write_lock(self):
         import sqlite3
@@ -211,23 +211,11 @@ class SecurityTests(unittest.TestCase):
             'account': 'g',
             'params': {'parent_id': 'root', 'name': 'a.txt', 'mime_type': 'text/plain', 'text': 'hi'},
         }
-        model = {
-            'operation': 'inference.openai',
-            'account': 'gen',
-            'params': {
-                'model': 'm',
-                'instructions': 'i',
-                'input': [],
-                'max_output_tokens': 1,
-                'store': False,
-                'tools': [],
-                'stream': False,
-            },
-        }
-        # Connected means authorized: reads, writes and model calls issue grants without a human.
+        post = {'operation': 'slack.post', 'account': 's', 'params': {'channel': 'C1', 'text': 'hi'}}
+        # Connected means authorized: reads and writes issue grants without a human.
         self.assertEqual(policy.authorize(search, 'drive')['decision'], 'allow')
         self.assertEqual(policy.authorize(create, 'drive')['decision'], 'allow')
-        self.assertEqual(policy.authorize(model, 'inference')['decision'], 'allow')
+        self.assertEqual(policy.authorize(post, 'slack')['decision'], 'allow')
         self.assertEqual(policy.inspect_rules()['rules'], {p: 'auto' for p in policy.PRINCIPALS})
         # Switching a principal to ask mode revokes outstanding grants and requires approval again.
         issued = policy.authorize(create, 'drive')
@@ -236,10 +224,10 @@ class SecurityTests(unittest.TestCase):
             policy.consume(create, 'drive', issued['grant_id'], issued['ticket'])
         self.assertEqual(policy.authorize(create, 'drive')['decision'], 'ask')
         self.assertEqual(policy.authorize(search, 'drive')['decision'], 'ask')
-        self.assertEqual(policy.authorize(model, 'inference')['decision'], 'allow')
-        policy.set_mode('inference', 'ask')
-        self.assertEqual(policy.authorize(model, 'inference')['decision'], 'ask')
-        self.assertEqual(policy.inspect_rules()['rules']['inference'], 'ask')
+        self.assertEqual(policy.authorize(post, 'slack')['decision'], 'allow')
+        policy.set_mode('slack', 'ask')
+        self.assertEqual(policy.authorize(post, 'slack')['decision'], 'ask')
+        self.assertEqual(policy.inspect_rules()['rules']['slack'], 'ask')
         with self.assertRaises(Denied):
             policy.authorize(search, 'notion')
         with self.assertRaises(Denied):

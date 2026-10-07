@@ -14,7 +14,7 @@ stage=/tmp/anchi-bootstrap
 limactl shell "$vm_name" -- bash -c "rm -rf $stage && mkdir -p $stage/anchi-cell"
 limactl copy guest/cell.env guest/arch.sh guest/install-gmail.sh guest/install-anchi.sh \
   guest/anchi_cell.py guest/anchi-build-base.sh guest/check-anchi.py guest/check-cell.py guest/check-gmail.py guest/gmail-cli.py \
-  guest/agent.py guest/check-inference.py guest/check-security.py guest/check-connectors.py "$vm_name:$stage/"
+  guest/check-security.py guest/check-connectors.py "$vm_name:$stage/"
 limactl copy "$runner/runner.mjs" "$runner/forward.mjs" "$runner/mcp.mjs" "$vm_name:$stage/anchi-cell/"
 limactl copy -r services systemd "$vm_name:$stage/"
 limactl shell "$vm_name" -- sudo bash "$stage/install-gmail.sh"

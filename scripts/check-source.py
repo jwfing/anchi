@@ -13,6 +13,4 @@ for directory in ("services", "scripts", "guest", "tests"):
         subprocess.run(["bash", "-n", str(source)], check=True)
 
 subprocess.run(["bash", "-n", str(ROOT / "guest/cell-run")], check=True)
-for source in sorted((ROOT / "pi").glob("*.mjs")):
-    subprocess.run(["node", "--check", str(source)], check=True)
-print("Python, shell and Pi syntax checks passed.")
+print("Python and shell syntax checks passed.")

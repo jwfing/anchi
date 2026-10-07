@@ -12,11 +12,10 @@ import importlib
 
 import auth
 import connectors
-import inference
 import policy
 from common import CELL_AGENT_HOST_UID, Denied, peer_uid, recv_json, send_json
 
-MODES = ('auth', 'inference', 'policy', *connectors.CONNECTORS)
+MODES = ('auth', 'policy', *connectors.CONNECTORS)
 RATE_LIMIT, RATE_WINDOW = 60, 60
 
 
@@ -24,8 +23,6 @@ def handler_for(mode):
     """Connector handlers are imported lazily so one broken connector cannot take the others down."""
     if mode == 'auth':
         return auth.handle
-    if mode == 'inference':
-        return inference.handle
     if mode == 'policy':
         return policy.handle
     return importlib.import_module(connectors.CONNECTORS[mode].module).handle
@@ -33,8 +30,6 @@ def handler_for(mode):
 
 def credential_ops(caller):
     """Which auth operations a trusted service identity may request; the kernel UID picks the caller."""
-    if caller == 'inference':
-        return ('model_key', 'codex_token')
     if caller == 'egress':
         return ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
     connector = connectors.CONNECTORS.get(caller)
@@ -124,7 +119,6 @@ def main():
     if mode not in MODES:
         raise SystemExit('Unknown service')
     service_uids = {pwd.getpwnam(c.user).pw_uid: c.id for c in connectors.CONNECTORS.values()}
-    service_uids[pwd.getpwnam('secure-inference').pw_uid] = 'inference'
     try:
         service_uids[pwd.getpwnam('anchi-egress').pw_uid] = 'egress'
     except KeyError:
@@ -132,8 +126,6 @@ def main():
     if os.environ.get('LISTEN_PID') != str(os.getpid()) or os.environ.get('LISTEN_FDS') != '1':
         raise SystemExit('Socket activation required')
     listener = socket.socket(fileno=3)
-    if mode == 'inference':
-        inference.recover()
     service = Service(mode, service_uids)
     service.writes_ready = recover_connector(mode)
     while True:

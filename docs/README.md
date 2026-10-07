@@ -1,25 +1,22 @@
 # Documentation
 
-Start with the [project overview](../README.md) and [Getting started](GETTING_STARTED.md). Documentation is maintained in English. This index covers the current implementation, operating instructions and known limitations. Historical proposals and acceptance reports are not maintained; use Git history when needed.
+Start with the [project overview](../README.md), [Getting started](GETTING_STARTED.md) and the [agent team guide](AGENT_TEAM.md). Documentation is maintained in English. This index covers the current implementation, operating instructions and known limitations. Historical proposals and acceptance reports are not maintained; use Git history when needed.
 
 ## Using Anchi
 
 | Document | Purpose |
 |---|---|
-| [Getting started](GETTING_STARTED.md) | Install on macOS or Linux and run the first Pi task |
-| [Desktop app](DESKTOP_APP.md) | Workspace, sessions, approvals, activity, and connection management |
+| [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault and connect a runtime |
+| [Agent team](AGENT_TEAM.md) | Connect accounts, create agents, delegation, approvals, triggers, skills and tasks |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, and Slack operations, scopes, and authorization |
-| [Gmail setup](GMAIL_SETUP.md) | Configure read-only Gmail OAuth |
-| [Pi agent](PI_AGENT.md) | Install Pi and configure model authentication |
-| [Pi chat protocol](PI_CHAT.md) | CLI and desktop RPC interface |
-| [Agent team](AGENT_TEAM.md) | Install the agent team, connect GitHub/AWS/Linear, create agents and run tasks |
+| [Gmail setup](GMAIL_SETUP.md) | Create the Google OAuth client for Gmail and Drive |
 
 ## Security and architecture
 
 | Document | Purpose |
 |---|---|
 | [Security](../SECURITY.md) | Trust boundaries, current authorization modes, limitations, and reporting |
-| [Security foundation](SECURITY_FOUNDATION.md) | Credential, policy, and inference services |
+| [Security foundation](SECURITY_FOUNDATION.md) | Vault, credential and policy services |
 | [Repository architecture](architecture/REPOSITORY.md) | Module responsibilities and dependency direction |
 | [Agent team design](architecture/AGENT_TEAM_DESIGN.md) | v2 design: daemon, per-task cells, credential-injecting proxy |
 | [Agent team phase 1 plan](architecture/AGENT_TEAM_PHASE1_PLAN.md) | Milestones, decisions, acceptance and status for phase 1 |
@@ -31,6 +28,6 @@ Start with the [project overview](../README.md) and [Getting started](GETTING_ST
 | Document | Purpose |
 |---|---|
 | [Contributing](../CONTRIBUTING.md) | Development commands, checks, and documentation conventions |
-| [Release process](engineering/RELEASE.md) | Packaging, signing, and release gates |
+| [Release process](engineering/RELEASE.md) | Versioning and release gates |
 | [Changelog](../CHANGELOG.md) | Project changes |
 | [License](../license.md) | Apache License 2.0 |

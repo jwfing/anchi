@@ -18,7 +18,6 @@ exec systemd-run --quiet --unit=secure-cell --collect --wait --pipe \
   --no-new-privileges=yes --console=pipe --chdir=/workspace \
   --bind=/var/lib/secure-vm/workspace:/workspace \
   --bind-ro=/run/secure-gmail:/run/secure-gmail \
-  --bind-ro=/run/secure-inference:/run/secure-inference \
   --bind-ro=/run/secure-drive:/run/secure-drive \
   --bind-ro=/run/secure-notion:/run/secure-notion \
   --bind-ro=/run/secure-slack:/run/secure-slack \

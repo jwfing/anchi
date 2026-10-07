@@ -1,7 +1,7 @@
 [Unit]
 Description=Keep decrypted credentials out of guest swap
 After=swap.target
-Before=secure-auth.service secure-inference.service
+Before=secure-auth.service
 
 [Service]
 Type=oneshot

@@ -1,26 +1,25 @@
 # Account connectors
 
-Gmail, Google Drive, Notion and Slack are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Connecting grants standing authorization by default; each connector can switch to per-request approval. Credentials stay in the VM vault, and the cell agent can invoke only structured operations.
+Gmail, Google Drive, Notion and Slack are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Connecting grants standing authorization by default; each connector can switch to per-request approval. Credentials stay in the VM vault. An agent cell gets the sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, …).
 
 ## Account setup
 
-| Connector | Preparation | Desktop action |
+| Connector | Preparation | Connect |
 |---|---|---|
-| Gmail | Enable Gmail API in Google Cloud; import a Desktop OAuth client JSON | Connect Google with the read-only scope |
-| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | Connect Google separately; tokens are stored independently from Gmail |
-| Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | Enter the `ntn_` token in the separate Notion token window |
-| Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | Enter the `xoxb-` Bot User OAuth Token |
+| Gmail | Enable Gmail API in Google Cloud; import a Desktop OAuth client JSON | `scripts/anchi setup google-client <json>` once, then `scripts/anchi setup service gmail` (read-only scope) |
+| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `scripts/anchi setup service drive`; tokens are stored independently from Gmail |
+| Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | `scripts/anchi setup service notion`, then enter the `ntn_` token without echo |
+| Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | `scripts/anchi setup service slack`, then enter the `xoxb-` Bot User OAuth Token |
 
-The token window is a separate main-process-created modal with a password field. Tokens go through IPC to the main process and stdin to the encrypted vault, never through the page displaying agent content or the activity log. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
+The TUI's **Connectors → Services** does the same with masked input in a full-screen dialog that agent output cannot draw over. Tokens go from the client to the daemon and over stdin to the encrypted vault; they are never logged or stored on the Mac. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
 
 ## Authorization modes
 
-New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation on Approvals. Restoring standing authorization requires confirmation of prompt-injection risk. Model calls have the same control in setup section 4. Any mode change revokes all unconsumed grants.
+New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation in Anchi's approval dialog. Any mode change revokes all unconsumed grants. The mode is per connector, not per agent: the services identify every agent cell by the same UID.
 
 ```bash
+scripts/anchi setup service-mode drive ask   # Require approval for Drive
 bash scripts/policy.sh rules                 # Show current modes
-bash scripts/policy.sh mode drive ask        # Require approval for Drive
-bash scripts/policy.sh mode inference auto   # Restore automatic model authorization
 ```
 
 Older databases without a mode use `auto`; explicit modes are preserved. The old read-only permission is not equivalent to standing read/write authorization. Review modes after upgrading, especially when handling untrusted content.
@@ -34,13 +33,13 @@ Older databases without a mode use `auto`; explicit modes are preserved. The old
 | Slack | `slack_channels`: joined channels; `slack_history`: up to 50 messages | `slack_post`: message, optionally in a thread |
 | Gmail | Status, list and read; see [Gmail setup](GMAIL_SETUP.md) | None |
 
-Write bodies are limited to 48 KB and each connector to 200 writes per day. Updates bind to the target revision in either mode. Pi registers tools only for connected connectors when creating a session.
+Write bodies are limited to 48 KB and each connector to 200 writes per day. Updates bind to the target revision in either mode. Agents see tools only for the connectors bound into their cell.
 
 ## Reviewing writes in approval mode
 
-Write approvals have a prominent banner, account, operation, target (file/revision, page/edit time, or channel/thread) and full body. Approval authorizes one execution. Updates recheck the target immediately before execution; changes fail with `TARGET_CHANGED` without retry.
+The approval dialog shows the agent, task, operation and the parameters the policy service recorded. Approval authorizes one execution of exactly that content. Updates recheck the target immediately before execution; changes fail with `TARGET_CHANGED` without retry.
 
-Pi retains the same request ID while waiting, supports cancellation and times out after ten minutes. Prepared actions are persisted; retries do not freeze a newer target version. Successful requests return cached results. Timeouts, dropped connections, upstream 5xx or unparseable success responses are recorded as UNKNOWN and are not automatically replayed. Check the remote service before taking further action.
+The in-cell tool keeps the same request ID while waiting and times out after ten minutes. Prepared actions are persisted; retries do not freeze a newer target version. Successful requests return cached results. Timeouts, dropped connections, upstream 5xx or unparseable success responses are recorded as UNKNOWN and are not automatically replayed. Check the remote service before taking further action.
 
 ## Disconnecting
 

@@ -59,35 +59,10 @@ def normalize(action, principal):
         or not re.fullmatch('[a-zA-Z0-9._:-]{1,128}', action['account'])
     ):
         raise Denied('BAD_ACTION')
-    if principal != 'inference':
-        connector = connectors.CONNECTORS.get(principal)
-        if connector is None or op not in connector.ops:
-            raise Denied('OPERATION_DENIED')
-        importlib.import_module(connector.module).validate(op, params)
-    elif principal == 'inference' and op == 'inference.codex':
-        from codex_schema import validate_payload
-
-        validate_payload(params)
-    elif principal == 'inference' and op == 'inference.openai':
-        fields(
-            params,
-            ('model', 'instructions', 'input', 'max_output_tokens', 'store', 'tools', 'stream'),
-            ('model', 'instructions', 'input', 'max_output_tokens', 'store', 'tools', 'stream'),
-        )
-        if (
-            params['store'] is not False
-            or params['stream'] is not False
-            or params['tools'] != []
-            or type(params['max_output_tokens']) is not int
-            or not 1 <= params['max_output_tokens'] <= 2048
-        ):
-            raise Denied('BAD_ACTION')
-        if not isinstance(params['model'], str) or not re.fullmatch('[a-zA-Z0-9._:-]{1,100}', params['model']):
-            raise Denied('BAD_ACTION')
-        if not isinstance(params['instructions'], str) or not isinstance(params['input'], list):
-            raise Denied('BAD_ACTION')
-    else:
+    connector = connectors.CONNECTORS.get(principal)
+    if connector is None or op not in connector.ops:
         raise Denied('OPERATION_DENIED')
+    importlib.import_module(connector.module).validate(op, params)
     # Digest canonical form stays ASCII for stability; the size bound counts UTF-8 bytes.
     encoded = json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     if len(json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()) > 56000:
@@ -95,7 +70,7 @@ def normalize(action, principal):
     return encoded, hashlib.sha256(encoded.encode()).hexdigest()
 
 
-PRINCIPALS = (*connectors.CONNECTORS, 'inference')
+PRINCIPALS = tuple(connectors.CONNECTORS)
 MODES = ('auto', 'ask')
 
 

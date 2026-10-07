@@ -1,13 +1,40 @@
 #!/bin/bash
 # Installs the agent-team pieces: egress proxy service, task-cell manager and cell runner.
-# Run after bootstrap.sh, install-gmail.sh (trusted services) and install-pi.sh (cell Node).
+# Run after bootstrap.sh and install-gmail.sh (trusted services).
 set -euo pipefail
 [[ $(id -u) == 0 ]] || { echo 'Must run as guest root' >&2; exit 1; }
 src=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=guest/cell.env
 source "$src/cell.env"
 rootfs=/var/lib/secure-vm/rootfs
-[[ -x $rootfs/opt/node/bin/node ]] || { echo 'Cell Node missing; run install-pi.sh first' >&2; exit 1; }
+# Node for the cell runner, in the read-only cell rootfs: pinned version, checked SHA-256.
+# shellcheck source=guest/arch.sh
+source "$src/arch.sh"
+node_arch=$(node_arch "$(uname -m)")
+node_dir=/opt/secure-vm/node-v${SECURE_NODE_VERSION}-linux-${node_arch}
+if [[ ! -x $node_dir/bin/node ]]; then
+  python3 - "$SECURE_NODE_VERSION" "$(node_sha256 "$node_arch")" "$node_arch" <<'PY'
+import hashlib, sys, urllib.request
+from pathlib import Path
+version, expected, arch = sys.argv[1:]
+url = f'https://nodejs.org/dist/v{version}/node-v{version}-linux-{arch}.tar.xz'
+with urllib.request.urlopen(url, timeout=60) as source:
+    data = source.read(60 * 1024 * 1024)
+if hashlib.sha256(data).hexdigest() != expected:
+    raise SystemExit('Node distribution checksum mismatch')
+Path('/tmp/secure-node.tar.xz').write_bytes(data)
+PY
+  tar -xJf /tmp/secure-node.tar.xz -C /opt/secure-vm
+  rm -f /tmp/secure-node.tar.xz
+fi
+if [[ ! -x $rootfs/opt/node/bin/node ]] || ! cmp -s "$node_dir/bin/node" "$rootfs/opt/node/bin/node"; then
+  rm -rf "$rootfs/opt/node" && install -d -m 0755 "$rootfs/opt/node"
+  cp -a "$node_dir/." "$rootfs/opt/node/"
+  chown -R "$SECURE_CELL_UID_BASE:$SECURE_CELL_UID_BASE" "$rootfs/opt/node"
+fi
+# Pi was retired with the desktop app; remove what it left in the cell rootfs.
+rm -rf "$rootfs/opt/secure-pi" /opt/secure-vm/pi-build "$rootfs/opt/secure-vm/check-pi.py" \
+  "$rootfs/opt/secure-vm/agent.py" "$rootfs/opt/secure-vm/check-inference.py"
 for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_cell.py anchi-build-base.sh check-anchi.py; do
   [[ -f $src/$f ]] || { echo "missing $f in bootstrap bundle" >&2; exit 1; }
 done

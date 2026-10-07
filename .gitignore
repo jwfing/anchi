@@ -7,7 +7,6 @@ artifacts/
 secrets/
 
 node_modules/
-desktop/workspace.json
 .venv/
 .pytest_cache/
 coverage/

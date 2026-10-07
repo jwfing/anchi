@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 import server
 from common import recv_json, send_json
 
-GMAIL_UID, INFERENCE_UID, CELL_UID, STRANGER_UID = 1001, 1002, 2001, 3001
-SERVICE_UIDS = {GMAIL_UID: 'gmail', INFERENCE_UID: 'inference'}
+GMAIL_UID, EGRESS_UID, CELL_UID, STRANGER_UID = 1001, 1002, 2001, 3001
+SERVICE_UIDS = {GMAIL_UID: 'gmail', EGRESS_UID: 'egress'}
 
 
 class Clock:
@@ -67,20 +67,20 @@ class ServerTests(unittest.TestCase):
     def test_kernel_uid_gates_every_mode(self):
         gmail = self.service('gmail', lambda request: {'echo': request})
         self.assertEqual(self.request(gmail, CELL_UID, {'op': 'x'}), {'ok': True, 'result': {'echo': {'op': 'x'}}})
-        for uid in (GMAIL_UID, INFERENCE_UID, STRANGER_UID, 0):
+        for uid in (GMAIL_UID, EGRESS_UID, STRANGER_UID, 0):
             self.assertEqual(self.request(gmail, uid, {'op': 'x'})['error'], 'CALLER_DENIED')
         policy = self.service('policy', lambda request, caller: {'caller': caller})
-        self.assertEqual(self.request(policy, INFERENCE_UID, {'op': 'x'})['result'], {'caller': 'inference'})
+        self.assertEqual(self.request(policy, EGRESS_UID, {'op': 'x'})['result'], {'caller': 'egress'})
         self.assertEqual(self.request(policy, CELL_UID, {'op': 'x'})['error'], 'CALLER_DENIED')
 
     def test_credential_scope_enforced_before_handler(self):
         called = []
         auth = self.service('auth', lambda request, caller: called.append((request, caller)) or {'ok': 1})
         self.assertEqual(self.request(auth, GMAIL_UID, {'op': 'codex_token'})['error'], 'CREDENTIAL_SCOPE_DENIED')
-        self.assertEqual(self.request(auth, INFERENCE_UID, {'op': 'access_token'})['error'], 'CREDENTIAL_SCOPE_DENIED')
+        self.assertEqual(self.request(auth, EGRESS_UID, {'op': 'access_token'})['error'], 'CREDENTIAL_SCOPE_DENIED')
         self.assertEqual(called, [])
         self.assertTrue(self.request(auth, GMAIL_UID, {'op': 'access_token'})['ok'])
-        self.assertTrue(self.request(auth, INFERENCE_UID, {'op': 'codex_token'})['ok'])
+        self.assertTrue(self.request(auth, EGRESS_UID, {'op': 'codex_token'})['ok'])
 
     def test_rate_limit_window(self):
         service = self.service('gmail', lambda request: {})
@@ -107,8 +107,8 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(server.credential_ops('drive'), ('status', 'access_token'))
         self.assertEqual(server.credential_ops('notion'), ('status', 'token'))
         self.assertEqual(server.credential_ops('slack'), ('status', 'token'))
-        self.assertEqual(server.credential_ops('inference'), ('model_key', 'codex_token'))
-        uids = {1001: 'gmail', 1002: 'inference', 1003: 'drive', 1004: 'notion', 1005: 'slack'}
+        self.assertEqual(server.credential_ops('inference'), ())
+        uids = {1001: 'gmail', 1002: 'egress', 1003: 'drive', 1004: 'notion', 1005: 'slack'}
         seen = []
         auth = server.Service('auth', uids, cell_uid=CELL_UID, clock=Clock())
         auth.handler = lambda request, caller: seen.append((request['op'], caller)) or {}

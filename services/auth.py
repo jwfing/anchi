@@ -372,7 +372,7 @@ def handle(request, caller):
         if op == 'codex_account' and caller == 'egress':
             # An identifier, not an authenticator: cells need it even when the token has expired.
             return {'account_id': read('codex.json')['account_id']}
-        if op == 'codex_token' and caller in ('inference', 'egress'):
+        if op == 'codex_token' and caller == 'egress':
             credential = read('codex.json')
             if credential['expires_at'] <= time.time() + 30:
                 raise Denied('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
@@ -381,6 +381,4 @@ def handle(request, caller):
             # A `claude setup-token` token or an API key; no refresh on either side.
             value = read('claude.json')
             return {'token': value['token'], 'kind': value['kind'], 'generation': value['generation']}
-        if op == 'model_key' and caller == 'inference':
-            return read('model.json')
         raise Denied('OPERATION_DENIED')
