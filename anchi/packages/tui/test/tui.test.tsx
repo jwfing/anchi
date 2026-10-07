@@ -362,6 +362,8 @@ describe('App', () => {
     expect(ui.lastFrame()).toContain('Opened the PR.');
     ui.stdin.write('\u000e'); // ^N → the running task
     await tick();
+    ui.stdin.write('\r'); // the click focused the sidebar; Enter opens the task
+    await tick();
     expect(ui.lastFrame()).toContain('c cancel');
     ui.stdin.write('c');
     await tick();
@@ -370,6 +372,55 @@ describe('App', () => {
     await tick();
     expect(ui.lastFrame()).toContain('@dev · dev');
     expect(ui.lastFrame()).toContain('t-a000000001');
+    ui.unmount();
+  });
+
+  it('moves between the sidebar and the main pane with the keyboard alone', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[
+          task('t-a000000002', 'dev', { title: 'newer' }),
+          task('t-a000000001', 'dev', { status: 'running', title: 'older' }),
+        ]}
+      />,
+    );
+    await tick();
+    // Starts in the chat of the first agent; typing goes to the input.
+    ui.stdin.write('hi');
+    await tick();
+    ui.stdin.write('\u001b'); // Esc clears the draft...
+    await tick();
+    ui.stdin.write('\u001b'); // ...then moves to the sidebar
+    await tick();
+    expect(ui.lastFrame()).toContain('Tab switch pane');
+    ui.stdin.write('3'); // Tasks section
+    await tick();
+    expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
+    ui.stdin.write('j'); // next task
+    await tick();
+    ui.stdin.write('\r'); // open it
+    await tick();
+    ui.stdin.write('c');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.cancel')?.[1]).toEqual({ taskId: 't-a000000001' });
+    ui.stdin.write('\u001b'); // back to the sidebar
+    await tick();
+    ui.stdin.write('1'); // Configure → Runtimes
+    await tick();
+    ui.stdin.write('\u001b[C'); // → opens it
+    await tick();
+    expect(ui.lastFrame()).toContain('s start VM');
+    ui.stdin.write('\t'); // Tab back to the sidebar
+    await tick();
+    ui.stdin.write('?');
+    await tick();
+    expect(ui.lastFrame()).toContain('switch between the sidebar and the main pane');
+    ui.stdin.write('\u001b');
+    await tick();
+    expect(ui.lastFrame()).not.toContain('Esc or ? to close');
     ui.unmount();
   });
 

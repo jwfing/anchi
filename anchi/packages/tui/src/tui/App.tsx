@@ -89,6 +89,7 @@ type Modal =
       input: string;
     }
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
+  | { kind: 'help' }
   | {
       kind: 'text';
       title: string;
@@ -133,6 +134,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const [agents, setAgents] = useState(initialAgents);
   const [tasks, setTasks] = useState(initialTasks);
   const [selected, setSelected] = useState<string | undefined>(undefined);
+  // Which pane takes the keys: the sidebar or the main pane (chat, task, settings).
+  const [focus, setFocus] = useState<'side' | 'main'>('main');
   const [taskPage, setTaskPage] = useState(0);
   const [focusTask, setFocusTask] = useState<Record<string, string | null>>({});
   const [logs, setLogs] = useState<Record<string, StoredEvent[]>>({});
@@ -320,13 +323,17 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       return items[(from + d + items.length) % items.length];
     });
   /** Shows another page of tasks; a selected task moves to the first task of that page. */
-  const turnPage = (to: number) => {
+  /** Shows another page of tasks; with `select` (or a task selected), its first task. */
+  const turnPage = (to: number, select = false) => {
     const next = Math.max(0, Math.min(pages - 1, to));
     setTaskPage(next);
-    if (detail && tasks[next * pageSize]) setSelected(TASK_ITEM + tasks[next * pageSize]!.id);
+    const first = tasks[next * pageSize];
+    if ((detail || select) && first) setSelected(TASK_ITEM + first.id);
   };
   const turnPageRef = useRef(turnPage);
   turnPageRef.current = turnPage;
+  const pageRef = useRef(page);
+  pageRef.current = page;
 
   const submit = (raw = input) => {
     const text = raw.trim();
@@ -434,6 +441,10 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
         setModal({ ...modal, input: modal.input + ch.replace(/[\r\n]/g, '') });
       return;
     }
+    if (modal?.kind === 'help') {
+      if (key.escape || key.return || ch === 'q' || ch === '?') setModal(null);
+      return;
+    }
     if (modal?.kind === 'confirm') {
       if (ch === 'y') {
         const { action, title } = modal;
@@ -451,11 +462,34 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     if (key.ctrl && ch === 'o' && proposals.length) {
       return setModal({ kind: 'proposal', proposal: proposals.at(-1)!, scroll: 0 });
     }
+    if (key.ctrl && ch === 't') return toggleAllGroups();
+    if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
+    if (key.tab) return setFocus((f) => (f === 'side' ? 'main' : 'side'));
+
+    // ── sidebar ──
+    if (focus === 'side') {
+      if (key.upArrow || ch === 'k') return move(-1);
+      if (key.downArrow || ch === 'j') return move(1);
+      if (key.home || ch === 'g') return setSelected(items[0]);
+      if (key.end || ch === 'G') return setSelected(items.at(-1));
+      if (key.pageUp || ch === '[') return turnPage(page - 1, true);
+      if (key.pageDown || ch === ']') return turnPage(page + 1, true);
+      if (ch === '1') return setSelected(CONFIG[0]);
+      if (ch === '2') return setSelected(BUILDER);
+      if (ch === '3') return turnPage(page, true);
+      if (key.return || key.rightArrow || ch === 'l') return setFocus('main');
+      if (ch === '?') return setModal({ kind: 'help' });
+      if (ch === 'q') return exit();
+      return;
+    }
+    // In the main pane, Esc (and ← outside the chat) goes back to the sidebar.
+    const back = () => setFocus('side');
 
     // ── task detail ──
     if (detail) {
       if (ch === 'q') return exit();
-      if (key.tab) return move(key.shift ? -1 : 1);
+      if (ch === '?') return setModal({ kind: 'help' });
+      if (key.escape || key.leftArrow || ch === 'h') return back();
       if (key.return) {
         // Continue the task in its agent's chat.
         setFocusTask((f) => ({ ...f, [detail.agentId]: detail.id }));
@@ -466,10 +500,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           .call('tasks.cancel', { taskId: detail.id })
           .catch((e: Error) => say(e.message));
       }
-      if (ch === '[' || key.leftArrow) return turnPage(page - 1);
-      if (ch === ']' || key.rightArrow) return turnPage(page + 1);
-      if (key.ctrl && ch === 't') return toggleAllGroups();
-      if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
+      if (ch === '[') return turnPage(page - 1);
+      if (ch === ']') return turnPage(page + 1);
       if (key.pageUp)
         return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
       if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
@@ -481,7 +513,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     // ── menu views ──
     if (isMenu) {
       if (ch === 'q') return exit();
-      if (key.tab) return move(key.shift ? -1 : 1);
+      if (ch === '?') return setModal({ kind: 'help' });
+      if (key.escape || key.leftArrow || ch === 'h') return back();
       if (current === 'connectors') {
         const ids: ConnectorId[] = ['github', 'aws', 'linear'];
         if (key.upArrow || ch === 'k') return setConnectorCursor((c) => Math.max(0, c - 1));
@@ -564,26 +597,25 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     }
 
     // ── agent chat ──
-    if (key.tab) return move(key.shift ? -1 : 1);
     if (key.ctrl && ch === 'x') {
       setFocusTask((f) => ({ ...f, [current]: null }));
       return say('the next message starts a new task');
     }
     if (key.ctrl && ch === 'e') return editDraft();
     if (key.ctrl && ch === 'u') return setInput('');
-    if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
-    if (key.ctrl && ch === 't') return toggleAllGroups();
     if (key.pageUp)
       return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
     if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
     if (key.upArrow) return setScroll((s) => Math.min(maxScroll, s + 1));
     if (key.downArrow) return setScroll((s) => Math.max(0, s - 1));
     if (key.escape) {
+      // Esc first cancels a running turn, then clears the draft, then leaves the chat.
       if (task && (task.status === 'running' || task.status === 'queued')) {
         void client.call('tasks.cancel', { taskId: task.id });
         return say(`cancelling ${task.id}`);
       }
-      return setInput('');
+      if (input) return setInput('');
+      return back();
     }
     if (key.return) return submit();
     if (key.backspace || key.delete) return setInput((v) => [...v].slice(0, -1).join(''));
@@ -597,10 +629,16 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
 
   useEffect(() => {
     onMouse?.((e) => {
-      if (e.kind === 'wheelUp') return setScroll((s) => s + 3);
-      if (e.kind === 'wheelDown') return setScroll((s) => Math.max(0, s - 3));
+      const side = e.x <= SIDEBAR_WIDTH;
+      // The wheel scrolls the transcript, or turns task pages over the sidebar.
+      if (e.kind === 'wheelUp' || e.kind === 'wheelDown') {
+        const up = e.kind === 'wheelUp';
+        if (side) return turnPageRef.current(pageRef.current + (up ? -1 : 1));
+        return setScroll((s) => (up ? s + 3 : Math.max(0, s - 3)));
+      }
       if (e.kind !== 'press' || e.button !== 0) return;
-      if (e.x > SIDEBAR_WIDTH) {
+      setFocus(side ? 'side' : 'main');
+      if (!side) {
         const line = visibleRef.current[e.y - firstRowRef.current];
         if (line?.group) toggleGroup(line.group);
         return;
@@ -629,22 +667,26 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           task ? ` · ${task.id} (${task.status})` : ' · new task'
         }`
       : CONFIG_LABEL[current as ConfigItem];
+  const busy = detail?.status === 'running' || detail?.status === 'queued';
   const status =
     flash ||
-    (detail
-      ? `Enter continue in @${detail.agentId}${detail.status === 'running' || detail.status === 'queued' ? ' · c cancel' : ''} · [ ] page · ^T tools · ^V verbose · ↑↓ PgUp/PgDn scroll · ^N/^P select`
-      : agent
-        ? '^N/^P select · Enter send · ^X new task · Esc cancel · ^E editor · ^T tools · ^V verbose · PgUp/PgDn'
-        : current === 'connectors'
-          ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · q quit'
-          : current === 'runtimes'
-            ? 's start VM · I install · u unlock vault · i import Codex login · r refresh · q quit'
-            : '^N/^P select · q quit') + (proposals.length ? ' · ^O proposal' : '');
+    (focus === 'side'
+      ? '↑↓ select · Enter/→ open · [ ] task page · 1 2 3 sections · Tab switch pane · ? help · q quit'
+      : detail
+        ? `Enter continue in @${detail.agentId}${busy ? ' · c cancel' : ''} · ↑↓ PgUp/PgDn scroll · [ ] page · ^T tools · Esc sidebar · ? help`
+        : agent
+          ? 'Enter send · ^X new task · Esc cancel/sidebar · ^E editor · ^T tools · ^V verbose · PgUp/PgDn · Tab sidebar'
+          : current === 'connectors'
+            ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · Esc sidebar'
+            : current === 'runtimes'
+              ? 's start VM · I install · u unlock vault · i import Codex login · r refresh · Esc sidebar'
+              : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
 
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       <Box flexDirection="row" height={bodyHeight}>
         <Sidebar
+          focused={focus === 'side'}
           rows={sideRows}
           agents={agents}
           tasks={tasks}
@@ -657,7 +699,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           width={mainWidth}
           height={bodyHeight}
           borderStyle="round"
-          borderColor="gray"
+          borderColor={focus === 'main' ? 'cyan' : 'gray'}
           paddingX={1}
         >
           <Text bold wrap="truncate">
@@ -739,6 +781,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
 }
 
 function Sidebar(props: {
+  focused: boolean;
   rows: SideRow[];
   agents: AgentSummary[];
   tasks: TaskRow[];
@@ -746,7 +789,7 @@ function Sidebar(props: {
   height: number;
   frame: number;
 }) {
-  const { rows, agents, tasks, current, height, frame } = props;
+  const { focused, rows, agents, tasks, current, height, frame } = props;
   const inner = SIDEBAR_WIDTH - 4;
   const spin = SPINNER[frame % SPINNER.length]!;
   const running = (id: string) => tasks.some((t) => t.agentId === id && t.status === 'running');
@@ -782,7 +825,7 @@ function Sidebar(props: {
       width={SIDEBAR_WIDTH}
       height={height}
       borderStyle="round"
-      borderColor="gray"
+      borderColor={focused ? 'cyan' : 'gray'}
       paddingX={1}
     >
       {rows.map((row, i) => {
@@ -815,9 +858,16 @@ function Sidebar(props: {
         }
         if (row.kind !== 'item') return null;
         const { glyph, color, text } = item(row.item);
+        // The selection is inverse while the sidebar has the keys, underlined otherwise.
         const on = current === row.item;
         return (
-          <Text key={i} inverse={on} bold={on} wrap="truncate">
+          <Text
+            key={i}
+            inverse={on && focused}
+            bold={on}
+            underline={on && !focused}
+            wrap="truncate"
+          >
             <Text color={color}>{glyph}</Text> {truncate(text, inner - 2).padEnd(inner - 2)}
           </Text>
         );
@@ -927,6 +977,50 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
         <Text dimColor>
           Enter next · Esc cancel · this screen is drawn by Anchi, not by an agent
         </Text>
+      </Box>
+    );
+  }
+  if (modal.kind === 'help') {
+    const keys: [string, string][] = [
+      ['Tab / Shift+Tab', 'switch between the sidebar and the main pane (or click either)'],
+      ['Ctrl+N / Ctrl+P', 'next / previous sidebar item, from anywhere'],
+      ['', ''],
+      ['Sidebar', ''],
+      ['↑ ↓  k j', 'move'],
+      ['Home End  g G', 'first / last item'],
+      ['1 2 3', 'Configure / Agents / Tasks'],
+      ['PgUp PgDn  [ ]', 'previous / next page of tasks (or the wheel, or ‹ prev / next ›)'],
+      ['Enter → l', 'open the item in the main pane'],
+      ['', ''],
+      ['Main pane', ''],
+      ['Esc', 'chat: cancel the running turn, then clear the draft, then back to the sidebar'],
+      ['Esc ← h', 'other views: back to the sidebar'],
+      ['↑ ↓  PgUp PgDn', 'scroll the transcript (or the wheel)'],
+      ['Enter', 'chat: send · task: continue it in the chat · connectors: connect'],
+      ['Ctrl+X  Ctrl+E', 'chat: new task · compose in $EDITOR'],
+      ['Ctrl+T  Ctrl+V', 'expand tool calls (or click one) · verbose tool output'],
+      ['Ctrl+O', 'reopen the pending builder proposal'],
+      ['q  Ctrl+C', 'quit (the daemon and running tasks keep going)'],
+    ];
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          Keys
+        </Text>
+        {keys.map(([k, v], i) => (
+          <Text key={i} wrap="truncate" bold={!v && Boolean(k)}>
+            {v ? `${k.padEnd(18)}${v}` : k || ' '}
+          </Text>
+        ))}
+        <Box flexGrow={1} />
+        <Text dimColor>Esc or ? to close</Text>
       </Box>
     );
   }

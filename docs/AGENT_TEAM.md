@@ -74,6 +74,7 @@ prompt:
 
 In the TUI, select an agent and type a task. **Enter** sends it.
 
+- Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft). **?** lists every key.
 - A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the Codex session in a new cell.
 - **Ctrl+X** starts a new task. **Esc** cancels the running turn.
 - **Ctrl+E** composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
