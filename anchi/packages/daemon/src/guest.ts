@@ -133,6 +133,8 @@ export interface CellStart {
   connectors: string[];
   sandbox: 'cell' | 'codex-workspace-write';
   runtime: 'codex' | 'claude-code';
+  /** Connectors whose writes wait for approval. */
+  ask: string[];
 }
 
 export interface ImageMeta {
@@ -165,6 +167,7 @@ export class Guest {
       connectors,
       c.sandbox,
       c.runtime,
+      c.ask.filter((x) => c.connectors.includes(x)).join(',') || '-',
     ]);
   }
 

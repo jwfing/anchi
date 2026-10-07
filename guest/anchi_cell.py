@@ -130,6 +130,26 @@ def egress(request, timeout=15):
     return response['result']
 
 
+def approvals_watch():
+    """Relays the proxy's approval stream to stdout (the daemon's watcher) until it ends."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(60)
+            conn.connect(str(EGRESS_CONTROL))
+            conn.sendall(b'{"op": "approvals.watch"}\n')
+            while block := conn.recv(65536):
+                sys.stdout.buffer.write(block)
+                sys.stdout.buffer.flush()
+    except OSError:
+        raise Failure('EGRESS_UNAVAILABLE') from None
+
+
+def approvals_decide(approval_id, verdict):
+    if not re.fullmatch(r'[0-9a-f]{16}', approval_id) or verdict not in ('allow', 'deny'):
+        raise Failure('USAGE')
+    emit(egress({'op': 'approvals.decide', 'id': approval_id, 'allow': verdict == 'allow'}))
+
+
 # ── images ──────────────────────────────────────────────────
 
 
@@ -521,7 +541,7 @@ CLAUDE_PLACEHOLDERS = {
 }
 
 
-def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='codex'):
+def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='codex', ask_arg='-'):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
     name(image, 'BAD_IMAGE')
@@ -534,6 +554,9 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
         raise Failure('BAD_SANDBOX')
     if runtime not in RUNTIMES or (runtime != 'codex' and sandbox != 'cell'):
         raise Failure('BAD_RUNTIME')
+    ask = [] if ask_arg == '-' else ask_arg.split(',')
+    if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
+        raise Failure('BAD_APPROVALS')
     env = cell_env()
     uid = int(env['SECURE_CELL_UID_BASE']) + int(env['SECURE_CELL_AGENT_UID'])
     work = CELLS / task
@@ -566,7 +589,14 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
         run('mount', '-t', 'overlay', 'overlay', '-o', f'ro,lowerdir={lower}', str(root))
         proxied = [c for c in connectors if c in PROXY_CONNECTORS]
         registration = egress(
-            {'op': 'register', 'task': task, 'agent': agent, 'connectors': proxied, 'runtime': RUNTIMES[runtime]}
+            {
+                'op': 'register',
+                'task': task,
+                'agent': agent,
+                'connectors': proxied,
+                'runtime': RUNTIMES[runtime],
+                'ask': [c for c in ask if c in PROXY_CONNECTORS],
+            }
         )
         identifiers = registration.get('identifiers', {})
         home = agent_home(agent, uid)
@@ -817,8 +847,12 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) in (6, 7):
+    if command == 'start' and len(rest) in (6, 7, 8):
         return cell_start(*rest)
+    if command == 'approvals' and rest == ['watch']:
+        return approvals_watch()
+    if command == 'approvals' and len(rest) == 3 and rest[0] == 'decide':
+        return approvals_decide(rest[1], rest[2])
     if command == 'stop' and len(rest) == 1:
         return cell_stop(*rest)
     if command == 'list' and not rest:

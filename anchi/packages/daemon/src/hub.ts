@@ -246,6 +246,12 @@ export class Hub extends EventEmitter<HubEvents> {
     return task;
   }
 
+  /** A line from Anchi in a task's transcript (approvals, delegation). */
+  notice(taskId: string, text: string): void {
+    const task = this.opts.store.getTask(taskId);
+    if (task) this.record(task, { type: 'notice', text: text.slice(0, 2000) });
+  }
+
   children(taskId: string): TaskRow[] {
     return this.opts.store.children(taskId);
   }
@@ -470,6 +476,9 @@ export class Hub extends EventEmitter<HubEvents> {
       connectors: agent.connectors,
       sandbox: agent.sandbox,
       runtime: agent.runtime,
+      ask: Object.entries(agent.approvals)
+        .filter(([, mode]) => mode === 'ask')
+        .map(([connector]) => connector),
     });
     const session = new CellSession(task.id, child);
     // The cell belongs to this task; its tool calls act as this task's agent.

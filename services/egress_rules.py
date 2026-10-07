@@ -345,3 +345,45 @@ def verify_account(connector, status, body):
         if str(exc) == 'CREDENTIAL_REJECTED':
             raise
     raise ValueError('VERIFY_UNEXPECTED_RESPONSE')
+
+
+# ── writes held for approval ────────────────────────────────
+# With `approvals: {<connector>: ask}`, an injected request that changes something waits for
+# the user. Reads are never held: they would make `ask` unusable, and the boundary (no
+# credential in the cell) does not depend on them.
+
+AWS_READ = re.compile(
+    r'^[a-z0-9-]+:(Get|List|Describe|Filter|Search|Lookup|Head|Query|Scan|BatchGet|Select|'
+    r'Check|Validate|Estimate|Preview|Simulate|Test|View|Download|StartQuery|StopQuery)'
+)
+GRAPHQL_MUTATION = re.compile(r'^\s*mutation\b')
+
+
+def graphql_mutation(body):
+    try:
+        query = json.loads(body or b'{}').get('query', '')
+    except (ValueError, AttributeError):
+        return True  # unreadable: treat as a write
+    return isinstance(query, str) and bool(GRAPHQL_MUTATION.match(query))
+
+
+def is_write(decision, method, path, body):
+    """Whether an injected request changes state upstream (git push, API writes, mutations)."""
+    rule = decision.rule
+    clean = path.split('?', 1)[0]
+    if rule is None:
+        return False
+    if rule.name == 'github-git':
+        return clean.endswith('/git-receive-pack')
+    if rule.name == 'github-api':
+        if clean == '/graphql':
+            return graphql_mutation(body)
+        return method not in ('GET', 'HEAD', 'OPTIONS')
+    if rule.name == 'linear':
+        return graphql_mutation(body)
+    if rule.kind == 'aws_sigv4':
+        op = decision.op or ''
+        if ':' in op and ' ' in op.split(':', 1)[1]:  # REST, such as S3: by method
+            return not op.split(':', 1)[1].startswith(('GET ', 'HEAD '))
+        return not AWS_READ.match(op)
+    return False

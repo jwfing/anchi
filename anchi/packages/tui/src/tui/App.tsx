@@ -1,6 +1,7 @@
 /** @jsxRuntime automatic */
 import type {
   AgentSummary,
+  Approval,
   BuilderProposal,
   ConnectorId,
   ConnectorSecret,
@@ -99,6 +100,7 @@ type Modal =
     }
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
   | { kind: 'help' }
+  | { kind: 'approval'; approval: Approval }
   | {
       kind: 'text';
       title: string;
@@ -158,6 +160,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const [modal, setModal] = useState<Modal | null>(null);
   const [setupLog, setSetupLog] = useState<string[]>([]);
   const [proposals, setProposals] = useState<BuilderProposal[]>([]);
+  // Writes the egress proxy holds for the user, oldest first.
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const seenApprovals = useRef(new Set<string>());
   const [flash, setFlash] = useState('');
   const loading = useRef(new Set<string>());
 
@@ -189,6 +194,22 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       .catch((e: Error) => say(e.message));
   }, [client, say]);
 
+  // A new held write opens its dialog unless another dialog is up; ^A reopens it.
+  useEffect(() => {
+    const fresh = approvals.find((a) => !seenApprovals.current.has(a.id));
+    for (const a of approvals) seenApprovals.current.add(a.id);
+    if (fresh && !modal) setModal({ kind: 'approval', approval: fresh });
+    if (modal?.kind === 'approval' && !approvals.some((a) => a.id === modal.approval.id)) {
+      setModal(null);
+    }
+  }, [approvals, modal]);
+  useEffect(() => {
+    void client
+      .call('approvals.list')
+      .then((list) => setApprovals(list ?? []))
+      .catch(() => {});
+  }, [client]);
+
   // ── daemon subscriptions ────────────────────────────────
   useEffect(() => {
     const offs = [
@@ -208,6 +229,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
         });
       }),
       client.on('setup', ({ line }) => setSetupLog((log) => [...log, line].slice(-8))),
+      client.on('approvals', ({ approvals: next }) => setApprovals(next)),
       client.on('proposal', ({ proposal }) => {
         setProposals((p) => [...p.filter((x) => x.agentId !== proposal.agentId), proposal]);
         setModal({ kind: 'proposal', proposal, scroll: 0 });
@@ -393,6 +415,18 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
 
   useInput((ch, key) => {
     // ── modals take every key ──
+    if (modal?.kind === 'approval') {
+      const { approval } = modal;
+      if (key.escape) return setModal(null);
+      if (ch === 'y' || ch === 'n') {
+        setModal(null);
+        return void client
+          .call('approvals.decide', { id: approval.id, allow: ch === 'y' })
+          .then(() => say(`${ch === 'y' ? 'approved' : 'denied'}: ${approval.operation}`))
+          .catch((e: Error) => say(e.message));
+      }
+      return;
+    }
     if (modal?.kind === 'proposal') {
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
       if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
@@ -479,6 +513,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     }
     if (key.ctrl && ch === 't') return toggleAllGroups();
     if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
+    if (key.ctrl && ch === 'a' && approvals.length) {
+      return setModal({ kind: 'approval', approval: approvals[0]! });
+    }
     if (key.tab) return setFocus((f) => (f === 'side' ? 'main' : 'side'));
 
     // ── sidebar ──
@@ -699,6 +736,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
             : current === 'runtimes'
               ? 's start VM · I install · u unlock vault · i Codex login · c Claude token · r refresh · Esc sidebar'
               : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
+  const statusLine = approvals.length
+    ? `⏸ ${approvals.length} write${approvals.length === 1 ? '' : 's'} waiting for approval (^A) · ${status}`
+    : status;
 
   return (
     <Box flexDirection="column" width={columns} height={rows}>
@@ -792,7 +832,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
         </Box>
       </Box>
       <Text dimColor wrap="truncate">
-        {status}
+        {statusLine}
       </Text>
     </Box>
   );
@@ -1014,6 +1054,41 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
       </Box>
     );
   }
+  if (modal.kind === 'approval') {
+    const a = modal.approval;
+    const left = Math.max(0, Math.round(a.timeout - (Date.now() - a.createdAt) / 1000));
+    const room = Math.max(3, height - 12);
+    const lines = sanitize(a.summary).split('\n').slice(0, room);
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="red"
+        paddingX={2}
+      >
+        <Text bold color="red">
+          Approve a write by @{sanitizeLine(a.agent)}?
+        </Text>
+        <Text>{`task       ${sanitizeLine(a.task)}`}</Text>
+        <Text>{`connector  ${sanitizeLine(a.connector)} (${sanitizeLine(a.host)})`}</Text>
+        <Text wrap="truncate">{`operation  ${sanitizeLine(a.operation)}`}</Text>
+        <Text dimColor>{`refused automatically in about ${left} s`}</Text>
+        <Text> </Text>
+        <Box flexDirection="column" height={room}>
+          {lines.map((l, i) => (
+            <Text key={i} wrap="truncate">
+              {truncate(l, Math.max(10, width - 6)) || ' '}
+            </Text>
+          ))}
+        </Box>
+        <Box flexGrow={1} />
+        <Text dimColor>The content above comes from the agent. This dialog is drawn by Anchi.</Text>
+        <Text bold>[y] approve · [n] deny · Esc decide later (^A)</Text>
+      </Box>
+    );
+  }
   if (modal.kind === 'help') {
     const keys: [string, string][] = [
       ['Tab / Shift+Tab', 'switch between the sidebar and the main pane (or click either)'],
@@ -1034,6 +1109,7 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
       ['Ctrl+X  Ctrl+E', 'chat: new task · compose in $EDITOR'],
       ['Ctrl+T  Ctrl+V', 'expand tool calls (or click one) · verbose tool output'],
       ['Ctrl+O', 'reopen the pending builder proposal'],
+      ['Ctrl+A', 'review a write waiting for your approval'],
       ['q  Ctrl+C', 'quit (the daemon and running tasks keep going)'],
     ];
     return (

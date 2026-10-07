@@ -508,6 +508,41 @@ describe('App', () => {
     ui.unmount();
   });
 
+  it('asks for approval of held writes in a full-screen dialog', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    const approval = {
+      id: 'a'.repeat(16),
+      task: 't-a000000001',
+      agent: 'dev',
+      connector: 'github',
+      operation: 'POST /o/r.git/git-receive-pack',
+      host: 'github.com',
+      summary: `git push: refs/heads/fix${ESC}]52;c;AAAA\u0007`,
+      createdAt: Date.now(),
+      timeout: 300,
+    };
+    emit('approvals', { approvals: [approval] });
+    await tick();
+    const frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('Approve a write by @dev?');
+    expect(frame).toContain('git push: refs/heads/fix');
+    expect(frame).not.toContain(']52;');
+    ui.stdin.write('\u001b'); // later
+    await tick();
+    expect(ui.lastFrame()).toContain('1 write waiting for approval (^A)');
+    ui.stdin.write('\u0001'); // ^A
+    await tick();
+    ui.stdin.write('n');
+    await tick();
+    expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({
+      id: 'a'.repeat(16),
+      allow: false,
+    });
+    ui.unmount();
+  });
+
   it('shows builder proposals in a full-screen modal and applies only on y', async () => {
     const { client, calls, emit } = fakeClient();
     const ui = render(<App client={client} initialAgents={[agent('builder')]} initialTasks={[]} />);

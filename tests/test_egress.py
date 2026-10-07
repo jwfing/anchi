@@ -210,6 +210,31 @@ class DecisionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'VERIFY_UNEXPECTED_RESPONSE'):
             rules.verify_account('github', 200, b'<html>')
 
+    def test_writes_are_classified_for_approval(self):
+        def write(method, host, path, body=b'', headers=None):
+            d = decide(method, host, path, headers or {}, body)
+            return rules.is_write(d, method, path, body)
+
+        self.assertTrue(write('POST', 'github.com', '/o/r.git/git-receive-pack'))
+        self.assertFalse(write('POST', 'github.com', '/o/r.git/git-upload-pack'))
+        self.assertTrue(write('POST', 'api.github.com', '/repos/o/r/pulls'))
+        self.assertFalse(write('GET', 'api.github.com', '/repos/o/r/pulls'))
+        self.assertFalse(write('POST', 'api.github.com', '/graphql', b'{"query": "query { viewer { login } }"}'))
+        self.assertTrue(write('POST', 'api.github.com', '/graphql', b'{"query": "mutation { addComment }"}'))
+        self.assertTrue(write('POST', 'api.linear.app', '/graphql', b'{"query":"mutation { commentCreate }"}'))
+        self.assertFalse(write('POST', 'api.linear.app', '/graphql', b'{"query":"{ issue(id: 1) { title } }"}'))
+        host, headers = signed('logs', target='Logs_20140328.FilterLogEvents')
+        self.assertFalse(write('POST', host, '/', headers=headers))
+        host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
+        self.assertTrue(write('POST', host, '/', headers=headers))
+
+    def test_git_push_summary_names_the_refs(self):
+        import egress_proxy
+
+        d = decide('POST', 'github.com', '/o/r.git/git-receive-pack')
+        body = b'00a8' + b'0' * 40 + b' ' + b'1' * 40 + b' refs/heads/fix-12\x00 report-status\n0000PACK...'
+        self.assertEqual(egress_proxy.write_summary(d, 'POST', '/o/r', body), 'git push: refs/heads/fix-12')
+
     def test_credential_classification_reveals_nothing(self):
         self.assertEqual(rules.classify_credential({}), 'none')
         self.assertEqual(rules.classify_credential({'authorization': 'Bearer anchi-placeholder-x'}), 'placeholder')
@@ -343,6 +368,35 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 claude_admin.validate({'token': bad})
 
+    def test_approvals_wait_for_the_user_and_time_out(self):
+        async def scenario():
+            approvals = self.module.Approvals(timeout=0.2)
+            seen = []
+
+            class Watcher:
+                def write(self, line):
+                    seen.append(json.loads(line))
+
+                def is_closing(self):
+                    return False
+
+            approvals.watchers.add(Watcher())
+            ask = asyncio.create_task(approvals.ask({'task': 't1', 'connector': 'github', 'summary': 'git push'}))
+            await asyncio.sleep(0.01)
+            approval_id = seen[0]['approval']['id']
+            approvals.decide(approval_id, True)
+            self.assertEqual(await ask, 'approved')
+            self.assertEqual(seen[-1], {'type': 'resolved', 'id': approval_id})
+            denied = asyncio.create_task(approvals.ask({'task': 't1'}))
+            await asyncio.sleep(0.01)
+            approvals.decide(seen[-1]['approval']['id'], False)
+            self.assertEqual(await denied, 'denied')
+            self.assertEqual(await approvals.ask({'task': 't1'}), 'timeout')
+            with self.assertRaises(ValueError):
+                approvals.decide('0' * 16, True)
+
+        asyncio.run(scenario())
+
     def test_register_validates_names_and_connectors(self):
         registry = self.module.Registry(('127.0.0.1', 1))
         for request in (
@@ -350,6 +404,7 @@ class RegistryTests(unittest.TestCase):
             {'task': 't', 'agent': 'A', 'connectors': []},
             {'task': 't', 'agent': 'a', 'connectors': ['gmail']},
             {'task': 't', 'agent': 'a', 'connectors': 'github'},
+            {'task': 't', 'agent': 'a', 'connectors': ['github'], 'ask': ['aws']},
         ):
             with self.assertRaises(ValueError):
                 registry.validate(request)

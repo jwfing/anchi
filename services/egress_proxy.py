@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import socket
 import struct
 import time
@@ -33,6 +34,9 @@ AUTH_SOCKET = os.environ.get('ANCHI_EGRESS_AUTH', '/run/secure-auth/token.sock')
 CREDENTIAL_TTL = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
+APPROVAL_TIMEOUT = 300
+APPROVALS_PENDING_MAX = 32
+GIT_REF_UPDATE = re.compile(rb'[0-9a-f]{40} [0-9a-f]{40} (refs/[^\x00\s]{1,200})')
 log = logging.getLogger('anchi-egress')
 
 
@@ -105,9 +109,79 @@ def https_call(method, url, headers, body):
         return exc.code, exc.read(65536)
 
 
+def write_summary(decision, method, path, body):
+    """What the user approves: the git refs a push updates, or the start of the request body."""
+    if decision.rule.name == 'github-git':
+        refs = [r.decode() for r in GIT_REF_UPDATE.findall(body[:65536])]
+        return 'git push: ' + (', '.join(refs) if refs else 'no ref updates found')
+    if not body:
+        return f'{method} {path[:300]}'
+    if b'\x00' in body[:4096]:
+        return f'{method} {path[:300]} (binary body, {len(body)} bytes)'
+    return f'{method} {path[:300]}\n' + body[:2000].decode('utf-8', 'replace')
+
+
+class Approvals:
+    """Writes held for the user. The daemon watches this queue over the control socket and
+    answers; an unanswered request is refused after APPROVAL_TIMEOUT seconds."""
+
+    def __init__(self, timeout=APPROVAL_TIMEOUT):
+        self.timeout = timeout
+        self.pending = {}
+        self.watchers = set()
+
+    def broadcast(self, event):
+        line = json.dumps(event).encode() + b'\n'
+        for writer in list(self.watchers):
+            try:
+                writer.write(line)
+            except (ConnectionError, RuntimeError):
+                self.watchers.discard(writer)
+
+    async def ask(self, item):
+        """'approved', 'denied' or 'timeout'."""
+        if len(self.pending) >= APPROVALS_PENDING_MAX:
+            return 'denied'
+        item = {**item, 'id': secrets.token_hex(8), 'created_at': time.time(), 'timeout': self.timeout}
+        future = asyncio.get_running_loop().create_future()
+        self.pending[item['id']] = (item, future)
+        self.broadcast({'type': 'pending', 'approval': item})
+        try:
+            return 'approved' if await asyncio.wait_for(future, self.timeout) else 'denied'
+        except TimeoutError:
+            return 'timeout'
+        finally:
+            self.pending.pop(item['id'], None)
+            self.broadcast({'type': 'resolved', 'id': item['id']})
+
+    def decide(self, approval_id, allow):
+        entry = self.pending.get(approval_id)
+        if entry is None or entry[1].done():
+            raise ValueError('UNKNOWN_APPROVAL')
+        entry[1].set_result(bool(allow))
+        return {'id': approval_id, 'allowed': bool(allow)}
+
+    async def watch(self, writer):
+        """Streams pending approvals and changes until the watcher disconnects."""
+        for item, _ in self.pending.values():
+            writer.write(json.dumps({'type': 'pending', 'approval': item}).encode() + b'\n')
+        self.watchers.add(writer)
+        try:
+            while not writer.is_closing():
+                writer.write(b'{"type": "ping"}\n')
+                await writer.drain()
+                await asyncio.sleep(15)
+        except (ConnectionError, RuntimeError):
+            pass
+        finally:
+            self.watchers.discard(writer)
+
+
 class Cell:
-    def __init__(self, task, agent, grants):
+    def __init__(self, task, agent, grants, ask=()):
         self.task, self.agent, self.grants = task, agent, frozenset(grants)
+        # Connectors whose writes wait for the user's approval.
+        self.ask = frozenset(ask)
         self.server = None
         self.writers = set()
 
@@ -136,6 +210,9 @@ class Registry:
             raise ValueError('BAD_AGENT')
         if not isinstance(connectors, list) or not all(c in rules.CONNECTORS for c in connectors):
             raise ValueError('BAD_CONNECTORS')
+        ask = request.get('ask', [])
+        if not isinstance(ask, list) or not all(c in connectors for c in ask):
+            raise ValueError('BAD_APPROVALS')
         if task in self.cells:
             raise ValueError('CELL_EXISTS')
         # The cell gets its own runtime's credential only.
@@ -143,7 +220,7 @@ class Registry:
 
     async def register(self, request):
         task, agent, grants = self.validate(request)
-        cell = Cell(task, agent, grants)
+        cell = Cell(task, agent, grants, request.get('ask', []))
         cell.directory.mkdir(parents=True, exist_ok=False)
         # The service runs with UMask=0077; the cell's agent user must traverse this directory.
         os.chmod(cell.directory, 0o755)
@@ -152,7 +229,7 @@ class Registry:
         # Only this cell has the directory bound in; the agent user must be able to connect.
         os.chmod(path, 0o666)
         self.cells[task] = cell
-        audit({'event': 'register', 'task': task, 'agent': agent, 'grants': sorted(grants)})
+        audit({'event': 'register', 'task': task, 'agent': agent, 'grants': sorted(grants), 'ask': sorted(cell.ask)})
         return {'directory': str(cell.directory)}
 
     async def unregister(self, task):
@@ -215,6 +292,7 @@ class EgressProxy:
     def __init__(self, registry=None, credentials=None, call=https_call):
         self.registry = registry or Registry(('127.0.0.1', 18080))
         self.credentials = credentials or Credentials()
+        self.approvals = Approvals()
         self.call = call
         self.control = None
         # Server connection id → the (host, port) the client asked for, while it is being opened.
@@ -252,7 +330,12 @@ class EgressProxy:
                 raise ValueError('BAD_REQUEST')
             request = json.loads(line)
             op = request.get('op') if isinstance(request, dict) else None
-            if op == 'register':
+            if op == 'approvals.watch':
+                # A stream, not a request: it stays open while the daemon watches.
+                return await self.approvals.watch(writer)
+            if op == 'approvals.decide':
+                result = self.approvals.decide(str(request.get('id', '')), request.get('allow') is True)
+            elif op == 'register':
                 result = await self.registry.register(request)
                 result['identifiers'] = self.identifiers(self.registry.cells[request['task']].grants)
             elif op == 'unregister':
@@ -416,6 +499,23 @@ class EgressProxy:
         if decision.action == 'pass':
             audit(entry)
             return
+        if decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body):
+            outcome = await self.approvals.ask(
+                {
+                    'task': cell.task,
+                    'agent': cell.agent,
+                    'connector': decision.rule.grant,
+                    'operation': entry['op'],
+                    'host': host,
+                    'summary': write_summary(decision, req.method, path, body),
+                }
+            )
+            entry['approval'] = outcome
+            if outcome != 'approved':
+                entry['decision'] = 'held-' + outcome
+                audit(entry)
+                reason = 'timed out' if outcome == 'timeout' else 'was denied'
+                return self.respond(flow, 403, f'anchi: approval for this write {reason}\n'.encode())
         try:
             credential = await asyncio.get_running_loop().run_in_executor(
                 None, self.credentials.get, decision.rule.grant

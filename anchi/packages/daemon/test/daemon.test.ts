@@ -25,7 +25,21 @@ class FakeTransport implements GuestTransport {
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
 
+  /** Lines the fake `anchi-cell approvals watch` prints, then it stays open. */
+  approvalLines: string[] = [];
+
   spawn(args: string[]) {
+    if (args[1] === 'approvals') {
+      return spawn(
+        process.execPath,
+        [
+          '-e',
+          'for (const l of JSON.parse(process.argv[1])) console.log(l); setInterval(() => {}, 1e6);',
+          JSON.stringify(this.approvalLines),
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+    }
     this.starts.push(args);
     return spawn(process.execPath, [RUNNER], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -44,6 +58,8 @@ class FakeTransport implements GuestTransport {
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'approvals')
+      return ok({ id: args[3], allowed: args[4] === 'allow' });
     if (args[0] === 'anchi-cell' && args[1] === 'verify') {
       if (this.rejectCredential)
         return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
@@ -156,6 +172,7 @@ describe('daemon tasks', () => {
       'github',
       'cell',
       'codex',
+      '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([
@@ -408,6 +425,60 @@ describe('daemon tasks', () => {
     );
     expect(qa.answer.ok).toBe(true);
     expect(qa.answer.result.result).toContain('already working on a task above this one');
+  });
+
+  it('mirrors held writes, notes them in the task and sends the decision back', async () => {
+    const { client: first } = await start();
+    const task = await first.call('tasks.create', { agentId: 'dev', text: 'push it' });
+    await first.call('tasks.wait', { taskId: task.id });
+    await daemon!.stop();
+    daemon = undefined;
+    first.close();
+    transport.approvalLines = [
+      JSON.stringify({
+        type: 'pending',
+        approval: {
+          id: 'a'.repeat(16),
+          task: task.id,
+          agent: 'dev',
+          connector: 'github',
+          operation: 'POST /o/r.git/git-receive-pack',
+          host: 'github.com',
+          summary: 'git push: refs/heads/fix',
+          created_at: 1,
+          timeout: 300,
+        },
+      }),
+      'not json',
+      JSON.stringify({ type: 'pending', approval: { id: '../bad' } }),
+    ];
+    const { client } = await start();
+    await new Promise((r) => setTimeout(r, 300));
+    const pending = await client.call('approvals.list');
+    expect(pending).toEqual([
+      expect.objectContaining({
+        id: 'a'.repeat(16),
+        summary: 'git push: refs/heads/fix',
+        createdAt: 1000,
+      }),
+    ]);
+    const notices = (await client.call('tasks.events', { taskId: task.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toContain(
+      '⏸ waiting for your approval: POST /o/r.git/git-receive-pack (github)',
+    );
+    await client.call('approvals.decide', { id: 'a'.repeat(16), allow: true });
+    expect(transport.execs.at(-1)!.args).toEqual([
+      'anchi-cell',
+      'approvals',
+      'decide',
+      'a'.repeat(16),
+      'allow',
+    ]);
+    await expect(
+      client.call('approvals.decide', { id: 'b'.repeat(16), allow: true }),
+    ).rejects.toThrow(/unknown/);
   });
 
   it('accepts a task for an agent file written just before it', async () => {

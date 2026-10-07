@@ -10,6 +10,7 @@ import {
   SETUP_ACTIONS,
   type SetupAction,
 } from '@anchi/protocol';
+import { ApprovalWatcher } from './approvals.ts';
 import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
 import {
@@ -52,6 +53,8 @@ export interface DaemonOptions {
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
   hostRun?: typeof hostOutput;
+  /** Watch the egress proxy's approval queue (default true). */
+  approvals?: boolean;
   /** Reap guest cells at start (default true). */
   reap?: boolean;
 }
@@ -97,6 +100,7 @@ export class Daemon {
   readonly guest: Guest;
   readonly lima: LimaTransport;
   readonly proposals: Proposals;
+  readonly approvals: ApprovalWatcher;
   private server?: Server;
   private watchers: FSWatcher[] = [];
   private clients = new Map<string, Peer>();
@@ -114,6 +118,20 @@ export class Daemon {
     this.store = new Store(opts.layout.dbFile);
     this.proposals = new Proposals(opts.layout);
     this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
+    this.approvals = new ApprovalWatcher(this.guest.transport, this.log);
+    this.approvals.on('changed', (approvals) => this.broadcast('approvals', { approvals }));
+    this.approvals.on('added', (a) => {
+      this.hub.notice(a.task, `⏸ waiting for your approval: ${a.operation} (${a.connector})`);
+      if (!this.opts.quiet && this.clients.size === 0) {
+        void desktopNotify(
+          `Anchi: @${a.agent} asks for approval`,
+          `${a.connector}: ${a.operation}`,
+        );
+      }
+    });
+    this.approvals.on('resolved', ({ approval, decided }) => {
+      if (!decided) this.hub.notice(approval.task, `⏹ approval for ${approval.operation} expired`);
+    });
     this.hostRun = opts.hostRun ?? hostOutput;
     this.hub = new Hub({
       layout: opts.layout,
@@ -228,6 +246,14 @@ export class Daemon {
       if (imageId) this.log(`image "${imageId}" will be built on the first task that uses it`);
       return agents;
     },
+    'approvals.list': () => this.approvals.list(),
+    'approvals.decide': async ({ id, allow }) => {
+      const a = this.approvals.list().find((x) => x.id === id);
+      await this.approvals.decide(str(id, 'approval', 20), allow === true);
+      if (a)
+        this.hub.notice(a.task, `${allow === true ? '✓ approved' : '✗ denied'}: ${a.operation}`);
+      return null;
+    },
     'builder.discard': ({ proposalId }) => {
       this.proposals.discard(str(proposalId, 'proposal', 20));
       return null;
@@ -331,6 +357,7 @@ export class Daemon {
     });
     chmodSync(layout.socketFile, 0o600);
     this.watchConfig();
+    if (this.opts.approvals !== false) this.approvals.start();
     this.awsTimer = setInterval(() => void this.refreshAws(), AWS_REFRESH_EVERY_MS);
     this.awsTimer.unref();
     this.log(`daemon ${process.pid} listening on ${layout.socketFile}`);
@@ -358,6 +385,7 @@ export class Daemon {
 
   async stop(): Promise<void> {
     this.hub.shutdown();
+    this.approvals.stop();
     clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();
     for (const p of this.clients.values()) p.close();

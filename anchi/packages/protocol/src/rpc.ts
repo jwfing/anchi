@@ -115,6 +115,24 @@ export type ConnectorSecret =
       region: string;
     };
 
+/**
+ * A write held by the egress proxy until the user decides (agent `approvals: {x: ask}`).
+ * `summary` shows what would be written: git refs, or the start of the request body. It is
+ * agent-originated text.
+ */
+export interface Approval {
+  id: string;
+  task: string;
+  agent: string;
+  connector: string;
+  operation: string;
+  host: string;
+  summary: string;
+  createdAt: number;
+  /** Seconds after `createdAt` when the proxy refuses the write. */
+  timeout: number;
+}
+
 export interface BuilderProposal {
   id: string;
   agentId: string;
@@ -178,6 +196,9 @@ export interface Methods {
   /** Writes a proposal after the user confirmed it in a modal. */
   'builder.apply': [{ proposalId: string }, AgentSummary[]];
   'builder.discard': [{ proposalId: string }, null];
+  'approvals.list': [Record<string, never>, Approval[]];
+  /** The caller showed the approval in a full-screen dialog and the user decided. */
+  'approvals.decide': [{ id: string; allow: boolean }, null];
 }
 
 /** Daemon → client notifications. */
@@ -188,6 +209,8 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
+  /** The pending approvals, whenever they change. */
+  approvals: { approvals: Approval[] };
 }
 
 export type MethodName = keyof Methods;

@@ -157,6 +157,38 @@ program
     });
   });
 
+program
+  .command('approvals')
+  .description('Writes waiting for your approval')
+  .action(() =>
+    withClient(async (client) => {
+      const list = await client.call('approvals.list');
+      if (!list.length) return console.log('no writes waiting for approval');
+      for (const a of list) {
+        console.log(
+          `${a.id}  @${sanitizeLine(a.agent)} ${sanitizeLine(a.task)}  ${sanitizeLine(a.connector)}: ${sanitizeLine(a.operation)}`,
+        );
+        for (const line of sanitizeLine(a.summary).slice(0, 300).split('\n'))
+          console.log(`    ${line}`);
+      }
+    }),
+  );
+
+for (const [name, allow] of [
+  ['approve', true],
+  ['deny', false],
+] as const) {
+  program
+    .command(`${name} <id>`)
+    .description(`${allow ? 'Approve' : 'Deny'} a write waiting for approval`)
+    .action((id: string) =>
+      withClient(async (client) => {
+        await client.call('approvals.decide', { id, allow });
+        console.log(allow ? 'approved' : 'denied');
+      }),
+    );
+}
+
 program.command('cancel <task>').action(async (taskId: string) => {
   await withClient((client) => client.call('tasks.cancel', { taskId }));
 });
