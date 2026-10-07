@@ -20,6 +20,7 @@ Start with the [project overview](../README.md) and [Getting started](GETTING_ST
 | [Security](../SECURITY.md) | Trust boundaries, current authorization modes, limitations, and reporting |
 | [Security foundation](SECURITY_FOUNDATION.md) | Credential, policy, and inference services |
 | [Repository architecture](architecture/REPOSITORY.md) | Module responsibilities and dependency direction |
+| [Agent team design](architecture/AGENT_TEAM_DESIGN.md) | Planned v2 design: daemon, per-task cells, credential-injecting proxy (not implemented) |
 
 ## Development and releases
 
