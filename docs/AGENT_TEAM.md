@@ -1,6 +1,6 @@
 # Agent team
 
-Anchi runs a team of Codex agents. Each task runs in a disposable cell inside the `secure-vm` VM. GitHub, AWS and Linear credentials stay in the VM vault: an egress proxy adds them to the agent's requests on the way out. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
+Anchi runs a team of Codex and Claude Code agents. Each task runs in a disposable cell inside the `secure-vm` VM. GitHub, AWS and Linear credentials stay in the VM vault: an egress proxy adds them to the agent's requests on the way out. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
 
 ## Install
 
@@ -28,6 +28,15 @@ scripts/anchi setup codex
 
 This stores the access token and account id in the vault. The refresh token stays with the Codex CLI on the Mac. When the access token expires, run `codex` on the Mac once to refresh it, then import again.
 
+Claude Code uses a long-lived subscription token, or an Anthropic API key:
+
+```bash
+claude setup-token          # on the Mac; prints a token
+scripts/anchi setup claude  # paste it, without echo
+```
+
+Agents with `runtime: claude-code` then run Claude Code in their cells with a placeholder; the proxy substitutes the token on `api.anthropic.com`.
+
 Connectors:
 
 ```bash
@@ -41,6 +50,19 @@ scripts/anchi setup connector aws --profile dev  # or a profile on this Mac, suc
 With `--profile`, the daemon exports the profile's temporary credentials with the AWS CLI on the Mac (`aws configure export-credentials`) and imports them again before they expire. The AWS CLI refreshes the SSO token while the SSO session lasts; when it ends, the daemon shows a notification and you run `aws sso login --profile dev`. In the TUI, **Connectors** offers `g` (GitHub from gh) and `p` (AWS profile).
 
 Each command checks the credential with the service and prints the account it belongs to. A credential the service refuses is not kept. Run these commands in a terminal: they prompt for the secret without echo. They also read the secret from stdin when stdin is not a terminal. For AWS, stdin takes JSON: `{"accessKeyId", "secretAccessKey", "region", "sessionToken"?}`. In the TUI, the same setup is under **Connectors** and **Runtimes**.
+
+Gmail, Drive, Notion and Slack are trusted services in the VM. Agents with these connectors call them through Anchi tools; the services' own policy decides each request.
+
+```bash
+scripts/anchi setup google-client ~/Downloads/client.json  # once: a Google Cloud "Desktop app" OAuth client
+scripts/anchi setup service gmail      # Google sign-in in the browser (read-only scope)
+scripts/anchi setup service drive
+scripts/anchi setup service notion     # internal integration secret, without echo
+scripts/anchi setup service slack      # bot token
+scripts/anchi setup service-mode notion ask   # every Notion write waits for your approval
+```
+
+Google tokens are obtained in the VM from the authorization code; they never reach the Mac. In the TUI, the **Services** part of **Connectors** does the same (`Enter` connect, `m` write mode, `d` disconnect).
 
 Grant only what agents need:
 
@@ -70,6 +92,28 @@ prompt:
   text: Fix the GitHub issue you are given, push a branch and open a pull request.
 ```
 
+## Teams, approvals, triggers and skills
+
+```yaml
+# ~/.anchi/agents/lead.yaml
+name: Lead
+runtime: claude-code
+connectors: [linear, github]
+delegates: [developer]          # may hand tasks to these agents
+approvals: { github: ask }      # its GitHub writes (push, PR, comments) wait for you
+skills: [triage]
+triggers:
+  - poll: { type: linear-issues, label: agent }
+    text: "Triage {title} ({url}) and delegate the fix"
+  - schedule: '0 9 * * 1-5'
+    text: Summarize yesterday's merged pull requests
+```
+
+- **Delegation.** An agent with `delegates` gets the tools `anchi_delegate_task`, `anchi_task_status`, `anchi_send_to_task` and `anchi_list_tasks`. A delegated task runs in its own cell with its own connectors; the parent waits for its result. Delegation stops at three levels, ten children per task and sixty turns per tree, and an agent cannot be asked to work on a task above its own.
+- **Approvals.** With `approvals: {<connector>: ask}` (github, aws, linear), the proxy holds the agent's writes: git push, GitHub API writes and mutations, AWS operations other than reads, Linear mutations. A full-screen dialog shows the git refs or the start of the request; `y` lets it through, `n` refuses it, and it is refused after five minutes. Gmail, Drive, Notion and Slack writes follow each service's write mode. `scripts/anchi approvals`, `approve ID` and `deny ID` do the same from the CLI.
+- **Triggers.** `schedule` takes a cron expression in local time; a run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `scripts/anchi triggers` lists them.
+- **Skills.** `scripts/anchi skills add <directory or GitHub URL>` stores a `SKILL.md` skill (a GitHub skill is pinned to the commit it was fetched at). Agents list skills by id; their cells get them read-only. Skill content is untrusted, like any other agent input.
+
 ## Run tasks
 
 In the TUI, select an agent and type a task. **Enter** sends it.
@@ -86,7 +130,8 @@ The CLI does the same:
 ```bash
 scripts/anchi run dev "Fix https://github.com/me/repo/issues/12"
 scripts/anchi send t-0123456789 "Also add a test"
-scripts/anchi tasks
+scripts/anchi tasks --status failed --since 7d --search login
+scripts/anchi rm t-0123456789       # delete a finished task and the tasks it delegated
 scripts/anchi scan t-0123456789     # credential-invariant scan of the live cell
 ```
 
@@ -96,6 +141,8 @@ Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. I
 
 - One turn at a time per agent and at most four live cells. The longest-idle cell is closed to make room.
 - A turn that runs longer than 60 minutes is cancelled and the task fails.
+- Finished tasks are deleted after 90 days; set `retentionDays` in `~/.anchi/settings.yaml` to change it.
+- Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content; use `approvals` for its writes.
 - Credential isolation is not data isolation: agents can send what they read to any public host.
 - S3 uploads signed as streaming payloads (`aws-chunked`, used by the AWS CLI for large objects) are refused.
 - Phase 1 has no scheduled triggers and no agent-to-agent delegation.

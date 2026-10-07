@@ -153,3 +153,27 @@ N0 ─┬─ N1 Claude Code ─────────────────�
 - **Claude subscription terms** (E5).
 - **Holding proxied requests for approval** can break clients with short timeouts. Measured per client in N5; `git` and `gh` are the priority.
 - **Polling credentials** live in a new trusted component (E4); it must stay limited to fixed queries.
+
+## Status
+
+| Milestone | State | Evidence |
+|---|---|---|
+| N0 | Done | Agent schema (runtime, service connectors, delegates, triggers, skills, approvals) and runner protocol v2 with tests |
+| N1 | Done; live Claude turn pending a token | Base image with Claude Code 2.1.291 (35 s build); Claude Agent SDK 0.3.291 adapter with tests; a Claude agent without a token fails with a setup hint |
+| N2 | Done | Live: Codex called `anchi_whoami` and `anchi_list_agents` through `/opt/anchi/mcp.mjs` |
+| N3 | Done | Live: `lead` delegated to `scratch` and reported its result; tests cover limits and cycle refusal |
+| N4 | Done | Live: `notion_search` through the bound socket; `make verify-anchi` checks per-agent sockets (23/23) |
+| N5 | Done | Live: `gh api -X POST …/issues` held, shown with its body, denied; nothing reached GitHub |
+| N6 | Done | Search, tree, usage, delete and retention with tests; TUI filter and task detail |
+| N7 | Done | Live: a per-minute schedule started a task each minute; poll baseline and exactly-once in tests |
+| N8 | Done | Live: Codex found and used a skill from `~/.codex/skills` |
+| N9 | Setup done; removal pending | Google sign-in, Notion/Slack tokens and write modes in the daemon, CLI and TUI; `desktop/` and `pi/` still present |
+
+Decisions taken during implementation:
+
+- **Tool names** start with `anchi_`: Codex has a built-in `list_agents` the model preferred over the MCP tool.
+- **SDK pins** stay older than pnpm's minimum release age instead of excluding packages from that policy.
+- **Connector-service approvals** are verified with `policy_admin show` before the TUI shows them, and approved with the digest the policy service recorded; a cell can only name an approval id.
+- **Polling** runs in the egress service (it already holds the credentials and the network path), not in a new component.
+- **Proxy connection reuse**: the checked address is pinned only while the connection opens, so keep-alive clients reuse upstream connections (a fix found in phase 1 acceptance).
+
