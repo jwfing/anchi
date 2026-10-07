@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import type { Approval } from '@anchi/protocol';
-import type { GuestTransport } from './guest.ts';
+import type { Guest, GuestTransport } from './guest.ts';
 
 const ID = /^[0-9a-f]{16}$/;
 const RETRY_MIN_MS = 2_000;
@@ -19,6 +19,8 @@ export class ApprovalWatcher extends EventEmitter<{
   resolved: [{ approval: Approval; decided: boolean }];
 }> {
   private pending = new Map<string, Approval>();
+  /** Connector-service writes: decided through the policy service, with its digest. */
+  private policy = new Map<string, { approval: Approval; digest: string; timer: NodeJS.Timeout }>();
   private decided = new Set<string>();
   private child?: ReturnType<GuestTransport['spawn']>;
   private retry = RETRY_MIN_MS;
@@ -33,7 +35,54 @@ export class ApprovalWatcher extends EventEmitter<{
   }
 
   list(): Approval[] {
-    return [...this.pending.values()].sort((a, b) => a.createdAt - b.createdAt);
+    return [...this.pending.values(), ...[...this.policy.values()].map((p) => p.approval)].sort(
+      (a, b) => a.createdAt - b.createdAt,
+    );
+  }
+
+  /**
+   * A connector service answered APPROVAL_REQUIRED to a cell. The cell only names the id; the
+   * policy service says what it is, and it must be pending for the agent's own connector.
+   */
+  async addPolicy(
+    guest: Guest,
+    task: { id: string; agentId: string },
+    connector: string,
+    id: string,
+  ) {
+    if (this.policy.has(id)) return;
+    const g = await guest.policyShow(id);
+    if (g.state !== 'PENDING' || g.principal !== connector)
+      throw new Error('no such pending approval');
+    const approval: Approval = {
+      id,
+      kind: 'policy',
+      task: task.id,
+      agent: task.agentId,
+      connector,
+      operation: String(g.action.operation ?? '').slice(0, 300),
+      host: connector,
+      summary: JSON.stringify(g.action.params ?? {}, null, 2).slice(0, 4000),
+      createdAt: g.created * 1000,
+      timeout: Math.max(0, Math.round(g.expires - g.created)),
+    };
+    const timer = setTimeout(
+      () => this.dropPolicy(id, false),
+      Math.max(0, g.expires * 1000 - Date.now()),
+    );
+    timer.unref();
+    this.policy.set(id, { approval, digest: g.digest, timer });
+    this.emit('added', approval);
+    this.emit('changed', this.list());
+  }
+
+  private dropPolicy(id: string, decided: boolean) {
+    const p = this.policy.get(id);
+    if (!p) return;
+    clearTimeout(p.timer);
+    this.policy.delete(id);
+    this.emit('resolved', { approval: p.approval, decided });
+    this.emit('changed', this.list());
   }
 
   start(): void {
@@ -47,7 +96,12 @@ export class ApprovalWatcher extends EventEmitter<{
     this.child?.kill();
   }
 
-  async decide(id: string, allow: boolean): Promise<void> {
+  async decide(id: string, allow: boolean, guest?: Guest): Promise<void> {
+    const p = this.policy.get(id);
+    if (p && guest) {
+      await guest.policyDecide(id, allow, p.digest);
+      return this.dropPolicy(id, true);
+    }
     if (!ID.test(id) || !this.pending.has(id)) throw new Error('unknown or expired approval');
     this.decided.add(id);
     const r = await this.transport.exec([
@@ -113,6 +167,7 @@ function parse(v: Record<string, unknown>): Approval | undefined {
   if (typeof v.id !== 'string' || !ID.test(v.id)) return undefined;
   return {
     id: v.id,
+    kind: 'proxy',
     task: str(v.task, 40),
     agent: str(v.agent, 40),
     connector: str(v.connector, 20),

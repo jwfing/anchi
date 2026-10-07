@@ -124,6 +124,15 @@ export const resolvedAgentSchema = z
     message: 'sandbox codex-workspace-write needs runtime codex',
     path: ['sandbox'],
   })
+  .refine(
+    (a) =>
+      Object.keys(a.approvals).every((c) => (PROXY_CONNECTORS as readonly string[]).includes(c)),
+    {
+      message:
+        'approvals apply to github, aws and linear; writes to gmail, drive, notion and slack follow their connector policy',
+      path: ['approvals'],
+    },
+  )
   .refine((a) => !a.delegates.includes(a.id), {
     message: 'an agent cannot delegate to itself',
     path: ['delegates'],

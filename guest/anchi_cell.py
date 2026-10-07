@@ -643,6 +643,12 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
             f'--bind-ro={EGRESS_CELLS / task}:/run/anchi',
             f'--bind-ro={LIB}:/opt/anchi',
             f'--bind-ro={CA_BUNDLE}:{CA_IN_CELL}',
+            # Only the agent's own connector services; their sockets check policy themselves.
+            *[
+                f'--bind-ro=/run/secure-{c}:/run/anchi-connectors/{c}'
+                for c in connectors
+                if c in SERVICE_CONNECTORS and Path(f'/run/secure-{c}').is_dir()
+            ],
             '--tmpfs=/tmp:mode=1777,size=512M',
             '--tmpfs=/var/tmp:mode=1777,size=512M',
             '--system-call-filter=~io_uring_setup io_uring_enter io_uring_register bpf perf_event_open',

@@ -139,6 +139,8 @@ export class Daemon {
       guest: this.guest,
       idleMs: opts.idleMs,
       turnTimeoutMs: opts.turnTimeoutMs,
+      onPolicyApproval: (task, connector, id) =>
+        this.approvals.addPolicy(this.guest, task, connector, id),
       log: this.log,
       builtins: [builderAgent()],
     });
@@ -249,7 +251,7 @@ export class Daemon {
     'approvals.list': () => this.approvals.list(),
     'approvals.decide': async ({ id, allow }) => {
       const a = this.approvals.list().find((x) => x.id === id);
-      await this.approvals.decide(str(id, 'approval', 20), allow === true);
+      await this.approvals.decide(str(id, 'approval', 40), allow === true, this.guest);
       if (a)
         this.hub.notice(a.task, `${allow === true ? '✓ approved' : '✗ denied'}: ${a.operation}`);
       return null;

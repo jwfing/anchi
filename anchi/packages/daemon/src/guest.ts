@@ -278,6 +278,34 @@ export class Guest {
     ) as { configured: boolean; account_id: string | null; expires_at: number | null };
   }
 
+  /** A pending connector-service write, as the policy service recorded it. */
+  async policyShow(id: string): Promise<{
+    id: string;
+    digest: string;
+    state: string;
+    principal: string;
+    expires: number;
+    created: number;
+    action: { operation?: string; params?: unknown };
+  }> {
+    if (!/^[0-9a-f]{32}$/.test(id)) throw new Error('invalid approval id');
+    return parse(
+      await this.transport.exec(['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'show', id]),
+    ) as never;
+  }
+
+  async policyDecide(id: string, allow: boolean, digest: string): Promise<void> {
+    if (!/^[0-9a-f]{32}$/.test(id) || !/^[0-9a-f]{64}$/.test(digest))
+      throw new Error('invalid approval');
+    parse(
+      await this.transport.exec(
+        allow
+          ? ['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'approve', id, '--digest', digest]
+          : ['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'deny', id],
+      ),
+    );
+  }
+
   async claudeStatus(): Promise<{ configured: boolean; kind: 'oauth' | 'api_key' | null }> {
     return parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'status']),

@@ -1,5 +1,6 @@
 import { createConnection } from 'node:net';
 import { createInterface } from 'node:readline';
+import { availableConnectorTools, callConnector, type ConnectorTool } from './connectors.ts';
 import { TOOLS_SOCKET } from './paths.ts';
 
 /**
@@ -14,6 +15,18 @@ type Json = Record<string, unknown>;
 type Call = (tool: string, args: Json) => Promise<{ ok: boolean; result?: Json; error?: string }>;
 
 const LIST_TOOLS = 'anchi.tools';
+const APPROVAL_PENDING = 'anchi.approval_pending';
+
+/** Connector tools served in the cell itself (through the bound service sockets). */
+export interface LocalTools {
+  list(): ConnectorTool[];
+  run(tool: ConnectorTool, args: Json, onApproval: (id: string) => void): Promise<Json>;
+}
+
+export const connectorTools: LocalTools = {
+  list: () => availableConnectorTools(),
+  run: (tool, args, onApproval) => callConnector(tool, args, { onApproval }),
+};
 const SERVER_INFO = { name: 'anchi', version: '1' };
 const DEFAULT_PROTOCOL = '2025-06-18';
 
@@ -41,7 +54,11 @@ export function socketCall(path = TOOLS_SOCKET): Call {
 }
 
 /** Answers one JSON-RPC message; returns undefined for notifications. */
-export async function handle(message: Json, call: Call): Promise<Json | undefined> {
+export async function handle(
+  message: Json,
+  call: Call,
+  local: LocalTools = connectorTools,
+): Promise<Json | undefined> {
   const { id, method } = message;
   const params = (message.params ?? {}) as Json;
   if (id === undefined || id === null) return undefined; // notifications need no answer
@@ -64,11 +81,33 @@ export async function handle(message: Json, call: Call): Promise<Json | undefine
     case 'tools/list': {
       const r = await call(LIST_TOOLS, {});
       if (!r.ok) return fail(-32603, r.error ?? 'cannot list tools');
-      return reply({ tools: (r.result?.tools as unknown[]) ?? [] });
+      const connectors = local
+        .list()
+        .map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+      return reply({ tools: [...((r.result?.tools as unknown[]) ?? []), ...connectors] });
     }
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : '';
       const args = (params.arguments ?? {}) as Json;
+      const connectorTool = local.list().find((t) => t.name === name);
+      if (connectorTool) {
+        // Best effort: lets the daemon show the approval in the TUI while the service waits.
+        const onApproval = (id: string) =>
+          void call(APPROVAL_PENDING, { connector: connectorTool.connector, approval_id: id });
+        try {
+          const result = await local.run(connectorTool, args, onApproval);
+          return reply({
+            content: [{ type: 'text', text: JSON.stringify(result) }],
+            structuredContent: result,
+            isError: false,
+          });
+        } catch (err) {
+          return reply({
+            content: [{ type: 'text', text: (err as Error).message }],
+            isError: true,
+          });
+        }
+      }
       const r = await call(name, args);
       return reply({
         content: [

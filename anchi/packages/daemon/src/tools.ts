@@ -16,7 +16,12 @@ export interface ToolHost {
   getTask(taskId: string): TaskRow;
   children(taskId: string): TaskRow[];
   wait(taskId: string): Promise<TaskRow>;
+  policyApproval(task: TaskRow, connector: string, id: string): Promise<void>;
 }
+
+/** The MCP server reports a connector write waiting for approval; not a tool the model sees. */
+export const APPROVAL_PENDING = 'anchi.approval_pending';
+const SERVICE = new Set(['gmail', 'drive', 'notion', 'slack']);
 
 /** Longest a tool call waits for a delegated task; below the 60-minute turn timeout. */
 export const MAX_WAIT_MINUTES = 55;
@@ -183,6 +188,16 @@ export class ToolDispatcher {
 
   async call(ctx: ToolContext, name: string, args: Record<string, unknown>) {
     if (name === LIST_TOOLS) return { tools: this.list(ctx.agent) };
+    if (name === APPROVAL_PENDING) {
+      const connector = String(args.connector ?? '');
+      const id = String(args.approval_id ?? '');
+      if (!SERVICE.has(connector) || !(ctx.agent.connectors as string[]).includes(connector)) {
+        throw new Error('not a connector of this agent');
+      }
+      if (!/^[0-9a-f]{32}$/.test(id)) throw new Error('invalid approval id');
+      await this.host.policyApproval(ctx.task, connector, id);
+      return {};
+    }
     const t = this.tools.get(name);
     // An unavailable tool is reported like an unknown one.
     if (!t || !t.available(ctx.agent)) throw new Error(`unknown tool ${name}`);

@@ -65,6 +65,22 @@ class FakeTransport implements GuestTransport {
         return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
       return ok({ connector: args[2], account: 'octo' });
     }
+    if (args[1]?.endsWith('policy_admin.py')) {
+      if (args[2] === 'show') {
+        return args[3] === 'c'.repeat(32)
+          ? ok({
+              id: args[3],
+              digest: 'd'.repeat(64),
+              state: 'PENDING',
+              principal: 'notion',
+              created: Date.now() / 1000,
+              expires: Date.now() / 1000 + 600,
+              action: { operation: 'notion.create_page', params: { title: 'Notes' } },
+            })
+          : { code: 1, stdout: '{"error":"APPROVAL_NOT_FOUND"}', stderr: '' };
+      }
+      return ok({ approval_id: args[3], state: args[2] === 'approve' ? 'APPROVED' : 'DENIED' });
+    }
     if (args[1]?.endsWith('admin.py')) {
       const [action, id] = args.slice(2) as [string, string];
       if (action === 'status') return ok(this.vault);
@@ -479,6 +495,40 @@ describe('daemon tasks', () => {
     await expect(
       client.call('approvals.decide', { id: 'b'.repeat(16), allow: true }),
     ).rejects.toThrow(/unknown/);
+  });
+
+  it('shows connector-service writes held by the policy service, verified there', async () => {
+    write('agents/writer.yaml', 'runtime: codex\nconnectors: [notion]\n');
+    const { client } = await start();
+    const turn = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      const done = await client.call('tasks.wait', { taskId: task.id });
+      return JSON.parse(done.result!) as { ok: boolean; error?: string };
+    };
+    const pending = (id: string, connector = 'notion') =>
+      `call anchi.approval_pending ${JSON.stringify({ connector, approval_id: id })}`;
+    expect((await turn('writer', pending('c'.repeat(32)))).ok).toBe(true);
+    const [a] = await client.call('approvals.list');
+    expect(a).toMatchObject({
+      kind: 'policy',
+      connector: 'notion',
+      operation: 'notion.create_page',
+      agent: 'writer',
+    });
+    expect(a!.summary).toContain('"title": "Notes"');
+    // An id the policy service does not know, or a connector the agent lacks, is refused.
+    expect((await turn('writer', pending('e'.repeat(32)))).ok).toBe(false);
+    expect((await turn('writer', pending('c'.repeat(32), 'gmail'))).error).toMatch(
+      /not a connector/,
+    );
+    await client.call('approvals.decide', { id: 'c'.repeat(32), allow: true });
+    expect(transport.execs.at(-1)!.args.slice(2)).toEqual([
+      'approve',
+      'c'.repeat(32),
+      '--digest',
+      'd'.repeat(64),
+    ]);
+    expect(await client.call('approvals.list')).toEqual([]);
   });
 
   it('accepts a task for an agent file written just before it', async () => {

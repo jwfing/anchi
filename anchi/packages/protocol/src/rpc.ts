@@ -122,6 +122,8 @@ export type ConnectorSecret =
  */
 export interface Approval {
   id: string;
+  /** `proxy`: a held HTTP write. `policy`: a connector service write (Gmail, Drive, Notion, Slack). */
+  kind: 'proxy' | 'policy';
   task: string;
   agent: string;
   connector: string;

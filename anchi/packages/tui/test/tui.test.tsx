@@ -514,6 +514,7 @@ describe('App', () => {
     await tick();
     const approval = {
       id: 'a'.repeat(16),
+      kind: 'proxy' as const,
       task: 't-a000000001',
       agent: 'dev',
       connector: 'github',

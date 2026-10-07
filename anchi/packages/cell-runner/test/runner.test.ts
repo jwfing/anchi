@@ -11,6 +11,7 @@ import {
 } from '@anchi/protocol';
 import { codexOptions, mapCodexEvent } from '../src/codex.ts';
 import { claudeOptions, mapClaudeMessage } from '../src/claude.ts';
+import { callConnector, CONNECTOR_TOOLS } from '../src/connectors.ts';
 import { handle } from '../src/mcp.ts';
 import { startRunner, type RunTurn } from '../src/runner.ts';
 
@@ -278,5 +279,49 @@ describe('Claude Code mapping', () => {
       systemPrompt: { type: 'preset', preset: 'claude_code', append: 'Be brief' },
       mcpServers: { anchi: { type: 'stdio', args: ['/opt/anchi/mcp.mjs'] } },
     });
+  });
+});
+
+describe('connector tools', () => {
+  it('keeps one request id while a write waits for approval', async () => {
+    const tool = CONNECTOR_TOOLS.find((t) => t.name === 'notion_create_page')!;
+    const requests: Record<string, unknown>[] = [];
+    const announced: string[] = [];
+    let n = 0;
+    const result = await callConnector(
+      tool,
+      { parent_page_id: 'p1', title: 'Notes', paragraphs: ['a'], extra: 'dropped' },
+      {
+        call: async (path, request) => {
+          expect(path).toBe('/run/anchi-connectors/notion/api.sock');
+          requests.push(request);
+          if (++n < 3) throw new Error('APPROVAL_REQUIRED:' + 'f'.repeat(32));
+          return { page_id: 'new' };
+        },
+        onApproval: (id) => announced.push(id),
+        wait: async () => {},
+      },
+    );
+    expect(result).toEqual({ page_id: 'new' });
+    expect(new Set(requests.map((r) => r.request_id)).size).toBe(1);
+    expect(requests[0]).toMatchObject({ op: 'create_page', title: 'Notes', paragraphs: ['a'] });
+    expect(requests[0]).not.toHaveProperty('extra');
+    expect(announced).toEqual(['f'.repeat(32)]);
+  });
+
+  it('reads carry no request id and other errors are not retried', async () => {
+    const tool = CONNECTOR_TOOLS.find((t) => t.name === 'gmail_list')!;
+    await expect(
+      callConnector(
+        tool,
+        { query: 'x', limit: 1 },
+        {
+          call: async (_p, request) => {
+            expect(request).toEqual({ op: 'list', query: 'x', limit: 1 });
+            throw new Error('POLICY_DENIED');
+          },
+        },
+      ),
+    ).rejects.toThrow('POLICY_DENIED');
   });
 });

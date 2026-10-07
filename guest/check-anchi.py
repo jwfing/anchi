@@ -181,11 +181,28 @@ def main():
             out.startswith('401') and rows and rows[-1]['decision'] == 'pass:not-granted',
             f'{out[:20]} {rows[-1]["decision"] if rows else "no audit row"}',
         )
+        _, none = sh('chk-a', 'ls /run/anchi-connectors 2>&1 || true')
+        check('a cell without service connectors has no connector sockets', 'No such file' in none, none[:80])
         text = AUDIT.read_text()
         check('audit log carries no placeholder or header values', 'anchi-placeholder-github' not in text)
     finally:
         stop(a)
         stop(b)
+
+    # ── phase 2: service connector sockets are bound per agent ──
+    c, ready_c = start('chk-c', 'chk-gamma', 'gmail')
+    try:
+        _, listing = sh(
+            'chk-c', 'ls /run/anchi-connectors; test -S /run/anchi-connectors/gmail/api.sock && echo socket'
+        )
+        check(
+            'a cell gets only its own connector sockets',
+            ready_c and listing.split() == ['gmail', 'socket'],
+            listing[:80],
+        )
+    finally:
+        stop(c)
+        subprocess.run(['rm', '-rf', '/var/lib/anchi/agents/chk-gamma'])
 
     # ── M1: start-up time ──
     import importlib.util

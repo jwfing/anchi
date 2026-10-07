@@ -53,6 +53,8 @@ export interface HubOptions {
   store: Store;
   guest: Guest;
   idleMs?: number;
+  /** A connector service holds a cell's write for approval (see ApprovalWatcher.addPolicy). */
+  onPolicyApproval?(task: TaskRow, connector: string, id: string): Promise<void>;
   /** Longest a single turn may run before it is cancelled and the task fails. */
   turnTimeoutMs?: number;
   log?(msg: string): void;
@@ -95,6 +97,10 @@ export class Hub extends EventEmitter<HubEvents> {
       getTask: (id) => this.getTask(id),
       children: (id) => this.children(id),
       wait: (id) => this.wait(id),
+      policyApproval: async (task, connector, id) => {
+        if (!this.opts.onPolicyApproval) throw new Error('approvals are not available');
+        await this.opts.onPolicyApproval(task, connector, id);
+      },
     });
     this.reload();
   }

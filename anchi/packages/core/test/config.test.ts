@@ -118,7 +118,7 @@ describe('loadImage', () => {
         'connectors: [linear, slack]',
         'delegates: [dev]',
         'skills: [triage]',
-        'approvals: { slack: ask }',
+        'approvals: { linear: ask }',
         'triggers:',
         "  - schedule: '0 9 * * 1-5'",
         '    text: Post the daily summary',
@@ -131,9 +131,11 @@ describe('loadImage', () => {
       runtime: 'claude-code',
       delegates: ['dev'],
       skills: ['triage'],
-      approvals: { slack: 'ask' },
+      approvals: { linear: 'ask' },
     });
     expect(lead.triggers).toHaveLength(2);
+    write('agents/ap.yaml', 'runtime: codex\nconnectors: [notion]\napprovals: { notion: ask }\n');
+    expect(() => resolveAgent('ap', layout())).toThrow(/connector policy/);
     write('agents/self.yaml', 'runtime: codex\ndelegates: [self]\n');
     expect(() => resolveAgent('self', layout())).toThrow(/delegate to itself/);
     write('agents/sb.yaml', 'runtime: claude-code\nsandbox: codex-workspace-write\n');
