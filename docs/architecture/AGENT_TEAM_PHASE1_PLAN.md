@@ -201,10 +201,10 @@ All milestones are implemented on the `feat/agent-team-phase1` branch. The [agen
 |---|---|---|
 | M0 | Done | `anchi/` workspace in `make check`; trust-zone dependency check; [contracts](AGENT_TEAM_CONTRACTS.md) |
 | M1 | Done | `make verify-anchi`: concurrent isolated cells; nspawn start-to-exec about 36 ms (60–75 ms including the manager); no overlay left after the reaper |
-| M2 | Done; private push pending | `make verify-anchi`: no direct egress, SSRF and DNS rebinding refused, minting denied, no injection without a connector. `tests/test_egress.py` holds the ported PoC checks |
+| M2 | Done; private push pending | `make verify-anchi`: no direct egress, SSRF and DNS rebinding refused, minting denied, no injection without a connector. `tests/test_egress.py` holds the ported PoC checks. Live on 2026-10-07: a Codex agent without a connector cloned a public repository through the proxy, and its push got no credential (`pass:not-granted`) |
 | M3 | Done | Live on 2026-10-07: a multi-turn Codex task in one cell, a follow-up resumed in a new cell after the first was stopped, and a cancelled turn that released its cell. `anchi scan` found no real credential in the cell |
 | M4 | Done | Daemon tests: task store, cell reuse and idle timeout, restart recovery and reaping |
-| M5 | Done; IME check pending | TUI tests: OSC 52, OSC 8, clear screen and a fake approval prompt are neutralized; secrets are masked |
+| M5 | Done; IME check pending | TUI tests: OSC 52, OSC 8, clear screen and a fake approval prompt are neutralized; secrets are masked; IME-committed CJK input is sent intact and deleted by character |
 | M6 | Done; live checks pending | AWS re-signing and denials tested offline; Linear injection rule |
 | M7 | Done | Live on 2026-10-07: the builder proposed a `pydev` agent and a Python image; the applied proposal wrote both files, the image was built on first use (64 s, 9 MB layer), and the agent ran and passed its pytest task |
 

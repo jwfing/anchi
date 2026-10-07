@@ -190,6 +190,33 @@ describe('App', () => {
     ui.unmount();
   });
 
+  it('accepts IME-committed CJK text and deletes it by character', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    // An IME commits a whole phrase as one chunk; the composition itself stays in the IME.
+    ui.stdin.write('修复登录页');
+    await tick();
+    ui.stdin.write('的错误呀');
+    await tick();
+    expect(ui.lastFrame()).toContain('修复登录页的错误呀');
+    ui.stdin.write('\u007f');
+    await tick();
+    ui.stdin.write('，谢谢\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.send')?.[1]).toEqual({
+      taskId: 't-a000000001',
+      text: '修复登录页的错误，谢谢',
+    });
+    ui.unmount();
+  });
+
   it('masks connector secrets and sends them only to the daemon', async () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
