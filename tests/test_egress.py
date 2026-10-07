@@ -18,7 +18,7 @@ GITHUB = {'token': 'ghp_fakefakefakefakefakefake', 'generation': 'g'}
 CODEX = {'token': 'fake-codex-access', 'account_id': 'acct-123'}
 LINEAR = {'token': 'lin_api_fakefakefakefakefake', 'generation': 'g'}
 AWS = {
-    'access_key_id': 'AKIAFAKEREAL00000000',
+    'access_key_id': 'AKIAI44QH8DHBEXAMPLE',
     'secret_access_key': 'fake/secret/key/0000000000',
     'region': 'us-east-1',
 }
@@ -523,13 +523,13 @@ class AuthEgressScopeTests(unittest.TestCase):
             patch.object(auth.vault, 'KEY', Path(store) / 'key'),
         ):
             Path(store, 'key').write_bytes(os.urandom(32))
-            good = {'access_key_id': 'AKIAABCDEFGHIJKLMNOP', 'secret_access_key': 'a' * 40, 'region': 'us-west-2'}
+            good = {'access_key_id': 'AKIAIOSFODNN7EXAMPLE', 'secret_access_key': 'a' * 40, 'region': 'us-west-2'}
             self.assertTrue(auth.import_aws(good)['connected'])
             self.assertEqual(auth.egress_credential('aws')['region'], 'us-west-2')
             for bad in (
                 {**good, 'access_key_id': 'nope'},
                 {**good, 'region': 'mars'},
-                {**good, 'access_key_id': 'ASIAABCDEFGHIJKLMNOP'},
+                {**good, 'access_key_id': 'ASIAIOSFODNN7EXAMPLE'},
                 {**good, 'extra': 1},
             ):
                 with self.assertRaises(Denied):

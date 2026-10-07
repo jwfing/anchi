@@ -326,7 +326,7 @@ describe('daemon tasks', () => {
     const soon = new Date(Date.now() + 5 * 60_000).toISOString();
     hostAnswers['aws configure export-credentials'] = JSON.stringify({
       Version: 1,
-      AccessKeyId: 'ASIAFAKE0000000000001',
+      AccessKeyId: 'ASIAIOSFODNN7EXAMPLE',
       SecretAccessKey: 'fake/secret',
       SessionToken: 'fake-session',
       Expiration: soon,
@@ -338,7 +338,7 @@ describe('daemon tasks', () => {
     const status = await client.call('connectors.awsProfile', { profile: 'dev-sso' });
     expect(status).toMatchObject({ id: 'aws', connected: true, profile: 'dev-sso' });
     expect(transport.imported.at(-1)!.value).toEqual({
-      access_key_id: 'ASIAFAKE0000000000001',
+      access_key_id: 'ASIAIOSFODNN7EXAMPLE',
       secret_access_key: 'fake/secret',
       session_token: 'fake-session',
       region: 'us-west-2',
@@ -349,7 +349,7 @@ describe('daemon tasks', () => {
     // Keys entered by hand end the profile refresh.
     await client.call('connectors.set', {
       id: 'aws',
-      accessKeyId: 'AKIAFAKE000000000000',
+      accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
       secretAccessKey: 's',
       region: 'us-east-1',
     });
