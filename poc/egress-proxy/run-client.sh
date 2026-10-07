@@ -8,6 +8,7 @@ target=${1:?usage: run-client.sh claude|codex|gh|git|aws}
 port=${ANCHI_POC_PORT:-18080}
 ca="$here/out/mitm/mitmproxy-ca-cert.pem"
 [[ -f $ca ]] || { echo "CA not found; start the proxy first" >&2; exit 1; }
+nc -z 127.0.0.1 "$port" 2>/dev/null || { echo "proxy is not listening on 127.0.0.1:$port; run ./start-proxy.sh in another terminal" >&2; exit 1; }
 home="$here/out/home-$target"
 rm -rf "$home" && mkdir -p "$home"
 
