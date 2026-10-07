@@ -16,9 +16,9 @@ if ! ls /etc/apt/sources.list.d/*.sources /etc/apt/sources.list >/dev/null 2>&1;
 fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends git >/dev/null
+apt-get install -y -qq --no-install-recommends git bubblewrap >/dev/null
 rm -rf /var/lib/apt/lists/* /var/cache/apt/*.bin
-echo "build: $(git --version)"
+echo "build: $(git --version); $(bwrap --version)"
 
 url="https://github.com/openai/codex/releases/download/rust-v$CODEX_VERSION/codex-$CODEX_TARGET.tar.gz"
 python3 - "$url" <<'EOF'
@@ -32,6 +32,11 @@ tar -xzf /var/tmp/codex.tgz -C /var/tmp
 install -m 0755 "/var/tmp/codex-$CODEX_TARGET" /usr/local/bin/codex
 rm -f /var/tmp/codex.tgz "/var/tmp/codex-$CODEX_TARGET"
 echo "build: $(codex --version)"
+# Codex re-executes itself as codex-linux-sandbox (argv[0] dispatch). Ship
+# the alias in the image instead of letting Codex create it at runtime.
+ln -sf codex /usr/local/bin/codex-linux-sandbox
+# A non-tmp home: Codex refuses to create helper binaries under /tmp.
+install -d -o 1000 -g 1000 -m 0700 /home/agent
 
 # Image-wide client settings: everything goes through the cell forwarder.
 cat >/etc/profile.d/anchi-proxy.sh <<EOF
