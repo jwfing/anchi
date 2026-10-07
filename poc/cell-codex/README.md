@@ -98,3 +98,28 @@ Direct `codex sandbox` probes: `read-only` blocked all writes; `workspace-write`
 3. **Identifiers may enter the cell; authenticators may not.** Codex needs the real ChatGPT account id locally. The invariant should be phrased in terms of credentials that authenticate (tokens, keys, refresh tokens), not every account attribute.
 4. **Codex's own sandbox inside the cell is untested.** The bundled bubblewrap was not exercised by a read-only "hi" turn. Next: run a tool-using turn, and decide whether to rely on the cell alone (`--sandbox danger-full-access`) or make nested bubblewrap work.
 5. **Building an image layer in a build cell is practical.** No credentials are involved and every fetch is logged, so the build is auditable. Layers are large (373 MB with the Codex binary); share common tools in a base layer.
+
+## AWS: SigV4 re-signing from a task cell (2026-10-06, real credentials)
+
+`build-layer.sh aws` builds an AWS CLI v2 layer: 7 s, 269 MB. `run-aws.sh` runs the CLI as `agent`. The cell holds only placeholder keys; the proxy re-signs every SigV4 call with the real key.
+
+| Call | Protocol | Result |
+|---|---|---|
+| `sts get-caller-identity` | Query (body `Action=`) | Returned the real IAM user ARN |
+| `ec2 describe-regions` | Query, regional endpoint | 17 regions |
+| `logs describe-log-groups` | JSON (`X-Amz-Target`) | Real log groups |
+| `s3 ls` | REST | Real bucket list |
+| `iam create-access-key` | Query | Proxy `AccessDenied` (AWS error shape) |
+| `sts get-session-token` | Query | Proxy `AccessDenied` |
+| `sts assume-role` | Query | Proxy `AccessDenied` |
+
+There was no `SignatureDoesNotMatch` anywhere, so re-signing is correct for all three protocol families. The deny probes use arguments AWS itself would reject (nonexistent user, invalid MFA, nonexistent role), so a failed denial could not have minted anything.
+
+Fixes made on the way:
+
+- Unsigned `*.amazonaws.com` requests now pass through. The AWS CLI installer download had hit the AWS rule and failed closed with 502.
+- Denials now return the service's error shape (XML or JSON) instead of plain text. The AWS CLI had reported plain text as an unparsable response and suggested retrying.
+
+Not covered: S3 uploads (`ANCHI_POC_S3_BUCKET`). Recent CLIs default to streaming checksums (`STREAMING-UNSIGNED-PAYLOAD-TRAILER`), which the proxy currently refuses together with signed `aws-chunked`.
+
+Design implication: the key used here is a long-lived IAM user key that can read production logs and buckets. The proxy keeps it out of the cell, but any agent granted the AWS connector can use everything that key allows, except the denied operations. Agents should get a dedicated least-privilege principal. The proxy deny list complements IAM policy; it does not replace it.

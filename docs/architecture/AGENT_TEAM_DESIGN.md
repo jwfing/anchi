@@ -102,6 +102,8 @@ The cell holds a placeholder access key pair, and the AWS CLI signs requests wit
 - **Phase 1 scope:** a per-service allowlist, with STS and IAM writes denied. S3 uploads must use `UNSIGNED-PAYLOAD`; chained `aws-chunked` signatures are not re-signed.
 - SSO refresh and role assumption run on the trusted side, using credentials sourced from the host profile.
 - Presigned URLs generated inside the cell carry the placeholder signature and are invalid. This is expected.
+- **PoC status:** verified from a task cell with real credentials. Query (STS, EC2), JSON (CloudWatch Logs) and REST (S3 list) calls re-signed correctly. Minting calls returned an AWS-shaped `AccessDenied`. Unsigned requests (public downloads) pass through. S3 uploads with streaming checksums are untested.
+- **Least privilege comes from IAM.** Agents with the AWS connector act with the full authority of the configured principal, minus the deny list. Configure a dedicated least-privilege principal for agents rather than a personal key.
 
 ### What the boundary does not cover
 
