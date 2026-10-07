@@ -265,6 +265,30 @@ export class Hub extends EventEmitter<HubEvents> {
     if (task) this.record(task, { type: 'notice', text: text.slice(0, 2000) });
   }
 
+  /**
+   * Deletes a task with the tasks it delegated (and theirs), once none of them is running.
+   * The task's cell, if still idle, goes too.
+   */
+  deleteTask(taskId: string): number {
+    const task = this.getTask(taskId);
+    const ids: string[] = [];
+    const walk = (t: TaskRow) => {
+      if (t.status === 'running' || t.status === 'queued') {
+        throw new Error(`${t.id} is still ${t.status}; cancel it first`);
+      }
+      ids.push(t.id);
+      for (const child of this.opts.store.children(t.id)) walk(child);
+    };
+    walk(task);
+    for (const id of ids) this.closeCell(id, 'task deleted');
+    return this.opts.store.deleteTasks(ids);
+  }
+
+  /** Deletes finished tasks older than `days`; their cells are long gone. */
+  purge(days: number, now = Date.now()): number {
+    return this.opts.store.deleteTasks(this.opts.store.finishedBefore(now - days * 86_400_000));
+  }
+
   children(taskId: string): TaskRow[] {
     return this.opts.store.children(taskId);
   }
@@ -324,6 +348,8 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   private record(task: TaskRow, event: RuntimeEvent): void {
+    if (event.type === 'usage')
+      this.opts.store.addUsage(task.id, event.inputTokens, event.outputTokens);
     const seq =
       event.type === 'text.delta' ? undefined : this.opts.store.appendEvent(task.id, event);
     this.emit('event', { taskId: task.id, agentId: task.agentId, seq, event });

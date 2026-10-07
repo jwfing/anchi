@@ -581,6 +581,44 @@ describe('daemon tasks', () => {
     expect(daemon.triggers.list()[0]).toMatchObject({ kind: 'poll', lastResult: 'nothing new' });
   });
 
+  it('searches, walks trees, counts usage and deletes tasks with their children', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    const { client, daemon } = await start();
+    const run = async (agentId: string, text: string) => {
+      const t = await client.call('tasks.create', { agentId, text });
+      return client.call('tasks.wait', { taskId: t.id });
+    };
+    const plain = await run('dev', 'fix the 100% bug');
+    const parent = await run(
+      'lead',
+      'call anchi_delegate_task {"agent":"dev","task":"child work"}',
+    );
+    const tree = await client.call('tasks.tree', { taskId: parent.id });
+    expect(tree.map((t) => [t.agentId, t.depth])).toEqual([
+      ['lead', 0],
+      ['dev', 1],
+    ]);
+    expect((await client.call('tasks.search', { text: '100%' })).map((t) => t.id)).toEqual([
+      plain.id,
+    ]);
+    expect((await client.call('tasks.search', { text: '%' })).map((t) => t.id)).toEqual([plain.id]);
+    expect(await client.call('tasks.search', { agentId: 'lead', status: 'done' })).toHaveLength(1);
+    expect(await client.call('tasks.search', { since: Date.now() + 1000 })).toEqual([]);
+    expect(plain.turns).toBe(1);
+    daemon.store.addUsage(plain.id, 1200, 30);
+    expect(daemon.store.getTask(plain.id)).toMatchObject({ inputTokens: 1200, outputTokens: 30 });
+    // Deleting the parent takes the delegated task; a running task cannot be deleted.
+    transport.mode = 'slow';
+    const busy = await client.call('tasks.create', { agentId: 'dev', text: 'busy' });
+    await new Promise((r) => setTimeout(r, 50));
+    await expect(client.call('tasks.delete', { taskId: busy.id })).rejects.toThrow(/still/);
+    expect(await client.call('tasks.delete', { taskId: parent.id })).toEqual({ deleted: 2 });
+    expect(daemon.store.tree(parent.id)).toEqual([]);
+    // Retention removes finished tasks older than the limit.
+    expect(daemon.hub.purge(30, Date.now() + 31 * 86_400_000)).toBe(1);
+    expect(daemon.store.getTask(plain.id)).toBeUndefined();
+  });
+
   it('accepts a task for an agent file written just before it', async () => {
     const { client } = await start();
     write('agents/fresh.yaml', 'runtime: codex\n');

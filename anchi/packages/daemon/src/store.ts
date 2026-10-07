@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { RuntimeEvent, StoredEvent, TaskRow, TaskStatus } from '@anchi/protocol';
+import type { RuntimeEvent, StoredEvent, TaskQuery, TaskRow, TaskStatus } from '@anchi/protocol';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -65,6 +65,9 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     parentId: (r.parent_id as string | null) ?? null,
     rootId: ((r.root_id as string | null) ?? r.id) as string,
     depth: (r.depth as number | null) ?? 0,
+    turns: (r.turns as number | null) ?? 0,
+    inputTokens: (r.input_tokens as number | null) ?? 0,
+    outputTokens: (r.output_tokens as number | null) ?? 0,
   };
 }
 
@@ -108,6 +111,8 @@ export class Store {
       ['root_id', 'TEXT'],
       ['depth', 'INTEGER NOT NULL DEFAULT 0'],
       ['turns', 'INTEGER NOT NULL DEFAULT 0'],
+      ['input_tokens', 'INTEGER NOT NULL DEFAULT 0'],
+      ['output_tokens', 'INTEGER NOT NULL DEFAULT 0'],
     ];
     for (const [name, type] of add) {
       if (!have.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
@@ -229,6 +234,75 @@ export class Store {
           .all(agentId, limit)
       : this.db.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?').all(limit);
     return rows.map(rowToTask);
+  }
+
+  search(q: TaskQuery): TaskRow[] {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (q.agentId) {
+      where.push('agent_id = ?');
+      args.push(q.agentId);
+    }
+    if (q.status) {
+      where.push('status = ?');
+      args.push(q.status);
+    }
+    for (const word of (q.text ?? '').split(/\s+/).filter(Boolean).slice(0, 8)) {
+      where.push("(title LIKE ? ESCAPE '\\' OR result LIKE ? ESCAPE '\\')");
+      const like = `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      args.push(like, like);
+    }
+    if (q.since !== undefined) {
+      where.push('created_at >= ?');
+      args.push(q.since);
+    }
+    if (q.until !== undefined) {
+      where.push('created_at < ?');
+      args.push(q.until);
+    }
+    const limit = Math.min(Math.max(Math.trunc(q.limit ?? 100), 1), 500);
+    const offset = Math.max(Math.trunc(q.offset ?? 0), 0);
+    return this.db
+      .prepare(
+        `SELECT * FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...args, limit, offset)
+      .map(rowToTask);
+  }
+
+  tree(rootId: string): TaskRow[] {
+    return this.db
+      .prepare('SELECT * FROM tasks WHERE id = ? OR root_id = ? ORDER BY depth, created_at')
+      .all(rootId, rootId)
+      .map(rowToTask);
+  }
+
+  addUsage(id: string, input = 0, output = 0): void {
+    this.db
+      .prepare(
+        'UPDATE tasks SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?',
+      )
+      .run(input, output, id);
+  }
+
+  /** Deletes tasks (and their events) by id; returns how many went. */
+  deleteTasks(ids: string[]): number {
+    let n = 0;
+    for (const id of ids) {
+      this.db.prepare('DELETE FROM events WHERE task_id = ?').run(id);
+      n += Number(this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes);
+    }
+    return n;
+  }
+
+  /** Ids of finished tasks created before `before`, for retention. */
+  finishedBefore(before: number): string[] {
+    return this.db
+      .prepare(
+        "SELECT id FROM tasks WHERE created_at < ? AND status IN ('done','failed','cancelled')",
+      )
+      .all(before)
+      .map((r) => r.id as string);
   }
 
   setStatus(id: string, status: TaskStatus): TaskRow {

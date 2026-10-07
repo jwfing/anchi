@@ -107,6 +107,8 @@ type Modal =
       label: string;
       input: string;
       submit: (value: string) => Promise<unknown>;
+      /** Enter with an empty input submits it (clears a filter). */
+      allowEmpty?: boolean;
     };
 
 export interface AppProps {
@@ -116,6 +118,33 @@ export interface AppProps {
   onMouse?(handler: (e: MouseEvent) => void): void;
   /** Opens $EDITOR on a draft and returns the edited text (CJK input fallback). */
   compose?(draft: string): string;
+}
+
+function duration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60
+    ? `${s}s`
+    : s < 3600
+      ? `${Math.floor(s / 60)}m${s % 60}s`
+      : `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m`;
+}
+
+function tokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/** Tasks matching a filter: `@agent` or `agent:x`, `status:x`, and words in title, result or id. */
+export function filterTasks(tasks: TaskRow[], filter: string): TaskRow[] {
+  const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return tasks;
+  return tasks.filter((t) =>
+    words.every((w) => {
+      if (w.startsWith('@')) return t.agentId === w.slice(1);
+      if (w.startsWith('agent:')) return t.agentId === w.slice(6);
+      if (w.startsWith('status:')) return t.status === w.slice(7);
+      return `${t.id} ${t.title} ${t.result ?? ''}`.toLowerCase().includes(w);
+    }),
+  );
 }
 
 function relTime(ms: number | null): string {
@@ -148,6 +177,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   // Which pane takes the keys: the sidebar or the main pane (chat, task, settings).
   const [focus, setFocus] = useState<'side' | 'main'>('main');
   const [taskPage, setTaskPage] = useState(0);
+  // `@agent status:failed words` over the loaded tasks; empty shows all.
+  const [taskFilter, setTaskFilter] = useState('');
   const [focusTask, setFocusTask] = useState<Record<string, string | null>>({});
   const [logs, setLogs] = useState<Record<string, StoredEvent[]>>({});
   const [input, setInput] = useState('');
@@ -167,11 +198,12 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const loading = useRef(new Set<string>());
 
   const userAgents = agents.filter((a) => a.id !== BUILDER);
+  const shownTasks = useMemo(() => filterTasks(tasks, taskFilter), [tasks, taskFilter]);
   const items: string[] = [
     ...CONFIG,
     BUILDER,
     ...userAgents.map((a) => a.id),
-    ...tasks.map((t) => TASK_ITEM + t.id),
+    ...shownTasks.map((t) => TASK_ITEM + t.id),
   ];
   // Selection is by item, so new tasks arriving at the top do not move it.
   const current = selected && items.includes(selected) ? selected : (userAgents[0]?.id ?? BUILDER);
@@ -230,6 +262,12 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       }),
       client.on('setup', ({ line }) => setSetupLog((log) => [...log, line].slice(-8))),
       client.on('approvals', ({ approvals: next }) => setApprovals(next)),
+      client.on('tasksDeleted', () => {
+        void client
+          .call('tasks.list', { limit: 500 })
+          .then((list) => setTasks(list ?? []))
+          .catch(() => {});
+      }),
       client.on('proposal', ({ proposal }) => {
         setProposals((p) => [...p.filter((x) => x.agentId !== proposal.agentId), proposal]);
         setModal({ kind: 'proposal', proposal, scroll: 0 });
@@ -279,8 +317,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
 
   // Task pages fill the sidebar below the fixed rows (header, page rows, pager).
   const pageSize = Math.max(3, bodyHeight - 2 - sidebarFixedRows(userAgents.length) - 1);
-  const pages = Math.max(1, Math.ceil(tasks.length / pageSize));
-  const detailIndex = detail ? tasks.indexOf(detail) : -1;
+  const pages = Math.max(1, Math.ceil(shownTasks.length / pageSize));
+  const detailIndex = detail ? shownTasks.indexOf(detail) : -1;
   const page = Math.min(
     detailIndex >= 0 ? Math.floor(detailIndex / pageSize) : taskPage,
     pages - 1,
@@ -294,12 +332,15 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     ...(userAgents.length
       ? userAgents.map((a) => ({ kind: 'item' as const, item: a.id }))
       : [{ kind: 'note' as const, text: 'none yet — use the builder' }]),
-    { kind: 'header', text: pages > 1 ? `TASKS ${page + 1}/${pages}` : 'TASKS' },
-    ...(tasks.length
-      ? tasks
+    {
+      kind: 'header',
+      text: `TASKS${pages > 1 ? ` ${page + 1}/${pages}` : ''}${taskFilter ? ' · filtered' : ''}`,
+    },
+    ...(shownTasks.length
+      ? shownTasks
           .slice(page * pageSize, (page + 1) * pageSize)
           .map((t) => ({ kind: 'item' as const, item: TASK_ITEM + t.id }))
-      : [{ kind: 'note' as const, text: 'no tasks yet' }]),
+      : [{ kind: 'note' as const, text: taskFilter ? 'no task matches' : 'no tasks yet' }]),
     ...(pages > 1 ? [{ kind: 'pager' as const, page, pages }] : []),
   ];
   const sideRowsRef = useRef(sideRows);
@@ -358,7 +399,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const turnPage = (to: number, select = false) => {
     const next = Math.max(0, Math.min(pages - 1, to));
     setTaskPage(next);
-    const first = tasks[next * pageSize];
+    const first = shownTasks[next * pageSize];
     if ((detail || select) && first) setSelected(TASK_ITEM + first.id);
   };
   const turnPageRef = useRef(turnPage);
@@ -398,6 +439,12 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const openConnector = (id: ConnectorId) =>
     setModal({ kind: 'secret', connector: id, index: 0, values: {}, input: '' });
 
+  /** Edits the input of the open text or secret dialog from its latest state (fast typing). */
+  const editModalInput = (edit: (value: string) => string) =>
+    setModal((m) =>
+      m && (m.kind === 'text' || m.kind === 'secret') ? { ...m, input: edit(m.input) } : m,
+    );
+
   const runAction = (action: () => Promise<unknown>, done: string) => {
     void action()
       .then(() => {
@@ -408,8 +455,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   };
 
   usePaste((text) => {
-    if (modal?.kind === 'secret' || modal?.kind === 'text')
-      setModal({ ...modal, input: modal.input + text.trim() });
+    if (modal?.kind === 'secret' || modal?.kind === 'text') editModalInput((v) => v + text.trim());
     else if (!modal && agent) setInput((v) => v + text);
   });
 
@@ -451,8 +497,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     if (modal?.kind === 'secret') {
       const field = SECRET_FIELDS[modal.connector][modal.index]!;
       if (key.escape) return setModal(null);
-      if (key.backspace || key.delete)
-        return setModal({ ...modal, input: [...modal.input].slice(0, -1).join('') });
+      if (key.backspace || key.delete) return editModalInput((v) => [...v].slice(0, -1).join(''));
       if (key.return) {
         if (!modal.input && !field.optional) return;
         const values = { ...modal.values, ...(modal.input ? { [field.key]: modal.input } : {}) };
@@ -472,22 +517,19 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           `${modal.connector} connected`,
         );
       }
-      if (ch && !key.ctrl && !key.meta)
-        setModal({ ...modal, input: modal.input + ch.replace(/[\r\n]/g, '') });
+      if (ch && !key.ctrl && !key.meta) editModalInput((v) => v + ch.replace(/[\r\n]/g, ''));
       return;
     }
     if (modal?.kind === 'text') {
       if (key.escape) return setModal(null);
-      if (key.backspace || key.delete)
-        return setModal({ ...modal, input: [...modal.input].slice(0, -1).join('') });
+      if (key.backspace || key.delete) return editModalInput((v) => [...v].slice(0, -1).join(''));
       if (key.return) {
-        if (!modal.input) return;
+        if (!modal.input && !modal.allowEmpty) return;
         const { submit, input, title } = modal;
         setModal(null);
         return runAction(() => submit(input), `${title}: done`);
       }
-      if (ch && !key.ctrl && !key.meta)
-        setModal({ ...modal, input: modal.input + ch.replace(/[\r\n]/g, '') });
+      if (ch && !key.ctrl && !key.meta) editModalInput((v) => v + ch.replace(/[\r\n]/g, ''));
       return;
     }
     if (modal?.kind === 'help') {
@@ -531,6 +573,20 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       if (ch === '3') return turnPage(page, true);
       if (key.return || key.rightArrow || ch === 'l') return setFocus('main');
       if (ch === '?') return setModal({ kind: 'help' });
+      if (ch === '/') {
+        return setModal({
+          kind: 'text',
+          title: 'Filter tasks',
+          label:
+            '@agent, status:done|failed|running|cancelled|queued and words; Enter on empty shows all',
+          input: taskFilter,
+          allowEmpty: true,
+          submit: async (value) => {
+            setTaskFilter(value.trim());
+            setTaskPage(0);
+          },
+        });
+      }
       if (ch === 'q') return exit();
       return;
     }
@@ -554,6 +610,17 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       }
       if (ch === '[') return turnPage(page - 1);
       if (ch === ']') return turnPage(page + 1);
+      if (ch === 'D' && detail.status !== 'running' && detail.status !== 'queued') {
+        return setModal({
+          kind: 'confirm',
+          title: `Delete ${detail.id}`,
+          body: `Delete this task, the tasks it delegated and their transcripts from ~/.anchi. This cannot be undone.`,
+          action: async () => {
+            await client.call('tasks.delete', { taskId: detail.id });
+            setSelected(detail.agentId);
+          },
+        });
+      }
       if (key.pageUp)
         return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
       if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
@@ -726,9 +793,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const status =
     flash ||
     (focus === 'side'
-      ? '↑↓ select · Enter/→ open · [ ] task page · 1 2 3 sections · Tab switch pane · ? help · q quit'
+      ? '↑↓ select · Enter/→ open · [ ] task page · / filter tasks · 1 2 3 sections · Tab pane · ? help'
       : detail
-        ? `Enter continue in @${detail.agentId}${busy ? ' · c cancel' : ''} · ↑↓ PgUp/PgDn scroll · [ ] page · ^T tools · Esc sidebar · ? help`
+        ? `Enter continue in @${detail.agentId}${busy ? ' · c cancel' : ' · D delete'} · ↑↓ PgUp/PgDn scroll · [ ] page · ^T tools · Esc sidebar · ? help`
         : agent
           ? 'Enter send · ^X new task · Esc cancel/sidebar · ^E editor · ^T tools · ^V verbose · PgUp/PgDn · Tab sidebar'
           : current === 'connectors'
@@ -797,14 +864,23 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
               <Text wrap="truncate">
                 <Text color={TASK_COLOR[detail.status]}>{detail.status}</Text>
                 {`  created ${new Date(detail.createdAt).toLocaleString()}`}
-                {detail.finishedAt
-                  ? ` · finished ${new Date(detail.finishedAt).toLocaleString()}`
+                {detail.finishedAt && detail.startedAt
+                  ? ` · ran ${duration(detail.finishedAt - detail.startedAt)}`
                   : detail.startedAt
                     ? ` · started ${relTime(detail.startedAt)} ago`
                     : ''}
+                {` · ${detail.turns} turn${detail.turns === 1 ? '' : 's'}`}
+                {detail.inputTokens || detail.outputTokens
+                  ? ` · ${tokens(detail.inputTokens)} in / ${tokens(detail.outputTokens)} out`
+                  : ''}
               </Text>
               <Text color="blue" wrap="truncate">
-                {detail.links.length ? detail.links.map(sanitizeLine).join('  ') : ' '}
+                {[
+                  ...detail.links.map(sanitizeLine),
+                  ...tasks
+                    .filter((t) => t.parentId === detail.id)
+                    .map((t) => `↳ ${t.id} @${t.agentId} ${t.status}`),
+                ].join('  ') || ' '}
               </Text>
               <Box flexDirection="column" height={transcriptHeight}>
                 {visible.length ? (
@@ -1099,6 +1175,7 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
       ['Home End  g G', 'first / last item'],
       ['1 2 3', 'Configure / Agents / Tasks'],
       ['PgUp PgDn  [ ]', 'previous / next page of tasks (or the wheel, or ‹ prev / next ›)'],
+      ['/', 'filter tasks: @agent, status:failed, words'],
       ['Enter → l', 'open the item in the main pane'],
       ['', ''],
       ['Main pane', ''],
@@ -1106,6 +1183,7 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
       ['Esc ← h', 'other views: back to the sidebar'],
       ['↑ ↓  PgUp PgDn', 'scroll the transcript (or the wheel)'],
       ['Enter', 'chat: send · task: continue it in the chat · connectors: connect'],
+      ['c  D', 'task: cancel it · delete it with its delegated tasks'],
       ['Ctrl+X  Ctrl+E', 'chat: new task · compose in $EDITOR'],
       ['Ctrl+T  Ctrl+V', 'expand tool calls (or click one) · verbose tool output'],
       ['Ctrl+O', 'reopen the pending builder proposal'],

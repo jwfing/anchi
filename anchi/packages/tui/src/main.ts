@@ -130,12 +130,38 @@ program
 
 program
   .command('tasks')
-  .description('List recent tasks')
+  .description('List tasks, newest first')
   .option('-a, --agent <id>')
-  .action((opts: { agent?: string }) =>
+  .option('-s, --status <status>', 'queued, running, done, failed or cancelled')
+  .option('-q, --search <words>', 'words in the title or result')
+  .option('--since <age>', 'created within, e.g. 24h or 7d')
+  .option('-n, --limit <n>', 'how many', '50')
+  .action(
+    (opts: { agent?: string; status?: string; search?: string; since?: string; limit: string }) =>
+      withClient(async (client) => {
+        const age = opts.since ? /^(\d+)([hd])$/.exec(opts.since) : null;
+        if (opts.since && !age) fail('--since takes a number of hours or days, such as 24h or 7d');
+        const since = age
+          ? Date.now() - Number(age[1]) * (age[2] === 'h' ? 3600_000 : 86_400_000)
+          : undefined;
+        const list = await client.call('tasks.search', {
+          agentId: opts.agent,
+          status: opts.status as TaskRow['status'] | undefined,
+          text: opts.search,
+          since,
+          limit: Number(opts.limit) || 50,
+        });
+        for (const t of list) console.log(taskLine(t));
+      }),
+  );
+
+program
+  .command('rm <task>')
+  .description('Delete a finished task, the tasks it delegated and their transcripts')
+  .action((taskId: string) =>
     withClient(async (client) => {
-      for (const t of await client.call('tasks.list', { agentId: opts.agent, limit: 50 }))
-        console.log(taskLine(t));
+      const { deleted } = await client.call('tasks.delete', { taskId });
+      console.log(`deleted ${deleted} task(s)`);
     }),
   );
 

@@ -28,6 +28,23 @@ export interface TaskRow {
   parentId: string | null;
   rootId: string;
   depth: number;
+  /** Turns run and model tokens used, summed over the task's turns. */
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Task search: every field narrows the result. */
+export interface TaskQuery {
+  agentId?: string;
+  status?: TaskStatus;
+  /** Words found in the title or the result. */
+  text?: string;
+  /** Created at or after / before (ms since the epoch). */
+  since?: number;
+  until?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface StoredEvent {
@@ -179,6 +196,11 @@ export interface Methods {
   /** Creates a task and queues its first turn. */
   'tasks.create': [{ agentId: string; text: string }, TaskRow];
   'tasks.list': [{ agentId?: string; limit?: number }, TaskRow[]];
+  'tasks.search': [TaskQuery, TaskRow[]];
+  /** The task's delegation tree, root first, in creation order. */
+  'tasks.tree': [{ taskId: string }, TaskRow[]];
+  /** Deletes a finished task, its delegated tasks and their events. */
+  'tasks.delete': [{ taskId: string }, { deleted: number }];
   'tasks.get': [{ taskId: string }, TaskRow];
   /** Follow-up turn in the same task (and cell, while it is alive). */
   'tasks.send': [{ taskId: string; text: string }, TaskRow];
@@ -226,6 +248,8 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
+  /** Tasks were deleted; clients reload their task list. */
+  tasksDeleted: Record<string, never>;
   /** The pending approvals, whenever they change. */
   approvals: { approvals: Approval[] };
 }

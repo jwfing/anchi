@@ -4,7 +4,7 @@ import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { sanitize } from '../src/sanitize.ts';
-import { App } from '../src/tui/App.tsx';
+import { App, filterTasks } from '../src/tui/App.tsx';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
 import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
 
@@ -36,6 +36,9 @@ const task = (id: string, agentId: string, over: Partial<TaskRow> = {}): TaskRow
   parentId: null,
   rootId: id,
   depth: 0,
+  turns: 1,
+  inputTokens: 0,
+  outputTokens: 0,
   ...over,
 });
 
@@ -398,7 +401,7 @@ describe('App', () => {
     await tick();
     ui.stdin.write('\u001b'); // ...then moves to the sidebar
     await tick();
-    expect(ui.lastFrame()).toContain('Tab switch pane');
+    expect(ui.lastFrame()).toContain('Tab pane');
     ui.stdin.write('3'); // Tasks section
     await tick();
     expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
@@ -424,6 +427,46 @@ describe('App', () => {
     ui.stdin.write('\u001b');
     await tick();
     expect(ui.lastFrame()).not.toContain('Esc or ? to close');
+    ui.unmount();
+  });
+
+  it('filters the task list', async () => {
+    const { client } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev'), agent('ops')]}
+        initialTasks={[
+          task('t-a000000003', 'ops', { title: 'rotate logs', status: 'failed' }),
+          task('t-a000000002', 'dev', { title: 'fix login' }),
+          task('t-a000000001', 'dev', { title: 'fix signup', status: 'failed' }),
+        ]}
+      />,
+    );
+    await tick();
+    expect(filterTasks([task('t-1', 'dev', { title: 'Fix X' })], '@dev fix')).toHaveLength(1);
+    ui.stdin.write('\u001b'); // to the sidebar
+    await tick();
+    ui.stdin.write('/');
+    await tick();
+    ui.stdin.write('@dev status:failed');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    let frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('TASKS · filtered');
+    expect(frame).toContain('fix signup');
+    expect(frame).not.toContain('fix login');
+    expect(frame).not.toContain('rotate logs');
+    // An empty filter shows everything again.
+    ui.stdin.write('/');
+    await tick();
+    for (const _ of '@dev status:failed') ui.stdin.write('\u007f');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('rotate logs');
     ui.unmount();
   });
 
