@@ -16,6 +16,16 @@ export const TURN_MAX_BYTES = 64 * 1024 * 1024;
 export const READY_TIMEOUT_MS = 90_000;
 export const TURN_TIMEOUT_MS = 60 * 60_000;
 const STDERR_KEEP = 8 * 1024;
+/** What the user can do about guest errors that stop a cell from starting. */
+const START_HINTS: Record<string, string> = {
+  CODEX_NOT_CONFIGURED: 'run `anchi setup codex` (Runtimes → i in the TUI)',
+  CLAUDE_NOT_CONFIGURED:
+    'run `claude setup-token` on this Mac, then `anchi setup claude` (Runtimes → c in the TUI)',
+  BASE_IMAGE_NOT_BUILT: 'run `anchi setup install`',
+  TOO_MANY_CELLS: 'too many tasks are running; try again when one finishes',
+  EGRESS_UNAVAILABLE: 'the egress proxy is not running; run `anchi setup install`',
+};
+
 /** Anchi tool calls one turn may make; a limit on runaway loops, not a security control. */
 export const TURN_MAX_TOOL_CALLS = 200;
 
@@ -105,7 +115,10 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
       'error' in value &&
       !('type' in value)
     ) {
-      return this.fail(`cell start failed: ${String((value as { error: unknown }).error)}`);
+      const code = String((value as { error: unknown }).error);
+      return this.fail(
+        `cell start failed: ${code}${START_HINTS[code] ? ` — ${START_HINTS[code]}` : ''}`,
+      );
     }
     const parsed = cellMessageSchema.safeParse(value);
     if (!parsed.success) return this.fail('runner sent an invalid message');
