@@ -137,12 +137,14 @@ const SETUP_STEPS = {
     [process.execPath, '-e', 'console.error("broken"); process.exit(3)'],
   ],
   'vault-init': [],
+  workspaces: [],
   'vault-unlock': [[process.execPath, '-e', 'console.log("{\\"unlocked\\": true}")']],
 };
 
-async function start(idleMs = 60_000, turnTimeoutMs?: number) {
+async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: string) {
   const layout = homeLayout(root);
   const d = new Daemon({
+    workspaceRoot: workspaceRoot ?? join(root, 'no-workspaces'),
     turnTimeoutMs,
     // Tests drive triggers with their own clock through daemon.triggers.tick().
     triggers: false,
@@ -197,6 +199,7 @@ describe('daemon tasks', () => {
       'github',
       'cell',
       'codex',
+      '-',
       '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
@@ -643,6 +646,33 @@ describe('daemon tasks', () => {
       status: 'failed',
       result: expect.stringMatching(/skill "missing" is not installed/),
     });
+  });
+
+  it('binds workspaces and reports code-running paths a turn adds to writable ones', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
+    mkdirSync(join(ws, 'app', '.git', 'hooks'), { recursive: true });
+    mkdirSync(join(ws, 'docs'));
+    write(
+      'agents/coder.yaml',
+      'runtime: codex\nworkspaces: [{ path: app, mode: rw }, { path: docs }]\n',
+    );
+    const { client } = await start(60_000, undefined, ws);
+    const t = await client.call('tasks.create', {
+      agentId: 'coder',
+      text: `write ${join(ws, 'app', '.git', 'hooks', 'post-checkout')}`,
+    });
+    await client.call('tasks.wait', { taskId: t.id });
+    const arg = transport.starts.at(-1)!.at(-1)!;
+    expect(JSON.parse(Buffer.from(arg, 'base64url').toString())).toEqual([
+      { name: 'app', path: 'app', mode: 'rw' },
+      { name: 'docs', path: 'docs', mode: 'ro' },
+    ]);
+    const notices = (await client.call('tasks.events', { taskId: t.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toEqual([
+      `⚠ workspace app: ${join('.git', 'hooks', 'post-checkout')}: git hook added or changed`,
+    ]);
   });
 
   it('accepts a task for an agent file written just before it', async () => {

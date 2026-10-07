@@ -34,6 +34,9 @@ An agent is a YAML file. Fields:
 - delegates: ids of agents this agent may hand tasks to (optional).
 - approvals: per connector, ask to hold its writes for the user's approval (optional), e.g.
   { github: ask }.
+- workspaces: directories of the user's Mac under ~/AnchiWorkspaces, e.g.
+  [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
+  /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
 - image: id of an image recipe (or omit for the base image, which has git, gh, curl, jq,
   Codex and Claude Code on Debian 12).
 - sandbox: cell (default).

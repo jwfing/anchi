@@ -135,6 +135,8 @@ export interface CellStart {
   runtime: 'codex' | 'claude-code';
   /** Connectors whose writes wait for approval. */
   ask: string[];
+  /** Directories under ~/AnchiWorkspaces bound into the cell. */
+  workspaces: { name: string; path: string; mode: 'ro' | 'rw' }[];
 }
 
 export interface PollItem {
@@ -174,6 +176,7 @@ export class Guest {
       c.sandbox,
       c.runtime,
       c.ask.filter((x) => c.connectors.includes(x)).join(',') || '-',
+      c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
     ]);
   }
 
@@ -337,6 +340,12 @@ export class Guest {
           : ['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'deny', id],
       ),
     );
+  }
+
+  /** Whether ~/AnchiWorkspaces is mounted in the VM. */
+  async workspacesMounted(): Promise<boolean> {
+    const r = await this.transport.exec(['mountpoint', '-q', '/mnt/anchi-host']);
+    return r.code === 0;
   }
 
   async claudeStatus(): Promise<{ configured: boolean; kind: 'oauth' | 'api_key' | null }> {

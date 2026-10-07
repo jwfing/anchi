@@ -74,16 +74,18 @@ export async function setupStatus(
     claude: { runtime: 'claude-code', connected: false, kind: null },
     services: [],
     googleClient: false,
+    workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
   };
   if (vm !== 'running') return empty;
   try {
-    const [vault, codex, claude, connectors, base] = await Promise.all([
+    const [vault, codex, claude, connectors, base, workspaces] = await Promise.all([
       guest.vaultStatus(),
       codexStatus(guest),
       claudeStatus(guest),
       connectorStatuses(guest),
       guest.imageStatus('codex', 'base').catch(() => false),
+      guest.workspacesMounted().catch(() => false),
     ]);
     const svc = (await services?.status().catch(() => undefined)) ?? {
       services: [],
@@ -98,6 +100,7 @@ export async function setupStatus(
       connectors,
       services: svc.services,
       googleClient: svc.googleClient,
+      workspaces,
     };
   } catch {
     return empty;

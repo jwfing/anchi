@@ -48,6 +48,39 @@ export const triggerSchema = z.union([
 ]);
 export type Trigger = z.infer<typeof triggerSchema>;
 
+/** A path segment under ~/AnchiWorkspaces: no separators, no `.` or `..`, no control characters. */
+const segment = z
+  .string()
+  .regex(/^[A-Za-z0-9._ -]{1,100}$/)
+  .refine((s) => s !== '.' && s !== '..' && s.trim() === s, 'invalid path segment');
+
+/** A directory of the Mac (under ~/AnchiWorkspaces) bound into the agent's cells. */
+export const workspaceSchema = z.strictObject({
+  /** Relative to ~/AnchiWorkspaces, such as `projects/webapp`. */
+  path: z
+    .string()
+    .max(500)
+    .refine((p) => p.split('/').every((s) => segment.safeParse(s).success), {
+      message: 'use a path relative to ~/AnchiWorkspaces, without "..", leading "/" or empty parts',
+    }),
+  /** `ro` (default) or `rw`: writes go straight to the Mac. */
+  mode: z.enum(['ro', 'rw']).default('ro'),
+  /** Name under /home/agent/workspaces; the last path segment by default. */
+  name: idSchema.optional(),
+});
+export type Workspace = z.infer<typeof workspaceSchema>;
+export const WORKSPACE_ROOT = '~/AnchiWorkspaces';
+export const workspaceName = (w: { path: string; name?: string }) =>
+  w.name ??
+  (w.path
+    .split('/')
+    .at(-1)!
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+/, '')
+    .slice(0, 40) ||
+    'workspace');
+
 /** `cell`: the cell is the only boundary. `codex-workspace-write` adds Codex's own sandbox. */
 export const sandboxSchema = z.enum(['cell', 'codex-workspace-write']);
 export type Sandbox = z.infer<typeof sandboxSchema>;
@@ -93,6 +126,7 @@ export const agentLayerSchema = z.strictObject({
   skills: z.array(idSchema).max(50).optional(),
   /** Per connector: `ask` holds writes for approval in the TUI. Reads are never held. */
   approvals: z.partialRecord(connectorSchema, approvalModeSchema).optional(),
+  workspaces: z.array(workspaceSchema).max(10).optional(),
 });
 export type AgentLayer = z.infer<typeof agentLayerSchema>;
 
@@ -119,6 +153,11 @@ export const resolvedAgentSchema = z
     triggers: z.array(triggerSchema).default([]),
     skills: z.array(idSchema).default([]),
     approvals: z.partialRecord(connectorSchema, approvalModeSchema).default({}),
+    workspaces: z.array(workspaceSchema).max(10).default([]),
+  })
+  .refine((a) => new Set(a.workspaces.map(workspaceName)).size === a.workspaces.length, {
+    message: 'workspaces need distinct names; set name: for one of them',
+    path: ['workspaces'],
   })
   .refine((a) => a.runtime === 'codex' || a.sandbox === 'cell', {
     message: 'sandbox codex-workspace-write needs runtime codex',

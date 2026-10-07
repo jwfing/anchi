@@ -8,6 +8,7 @@ import {
   watch,
   type FSWatcher,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:net';
 import type { HomeLayout } from '@anchi/core';
@@ -75,6 +76,8 @@ export interface DaemonOptions {
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
   hostRun?: typeof hostOutput;
+  /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
+  workspaceRoot?: string;
   /** Opens a URL for the user (Google sign-in); tests replace it. */
   openUrl?: (url: string) => void;
   /** Run schedule and polling triggers (default true). */
@@ -185,6 +188,7 @@ export class Daemon {
       idleMs: opts.idleMs,
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
+      workspaceRoot: opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces'),
       onPolicyApproval: (task, connector, id) =>
         this.approvals.addPolicy(this.guest, task, connector, id),
       log: this.log,

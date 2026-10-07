@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -8,8 +9,28 @@ import type { SetupAction } from '@anchi/protocol';
 /** The checkout the daemon runs from; setup steps use its scripts. */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
+export const WORKSPACE_MOUNT = '/mnt/anchi-host';
+
 /** Fixed host commands per setup step, run from the checkout in order. */
 export const SETUP_STEPS: Record<SetupAction, string[][]> = {
+  // Mounts ~/AnchiWorkspaces into the VM once (virtiofs, macOS); restarts the VM, which locks
+  // the vault, so it is unlocked again at the end.
+  workspaces: [
+    ['mkdir', '-p', join(homedir(), 'AnchiWorkspaces')],
+    ['limactl', 'stop', 'secure-vm'],
+    [
+      'limactl',
+      'edit',
+      'secure-vm',
+      '--tty=false',
+      '--set',
+      `.mounts=[{"location":"~/AnchiWorkspaces","mountPoint":"${WORKSPACE_MOUNT}","writable":true}]`,
+      '--set',
+      '.mountType="virtiofs"',
+    ],
+    ['limactl', 'start', '--tty=false', 'secure-vm'],
+    ['python3', 'scripts/vault.py', 'unlock'],
+  ],
   'vm-start': [['limactl', 'start', '--tty=false', 'secure-vm']],
   install: [
     ['bash', 'scripts/up.sh'],
@@ -34,6 +55,9 @@ export class SetupRunner {
 
   async run(action: SetupAction, onLine: (line: string) => void): Promise<void> {
     if (this.running) throw new Error(`setup step "${this.running}" is already running`);
+    if (action === 'workspaces' && process.platform !== 'darwin') {
+      throw new Error('workspaces are available on macOS only for now');
+    }
     this.running = action;
     try {
       for (const [cmd, ...args] of this.steps[action]) {

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
 import {
   agentFile,
   BASE_IMAGE,
@@ -7,10 +8,12 @@ import {
   loadImage,
   type ResolvedAgent,
   resolveAgent,
+  workspaceName,
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
 import { CellSession } from './cell.ts';
 import type { SkillStore } from './skills.ts';
+import { audit, snapshot, type Snapshot } from './workspace-audit.ts';
 import { ToolDispatcher } from './tools.ts';
 import type { Guest } from './guest.ts';
 import { instructions, WORKDIR } from './prompt.ts';
@@ -56,6 +59,8 @@ export interface HubOptions {
   idleMs?: number;
   /** Skills copied into an agent's cells. */
   skills?: SkillStore;
+  /** ~/AnchiWorkspaces on the Mac, where writable workspaces are audited after each turn. */
+  workspaceRoot?: string;
   /** A connector service holds a cell's write for approval (see ApprovalWatcher.addPolicy). */
   onPolicyApproval?(task: TaskRow, connector: string, id: string): Promise<void>;
   /** Longest a single turn may run before it is cancelled and the task fails. */
@@ -160,6 +165,7 @@ export class Hub extends EventEmitter<HubEvents> {
           status,
           queued: s.queue.length,
           triggers: s.agent?.triggers.length ?? 0,
+          workspaces: s.agent?.workspaces.map((w) => `${workspaceName(w)} (${w.mode})`) ?? [],
           delegates: s.agent?.delegates ?? [],
           error: s.error,
           file: s.agent?.sourceFiles.at(-1) ?? agentFile(this.opts.layout, s.id),
@@ -399,9 +405,11 @@ export class Hub extends EventEmitter<HubEvents> {
     let reply = '';
     let failure: string | undefined;
     let timedOut = false;
+    let before = new Map<string, Snapshot>();
     try {
       const hash = await this.ensureImage(agent, task);
       await this.syncSkills(agent);
+      before = this.snapshotWorkspaces(agent);
       if (signal.aborted) throw new Error('cancelled');
       const cell = await this.cellFor(task, agent, hash);
       const turnId = `turn-${Date.now().toString(36)}`;
@@ -439,6 +447,7 @@ export class Hub extends EventEmitter<HubEvents> {
         }
       } finally {
         clearTimeout(timer);
+        this.auditWorkspaces(agent, task, before);
         signal.removeEventListener('abort', onAbort);
         cell.lastUsed = Date.now();
         this.armIdle(task.id);
@@ -464,6 +473,29 @@ export class Hub extends EventEmitter<HubEvents> {
   // ── images and cells ─────────────────────────────────────
 
   private skillDigests = new Map<string, string>();
+
+  private workspaceDirs(agent: ResolvedAgent): [string, string][] {
+    const root = this.opts.workspaceRoot;
+    if (!root) return [];
+    return agent.workspaces
+      .filter((w) => w.mode === 'rw')
+      .map((w) => [workspaceName(w), join(root, ...w.path.split('/'))]);
+  }
+
+  private snapshotWorkspaces(agent: ResolvedAgent): Map<string, Snapshot> {
+    return new Map(this.workspaceDirs(agent).map(([name, dir]) => [name, snapshot(dir)]));
+  }
+
+  /** Reports code-running paths a turn added to writable workspaces (see workspace-audit). */
+  private auditWorkspaces(agent: ResolvedAgent, task: TaskRow, before: Map<string, Snapshot>) {
+    for (const [name, dir] of this.workspaceDirs(agent)) {
+      const was = before.get(name);
+      if (!was) continue;
+      for (const finding of audit(dir, was, snapshot(dir)).slice(0, 20)) {
+        this.record(task, { type: 'notice', text: `⚠ workspace ${name}: ${finding}` });
+      }
+    }
+  }
 
   /** Sends the agent's skills to the VM when they changed since the last cell. */
   private async syncSkills(agent: ResolvedAgent): Promise<void> {
@@ -534,6 +566,11 @@ export class Hub extends EventEmitter<HubEvents> {
       ask: Object.entries(agent.approvals)
         .filter(([, mode]) => mode === 'ask')
         .map(([connector]) => connector),
+      workspaces: agent.workspaces.map((w) => ({
+        name: workspaceName(w),
+        path: w.path,
+        mode: w.mode,
+      })),
     });
     const session = new CellSession(task.id, child);
     // The cell belongs to this task; its tool calls act as this task's agent.

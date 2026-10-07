@@ -67,6 +67,8 @@ export interface AgentSummary {
   status: AgentStatus;
   /** Tasks waiting behind the running one. */
   queued: number;
+  /** Directories of the Mac bound into the agent's cells, as `name (ro|rw)`. */
+  workspaces?: string[];
   /** Number of schedule and polling triggers. */
   triggers?: number;
   delegates?: string[];
@@ -92,12 +94,13 @@ export interface ConnectorStatus {
  * services and the agent team, and builds the base image; `vault-init` and `vault-unlock` use
  * the host-held vault key (read by `scripts/vault.py`, never by the daemon).
  */
-export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock';
+export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock' | 'workspaces';
 export const SETUP_ACTIONS: readonly SetupAction[] = [
   'vm-start',
   'install',
   'vault-init',
   'vault-unlock',
+  'workspaces',
 ];
 
 export interface RuntimeAccountStatus {
@@ -137,6 +140,8 @@ export interface SetupStatus {
   services: ServiceConnectorStatus[];
   /** Whether a Google OAuth client is stored (needed for Gmail and Drive). */
   googleClient: boolean;
+  /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
+  workspaces: boolean;
 }
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */

@@ -1,5 +1,6 @@
 // Stands in for `anchi-cell start`: speaks the runner protocol on stdio.
 // FAKE_MODE: ok | bad-frame | wrong-turn | huge | slow | fail-start
+import { writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const mode = process.env.FAKE_MODE ?? 'ok';
@@ -32,6 +33,9 @@ rl.on('line', (line) => {
     return;
   }
   turns++;
+  // "write <path>": the agent changes a file (workspace audit tests).
+  const written = /^write (\S+)$/.exec(cmd.input ?? '');
+  if (written) writeFileSync(written[1], '#!/bin/sh\necho planted\n');
   const tool = /^call (\S+)(?: (.*))?$/.exec(cmd.input ?? '');
   if (tool) {
     waiting.set(`c${turns}`, cmd.turn);

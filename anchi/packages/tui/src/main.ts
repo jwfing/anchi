@@ -338,6 +338,18 @@ setup
   );
 
 setup
+  .command('workspaces')
+  .description('Share ~/AnchiWorkspaces with the VM (macOS; restarts the VM once)')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action((opts: { yes?: boolean }) =>
+    runSetup(
+      'workspaces',
+      Boolean(opts.yes),
+      'Mount ~/AnchiWorkspaces into the VM? The VM restarts: running tasks stop, and the vault is unlocked again afterwards.',
+    ),
+  );
+
+setup
   .command('vm')
   .description('Start the VM')
   .action(() => runSetup('vm-start', true, ''));

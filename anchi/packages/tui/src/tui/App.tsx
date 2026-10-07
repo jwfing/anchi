@@ -776,7 +776,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           });
         }
       }
-      if (current === 'runtimes' && (ch === 's' || ch === 'I' || ch === 'u')) {
+      if (current === 'runtimes' && (ch === 's' || ch === 'I' || ch === 'u' || ch === 'W')) {
         const step = (
           {
             s: ['vm-start', 'Start the VM', 'Start the secure-vm VM.'],
@@ -785,6 +785,13 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
               'Install or update',
               'Create or update the secure-vm VM, install the trusted services and the agent ' +
                 'team, and build the base image. This takes several minutes.',
+            ],
+            W: [
+              'workspaces',
+              'Share ~/AnchiWorkspaces',
+              'Mount ~/AnchiWorkspaces into the VM so agents can be given directories of this Mac ' +
+                '(workspaces: in an agent). The VM restarts: running tasks stop, and the vault is ' +
+                'unlocked again afterwards.',
             ],
             u: [
               'vault-unlock',
@@ -891,6 +898,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     : agent
       ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}${
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
+        }${
+          agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
         }${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
@@ -907,7 +916,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
             : current === 'skills'
               ? '↑↓ choose · a add · d remove · Esc sidebar'
               : current === 'runtimes'
-                ? 's start VM · I install · u unlock vault · i Codex login · c Claude token · r refresh · Esc sidebar'
+                ? 's start VM · I install · u unlock · W workspaces · i Codex · c Claude · r refresh · Esc'
                 : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
   const statusLine = approvals.length
     ? `⏸ ${approvals.length} write${approvals.length === 1 ? '' : 's'} waiting for approval (^A) · ${status}`
@@ -1225,6 +1234,14 @@ function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[]
           </Text>
         ) : (
           <Text color="yellow">not connected — run `codex login` on this Mac, then press i</Text>
+        )}
+      </Text>
+      <Text>
+        Workspaces:{' '}
+        {setup.workspaces ? (
+          <Text color="green">~/AnchiWorkspaces is shared with the VM</Text>
+        ) : (
+          <Text dimColor>not set up — press W to share ~/AnchiWorkspaces</Text>
         )}
       </Text>
       <Text>

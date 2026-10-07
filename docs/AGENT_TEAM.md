@@ -114,6 +114,26 @@ triggers:
 - **Triggers.** `schedule` takes a cron expression in local time; a run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `scripts/anchi triggers` lists them.
 - **Skills.** `scripts/anchi skills add <directory or GitHub URL>` stores a `SKILL.md` skill (a GitHub skill is pinned to the commit it was fetched at). Agents list skills by id; their cells get them read-only. Skill content is untrusted, like any other agent input.
 
+## Directories of your Mac (workspaces)
+
+macOS only for now. Share `~/AnchiWorkspaces` with the VM once (it restarts the VM and unlocks the vault again):
+
+```bash
+scripts/anchi setup workspaces      # or W on the Runtimes screen
+```
+
+Then give an agent directories under it:
+
+```yaml
+workspaces:
+  - path: projects/webapp   # ~/AnchiWorkspaces/projects/webapp
+    mode: rw                # ro by default
+```
+
+They appear in the agent's cells at `/home/agent/workspaces/<name>`; a cell sees no other directory of the Mac. Writes to an `rw` workspace go straight to the Mac and are owned by you.
+
+A writable directory lets an agent leave code that your own tools later run. Anchi mounts git hooks, git configuration and info, `.gitattributes`, `.envrc`, `.vscode/` and `.idea/` read-only in the repositories near the top of an `rw` workspace. After each turn it compares the workspace with its state before the turn and notes in the task transcript any new git hook, git configuration that runs commands, symlink pointing outside the workspace, new executable file or changed editor or shell configuration. It never changes your files. Files that tools run by design, such as `package.json` scripts or a `Makefile`, cannot be masked: review an agent's changes before you run them.
+
 ## Run tasks
 
 In the TUI, select an agent and type a task. **Enter** sends it.

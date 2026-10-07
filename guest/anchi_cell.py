@@ -580,7 +580,77 @@ CLAUDE_PLACEHOLDERS = {
 }
 
 
-def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='codex', ask_arg='-'):
+WORKSPACE_ROOT = Path('/mnt/anchi-host')
+WORKSPACE_SEGMENT = re.compile(r'^[A-Za-z0-9._ -]{1,100}$')
+# Paths in a writable workspace that make the Mac run code later; mounted read-only over it.
+WORKSPACE_MASKS = ('.gitattributes', '.envrc', '.vscode', '.idea')
+GIT_MASKS = ('hooks', 'config', 'info')
+MAX_REPO_DEPTH = 4
+
+
+def parse_workspaces(arg):
+    """[(name, absolute host path in the VM, mode)] from base64url JSON, checked again here: the
+    daemon is trusted, but this command is the boundary the cell's mounts depend on."""
+    import base64
+
+    if arg == '-':
+        return []
+    try:
+        items = json.loads(base64.urlsafe_b64decode(arg + '=' * (-len(arg) % 4)))
+    except ValueError:
+        raise Failure('BAD_WORKSPACES') from None
+    if not isinstance(items, list) or len(items) > 10:
+        raise Failure('BAD_WORKSPACES')
+    if items and not os.path.ismount(WORKSPACE_ROOT):
+        raise Failure('WORKSPACES_NOT_MOUNTED')
+    out, names = [], set()
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {'name', 'path', 'mode'}:
+            raise Failure('BAD_WORKSPACES')
+        name, path, mode = item['name'], item['path'], item['mode']
+        parts = path.split('/') if isinstance(path, str) else []
+        if (
+            not isinstance(name, str)
+            or not NAME.fullmatch(name)
+            or name in names
+            or mode not in ('ro', 'rw')
+            or not parts
+            or any(p in ('.', '..') or not WORKSPACE_SEGMENT.fullmatch(p) for p in parts)
+        ):
+            raise Failure('BAD_WORKSPACES')
+        full = WORKSPACE_ROOT.joinpath(*parts)
+        # No symlink anywhere on the way: the real path must be the path as written.
+        if os.path.realpath(full) != str(full) or not full.is_dir():
+            raise Failure(f'WORKSPACE_NOT_A_DIRECTORY:{name}')
+        names.add(name)
+        out.append((name, full, mode))
+    return out
+
+
+def workspace_masks(full):
+    """Existing paths under a writable workspace to mount read-only: git hooks, config and
+    info of repositories near the top, and editor and shell configuration that runs commands."""
+    masks = []
+    for current, dirs, _files in os.walk(full):
+        depth = len(Path(current).relative_to(full).parts)
+        if '.git' in dirs and (Path(current) / '.git').is_dir() and not (Path(current) / '.git').is_symlink():
+            masks += [Path(current) / '.git' / m for m in GIT_MASKS if (Path(current) / '.git' / m).exists()]
+        masks += [Path(current) / m for m in WORKSPACE_MASKS if (Path(current) / m).exists()]
+        dirs[:] = [d for d in dirs if depth < MAX_REPO_DEPTH and not d.startswith('.') and d != 'node_modules']
+    return [m for m in masks if not m.is_symlink()]
+
+
+def workspace_binds(workspaces):
+    binds = []
+    for name, full, mode in workspaces:
+        inside = f'/home/agent/workspaces/{name}'
+        binds.append(f'--bind{"" if mode == "rw" else "-ro"}={full}:{inside}')
+        if mode == 'rw':
+            binds += [f'--bind-ro={m}:{inside}/{m.relative_to(full)}' for m in workspace_masks(full)]
+    return binds
+
+
+def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='codex', ask_arg='-', workspaces_arg='-'):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
     name(image, 'BAD_IMAGE')
@@ -593,6 +663,7 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
         raise Failure('BAD_SANDBOX')
     if runtime not in RUNTIMES or (runtime != 'codex' and sandbox != 'cell'):
         raise Failure('BAD_RUNTIME')
+    workspaces = parse_workspaces(workspaces_arg)
     ask = [] if ask_arg == '-' else ask_arg.split(',')
     if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
         raise Failure('BAD_APPROVALS')
@@ -618,6 +689,7 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
                     'connectors': connectors,
                     'sandbox': sandbox,
                     'runtime': runtime,
+                    'workspaces': [{'name': n, 'path': str(f), 'mode': m} for n, f, m in workspaces],
                     'started_at': time.time(),
                 }
             )
@@ -649,6 +721,11 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
         if sandbox == 'codex-workspace-write':
             ensure_bwrap_profile()
         cell = cell_environment(task, agent, connectors, identifiers, runtime)
+        if workspaces:
+            # virtiofs shows files as owned by their reader; git would refuse every workspace.
+            # The check protects a trusting user from an untrusted repository, and here the agent
+            # is the untrusted side.
+            cell.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='safe.directory', GIT_CONFIG_VALUE_0='*')
         command = [
             'systemd-run',
             '--quiet',
@@ -691,6 +768,8 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
                 if (SKILLS / agent / 'skills').is_dir()
                 else []
             ),
+            # The agent's directories of the Mac, with the code-running paths of rw ones read-only.
+            *workspace_binds(workspaces),
             # Only the agent's own connector services; their sockets check policy themselves.
             *[
                 f'--bind-ro=/run/secure-{c}:/run/anchi-connectors/{c}'
@@ -901,7 +980,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) in (6, 7, 8):
+    if command == 'start' and len(rest) in (6, 7, 8, 9):
         return cell_start(*rest)
     if command == 'skills' and len(rest) == 2 and rest[0] == 'set':
         return skills_set(rest[1])

@@ -1,6 +1,6 @@
-# Host directories for agents: proposal
+# Host directories for agents
 
-**Status: decided on 2026-10-07 (option A, `~/AnchiWorkspaces`, macOS first); H0 done.** It refines [Work directories](AGENT_TEAM_DESIGN.md#work-directories) of the design. Today the VM has no host mounts (`lima/secure-vm.yaml`: `mounts: []`), and the desktop app's directory grants were removed with the app.
+**Status: implemented on macOS (H0–H3, 2026-10-07).** Live: `make verify-anchi` 31/31 with eight workspace checks; a Codex agent edited and committed in an `rw` workspace, and the post-turn audit reported the symlink to `/` it was asked to create. It refines [Work directories](AGENT_TEAM_DESIGN.md#work-directories) of the design. Today the VM has no host mounts (`lima/secure-vm.yaml`: `mounts: []`), and the desktop app's directory grants were removed with the app.
 
 ## Goal
 
