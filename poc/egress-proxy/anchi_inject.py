@@ -29,6 +29,7 @@ class Rule:
     env: tuple[str, ...]
     deny: tuple[str, ...] = field(default=())  # regexes over the operation string
     extra_headers: tuple[tuple[str, str], ...] = field(default=())  # (header, env var)
+    path: str | None = None  # regex; when set, only matching paths are injected
 
 
 RULES: tuple[Rule, ...] = (
@@ -72,6 +73,8 @@ RULES: tuple[Rule, ...] = (
         hosts=("github.com",),
         kind="basic",
         env=("ANCHI_POC_GITHUB_TOKEN",),
+        # Git smart HTTP only; release downloads and web pages pass through.
+        path=r"^/[^/]+/[^/]+?(\.git)?/(info/refs|git-upload-pack|git-receive-pack)$",
     ),
     Rule(
         name="aws",
@@ -253,6 +256,9 @@ class AnchiInject:
             "client_cred": classify_credential(req.headers),
             "rule": rule.name if rule else None,
         }
+        if rule is not None and rule.path and not re.search(rule.path, entry["path"]):
+            rule = None
+            entry["rule"] = None
         if rule is None:
             entry["decision"] = "passthrough"
             log(entry)

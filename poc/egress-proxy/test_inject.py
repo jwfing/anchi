@@ -179,3 +179,16 @@ def test_private_destination_gets_403(monkeypatch):
     f = flow("GET", "127.0.0.1", "/")
     ai.AnchiInject().request(f)
     assert f.response.status_code == 403
+
+
+@pytest.mark.parametrize("path,injected", [
+    ("/o/r.git/info/refs?service=git-upload-pack", True),
+    ("/o/r/git-upload-pack", True),
+    ("/o/r.git/git-receive-pack", True),
+    ("/openai/codex/releases/download/v1/codex.tar.gz", False),
+    ("/login", False),
+])
+def test_github_git_path_scope(path, injected):
+    f = flow("GET", "github.com", path)
+    ai.AnchiInject().request(f)
+    assert ("authorization" in f.request.headers) is injected
