@@ -190,10 +190,12 @@ class Approvals:
 
 
 class Cell:
-    def __init__(self, task, agent, grants, ask=()):
+    def __init__(self, task, agent, grants, ask=(), egress=None):
         self.task, self.agent, self.grants = task, agent, frozenset(grants)
         # Connectors whose writes wait for the user's approval.
         self.ask = frozenset(ask)
+        # Hosts the cell may reach; None is open egress.
+        self.egress = rules.egress_allowlist(egress, self.grants)
         self.server = None
         self.writers = set()
 
@@ -225,6 +227,13 @@ class Registry:
         ask = request.get('ask', [])
         if not isinstance(ask, list) or not all(c in connectors for c in ask):
             raise ValueError('BAD_APPROVALS')
+        egress = request.get('egress')
+        if egress is not None and (
+            not isinstance(egress, list)
+            or len(egress) > 100
+            or not all(isinstance(p, str) and rules.EGRESS_PATTERN.fullmatch(p) for p in egress)
+        ):
+            raise ValueError('BAD_EGRESS')
         if task in self.cells:
             raise ValueError('CELL_EXISTS')
         # The cell gets its own runtime's credential only.
@@ -232,7 +241,7 @@ class Registry:
 
     async def register(self, request):
         task, agent, grants = self.validate(request)
-        cell = Cell(task, agent, grants, request.get('ask', []))
+        cell = Cell(task, agent, grants, request.get('ask', []), request.get('egress'))
         cell.directory.mkdir(parents=True, exist_ok=False)
         # The service runs with UMask=0077; the cell's agent user must traverse this directory.
         os.chmod(cell.directory, 0o755)
@@ -241,7 +250,16 @@ class Registry:
         # Only this cell has the directory bound in; the agent user must be able to connect.
         os.chmod(path, 0o666)
         self.cells[task] = cell
-        audit({'event': 'register', 'task': task, 'agent': agent, 'grants': sorted(grants), 'ask': sorted(cell.ask)})
+        audit(
+            {
+                'event': 'register',
+                'task': task,
+                'agent': agent,
+                'grants': sorted(grants),
+                'ask': sorted(cell.ask),
+                'egress': None if cell.egress is None else sorted(cell.egress),
+            }
+        )
         return {'directory': str(cell.directory)}
 
     async def unregister(self, task):
@@ -462,6 +480,10 @@ class EgressProxy:
         """Resolve once, refuse non-public destinations and connect to the checked address."""
         host, port = data.server.address
         cell = self.registry.client_cell(data.client)
+        if cell is not None and not rules.egress_allowed(cell.egress, str(host).lower().rstrip('.')):
+            data.server.error = f'anchi: {host} is not in this agent\'s egress list'
+            audit({'decision': 'egress-denied', 'host': str(host)[:200], 'task': cell.task, 'agent': cell.agent})
+            return
         try:
             infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except OSError as exc:

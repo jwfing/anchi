@@ -26,6 +26,7 @@ Agents are YAML files in `~/.anchi/agents/<id>.yaml`. The file name is the id: 1
 | `approvals` | `{}` | Per proxy connector (`github`, `aws`, `linear`): `ask` holds its writes for the user |
 | `triggers` | `[]` | `{schedule: '<cron>', text}` or `{poll: {type: linear-issues, team?, label?, state?} \| {type: github-issues, query}, text, every?}`; `text` may use `{title}`, `{url}`, `{id}` |
 | `skills` | `[]` | Skill ids in `~/.anchi/skills/` |
+| `egress` | none (open) | Host patterns (`example.com`, `*.example.com`) the cells may reach, besides the runtime's and the connectors' hosts |
 | `workspaces` | `[]` | `{path, mode: ro\|rw, name?}`: directories under `~/AnchiWorkspaces`, bound at `/home/agent/workspaces/<name>` (macOS) |
 
 Unknown fields are errors. my-bot's `account`, `workspace` and `tools` fields are rejected: there are no host accounts, host working directories or host tool lists.
@@ -67,7 +68,7 @@ The daemon runs only fixed commands: `limactl shell secure-vm -- sudo <command>`
 
 | Command | Purpose |
 |---|---|
-| `anchi-cell start TASK AGENT IMAGE HASH CONNECTORS SANDBOX RUNTIME ASK WORKSPACES` | Start a task cell and run the cell runner in it. Stdin and stdout are channel (3). Blocks until the cell exits, then releases its overlay, sockets and proxy registration |
+| `anchi-cell start TASK AGENT IMAGE HASH CONNECTORS SANDBOX RUNTIME ASK WORKSPACES EGRESS` | Start a task cell and run the cell runner in it. Stdin and stdout are channel (3). Blocks until the cell exits, then releases its overlay, sockets and proxy registration |
 | `anchi-cell approvals watch` | Streams the proxy's queue of held writes as JSON lines, until it ends |
 | `anchi-cell approvals decide ID allow\|deny` | Answers a held write |
 | `anchi-cell poll` | Runs a polling trigger's fixed read-only query (spec on stdin) in the egress service; prints the items |
@@ -89,7 +90,7 @@ The daemon runs only fixed commands: `limactl shell secure-vm -- sudo <command>`
 | `python3 /opt/secure-vm/services/policy_admin.py show\|approve\|deny\|mode\|rules` | Connector-service writes held by policy, and per-service write modes |
 | `python3 /opt/secure-vm/services/vault_admin.py status` | Whether the vault is unlocked |
 
-`TASK`, `AGENT` and `IMAGE` match `^[a-z0-9][a-z0-9-]{0,39}$`. `HASH` is `base` or the recipe's 16-hex content hash. `CONNECTORS` is a comma-separated subset of `github,aws,linear,gmail,drive,notion,slack`, or `-` for none. `SANDBOX` is `cell` or `codex-workspace-write`. `RUNTIME` is `codex` or `claude-code`. `ASK` is the subset of the proxy connectors whose writes are held, or `-`. `WORKSPACES` is base64url JSON `[{name, path, mode}]` or `-`; the cell manager checks again that each path stays under `/mnt/anchi-host` without symlinks or `..`.
+`TASK`, `AGENT` and `IMAGE` match `^[a-z0-9][a-z0-9-]{0,39}$`. `HASH` is `base` or the recipe's 16-hex content hash. `CONNECTORS` is a comma-separated subset of `github,aws,linear,gmail,drive,notion,slack`, or `-` for none. `SANDBOX` is `cell` or `codex-workspace-write`. `RUNTIME` is `codex` or `claude-code`. `ASK` is the subset of the proxy connectors whose writes are held, or `-`. `WORKSPACES` is base64url JSON `[{name, path, mode}]` or `-`; the cell manager checks again that each path stays under `/mnt/anchi-host` without symlinks or `..`. `EGRESS` is base64url JSON host patterns, or `-` for open egress.
 
 ## (3) Cell runner ⇄ daemon
 

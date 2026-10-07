@@ -37,6 +37,9 @@ An agent is a YAML file. Fields:
 - workspaces: directories of the user's Mac under ~/AnchiWorkspaces, e.g.
   [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
   /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
+- egress: hosts the agent may reach besides its runtime and connectors, e.g.
+  [registry.npmjs.org, '*.pypi.org']. Propose the smallest list the job needs; omit it only
+  if the job needs the open web.
 - image: id of an image recipe (or omit for the base image, which has git, gh, curl, jq,
   Codex and Claude Code on Debian 12).
 - sandbox: cell (default).

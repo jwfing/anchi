@@ -227,6 +227,7 @@ describe('daemon tasks', () => {
       'codex',
       '-',
       '-',
+      '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([
@@ -691,7 +692,7 @@ describe('daemon tasks', () => {
       text: `write ${join(ws, 'app', '.git', 'hooks', 'post-checkout')}`,
     });
     await client.call('tasks.wait', { taskId: t.id });
-    const arg = transport.starts.at(-1)!.at(-1)!;
+    const arg = transport.starts.at(-1)!.at(-2)!;
     expect(JSON.parse(Buffer.from(arg, 'base64url').toString())).toEqual([
       { name: 'app', path: 'app', mode: 'rw' },
       { name: 'docs', path: 'docs', mode: 'ro' },

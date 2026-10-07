@@ -525,3 +525,33 @@ def high_risk(decision, method, path, body, disabled=()):
         if any(re.search(pattern, s) for s in subjects):
             return entry_id, text
     return None
+
+
+# ── per-agent egress ────────────────────────────────────────
+# An agent with `egress: [...]` reaches only those hosts, plus what its runtime and connectors
+# need. Without the field, egress stays open (phase 3, F2).
+
+EGRESS_PATTERN = re.compile(r'^(\*\.)?[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$')
+BASE_EGRESS = {
+    'codex': ('chatgpt.com', '*.chatgpt.com'),
+    'claude': ('api.anthropic.com',),
+    'github': ('github.com', 'api.github.com', 'codeload.github.com', '*.githubusercontent.com'),
+    'aws': ('*.amazonaws.com',),
+    'linear': ('api.linear.app',),
+}
+
+
+def egress_allowlist(patterns, grants):
+    """The cell's allowed host patterns, or None for open egress."""
+    if patterns is None:
+        return None
+    allowed = {p.lower() for p in patterns}
+    for grant in grants:
+        allowed.update(BASE_EGRESS.get(grant, ()))
+    return frozenset(allowed)
+
+
+def egress_allowed(allowlist, host):
+    if allowlist is None:
+        return True
+    return any(host_matches(p, host) for p in allowlist)

@@ -28,10 +28,10 @@ def check(name, ok, detail=''):
     print(f'{"PASS" if ok else "FAIL"}  {name}{f"  ({detail})" if detail else ""}', flush=True)
 
 
-def start(task, agent, connectors='-', workspaces='-'):
+def start(task, agent, connectors='-', workspaces='-', egress='-'):
     """Starts a cell whose runner idles on an open stdin."""
     proc = subprocess.Popen(
-        ['anchi-cell', 'start', task, agent, 'codex', 'base', connectors, 'cell', 'codex', '-', workspaces],
+        ['anchi-cell', 'start', task, agent, 'codex', 'base', connectors, 'cell', 'codex', '-', workspaces, egress],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -203,6 +203,24 @@ def main():
     finally:
         stop(c)
         subprocess.run(['rm', '-rf', '/var/lib/anchi/agents/chk-gamma'])
+
+    # ── phase 3: per-agent egress ──
+    import base64
+
+    since = time.time()
+    allow = base64.urlsafe_b64encode(json.dumps(['example.com']).encode()).decode().rstrip('=')
+    e, ready_e = start('chk-e', 'chk-alpha', '-', '-', allow)
+    try:
+        allowed = proxied('chk-e', 'https://example.com/') if ready_e else ''
+        refused = proxied('chk-e', 'https://example.org/') if ready_e else ''
+        rows = [r for r in audit_since(since, 'chk-e') if r.get('decision') == 'egress-denied']
+        check(
+            'egress lists allow listed hosts and refuse others',
+            allowed.startswith('200') and not refused.startswith('200') and rows,
+            f'{allowed[:12]} / {refused[:12]} / {len(rows)} denied',
+        )
+    finally:
+        stop(e)
 
     # ── host workspaces (macOS, when ~/AnchiWorkspaces is shared) ──
     if os.path.ismount('/mnt/anchi-host'):

@@ -627,6 +627,21 @@ def parse_workspaces(arg):
     return out
 
 
+def parse_egress(arg):
+    """The agent's egress host patterns (base64url JSON list), or None for open egress."""
+    import base64
+
+    if arg == '-':
+        return None
+    try:
+        value = json.loads(base64.urlsafe_b64decode(arg + '=' * (-len(arg) % 4)))
+    except ValueError:
+        raise Failure('BAD_EGRESS') from None
+    if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+        raise Failure('BAD_EGRESS')
+    return value  # the proxy validates each pattern
+
+
 def workspace_masks(full):
     """Existing paths under a writable workspace to mount read-only: git hooks, config and
     info of repositories near the top, and editor and shell configuration that runs commands."""
@@ -650,7 +665,18 @@ def workspace_binds(workspaces):
     return binds
 
 
-def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='codex', ask_arg='-', workspaces_arg='-'):
+def cell_start(
+    task,
+    agent,
+    image,
+    digest,
+    connectors_arg,
+    sandbox,
+    runtime='codex',
+    ask_arg='-',
+    workspaces_arg='-',
+    egress_arg='-',
+):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
     name(image, 'BAD_IMAGE')
@@ -664,6 +690,7 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
     if runtime not in RUNTIMES or (runtime != 'codex' and sandbox != 'cell'):
         raise Failure('BAD_RUNTIME')
     workspaces = parse_workspaces(workspaces_arg)
+    egress_hosts = parse_egress(egress_arg)
     ask = [] if ask_arg == '-' else ask_arg.split(',')
     if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
         raise Failure('BAD_APPROVALS')
@@ -707,6 +734,7 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox, runtime='cod
                 'connectors': proxied,
                 'runtime': RUNTIMES[runtime],
                 'ask': [c for c in ask if c in PROXY_CONNECTORS],
+                'egress': egress_hosts,
             }
         )
         identifiers = registration.get('identifiers', {})
@@ -980,7 +1008,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) in (6, 7, 8, 9):
+    if command == 'start' and len(rest) in (6, 7, 8, 9, 10):
         return cell_start(*rest)
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.

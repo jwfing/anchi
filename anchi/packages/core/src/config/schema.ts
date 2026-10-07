@@ -48,6 +48,14 @@ export const triggerSchema = z.union([
 ]);
 export type Trigger = z.infer<typeof triggerSchema>;
 
+/** `example.com` or `*.example.com` (its subdomains). */
+const egressPattern = z
+  .string()
+  .regex(
+    /^(\*\.)?[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/,
+    'use a host name such as registry.npmjs.org or *.pypi.org',
+  );
+
 /** A path segment under ~/AnchiWorkspaces: no separators, no `.` or `..`, no control characters. */
 const segment = z
   .string()
@@ -127,6 +135,8 @@ export const agentLayerSchema = z.strictObject({
   /** Per connector: `ask` holds writes for approval in the TUI. Reads are never held. */
   approvals: z.partialRecord(connectorSchema, approvalModeSchema).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
+  /** Hosts the agent's cells may reach (plus its runtime and connectors); omitted: any. */
+  egress: z.array(egressPattern).max(100).optional(),
 });
 export type AgentLayer = z.infer<typeof agentLayerSchema>;
 
@@ -154,6 +164,7 @@ export const resolvedAgentSchema = z
     skills: z.array(idSchema).default([]),
     approvals: z.partialRecord(connectorSchema, approvalModeSchema).default({}),
     workspaces: z.array(workspaceSchema).max(10).default([]),
+    egress: z.array(egressPattern).max(100).optional(),
   })
   .refine((a) => new Set(a.workspaces.map(workspaceName)).size === a.workspaces.length, {
     message: 'workspaces need distinct names; set name: for one of them',

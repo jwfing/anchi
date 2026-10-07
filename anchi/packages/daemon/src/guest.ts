@@ -137,6 +137,8 @@ export interface CellStart {
   ask: string[];
   /** Directories under ~/AnchiWorkspaces bound into the cell. */
   workspaces: { name: string; path: string; mode: 'ro' | 'rw' }[];
+  /** Allowed hosts, or undefined for open egress. */
+  egress?: string[];
 }
 
 export interface PollItem {
@@ -177,6 +179,7 @@ export class Guest {
       c.runtime,
       c.ask.filter((x) => c.connectors.includes(x)).join(',') || '-',
       c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
+      c.egress ? Buffer.from(JSON.stringify(c.egress)).toString('base64url') : '-',
     ]);
   }
 

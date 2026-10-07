@@ -468,6 +468,25 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 proxy.set_settings({'high_risk_disabled': ['everything']})
 
+    def test_egress_allowlists_add_runtime_and_connector_hosts(self):
+        allow = rules.egress_allowlist(['registry.npmjs.org', '*.pypi.org'], {'codex', 'github'})
+        for host in ('registry.npmjs.org', 'files.pypi.org', 'chatgpt.com', 'api.github.com', 'github.com'):
+            self.assertTrue(rules.egress_allowed(allow, host), host)
+        for host in ('example.com', 'pypi.org.evil.com', 'api.anthropic.com', 'api.linear.app'):
+            self.assertFalse(rules.egress_allowed(allow, host), host)
+        self.assertTrue(rules.egress_allowed(rules.egress_allowlist(None, {'codex'}), 'example.com'))
+
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            await registry.register({'task': 'te', 'agent': 'a', 'connectors': [], 'egress': ['example.org']})
+            self.assertEqual(registry.cells['te'].egress, frozenset({'example.org', 'chatgpt.com', '*.chatgpt.com'}))
+            for bad in (['http://x.com'], ['*'], 'example.org', ['a' * 70 + '.com']):
+                with self.assertRaises(ValueError):
+                    registry.validate({'task': 'tf', 'agent': 'a', 'connectors': [], 'egress': bad})
+            await registry.unregister('te')
+
+        asyncio.run(scenario())
+
     def test_register_validates_names_and_connectors(self):
         registry = self.module.Registry(('127.0.0.1', 1))
         for request in (
