@@ -192,3 +192,25 @@ def test_github_git_path_scope(path, injected):
     f = flow("GET", "github.com", path)
     ai.AnchiInject().request(f)
     assert ("authorization" in f.request.headers) is injected
+
+
+def test_unsigned_aws_request_passes_through():
+    f = flow("GET", "awscli.amazonaws.com", "/awscli-exe-linux-aarch64.zip")
+    ai.AnchiInject().request(f)
+    assert f.response is None and "authorization" not in f.request.headers
+
+
+def test_aws_denial_uses_aws_error_shape():
+    body = b"Action=CreateAccessKey&Version=2010-05-08"
+    client = signed_with(ai.PLACEHOLDER_AWS_KEY, "p", "POST", "https://iam.amazonaws.com/",
+                         {"content-type": "application/x-www-form-urlencoded"}, body, "us-east-1", "iam")
+    f = flow("POST", "iam.amazonaws.com", "/", list(client.items()), body)
+    ai.AnchiInject().request(f)
+    assert f.response.status_code == 403
+    assert b"<Code>AccessDenied</Code>" in f.response.content
+
+
+def test_aws_json_denial_shape():
+    headers = {"x-amz-target": "AWSSecurityTokenServiceV20110615.AssumeRole"}
+    body, hdrs = ai.aws_error(headers, "anchi: sts:AssumeRole denied")
+    assert json.loads(body)["__type"] == "AccessDeniedException"

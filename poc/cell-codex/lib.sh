@@ -16,7 +16,7 @@ proxy_up() {
   local envs=(--setenv=ANCHI_POC_LOG=/opt/anchi-poc/state/flows.jsonl)
   local v
   for v in ANCHI_POC_CLAUDE_TOKEN ANCHI_POC_CODEX_ACCESS_TOKEN ANCHI_POC_CODEX_ACCOUNT_ID \
-    ANCHI_POC_GITHUB_TOKEN ANCHI_POC_AWS_ACCESS_KEY_ID ANCHI_POC_AWS_SECRET_ACCESS_KEY; do
+    ANCHI_POC_GITHUB_TOKEN ANCHI_POC_AWS_ACCESS_KEY_ID ANCHI_POC_AWS_SECRET_ACCESS_KEY ANCHI_POC_AWS_SESSION_TOKEN; do
     if [[ -n ${!v:-} ]]; then
       envs+=("--setenv=$v=${!v}")
       echo "proxy: $v from caller"

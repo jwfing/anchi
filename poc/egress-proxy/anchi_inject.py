@@ -153,6 +153,19 @@ def operation(rule: Rule, method: str, path: str, headers, body: bytes) -> str:
     return f"{method} {path.split('?', 1)[0]}"
 
 
+def aws_error(headers, message: str) -> tuple[bytes, dict[str, str]]:
+    """AccessDenied in the service's own error shape, so SDKs surface it
+    cleanly and do not treat it as a retryable parse failure."""
+    from xml.sax.saxutils import escape
+
+    if headers.get("x-amz-target"):
+        body = json.dumps({"__type": "AccessDeniedException", "message": message}).encode()
+        return body, {"content-type": "application/x-amz-json-1.1"}
+    body = ("<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code>"
+            f"<Message>{escape(message)}</Message></Error><RequestId>anchi</RequestId></ErrorResponse>").encode()
+    return body, {"content-type": "text/xml"}
+
+
 def denied(rule: Rule, op: str) -> bool:
     return any(re.search(p, op) for p in rule.deny)
 
@@ -259,6 +272,11 @@ class AnchiInject:
         if rule is not None and rule.path and not re.search(rule.path, entry["path"]):
             rule = None
             entry["rule"] = None
+        # AWS rules only re-sign SigV4-signed calls; unsigned requests (public
+        # downloads, public objects) carry no credential and pass through.
+        if rule is not None and rule.kind == "aws_sigv4" and aws_scope(req.headers) is None:
+            rule = None
+            entry["rule"] = None
         if rule is None:
             entry["decision"] = "passthrough"
             log(entry)
@@ -268,7 +286,11 @@ class AnchiInject:
         if denied(rule, op):
             entry["decision"] = "denied"
             log(entry)
-            flow.response = http.Response.make(403, f"anchi: {op} denied\n".encode(), {"content-type": "text/plain"})
+            if rule.kind == "aws_sigv4":
+                body, hdrs = aws_error(req.headers, f"anchi: {op} denied")
+                flow.response = http.Response.make(403, body, hdrs)
+            else:
+                flow.response = http.Response.make(403, f"anchi: {op} denied\n".encode(), {"content-type": "text/plain"})
             return
         missing = [v for v in rule.env if not os.environ.get(v)]
         if missing:
