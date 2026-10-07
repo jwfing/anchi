@@ -2,7 +2,7 @@ PYTHON ?= python3
 PY_SOURCES = services scripts guest tests
 SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run
 
-.PHONY: help check lint test desktop format package verify-vm
+.PHONY: help check lint test desktop format package verify-vm verify-anchi
 help:
 	@echo 'make check      Offline syntax, lint, formatting and unit tests (no VM/account access)'
 	@echo 'make lint       Ruff, shellcheck (when installed) and Prettier checks only'
@@ -11,6 +11,7 @@ help:
 	@echo 'make format     Format Python (ruff), desktop and Pi sources (prettier)'
 	@echo 'make package    Build unsigned macOS arm64 application'
 	@echo 'make verify-vm  Explicit live isolation verification against secure-vm'
+	@echo 'make verify-anchi  Live agent-team cell and egress proxy checks (no credentials used)'
 
 check: lint
 	$(PYTHON) scripts/check-source.py
@@ -45,3 +46,6 @@ package: check
 
 verify-vm:
 	bash scripts/verify.sh
+
+verify-anchi:
+	limactl shell secure-vm -- sudo /usr/bin/python3 /opt/secure-vm/check-anchi.py

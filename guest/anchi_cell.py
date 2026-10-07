@@ -638,20 +638,22 @@ def cell_reap(keep):
 
 
 def cell_leader(task):
-    """Host PID of the cell's init process (PID 1 inside the cell)."""
+    """Host PID of the cell's init process (PID 1 inside the cell): a child of systemd-nspawn."""
     pid = run('systemctl', 'show', '-p', 'MainPID', '--value', unit(task)).stdout.strip()
     if not pid or pid == '0':
         raise Failure('CELL_NOT_RUNNING')
-    cgroup = Path('/sys/fs/cgroup') / Path(f'/proc/{pid}/cgroup').read_text().strip().split('::', 1)[1].lstrip('/')
-    for procs in sorted(cgroup.rglob('cgroup.procs')):
-        for candidate in procs.read_text().split():
-            try:
-                status = Path(f'/proc/{candidate}/status').read_text()
-            except OSError:
-                continue
-            nspid = re.search(r'^NSpid:\s+(.+)$', status, re.M)
-            if nspid and nspid.group(1).split()[-1] == '1' and len(nspid.group(1).split()) > 1:
-                return int(candidate)
+    try:
+        children = Path(f'/proc/{pid}/task/{pid}/children').read_text().split()
+    except OSError:
+        raise Failure('CELL_NOT_RUNNING') from None
+    for candidate in children:
+        try:
+            status = Path(f'/proc/{candidate}/status').read_text()
+        except OSError:
+            continue
+        nspid = re.search(r'^NSpid:\s+(.+)$', status, re.M)
+        if nspid and len(nspid.group(1).split()) > 1 and nspid.group(1).split()[-1] == '1':
+            return int(candidate)
     raise Failure('CELL_NOT_RUNNING')
 
 
@@ -681,7 +683,7 @@ def cell_exec(task, command):
             '--all',
             '--setuid=1000',
             '--setgid=1000',
-            '--wd=/home/agent',
+            '--wdns=/home/agent',
             'env',
             '-i',
             *[f'{k}={v}' for k, v in env.items()],
