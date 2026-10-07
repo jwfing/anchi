@@ -1,8 +1,15 @@
 /** @jsxRuntime automatic */
-import type { AgentSummary, Notifications, StoredEvent, TaskRow } from '@anchi/protocol';
+import type {
+  AgentSummary,
+  Notifications,
+  RuntimeEvent,
+  StoredEvent,
+  TaskRow,
+} from '@anchi/protocol';
 import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
+import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
 import { App, filterTasks } from '../src/tui/App.tsx';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
@@ -639,5 +646,40 @@ describe('App', () => {
     expect(calls.some(([m]) => m === 'builder.apply')).toBe(false);
     expect(ui.lastFrame()).toContain('Cannot apply');
     ui.unmount();
+  });
+});
+
+describe('CLI renderer', () => {
+  const sink = (isTTY: boolean) => {
+    let text = '';
+    const out = { isTTY, columns: 80, write: (s: string) => ((text += s), true) };
+    return { out: out as unknown as NodeJS.WriteStream, text: () => text };
+  };
+  const events: RuntimeEvent[] = [
+    { type: 'tool.call', id: '1', name: 'shell', input: '{"command":"ls"}' },
+    { type: 'tool.result', id: '1', output: 'x', isError: false },
+    { type: 'tool.call', id: '2', name: 'shell', input: '{"command":"false"}' },
+    { type: 'tool.result', id: '2', output: 'boom', isError: true },
+    { type: 'message', text: 'done' },
+  ];
+
+  it('folds a run of tool calls into one summary line when piped', () => {
+    const s = sink(false);
+    const r = new TerminalRenderer(s.out);
+    for (const e of events) r.render(e);
+    const plain = s.text().replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toBe('▸ 2 tool calls (1 failed) · last: shell false\ndone\n');
+  });
+
+  it('rewrites the line in place on a terminal', () => {
+    const s = sink(true);
+    const r = new TerminalRenderer(s.out);
+    for (const e of events.slice(0, 3)) r.render(e);
+    expect(s.text()).toContain('\r\u001b[2K');
+    expect(s.text()).not.toContain('\n');
+    r.flush();
+    expect(s.text().replace(/\u001b\[[0-9;]*m/g, '')).toMatch(
+      /2 tool calls · last: shell false\n$/,
+    );
   });
 });

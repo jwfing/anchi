@@ -1,4 +1,5 @@
 PYTHON ?= python3
+VM ?= secure-vm
 PY_SOURCES = services scripts guest tests
 SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run
 
@@ -35,4 +36,4 @@ verify-vm:
 	bash scripts/verify.sh
 
 verify-anchi:
-	limactl shell secure-vm -- sudo /usr/bin/python3 /opt/secure-vm/check-anchi.py
+	limactl shell $(VM) -- sudo /usr/bin/python3 /opt/secure-vm/check-anchi.py

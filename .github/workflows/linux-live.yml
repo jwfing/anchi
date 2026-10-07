@@ -65,6 +65,21 @@ jobs:
           bash scripts/install-anchi.sh
       - name: Isolation and service checks
         run: bash scripts/verify.sh
+      - name: Vault, base image and a synthetic Codex account
+        # The token is well-formed but belongs to no account; the agent-team checks never call
+        # a model, and the proxy never forwards it anywhere they reach.
+        run: |
+          python3 scripts/vault.py init
+          limactl shell "$ANCHI_INSTALL_VM" -- sudo anchi-image build codex base
+          python3 - <<'PY' | limactl shell "$ANCHI_INSTALL_VM" -- sudo /usr/bin/python3 /opt/secure-vm/services/codex_admin.py import-token
+          import base64, json, time
+          b64 = lambda v: base64.urlsafe_b64encode(json.dumps(v).encode()).decode().rstrip('=')
+          claims = {'exp': int(time.time()) + 7200, 'https://api.openai.com/auth': {'chatgpt_account_id': 'ci-synthetic'}}
+          token = f"{b64({'alg': 'none'})}.{b64(claims)}.{'s' * 80}"
+          print(json.dumps({'access_token': token, 'account_id': 'ci-synthetic'}))
+          PY
+      - name: Agent-team isolation checks
+        run: make verify-anchi VM="$ANCHI_INSTALL_VM"
       - name: Collect Lima logs
         if: always()
         run: |

@@ -90,6 +90,7 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
   }
   const done = await client.call('tasks.wait', { taskId: task.id });
   off();
+  renderer.flush();
   return done;
 }
 
