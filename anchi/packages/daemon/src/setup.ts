@@ -18,9 +18,27 @@ export const CONNECTOR_IDS: ConnectorId[] = ['github', 'aws', 'linear'];
  * leaves the host (to the vault); the refresh token stays with the host Codex CLI, which keeps
  * refreshing it. Re-import when the access token expires.
  */
-export function readHostCodexLogin(
-  file = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'auth.json'),
-): { accessToken: string; accountId: string } {
+export const HOST_CODEX_LOGIN = join(
+  process.env.CODEX_HOME ?? join(homedir(), '.codex'),
+  'auth.json',
+);
+
+/** Expiry (ms) in a JWT's claims, without verifying it; the upstream service verifies. */
+export function jwtExpiry(token: string): number | null {
+  try {
+    const claims = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as {
+      exp?: unknown;
+    };
+    return typeof claims.exp === 'number' ? claims.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readHostCodexLogin(file = HOST_CODEX_LOGIN): {
+  accessToken: string;
+  accountId: string;
+} {
   let raw: string;
   try {
     raw = readFileSync(file, 'utf8');

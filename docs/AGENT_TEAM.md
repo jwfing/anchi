@@ -26,7 +26,7 @@ Codex uses your ChatGPT subscription. Log in on the Mac with `codex login`, then
 scripts/anchi setup codex
 ```
 
-This stores the access token and account id in the vault. The refresh token stays with the Codex CLI on the Mac. When the access token expires, run `codex` on the Mac once to refresh it, then import again.
+This stores the access token and account id in the vault. The refresh token stays with the Codex CLI on the Mac. Afterwards the daemon keeps the vault current: when the Codex CLI on the Mac has refreshed its login, the daemon imports the newer access token (checked on every change of `~/.codex/auth.json` and every five minutes). Set `codexAutoImport: false` in `~/.anchi/settings.yaml` to import only by hand. If the Mac has not used Codex for a while, run `codex` once to refresh its login.
 
 Claude Code uses a long-lived subscription token, or an Anthropic API key:
 

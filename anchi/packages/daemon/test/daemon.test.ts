@@ -76,6 +76,16 @@ class FakeTransport implements GuestTransport {
         return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
       return ok({ connector: args[2], account: 'octo' });
     }
+    if (args[1]?.endsWith('codex_admin.py')) {
+      if (args[2] === 'status') {
+        return ok({ configured: this.codex !== null, account_id: 'acct', expires_at: this.codex });
+      }
+      this.codexImports.push(JSON.parse(stdin));
+      this.codex = JSON.parse(
+        Buffer.from(JSON.parse(stdin).access_token.split('.')[1], 'base64url').toString(),
+      ).exp;
+      return ok({ configured: true, expires_at: this.codex });
+    }
     if (args[1]?.endsWith('policy_admin.py')) {
       if (args[2] === 'show') {
         return args[3] === 'c'.repeat(32)
@@ -110,6 +120,9 @@ class FakeTransport implements GuestTransport {
   pollItems: { id: string; title: string; url: string }[] = [];
   skillSets: { agent: string; files: string[] }[] = [];
   scans: string[] = [];
+  /** Vault Codex expiry (seconds) or null when not configured. */
+  codex: number | null = null;
+  codexImports: Record<string, string>[] = [];
   scanResult: { clean: boolean; findings: unknown[]; files: number } | null = {
     clean: true,
     findings: [],
@@ -160,6 +173,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     turnTimeoutMs,
     // Tests drive triggers with their own clock through daemon.triggers.tick().
     triggers: false,
+    codexSync: false,
     hostRun,
     setupSteps: SETUP_STEPS,
     layout,
@@ -723,6 +737,33 @@ describe('daemon tasks', () => {
       text: expect.stringContaining('did not complete'),
     });
     expect(transport.scans).toHaveLength(3);
+  });
+
+  it('imports a newer Codex login from the Mac, and only a newer one', async () => {
+    const { daemon } = await start();
+    const login = join(root, 'codex-auth.json');
+    const jwt = (exp: number) =>
+      `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
+    const writeLogin = (exp: number) =>
+      writeFileSync(
+        login,
+        JSON.stringify({
+          tokens: { access_token: jwt(exp), account_id: 'acct', refresh_token: 'r' },
+        }),
+      );
+    const now = Math.floor(Date.now() / 1000);
+    writeLogin(now + 3600);
+    expect(await daemon.syncCodex(login)).toBe(true);
+    expect(transport.codexImports).toEqual([{ access_token: jwt(now + 3600), account_id: 'acct' }]);
+    expect(await daemon.syncCodex(login)).toBe(false); // same token
+    writeLogin(now + 30); // about to expire: not imported
+    expect(await daemon.syncCodex(login)).toBe(false);
+    writeLogin(now + 7200);
+    write('settings.yaml', 'codexAutoImport: false\n');
+    expect(await daemon.syncCodex(login)).toBe(false);
+    write('settings.yaml', 'codexAutoImport: true\n');
+    expect(await daemon.syncCodex(login)).toBe(true);
+    expect(transport.codexImports).toHaveLength(2);
   });
 
   it('accepts a task for an agent file written just before it', async () => {

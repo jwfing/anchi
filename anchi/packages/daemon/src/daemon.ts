@@ -9,7 +9,7 @@ import {
   type FSWatcher,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createServer, type Server } from 'node:net';
 import type { HomeLayout } from '@anchi/core';
 import {
@@ -43,6 +43,8 @@ import { Peer } from './rpc.ts';
 import {
   claudeStatus,
   codexStatus,
+  HOST_CODEX_LOGIN,
+  jwtExpiry,
   CONNECTOR_IDS,
   connectorStatuses,
   readHostCodexLogin,
@@ -76,6 +78,10 @@ export interface DaemonOptions {
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
   hostRun?: typeof hostOutput;
+  /** Keep the vault's Codex token in step with the Mac's login (default true). */
+  codexSync?: boolean;
+  /** The Mac's Codex login file; tests point it elsewhere. */
+  codexLogin?: string;
   /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
   workspaceRoot?: string;
   /** Opens a URL for the user (Google sign-in); tests replace it. */
@@ -142,6 +148,39 @@ export class Daemon {
   private hostRun: typeof hostOutput;
   private awsTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
+  private codexTimer?: NodeJS.Timeout;
+  private codexImporting = false;
+
+  /**
+   * Keeps the vault's Codex access token current (phase 3, F4: on by default, off with
+   * `codexAutoImport: false`). When the Mac's Codex CLI has refreshed its login, the newer
+   * access token and the account id are imported, as `setup codex` does; the refresh token
+   * stays on the Mac.
+   */
+  async syncCodex(file = this.opts.codexLogin ?? HOST_CODEX_LOGIN): Promise<boolean> {
+    if (this.settings().codexAutoImport === false || this.codexImporting) return false;
+    let login: { accessToken: string; accountId: string };
+    try {
+      login = readHostCodexLogin(file);
+    } catch {
+      return false; // not logged in on this Mac
+    }
+    const hostExpiry = jwtExpiry(login.accessToken);
+    if (!hostExpiry || hostExpiry <= Date.now() + 60_000) return false;
+    this.codexImporting = true;
+    try {
+      const vault = await codexStatus(this.guest).catch(() => null);
+      if (!vault || (vault.connected && (vault.expiresAt ?? 0) >= hostExpiry)) return false;
+      await this.guest.importCodex(login.accessToken, login.accountId);
+      this.log(`codex token imported; valid until ${new Date(hostExpiry).toISOString()}`);
+      return true;
+    } catch (err) {
+      this.log(`codex token import failed: ${(err as Error).message}`);
+      return false;
+    } finally {
+      this.codexImporting = false;
+    }
+  }
 
   private settings(): Record<string, unknown> {
     try {
@@ -512,6 +551,21 @@ export class Daemon {
     if (this.opts.approvals !== false) this.approvals.start();
     if (this.opts.triggers !== false) this.triggers.start();
     void this.pushEgressSettings();
+    if (this.opts.codexSync !== false) {
+      void this.syncCodex();
+      this.codexTimer = setInterval(() => void this.syncCodex(), 5 * 60_000);
+      this.codexTimer.unref();
+      try {
+        const file = this.opts.codexLogin ?? HOST_CODEX_LOGIN;
+        this.watchers.push(
+          watch(dirname(file), (_e, name) => {
+            if (String(name) === basename(file)) setTimeout(() => void this.syncCodex(), 1000);
+          }),
+        );
+      } catch {
+        // No ~/.codex yet; the timer still checks.
+      }
+    }
     // Retention: finished tasks older than the configured number of days.
     const purge = () => {
       const n = this.hub.purge(this.retentionDays());
@@ -563,6 +617,7 @@ export class Daemon {
     this.triggers.stop();
     this.services.stop();
     clearInterval(this.purgeTimer);
+    clearInterval(this.codexTimer);
     clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();
     for (const p of this.clients.values()) p.close();

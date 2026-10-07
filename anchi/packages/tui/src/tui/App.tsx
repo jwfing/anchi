@@ -209,6 +209,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   // Writes the egress proxy holds for the user, oldest first.
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const seenApprovals = useRef(new Set<string>());
+  // A notification is newer than the initial list; a late list answer must not undo it.
+  const approvalsNotified = useRef(false);
   const [flash, setFlash] = useState('');
   const loading = useRef(new Set<string>());
 
@@ -253,7 +255,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   useEffect(() => {
     void client
       .call('approvals.list')
-      .then((list) => setApprovals(list ?? []))
+      .then((list) => {
+        if (!approvalsNotified.current) setApprovals(list ?? []);
+      })
       .catch(() => {});
   }, [client]);
 
@@ -276,7 +280,10 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
         });
       }),
       client.on('setup', ({ line }) => setSetupLog((log) => [...log, line].slice(-8))),
-      client.on('approvals', ({ approvals: next }) => setApprovals(next)),
+      client.on('approvals', ({ approvals: next }) => {
+        approvalsNotified.current = true;
+        setApprovals(next);
+      }),
       client.on('oauth', ({ id, ok, error }) => {
         say(ok ? `${id} connected` : `${id}: ${error ?? 'sign-in failed'}`);
         refreshSetup();
