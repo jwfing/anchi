@@ -40,16 +40,18 @@ Each must be shown with live evidence, as in phase 1.
    - delegation depth and budget limits stop a loop;
    - an agent without a connector cannot call its MCP tools.
 
-## Decisions to confirm
+## Decisions
 
 | # | Decision | Rationale |
 |---|---|---|
-| E1 | **The Anchi MCP server talks to the daemon over the runner's existing stdio channel.** A stdio MCP server in the cell (`/opt/anchi/mcp.mjs`, started by the runtime) connects to the runner over a cell-local Unix socket; the runner forwards tool calls to the daemon as new frame types, and the daemon answers. No new socket crosses the VM boundary | The daemon already knows which cell, task and agent a runner belongs to, so every tool call carries a trustworthy identity for free. The alternative, binding connector sockets into cells, identifies callers by UID, and all agent cells share one UID range, so per-agent scoping would need new per-cell sockets in every service |
-| E2 | **Gmail, Drive, Notion and Slack are called by the daemon through one fixed guest command** (`anchi-connector call AGENT OP` with the parameters on stdin), which runs the existing service code path (policy, ledger, one-time grants) with the agent as principal. Cells never get the connector sockets | Keeps the existing write path: frozen content, one-time grants and the daily write limit. The daemon checks the agent's `connectors` before calling. The proxy is not used, because these services already hold their credentials and enforce operation allowlists |
+| E1 | **Anchi's own tools (delegation, task status) reach the daemon over the runner's existing stdio channel.** A stdio MCP server in the cell (`/opt/anchi/mcp.mjs`, started by the runtime) connects to the runner over a cell-local Unix socket; the runner forwards tool calls to the daemon as new frame types, and the daemon answers | The daemon already knows which cell, task and agent a runner belongs to, so every call carries a trustworthy identity. No new socket crosses the VM boundary for these tools |
+| E2 | **Gmail, Drive, Notion and Slack: their sockets are bound into the cell, one per granted connector.** A trusted bridge (in the egress proxy service, like its proxy sockets) creates `/run/anchi-egress/cells/<task>/connectors/<id>.sock` only for the connectors the agent has, bound into the cell as `/run/anchi/connectors/<id>.sock`. It forwards to the service socket and adds the agent as principal; the services accept a principal only from the bridge's UID. The MCP server exposes the operations as tools | Chosen on 2026-10-07 over routing connector calls through the daemon. The existing service path stays as it is: policy, frozen content, one-time grants and the daily write limit, now per agent. The per-cell sockets restore per-agent scoping, which the shared cell UID range cannot give |
 | E3 | **Approvals move to the daemon.** Proxy rules and connector writes in `ask` mode create a pending approval; the TUI shows it in a full-screen modal, and a desktop notification fires when the TUI is closed. The proxy holds the request (up to a timeout) while it waits | One approval queue for both mechanisms. Holding the request keeps `git push` and `gh` working unchanged; the timeout (default 5 minutes) fails the request with a clear error |
 | E4 | **Polling runs in the trusted VM, not in cells.** A small trusted poller (`anchi-poll`, under the egress UID) calls one fixed read-only query per trigger type (Linear issues by filter, GitHub issues or PRs by query) with vault credentials and reports new item ids to the daemon. Cron needs no VM side | Polling every few minutes in a fresh cell would start hundreds of cells a day. The poller can only run fixed queries, so it adds no new capability |
 | E5 | **Claude Code uses a `claude setup-token` subscription token by default**, injected replace-only on `api.anthropic.com`, the same way as in the PoC. API key mode is an alternative per agent. Before public distribution, subscription mode is revisited (see [Known risks](AGENT_TEAM_DESIGN.md#known-risks)) | Verified in the PoC, including tool use. Matches the Codex model: the cell holds a placeholder |
 | E6 | **Retire the Electron app and Pi in this phase**, after the daemon covers their remaining setup (Google OAuth for Gmail and Drive, Notion and Slack tokens) | D7 of phase 1 froze them until the daemon reached parity; Google OAuth is the last missing piece. Two control planes would otherwise drift |
+
+E1–E6 were confirmed on 2026-10-07; E2 as revised above.
 
 ## Milestones
 
@@ -105,8 +107,9 @@ N0 ─┬─ N1 Claude Code ─────────────────�
 
 ### N4 — Existing connectors through MCP (M)
 
-- `anchi-connector call` (E2) and the MCP tools generated from the connector operation table (`gmail.list`, `notion.create_page`, …).
-- Writes return `APPROVAL_REQUIRED` to the daemon, which turns it into a pending approval (N5) and retries with the grant.
+- Per-cell connector sockets (E2): the bridge, its registration with the cell, and principal handling in the connector services (`agent:<id>`, accepted only from the bridge UID).
+- MCP tools generated from the connector operation table (`gmail.list`, `notion.create_page`, …), offered only for the agent's connectors.
+- Writes that need approval return `APPROVAL_REQUIRED:<id>`; the daemon shows the pending grant (N5), and the MCP tool retries once it is decided.
 
 **Acceptance:** scenario 4.
 
