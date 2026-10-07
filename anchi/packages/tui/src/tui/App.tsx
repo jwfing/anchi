@@ -18,17 +18,28 @@ import type { MouseEvent } from './mouse.ts';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
-const MENU = ['runtimes', 'skills', 'connectors', BUILDER, 'tasks'] as const;
-type MenuItem = (typeof MENU)[number];
-const MENU_LABEL: Record<MenuItem, string> = {
+const CONFIG = ['runtimes', 'skills', 'connectors'] as const;
+type ConfigItem = (typeof CONFIG)[number];
+const CONFIG_LABEL: Record<ConfigItem, string> = {
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
-  builder: 'Agent builder',
-  tasks: 'Tasks',
 };
-/** Terminal row (1-based) of the first sidebar entry. */
-export const SIDEBAR_FIRST_ROW = 3;
+/** Sidebar item of a task (agent ids cannot contain ':'). */
+const TASK_ITEM = 'task:';
+/** Terminal row (1-based) of the sidebar's first row (its title). */
+export const SIDEBAR_FIRST_ROW = 2;
+
+/** One row of the sidebar; `item` rows can be selected, `pager` rows turn the task page. */
+type SideRow =
+  | { kind: 'title' | 'header' | 'note'; text: string }
+  | { kind: 'item'; item: string }
+  | { kind: 'pager'; page: number; pages: number };
+
+/** Rows above the task list: title, three headers, config items, builder, agents. */
+function sidebarFixedRows(agentCount: number): number {
+  return 1 + 3 + CONFIG.length + 1 + Math.max(1, agentCount);
+}
 /** Screen row (1-based) of the first transcript line: border, header and rule above it. */
 export const TRANSCRIPT_FIRST_ROW = 4;
 
@@ -121,12 +132,12 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const { columns, rows } = useWindowSize();
   const [agents, setAgents] = useState(initialAgents);
   const [tasks, setTasks] = useState(initialTasks);
-  const [cursor, setCursor] = useState<number>(MENU.length);
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+  const [taskPage, setTaskPage] = useState(0);
   const [focusTask, setFocusTask] = useState<Record<string, string | null>>({});
   const [logs, setLogs] = useState<Record<string, StoredEvent[]>>({});
   const [input, setInput] = useState('');
   const [scroll, setScroll] = useState(0);
-  const [taskCursor, setTaskCursor] = useState(0);
   const [connectorCursor, setConnectorCursor] = useState(0);
   const [verbose, setVerbose] = useState(false);
   // Tool-call groups the user expanded, by group id (`<task>:g<seq>`).
@@ -139,10 +150,19 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const loading = useRef(new Set<string>());
 
   const userAgents = agents.filter((a) => a.id !== BUILDER);
-  const items: string[] = [...MENU, ...userAgents.map((a) => a.id)];
-  const current = items[Math.min(cursor, items.length - 1)] ?? 'tasks';
-  const isMenu = (MENU as readonly string[]).includes(current) && current !== BUILDER;
-  const agent = isMenu ? undefined : agents.find((a) => a.id === current);
+  const items: string[] = [
+    ...CONFIG,
+    BUILDER,
+    ...userAgents.map((a) => a.id),
+    ...tasks.map((t) => TASK_ITEM + t.id),
+  ];
+  // Selection is by item, so new tasks arriving at the top do not move it.
+  const current = selected && items.includes(selected) ? selected : (userAgents[0]?.id ?? BUILDER);
+  const isMenu = (CONFIG as readonly string[]).includes(current);
+  const detail = current.startsWith(TASK_ITEM)
+    ? tasks.find((t) => TASK_ITEM + t.id === current)
+    : undefined;
+  const agent = isMenu || detail ? undefined : agents.find((a) => a.id === current);
   const frame = useSpinner(tasks.some((t) => t.status === 'running'));
 
   const say = useCallback((msg: string) => {
@@ -195,8 +215,11 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   // The task shown for an agent: the one chosen, else its latest; null means "new task".
   const agentTasks = agent ? tasks.filter((t) => t.agentId === agent.id) : [];
   const chosen = agent ? focusTask[agent.id] : undefined;
-  const task =
-    chosen === null ? undefined : (agentTasks.find((t) => t.id === chosen) ?? agentTasks[0]);
+  const task = detail
+    ? detail
+    : chosen === null
+      ? undefined
+      : (agentTasks.find((t) => t.id === chosen) ?? agentTasks[0]);
 
   useEffect(() => {
     const id = task?.id;
@@ -216,7 +239,37 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const mainWidth = Math.max(30, columns - SIDEBAR_WIDTH);
   const textWidth = mainWidth - 4;
   const bodyHeight = rows - 1;
-  const transcriptHeight = Math.max(3, bodyHeight - 8);
+  // The chat has an input box below the transcript; a task's detail has two meta lines above it.
+  const transcriptHeight = Math.max(3, bodyHeight - (detail ? 7 : 8));
+  const transcriptFirstRow = TRANSCRIPT_FIRST_ROW + (detail ? 2 : 0);
+
+  // Task pages fill the sidebar below the fixed rows (header, page rows, pager).
+  const pageSize = Math.max(3, bodyHeight - 2 - sidebarFixedRows(userAgents.length) - 1);
+  const pages = Math.max(1, Math.ceil(tasks.length / pageSize));
+  const detailIndex = detail ? tasks.indexOf(detail) : -1;
+  const page = Math.min(
+    detailIndex >= 0 ? Math.floor(detailIndex / pageSize) : taskPage,
+    pages - 1,
+  );
+  const sideRows: SideRow[] = [
+    { kind: 'title', text: '安栖 Anchi' },
+    { kind: 'header', text: 'CONFIGURE' },
+    ...CONFIG.map((item) => ({ kind: 'item' as const, item })),
+    { kind: 'header', text: 'AGENTS' },
+    { kind: 'item', item: BUILDER },
+    ...(userAgents.length
+      ? userAgents.map((a) => ({ kind: 'item' as const, item: a.id }))
+      : [{ kind: 'note' as const, text: 'none yet — use the builder' }]),
+    { kind: 'header', text: pages > 1 ? `TASKS ${page + 1}/${pages}` : 'TASKS' },
+    ...(tasks.length
+      ? tasks
+          .slice(page * pageSize, (page + 1) * pageSize)
+          .map((t) => ({ kind: 'item' as const, item: TASK_ITEM + t.id }))
+      : [{ kind: 'note' as const, text: 'no tasks yet' }]),
+    ...(pages > 1 ? [{ kind: 'pager' as const, page, pages }] : []),
+  ];
+  const sideRowsRef = useRef(sideRows);
+  sideRowsRef.current = sideRows;
   const lines = useMemo<Line[]>(
     () =>
       transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
@@ -235,6 +288,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   );
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const firstRowRef = useRef(transcriptFirstRow);
+  firstRowRef.current = transcriptFirstRow;
 
   const toggleGroup = (id: string) =>
     setExpanded((all) => {
@@ -257,7 +312,21 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   };
 
   // ── actions ─────────────────────────────────────────────
-  const move = (d: number) => setCursor((c) => (c + d + items.length) % items.length);
+  const fallback = userAgents[0]?.id ?? BUILDER;
+  // From the previous selection, so several keys in one input chunk all count.
+  const move = (d: number) =>
+    setSelected((prev) => {
+      const from = items.indexOf(prev && items.includes(prev) ? prev : fallback);
+      return items[(from + d + items.length) % items.length];
+    });
+  /** Shows another page of tasks; a selected task moves to the first task of that page. */
+  const turnPage = (to: number) => {
+    const next = Math.max(0, Math.min(pages - 1, to));
+    setTaskPage(next);
+    if (detail && tasks[next * pageSize]) setSelected(TASK_ITEM + tasks[next * pageSize]!.id);
+  };
+  const turnPageRef = useRef(turnPage);
+  turnPageRef.current = turnPage;
 
   const submit = (raw = input) => {
     const text = raw.trim();
@@ -383,27 +452,36 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       return setModal({ kind: 'proposal', proposal: proposals.at(-1)!, scroll: 0 });
     }
 
+    // ── task detail ──
+    if (detail) {
+      if (ch === 'q') return exit();
+      if (key.tab) return move(key.shift ? -1 : 1);
+      if (key.return) {
+        // Continue the task in its agent's chat.
+        setFocusTask((f) => ({ ...f, [detail.agentId]: detail.id }));
+        return setSelected(detail.agentId);
+      }
+      if (ch === 'c' && (detail.status === 'running' || detail.status === 'queued')) {
+        return void client
+          .call('tasks.cancel', { taskId: detail.id })
+          .catch((e: Error) => say(e.message));
+      }
+      if (ch === '[' || key.leftArrow) return turnPage(page - 1);
+      if (ch === ']' || key.rightArrow) return turnPage(page + 1);
+      if (key.ctrl && ch === 't') return toggleAllGroups();
+      if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
+      if (key.pageUp)
+        return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
+      if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
+      if (key.upArrow || ch === 'k') return setScroll((s) => Math.min(maxScroll, s + 1));
+      if (key.downArrow || ch === 'j') return setScroll((s) => Math.max(0, s - 1));
+      return;
+    }
+
     // ── menu views ──
     if (isMenu) {
       if (ch === 'q') return exit();
       if (key.tab) return move(key.shift ? -1 : 1);
-      if (current === 'tasks') {
-        if (key.upArrow || ch === 'k') return setTaskCursor((c) => Math.max(0, c - 1));
-        if (key.downArrow || ch === 'j')
-          return setTaskCursor((c) => Math.min(tasks.length - 1, c + 1));
-        const t = tasks[taskCursor];
-        if (key.return && t) {
-          setFocusTask((f) => ({ ...f, [t.agentId]: t.id }));
-          const i = items.indexOf(t.agentId);
-          if (i >= 0) setCursor(i);
-          return;
-        }
-        if (ch === 'c' && t && (t.status === 'running' || t.status === 'queued')) {
-          return void client
-            .call('tasks.cancel', { taskId: t.id })
-            .catch((e: Error) => say(e.message));
-        }
-      }
       if (current === 'connectors') {
         const ids: ConnectorId[] = ['github', 'aws', 'linear'];
         if (key.upArrow || ch === 'k') return setConnectorCursor((c) => Math.max(0, c - 1));
@@ -521,24 +599,19 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     onMouse?.((e) => {
       if (e.kind === 'wheelUp') return setScroll((s) => s + 3);
       if (e.kind === 'wheelDown') return setScroll((s) => Math.max(0, s - 3));
-      if (e.kind === 'press' && e.button === 0 && e.x > SIDEBAR_WIDTH) {
-        const line = visibleRef.current[e.y - TRANSCRIPT_FIRST_ROW];
+      if (e.kind !== 'press' || e.button !== 0) return;
+      if (e.x > SIDEBAR_WIDTH) {
+        const line = visibleRef.current[e.y - firstRowRef.current];
         if (line?.group) toggleGroup(line.group);
         return;
       }
-      if (
-        e.kind === 'press' &&
-        e.button === 0 &&
-        e.x <= SIDEBAR_WIDTH &&
-        e.y >= SIDEBAR_FIRST_ROW
-      ) {
-        const row = e.y - SIDEBAR_FIRST_ROW;
-        // Menu rows, a header row, then agents.
-        const i = row < MENU.length ? row : row - 1;
-        if (i >= 0 && i < items.length && row !== MENU.length) setCursor(i);
-      }
+      const row = sideRowsRef.current[e.y - SIDEBAR_FIRST_ROW];
+      if (row?.kind === 'item') setSelected(row.item);
+      // The pager reads "‹ prev  ·  next ›": its left half goes back, its right half forward.
+      if (row?.kind === 'pager')
+        turnPageRef.current(row.page + (e.x <= SIDEBAR_WIDTH / 2 ? -1 : 1));
     });
-  }, [onMouse, items.length]);
+  }, [onMouse]);
 
   // ── render ──────────────────────────────────────────────
   if (modal) {
@@ -549,28 +622,31 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     );
   }
 
-  const header = agent
-    ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}${
-        task ? ` · ${task.id} (${task.status})` : ' · new task'
-      }`
-    : MENU_LABEL[current as MenuItem];
+  const header = detail
+    ? `${detail.id} · @${detail.agentId} · ${detail.status}`
+    : agent
+      ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}${
+          task ? ` · ${task.id} (${task.status})` : ' · new task'
+        }`
+      : CONFIG_LABEL[current as ConfigItem];
   const status =
     flash ||
-    (agent
-      ? '^N/^P select · Enter send · ^X new task · Esc cancel · ^E editor · ^T tools · ^V verbose · PgUp/PgDn'
-      : current === 'connectors'
-        ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · q quit'
-        : current === 'runtimes'
-          ? 's start VM · I install · u unlock vault · i import Codex login · r refresh · q quit'
-          : current === 'tasks'
-            ? '↑↓ choose · Enter open · c cancel · ^N/^P select · q quit'
+    (detail
+      ? `Enter continue in @${detail.agentId}${detail.status === 'running' || detail.status === 'queued' ? ' · c cancel' : ''} · [ ] page · ^T tools · ^V verbose · ↑↓ PgUp/PgDn scroll · ^N/^P select`
+      : agent
+        ? '^N/^P select · Enter send · ^X new task · Esc cancel · ^E editor · ^T tools · ^V verbose · PgUp/PgDn'
+        : current === 'connectors'
+          ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · q quit'
+          : current === 'runtimes'
+            ? 's start VM · I install · u unlock vault · i import Codex login · r refresh · q quit'
             : '^N/^P select · q quit') + (proposals.length ? ' · ^O proposal' : '');
 
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       <Box flexDirection="row" height={bodyHeight}>
         <Sidebar
-          agents={userAgents}
+          rows={sideRows}
+          agents={agents}
           tasks={tasks}
           current={current}
           height={bodyHeight}
@@ -616,13 +692,33 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
                 </Text>
               </Box>
             </>
-          ) : current === 'tasks' ? (
-            <TasksView
-              tasks={tasks}
-              cursor={taskCursor}
-              height={bodyHeight - 4}
-              width={textWidth}
-            />
+          ) : detail ? (
+            <>
+              <Text wrap="truncate">
+                <Text color={TASK_COLOR[detail.status]}>{detail.status}</Text>
+                {`  created ${new Date(detail.createdAt).toLocaleString()}`}
+                {detail.finishedAt
+                  ? ` · finished ${new Date(detail.finishedAt).toLocaleString()}`
+                  : detail.startedAt
+                    ? ` · started ${relTime(detail.startedAt)} ago`
+                    : ''}
+              </Text>
+              <Text color="blue" wrap="truncate">
+                {detail.links.length ? detail.links.map(sanitizeLine).join('  ') : ' '}
+              </Text>
+              <Box flexDirection="column" height={transcriptHeight}>
+                {visible.length ? (
+                  visible.map((l, i) => (
+                    <Text key={i} {...TONE[l.tone]} wrap="truncate">
+                      {l.text || ' '}
+                    </Text>
+                  ))
+                ) : (
+                  <Text dimColor>Loading…</Text>
+                )}
+              </Box>
+              <Text dimColor>{offset > 0 ? `↓ ${offset} more lines (PgDn)` : ' '}</Text>
+            </>
           ) : current === 'connectors' ? (
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
@@ -643,15 +739,43 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
 }
 
 function Sidebar(props: {
+  rows: SideRow[];
   agents: AgentSummary[];
   tasks: TaskRow[];
   current: string;
   height: number;
   frame: number;
 }) {
-  const { agents, tasks, current, height, frame } = props;
+  const { rows, agents, tasks, current, height, frame } = props;
   const inner = SIDEBAR_WIDTH - 4;
+  const spin = SPINNER[frame % SPINNER.length]!;
   const running = (id: string) => tasks.some((t) => t.agentId === id && t.status === 'running');
+  const item = (key: string) => {
+    if ((CONFIG as readonly string[]).includes(key)) {
+      return { glyph: '·', color: undefined, text: CONFIG_LABEL[key as ConfigItem] };
+    }
+    if (key.startsWith(TASK_ITEM)) {
+      const t = tasks.find((x) => TASK_ITEM + x.id === key)!;
+      const glyph =
+        t.status === 'running'
+          ? spin
+          : t.status === 'done'
+            ? '✓'
+            : t.status === 'failed'
+              ? '✗'
+              : t.status === 'cancelled'
+                ? '–'
+                : '◇';
+      return { glyph, color: TASK_COLOR[t.status], text: `@${t.agentId} ${sanitizeLine(t.title)}` };
+    }
+    if (key === BUILDER) {
+      return { glyph: running(BUILDER) ? spin : '✎', color: 'magenta', text: 'Agent builder' };
+    }
+    const a = agents.find((x) => x.id === key);
+    const glyph = a?.error ? '✗' : running(key) ? spin : a?.queued ? '◇' : '○';
+    const color = a?.error ? 'red' : running(key) ? 'yellow' : 'gray';
+    return { glyph, color, text: key };
+  };
   return (
     <Box
       flexDirection="column"
@@ -661,60 +785,40 @@ function Sidebar(props: {
       borderColor="gray"
       paddingX={1}
     >
-      <Text bold>安栖 Anchi</Text>
-      {MENU.map((m) => (
-        <Text key={m} inverse={current === m} bold={current === m}>
-          {truncate(
-            `${m === BUILDER && running(BUILDER) ? SPINNER[frame % SPINNER.length] : '·'} ${MENU_LABEL[m]}`,
-            inner,
-          ).padEnd(inner)}
-        </Text>
-      ))}
-      <Text dimColor>AGENTS</Text>
-      {agents.map((a) => {
-        const glyph = a.error
-          ? '✗'
-          : running(a.id)
-            ? SPINNER[frame % SPINNER.length]!
-            : a.queued
-              ? '◇'
-              : '○';
-        const color = a.error ? 'red' : running(a.id) ? 'yellow' : 'gray';
+      {rows.map((row, i) => {
+        if (row.kind === 'title')
+          return (
+            <Text key={i} bold>
+              {row.text}
+            </Text>
+          );
+        if (row.kind === 'header')
+          return (
+            <Text key={i} dimColor bold>
+              {row.text}
+            </Text>
+          );
+        if (row.kind === 'note')
+          return (
+            <Text key={i} dimColor wrap="truncate">
+              {`  ${row.text}`}
+            </Text>
+          );
+        if (row.kind === 'pager') {
+          const prev = row.page > 0 ? '‹ prev' : '      ';
+          const next = row.page < row.pages - 1 ? 'next ›' : '      ';
+          return (
+            <Text key={i} color="cyan">
+              {`${prev}${' '.repeat(Math.max(1, inner - 12))}${next}`}
+            </Text>
+          );
+        }
+        if (row.kind !== 'item') return null;
+        const { glyph, color, text } = item(row.item);
+        const on = current === row.item;
         return (
-          <Text key={a.id} inverse={current === a.id} bold={current === a.id}>
-            <Text color={color}>{glyph}</Text> {truncate(a.id, inner - 2).padEnd(inner - 2)}
-          </Text>
-        );
-      })}
-      {agents.length === 0 ? <Text dimColor>none yet — use the builder</Text> : null}
-    </Box>
-  );
-}
-
-function TasksView({
-  tasks,
-  cursor,
-  height,
-  width,
-}: {
-  tasks: TaskRow[];
-  cursor: number;
-  height: number;
-  width: number;
-}) {
-  const start = Math.max(0, Math.min(cursor - Math.floor(height / 2), tasks.length - height));
-  if (!tasks.length) return <Text dimColor>No tasks yet.</Text>;
-  return (
-    <Box flexDirection="column" height={height}>
-      {tasks.slice(start, start + height).map((t, i) => {
-        const link = t.links[0] ? `  ${t.links[0]}` : '';
-        return (
-          <Text key={t.id} inverse={start + i === cursor} wrap="truncate">
-            <Text color={TASK_COLOR[t.status]}>{t.status.padEnd(10)}</Text>
-            {`@${t.agentId}`.padEnd(14)}
-            {relTime(t.finishedAt ?? t.startedAt ?? t.createdAt).padEnd(9)}
-            {truncate(sanitizeLine(t.title), Math.max(10, width - 36 - link.length))}
-            <Text color="blue">{sanitizeLine(link)}</Text>
+          <Text key={i} inverse={on} bold={on} wrap="truncate">
+            <Text color={color}>{glyph}</Text> {truncate(text, inner - 2).padEnd(inner - 2)}
           </Text>
         );
       })}

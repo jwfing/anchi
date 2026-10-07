@@ -28,7 +28,7 @@ export function composeInEditor(draft: string): string {
 export async function runTui(client: DaemonClient): Promise<void> {
   const [agents, tasks] = await Promise.all([
     client.call('agents.list'),
-    client.call('tasks.list', { limit: 200 }),
+    client.call('tasks.list', { limit: 500 }),
   ]);
   let mouseHandler: ((e: MouseEvent) => void) | undefined;
   const releaseMouse = process.stdin.isTTY

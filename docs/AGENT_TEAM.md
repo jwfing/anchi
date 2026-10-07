@@ -77,7 +77,8 @@ In the TUI, select an agent and type a task. **Enter** sends it.
 - A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the Codex session in a new cell.
 - **Ctrl+X** starts a new task. **Esc** cancels the running turn.
 - **Ctrl+E** composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
-- **Tasks** lists every task with its status, result and links.
+- The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript; **Enter** continues it in its agent's chat, **c** cancels it, **[** and **]** turn the page. Clicking works too.
+- Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **Ctrl+T**) expands the list.
 
 The CLI does the same:
 

@@ -269,11 +269,8 @@ describe('App', () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    // Sidebar: runtimes, skills, connectors, ...; start is the first agent slot (tasks here).
-    ui.stdin.write('\u0010'); // ^P → tasks
-    await tick();
-    ui.stdin.write('\u0010'); // builder
-    ui.stdin.write('\u0010'); // connectors
+    // Sidebar: runtimes, skills, connectors, builder, agents, tasks; no agents, so the builder.
+    ui.stdin.write('\u0010'); // ^P → connectors
     await tick();
     expect(ui.lastFrame()).toContain('github');
     ui.stdin.write('\r');
@@ -330,11 +327,88 @@ describe('App', () => {
     ui.unmount();
   });
 
+  it('lists tasks in their own section and shows a task in detail', async () => {
+    const events = {
+      't-a000000002': [
+        { seq: 1, ts: 0, event: { type: 'input', text: 'fix the bug', source: 'user' } },
+        { seq: 2, ts: 0, event: { type: 'message', text: 'Opened the PR.' } },
+      ] as StoredEvent[],
+    };
+    const { client, calls } = fakeClient(events);
+    let mouse: ((e: MouseEvent) => void) | undefined;
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[
+          task('t-a000000002', 'dev', {
+            title: 'fix the bug',
+            links: ['https://github.com/o/r/pull/9'],
+          }),
+          task('t-a000000001', 'dev', { status: 'running', title: 'older task' }),
+        ]}
+        onMouse={(h) => (mouse = h)}
+      />,
+    );
+    await tick();
+    const frame = ui.lastFrame() ?? '';
+    for (const header of ['CONFIGURE', 'AGENTS', 'TASKS']) expect(frame).toContain(header);
+    expect(frame).toContain('@dev fix the bug');
+    // Rows: title, CONFIGURE, 3 settings, AGENTS, builder, dev, TASKS, then the tasks.
+    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 9 });
+    await tick();
+    expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
+    expect(ui.lastFrame()).toContain('https://github.com/o/r/pull/9');
+    expect(ui.lastFrame()).toContain('Opened the PR.');
+    ui.stdin.write('\u000e'); // ^N → the running task
+    await tick();
+    expect(ui.lastFrame()).toContain('c cancel');
+    ui.stdin.write('c');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.cancel')?.[1]).toEqual({ taskId: 't-a000000001' });
+    ui.stdin.write('\r'); // continue in the agent's chat
+    await tick();
+    expect(ui.lastFrame()).toContain('@dev · dev');
+    expect(ui.lastFrame()).toContain('t-a000000001');
+    ui.unmount();
+  });
+
+  it('pages through many tasks', async () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      task(`t-b${String(i).padStart(9, '0')}`, 'dev', { title: `task number ${i}` }),
+    );
+    const { client } = fakeClient();
+    let mouse: ((e: MouseEvent) => void) | undefined;
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={many}
+        onMouse={(h) => (mouse = h)}
+      />,
+    );
+    await tick();
+    const frame = ui.lastFrame() ?? '';
+    const pages = /TASKS 1\/(\d+)/.exec(frame);
+    expect(Number(pages?.[1])).toBeGreaterThan(1);
+    expect(frame).toContain('task number 0');
+    expect(frame).toContain('next ›');
+    // Select the first task, then turn the page with ].
+    mouse!({ kind: 'press', button: 0, x: 5, y: 11 });
+    await tick();
+    ui.stdin.write(']');
+    await tick();
+    expect(ui.lastFrame()).toContain('TASKS 2/');
+    expect(ui.lastFrame()).not.toContain('task number 0 ');
+    expect(ui.lastFrame()).toContain('‹ prev');
+    ui.unmount();
+  });
+
   it('imports from gh and connects an AWS profile only after confirmation', async () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    for (const _ of [1, 2, 3]) ui.stdin.write('\u0010'); // ^P ×3 → connectors
+    ui.stdin.write('\u0010'); // ^P → connectors
     await tick();
     ui.stdin.write('g');
     await tick();
@@ -364,7 +438,7 @@ describe('App', () => {
     const { client, calls, emit } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    for (const _ of [1, 2, 3, 4, 5]) ui.stdin.write('\u0010'); // ^P ×5 → runtimes
+    for (const _ of [1, 2, 3]) ui.stdin.write('\u0010'); // ^P ×3 → runtimes
     await tick();
     expect(ui.lastFrame()).toContain('start VM');
     ui.stdin.write('u');
