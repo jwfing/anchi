@@ -41,6 +41,10 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm ci --prefix pi --ignore-scripts
+      - uses: pnpm/action-setup@v5
+        with:
+          package_json_file: anchi/package.json
+      - run: pnpm --dir anchi install --frozen-lockfile
       - run: make check PYTHON=python
 
   # Unsigned packaging smoke test: proves the runtime bundle and Electron packager still

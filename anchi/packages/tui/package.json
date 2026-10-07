@@ -1,0 +1,18 @@
+{
+  "name": "@anchi/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "anchi": "./src/main.ts"
+  },
+  "dependencies": {
+    "@anchi/core": "workspace:*",
+    "@anchi/daemon": "workspace:*",
+    "@anchi/protocol": "workspace:*",
+    "commander": "^15.0.0",
+    "ink": "^8.0.0",
+    "react": "^19.3.0",
+    "string-width": "^8.3.0"
+  }
+}

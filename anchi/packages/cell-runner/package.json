@@ -1,0 +1,19 @@
+{
+  "name": "@anchi/cell-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "bundle": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/runner.mjs"
+  },
+  "dependencies": {
+    "@anchi/protocol": "workspace:*",
+    "@openai/codex-sdk": "^0.160.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}

@@ -6,7 +6,7 @@ SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run
 help:
 	@echo 'make check      Offline syntax, lint, formatting and unit tests (no VM/account access)'
 	@echo 'make lint       Ruff, shellcheck (when installed) and Prettier checks only'
-	@echo 'make test       Python services, Pi protocol and desktop unit tests'
+	@echo 'make test       Python services, Pi protocol, desktop and anchi unit tests'
 	@echo 'make desktop    Start the desktop application from source'
 	@echo 'make format     Format Python (ruff), desktop and Pi sources (prettier)'
 	@echo 'make package    Build unsigned macOS arm64 application'
@@ -15,6 +15,7 @@ help:
 check: lint
 	$(PYTHON) scripts/check-source.py
 	npm --prefix desktop run check
+	pnpm --dir anchi run check
 	node --test pi/tests/*.test.mjs
 	$(PYTHON) -m unittest discover -s tests -q
 
@@ -26,6 +27,7 @@ lint:
 
 test:
 	npm --prefix desktop test
+	pnpm --dir anchi test
 	node --test pi/tests/*.test.mjs
 	$(PYTHON) -m unittest discover -s tests -q
 
@@ -36,6 +38,7 @@ format:
 	$(PYTHON) -m ruff check --fix $(PY_SOURCES)
 	$(PYTHON) -m ruff format $(PY_SOURCES)
 	npm --prefix desktop run format
+	pnpm --dir anchi run format
 
 package: check
 	npm --prefix desktop run package
