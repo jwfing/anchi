@@ -137,6 +137,8 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   private state(agentId: string): AgentState {
+    // A file created just now may not have reached the watcher yet.
+    if (!this.states.has(agentId)) this.reload();
     const s = this.states.get(agentId);
     if (!s) throw new Error(`unknown agent "${agentId}"`);
     return s;

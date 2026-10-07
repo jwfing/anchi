@@ -197,6 +197,13 @@ describe('daemon tasks', () => {
       /unknown agent/,
     );
   });
+
+  it('accepts a task for an agent file written just before it', async () => {
+    const { client } = await start();
+    write('agents/fresh.yaml', 'runtime: codex\n');
+    const task = await client.call('tasks.create', { agentId: 'fresh', text: 'hello' });
+    expect((await client.call('tasks.wait', { taskId: task.id })).status).toBe('done');
+  });
 });
 
 describe('builder', () => {
