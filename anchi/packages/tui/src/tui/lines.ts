@@ -7,6 +7,19 @@ export type Tone = 'user' | 'assistant' | 'tool' | 'toolOut' | 'error' | 'warn' 
 export interface Line {
   text: string;
   tone: Tone;
+  /** Set on the summary line of a tool-call group; clicking it toggles the group. */
+  group?: string;
+}
+
+export interface TranscriptOptions {
+  /** Show every tool call with its output (^V). */
+  verbose?: boolean;
+  /** Ids of tool-call groups the user expanded. */
+  expanded?: ReadonlySet<string>;
+  /** The task's turn is running: its last tool-call group is shown as one live line. */
+  live?: boolean;
+  /** Prefix of group ids, so they are unique across tasks. */
+  prefix?: string;
 }
 
 const segmenter = new Intl.Segmenter();
@@ -70,6 +83,9 @@ export function summarizeInput(input: string, max = 120): string {
   } catch {
     // Not JSON; show as is.
   }
+  // Codex runs shell commands as `/bin/bash -lc '<command>'`; the wrapper only takes up room.
+  const shell = /^\/bin\/(?:ba)?sh -lc (['"])([\s\S]*)\1$/.exec(s);
+  if (shell) s = shell[2]!;
   s = sanitizeLine(s);
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
@@ -127,9 +143,70 @@ function eventLines(event: RuntimeEvent, width: number, lines: Line[], verbose: 
   }
 }
 
+const isTool = (e: RuntimeEvent) => e.type === 'tool.call' || e.type === 'tool.result';
+// Events that neither show anything nor end a run of tool calls.
+const isSilent = (e: RuntimeEvent) =>
+  e.type === 'usage' || e.type === 'session.started' || e.type === 'text.delta';
+
+function callLabel(event: RuntimeEvent & { type: 'tool.call' }): string {
+  return `${sanitizeLine(event.name)} ${summarizeInput(event.input, 200)}`;
+}
+
+/**
+ * A run of consecutive tool calls, shown as one line: while the turn runs, the count and the
+ * latest call (rewritten in place); afterwards, the count, which expands to the full list.
+ */
+function groupLines(
+  group: StoredEvent[],
+  id: string,
+  width: number,
+  lines: Line[],
+  opts: TranscriptOptions,
+  live: boolean,
+) {
+  const calls = group.filter((e) => e.event.type === 'tool.call');
+  const failed = group.filter((e) => e.event.type === 'tool.result' && e.event.isError).length;
+  const count = `${calls.length} tool call${calls.length === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}`;
+  const last = calls.at(-1)?.event as (RuntimeEvent & { type: 'tool.call' }) | undefined;
+  const open = opts.verbose || opts.expanded?.has(id);
+  if (open) {
+    lines.push({ text: truncate(`▾ ${count}`, width), tone: 'tool', group: id });
+    for (const { event } of group) eventLines(event, width, lines, Boolean(opts.verbose));
+    return;
+  }
+  const text = live
+    ? `▸ ${count} · ${last ? callLabel(last) : ''}`
+    : `▸ ${count}${last ? ` · last: ${callLabel(last)}` : ''}`;
+  const hint = live ? '' : ' · click to expand';
+  const room = width - stringWidth(hint);
+  lines.push({
+    text: room > 20 ? truncate(text, room) + hint : truncate(text, width),
+    tone: failed ? 'warn' : 'tool',
+    group: id,
+  });
+}
+
 /** Transcript of one task. Every line is sanitized and wrapped to `width`. */
-export function transcriptLines(events: StoredEvent[], width: number, verbose = false): Line[] {
+export function transcriptLines(
+  events: StoredEvent[],
+  width: number,
+  opts: TranscriptOptions = {},
+): Line[] {
   const lines: Line[] = [];
-  for (const { event } of events) eventLines(event, width, lines, verbose);
+  let group: StoredEvent[] = [];
+  const flush = (live: boolean) => {
+    if (!group.length) return;
+    groupLines(group, `${opts.prefix ?? ''}g${group[0]!.seq}`, width, lines, opts, live);
+    group = [];
+  };
+  for (const stored of events) {
+    if (isTool(stored.event)) group.push(stored);
+    else if (isSilent(stored.event)) continue;
+    else {
+      flush(false);
+      eventLines(stored.event, width, lines, Boolean(opts.verbose));
+    }
+  }
+  flush(Boolean(opts.live));
   return lines;
 }

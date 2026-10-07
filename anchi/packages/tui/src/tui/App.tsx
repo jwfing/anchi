@@ -29,6 +29,8 @@ const MENU_LABEL: Record<MenuItem, string> = {
 };
 /** Terminal row (1-based) of the first sidebar entry. */
 export const SIDEBAR_FIRST_ROW = 3;
+/** Screen row (1-based) of the first transcript line: border, header and rule above it. */
+export const TRANSCRIPT_FIRST_ROW = 4;
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const TASK_COLOR: Record<TaskStatus, string> = {
@@ -127,6 +129,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const [taskCursor, setTaskCursor] = useState(0);
   const [connectorCursor, setConnectorCursor] = useState(0);
   const [verbose, setVerbose] = useState(false);
+  // Tool-call groups the user expanded, by group id (`<task>:g<seq>`).
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
   const [setupLog, setSetupLog] = useState<string[]>([]);
@@ -214,8 +218,14 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const bodyHeight = rows - 1;
   const transcriptHeight = Math.max(3, bodyHeight - 8);
   const lines = useMemo<Line[]>(
-    () => transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, verbose),
-    [logs, task?.id, textWidth, verbose],
+    () =>
+      transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
+        verbose,
+        expanded,
+        live: task?.status === 'running',
+        prefix: task ? `${task.id}:` : '',
+      }),
+    [logs, task?.id, task?.status, textWidth, verbose, expanded],
   );
   const maxScroll = Math.max(0, lines.length - transcriptHeight);
   const offset = Math.min(scroll, maxScroll);
@@ -223,6 +233,28 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     Math.max(0, lines.length - transcriptHeight - offset),
     lines.length - offset,
   );
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+
+  const toggleGroup = (id: string) =>
+    setExpanded((all) => {
+      const next = new Set(all);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  /** ^T: expands every tool-call group of the shown task, or collapses them all. */
+  const toggleAllGroups = () => {
+    const ids = [...new Set(lines.flatMap((l) => (l.group ? [l.group] : [])))];
+    setExpanded((all) => {
+      const next = new Set(all);
+      const open = ids.some((id) => !all.has(id));
+      for (const id of ids) {
+        if (open) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
 
   // ── actions ─────────────────────────────────────────────
   const move = (d: number) => setCursor((c) => (c + d + items.length) % items.length);
@@ -462,6 +494,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     if (key.ctrl && ch === 'e') return editDraft();
     if (key.ctrl && ch === 'u') return setInput('');
     if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
+    if (key.ctrl && ch === 't') return toggleAllGroups();
     if (key.pageUp)
       return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
     if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
@@ -488,6 +521,11 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     onMouse?.((e) => {
       if (e.kind === 'wheelUp') return setScroll((s) => s + 3);
       if (e.kind === 'wheelDown') return setScroll((s) => Math.max(0, s - 3));
+      if (e.kind === 'press' && e.button === 0 && e.x > SIDEBAR_WIDTH) {
+        const line = visibleRef.current[e.y - TRANSCRIPT_FIRST_ROW];
+        if (line?.group) toggleGroup(line.group);
+        return;
+      }
       if (
         e.kind === 'press' &&
         e.button === 0 &&
@@ -519,7 +557,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const status =
     flash ||
     (agent
-      ? '^N/^P select · Enter send · ^X new task · Esc cancel · ^E editor · ^V verbose · PgUp/PgDn scroll'
+      ? '^N/^P select · Enter send · ^X new task · Esc cancel · ^E editor · ^T tools · ^V verbose · PgUp/PgDn'
       : current === 'connectors'
         ? '↑↓ choose · Enter connect · g github from gh · p aws profile · d disconnect · q quit'
         : current === 'runtimes'

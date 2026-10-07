@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { sanitize } from '../src/sanitize.ts';
 import { App } from '../src/tui/App.tsx';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
-import { normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
+import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
 
 const ESC = '\u001b';
 const agent = (id: string, over: Partial<AgentSummary> = {}): AgentSummary => ({
@@ -121,8 +121,56 @@ describe('lines', () => {
         },
       ],
       60,
+      { verbose: true },
     );
     for (const l of lines) expect(l.text).not.toContain(ESC);
+  });
+
+  it('folds a run of tool calls into one line that expands', () => {
+    const call = (seq: number, command: string): StoredEvent => ({
+      seq,
+      ts: 0,
+      event: {
+        type: 'tool.call',
+        id: `c${seq}`,
+        name: 'shell',
+        input: JSON.stringify({ command }),
+      },
+    });
+    const result = (seq: number, isError = false): StoredEvent => ({
+      seq,
+      ts: 0,
+      event: { type: 'tool.result', id: `c${seq - 1}`, output: 'out', isError },
+    });
+    const events: StoredEvent[] = [
+      { seq: 1, ts: 0, event: { type: 'input', text: 'fix it', source: 'user' } },
+      call(2, 'ls'),
+      result(3),
+      call(4, 'git status'),
+      result(5, true),
+      { seq: 6, ts: 0, event: { type: 'message', text: 'Looking further.' } },
+      call(7, "/bin/bash -lc 'make test'"),
+    ];
+    const text = (ls: { text: string }[]) => ls.map((l) => l.text);
+    // Running: the last group is one line with the latest call.
+    const live = transcriptLines(events, 80, { live: true, prefix: 't:' });
+    expect(text(live)).toEqual([
+      '› fix it',
+      '▸ 2 tool calls (1 failed) · last: shell git status · click to expand',
+      'Looking further.',
+      '▸ 1 tool call · shell make test',
+    ]);
+    expect(live[1]!.group).toBe('t:g2');
+    // Done and expanded: the full list under a header.
+    const open = transcriptLines(events, 80, { expanded: new Set(['t:g2']), prefix: 't:' });
+    expect(text(open).slice(1, 6)).toEqual([
+      '▾ 2 tool calls (1 failed)',
+      '▸ shell ls',
+      '  ⎿ out',
+      '▸ shell git status',
+      '  ⎿ out',
+    ]);
+    expect(text(open).at(-1)).toBe('▸ 1 tool call · last: shell make test · click to expand');
   });
 
   it('parses mouse and normalizes Enter', () => {
@@ -240,6 +288,45 @@ describe('App', () => {
       id: 'github',
       token: 'github_pat_secretvalue123',
     });
+    ui.unmount();
+  });
+
+  it('expands tool calls on click and with ^T', async () => {
+    const events = {
+      't-a000000001': [
+        {
+          seq: 1,
+          ts: 0,
+          event: { type: 'tool.call', id: 'a', name: 'shell', input: '{"command":"ls"}' },
+        },
+        {
+          seq: 2,
+          ts: 0,
+          event: { type: 'tool.call', id: 'b', name: 'shell', input: '{"command":"pwd"}' },
+        },
+        { seq: 3, ts: 0, event: { type: 'message', text: 'done' } },
+      ] as StoredEvent[],
+    };
+    const { client } = fakeClient(events);
+    let mouse: ((e: MouseEvent) => void) | undefined;
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+        onMouse={(h) => (mouse = h)}
+      />,
+    );
+    await tick();
+    expect(ui.lastFrame()).toContain('2 tool calls');
+    expect(ui.lastFrame()).not.toContain('shell pwd\n');
+    mouse!({ kind: 'press', button: 0, x: 40, y: 4 });
+    await tick();
+    expect(ui.lastFrame()).toContain('▾ 2 tool calls');
+    expect(ui.lastFrame()).toContain('▸ shell ls');
+    ui.stdin.write('\u0014'); // ^T collapses all
+    await tick();
+    expect(ui.lastFrame()).not.toContain('▾');
     ui.unmount();
   });
 
