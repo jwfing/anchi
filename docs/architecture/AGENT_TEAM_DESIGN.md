@@ -40,7 +40,7 @@ TUI client ──┐
 
 The daemon is the control plane. Clients only render state and forward user input, so the UI can be closed while scheduled tasks keep running. Setup, OAuth loopback, vault unlock and VM administration move from `desktop/src/main` into the daemon. The protocol is client-agnostic so a GUI client can be added later without changing the daemon.
 
-The implementation starts from the `my-bot` daemon (scheduler, team, permissions, notifications) and its Ink TUI.
+The implementation ports parts of the `my-bot` daemon (queue, scheduler, notifications) and its Ink TUI, refactored to the boundaries below; see the [phase 1 plan](AGENT_TEAM_PHASE1_PLAN.md#porting-my-bot).
 
 ### VM and cells
 

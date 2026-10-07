@@ -46,15 +46,15 @@ Phase 1 is done when all of the following pass on a fresh macOS install. Each mu
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | **Import my-bot into this repository** as a pnpm/TypeScript workspace under `anchi/` (`core`, `daemon`, `cli`) | my-bot already has the YAML agent model, daemon, scheduler, team MCP and Ink TUI. One repository keeps the trust-boundary docs and tests together |
-| D2 | **The runtime SDK runs inside the cell.** A small in-cell runner (Node) hosts the Codex SDK and streams my-bot's `BotEvent` JSON lines over a per-cell control socket. On the host, a `CellRuntimeAdapter` replaces my-bot's direct adapter | The SDK and CLI are both untrusted and both stay in the cell. The daemon only parses bounded events. This mirrors today's `pi/` bridge |
+| D1 | **Port my-bot into this repository, refactored, not copied.** A pnpm/TypeScript workspace under `anchi/`, split by trust zone. Each milestone ports the my-bot module it needs and rewrites it to Anchi's boundaries, with its tests; see [Porting my-bot](#porting-my-bot) | my-bot has a working agent model, daemon, scheduler, team MCP and Ink TUI, but assumes runtimes run on the host with the user's account directories. A copy would bring host execution, credential paths and an unauthenticated agent identity into the trusted zone |
+| D2 | **The runtime SDK runs inside the cell.** A small in-cell runner (Node) hosts the Codex SDK and streams runtime events as JSON lines over a per-cell control socket. On the host, a cell runtime client takes the place of my-bot's in-process adapters | The SDK and CLI are both untrusted and both stay in the cell. The daemon only parses bounded events. This mirrors today's `pi/` bridge |
 | D3 | **The proxy is mitmproxy plus the Anchi addon**, as a trusted VM service with its own UID | Proven in the PoC: TLS interception, WebSocket and HTTP/2. Python matches `services/`. Revisit only if performance or footprint requires it |
 | D4 | **A cell lives for one task.** It stays alive across turns of that task and is destroyed after completion plus an idle timeout (default 10 minutes). Each agent has a persistent volume holding its workdir and runtime state (`CODEX_HOME` sessions, without auth) | Follow-up messages reuse the cell. A new task starts clean, and the agent's repositories and dependency caches persist |
 | D5 | **Credentials live in the existing `secure-auth` vault.** The proxy UID obtains them over the auth socket, verified by `SO_PEERCRED`. Codex token refresh reuses the existing trusted Codex administration | Reuses the encrypted-at-rest, host-held-key design. There is no second credential store |
 | D6 | **Codex runs `danger-full-access`; the cell is the boundary.** The bwrap `userns` AppArmor profile is a per-agent opt-in | Decided after the PoC |
 | D7 | **Freeze the Electron desktop app and Pi.** They keep working until the daemon reaches parity for setup, then are retired. Existing connector services stay deployed but are not wired to the new runtimes in phase 1 | Avoids two control planes evolving at once |
 
-Confirm D1–D4 before M0 starts. D5–D7 follow from earlier decisions.
+D1–D4 were confirmed on 2026-10-06. D5–D7 follow from earlier decisions.
 
 ## Milestones
 
@@ -68,14 +68,20 @@ M0 ─┬─ M1 cells ────┬─ M3 Codex runtime ─┬─ M5 TUI ─�
 
 ### M0 — Workspace and contracts (S)
 
-- Import `my-bot` into `anchi/`: pnpm workspace, TypeScript, Vitest. Wire it into `make check` and CI.
-- Write down the contracts that later milestones code against:
-  1. **Daemon ⇄ client:** JSON-RPC plus an event stream over a Unix socket, extending my-bot's `protocol.ts`.
+- Create the `anchi/` pnpm workspace with the package split below: TypeScript, Vitest, Prettier. Wire it into `make check` and CI.
+- Port the trusted foundations from my-bot, refactored:
+  - the agent schema and loader, with my-bot's account and access fields removed and Anchi's fields added: `connectors[]`, `image`, `network` (reserved) and `sandbox` (`cell` | `codex-workspace-write`);
+  - the bounded JSON-lines codec, used by every socket.
+- Write down the contracts that later milestones code against, as types plus zod schemas in `@anchi/protocol`:
+  1. **Daemon ⇄ client:** JSON-RPC plus an event stream over a Unix socket.
   2. **Daemon ⇄ guest administration:** fixed, allowlisted commands over Lima SSH, as today.
-  3. **Cell runner ⇄ daemon:** `BotEvent` JSON lines with byte limits.
-- Extend the agent schema with: `connectors[]`, `image`, `network` (reserved), and `sandbox` (`cell` | `codex-workspace-write`).
+  3. **Cell runner ⇄ daemon:** runtime events as JSON lines, validated, with per-frame and per-turn byte limits.
 
-**Acceptance:** `make check` runs the TypeScript tests. The schema and protocol documents are in `docs/architecture/`.
+**Acceptance:**
+
+- `make check` runs the TypeScript tests, including the ported schema and loader tests.
+- A dependency check fails if a host package imports `@anchi/cell-runner` or a runtime SDK.
+- The schema and protocol documents are in `docs/architecture/`.
 
 ### M1 — Task cells (M)
 
@@ -132,7 +138,7 @@ M0 ─┬─ M1 cells ────┬─ M3 Codex runtime ─┬─ M5 TUI ─�
 
 ### M4 — Daemon core and minimal task list (M)
 
-- Start from my-bot's daemon: agent registry, run queue, notifications. Remove direct host execution of runtimes.
+- Port my-bot's hub as the daemon core: agent registry, per-agent run queue, notifications. Runs go to the cell runtime client; there is no host execution of runtimes.
 - **Task store** (SQLite under the daemon data directory):
   - task id, agent, trigger, status;
   - start and end times, final result text, links;
@@ -149,7 +155,7 @@ M0 ─┬─ M1 cells ────┬─ M3 Codex runtime ─┬─ M5 TUI ─�
 
 ### M5 — TUI (M)
 
-- **First task: the CJK IME check** in the my-bot TUI. Test long Chinese input, editing and cursor position in Terminal.app, iTerm2 and Ghostty. If any fails, add an `$EDITOR` compose fallback before building further.
+- **First task: the CJK IME check** in the my-bot TUI as it is today, before porting it. Test long Chinese input, editing and cursor position in Terminal.app, iTerm2 and Ghostty. If any fails, add an `$EDITOR` compose fallback before building further.
 - **Layout:** the left menu holds runtimes, skills (placeholder), connectors and builder above the agent list; the main pane is chat. Add a task list view.
 - **Security requirements:**
   - strip control characters and ANSI/OSC sequences from all agent-originated text;
@@ -186,6 +192,43 @@ M0 ─┬─ M1 cells ────┬─ M3 Codex runtime ─┬─ M5 TUI ─�
 - The builder cannot modify any agent configuration directly, including its own.
 
 **Acceptance:** scenario 1 starts from a builder conversation, with no hand-edited YAML.
+
+## Porting my-bot
+
+my-bot (`../my-bot`, about 3,500 lines of TypeScript) is the starting point for the host side. It is ported module by module, not imported as a whole.
+
+### Package split
+
+| Package | Zone | Contents | Must not depend on |
+|---|---|---|---|
+| `@anchi/protocol` | Shared | Event and RPC types, zod schemas, bounded JSON-lines codec | Anything else in the workspace |
+| `@anchi/core` | Host, trusted | Agent schema and loader, data directory layout, SQLite store | Runtime SDKs, `cell-runner` |
+| `@anchi/daemon` | Host, trusted | Hub, task store, scheduler, cell and proxy control, client socket | Runtime SDKs, `cell-runner` |
+| `@anchi/tui` | Host, trusted | Ink client | Runtime SDKs, `cell-runner` |
+| `@anchi/cell-runner` | Cell, untrusted | Runtime adapters (Codex SDK; Claude Agent SDK in phase 2) | Host packages |
+
+The host packages never load a runtime SDK. The cell runner is built into the agent image and only shares `@anchi/protocol` with the host.
+
+### Module map
+
+| my-bot module | Phase 1 handling | Milestone |
+|---|---|---|
+| `core/config/schema.ts`, `loader.ts` | Port. Keep `extends` templates and layer merging. Remove `account`, `workspace.access`, `workspace.extraDirs`, `workspace.network` and `tools.allow`/`deny`; add Anchi's fields. Rename bot to agent | M0 |
+| `daemon/rpc.ts` | Port the codec with a maximum frame size, and drop invalid frames with an error instead of skipping them silently | M0 |
+| `daemon/protocol.ts`, `core/events.ts` | Port as `@anchi/protocol` with zod schemas. Remove `permission.decided` and the permission methods; Codex runs with no in-runtime approvals (D6) | M0 |
+| `core/runtime/codex.ts` | Move to `cell-runner`. It receives no host environment and no `CODEX_HOME` containing auth | M3 |
+| `core/runner.ts` | Port session selection and the prompt-hash rule into the daemon. Replace adapter calls and `runtimeEnv` with the cell runtime client | M3, M4 |
+| `core/store.ts` | Port sessions and events, add the task table, and cap stored event size | M4 |
+| `daemon/hub.ts`, `daemon.ts`, `scheduler.ts` | Port the per-agent queue, interrupt and status model. The scheduler stays unused until cron in phase 2 | M4 |
+| `daemon/launch.ts`, `notify.ts` | Port: launchd user agent and desktop notifications | M4 |
+| `cli/tui/*` | Port with the security requirements of M5 (escape stripping, modals, masked input) | M5 |
+| `core/env.ts` | **Drop.** Login-shell capture and account directories are host-execution concerns. Cells get a fixed environment from their image | — |
+| `core/runtime/claude.ts` | Phase 2, into `cell-runner` | — |
+| `daemon/team.ts` | Phase 2, redesigned. Its caller identity is a URL path plus one token shared by every agent, so any agent could act as another. In Anchi the caller is the cell its control socket belongs to | — |
+| `daemon/telegram.ts` | Not planned. A Telegram channel would need its own credential handling | — |
+| `cli/accounts.ts`, `detect.ts`, `init.ts`, `doctor.ts` | Replaced by daemon setup (M4) and connector screens (M5) | — |
+
+Ported files keep a note of their my-bot origin in the commit message, not in the code. my-bot itself stays unchanged.
 
 ## Cross-cutting work
 
