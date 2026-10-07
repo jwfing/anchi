@@ -53,7 +53,7 @@ The implementation starts from the `my-bot` daemon (scheduler, team, permissions
 
 | Runtime | Phase | Model authentication |
 |---|---|---|
-| Codex | 1 | The cell holds a placeholder `auth.json` that carries the real account id (an identifier) and placeholder tokens. The proxy injects the access token on `chatgpt.com`, including the WebSocket model stream, and the trusted side owns refresh. Verified end to end in the PoC |
+| Codex | 1 | The cell holds a placeholder `auth.json` that carries the real account id (an identifier) and placeholder tokens. The proxy injects the access token on `chatgpt.com`, including the WebSocket model stream, and the trusted side owns refresh. Verified end to end in the PoC, including tool calls. The image must install the full `codex-package-<target>`, not the bare binary. Codex's own sandbox needs nested user namespaces; whether to grant them to bwrap through AppArmor is an open decision |
 | Claude Code | 2 | Subscription by default via a `claude setup-token` token. The cell holds a placeholder `CLAUDE_CODE_OAUTH_TOKEN`; the proxy substitutes the real token on requests to Anthropic hosts. API key or Bedrock remain optional alternatives. |
 
 Pi is replaced by the runtime SDKs. Connectors are exposed to both runtimes through a single **Anchi MCP server** inside the cell, which forwards to the existing connector sockets. Each connector is integrated once and both runtimes can use it.

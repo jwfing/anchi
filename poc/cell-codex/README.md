@@ -74,6 +74,21 @@ The cell runs as `agent`, uid 1000, with no capabilities, a read-only `layer:bas
 | Telemetry | `ab.chatgpt.com/otlp/v1/metrics` passed through **without** a credential, because injection matches `chatgpt.com` exactly and not its subdomains |
 | Warnings | No system `bwrap`, so Codex used its bundled copy; `codex-code-mode-host` is missing from the release tarball; Codex refuses to create PATH helpers under `/tmp`. None of these blocked the turn |
 
+## Tool calls and Codex's own sandbox (2026-10-06, real credentials)
+
+**Codex ran a shell tool inside the cell under its own `workspace-write` sandbox.** It wrote `report.txt` (`git log` and `ls` output) in the cloned repository. Its attempt to create `/etc/anchi-probe` failed with `Read-only file system`. That error comes from bwrap's read-only bind; without bwrap, the agent user would get `Permission denied` instead. The turn used 4,563 tokens, and the cell took 15 s including the clone.
+
+| Step | Problem found | Fix in the layer |
+|---|---|---|
+| 1 | The bare `codex-<target>` tarball has no bubblewrap, so `codex sandbox` panicked | Install Debian `bubblewrap` |
+| 2 | `codex-linux-sandbox` helper missing: Codex refuses to create it under `/tmp` | Ship a `codex-linux-sandbox` → `codex` alias; agent home at `/home/agent` |
+| 3 | `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` | Caused by Ubuntu's `apparmor_restrict_unprivileged_userns=1` (confirmed by a temporary toggle). Fixed by an AppArmor profile granting `userns` to `/usr/bin/bwrap` only; the path matches the binary inside the cell |
+| 4 | Shell tool failed: `codex-code-mode-host` not found | Install the full `codex-package-<target>` (codex, code-mode host, bundled bwrap, rg, zsh). Layer grows to 519 MB, including unused voice libraries |
+
+Direct `codex sandbox` probes: `read-only` blocked all writes; `workspace-write` allowed the workdir and `/tmp`, and blocked `/etc`.
+
+**Trade-off still open:** with the bwrap profile, the agent can call `bwrap` itself to get a nested user namespace (uid 0 inside it). Plain `unshare` stays blocked. The profile narrows nested user namespaces to bwrap but does not remove the kernel attack surface. The alternative is to rely on the cell alone and run `--sandbox danger-full-access` with `ANCHI_POC_BWRAP_PROFILE=0`.
+
 ## Findings for the design
 
 1. **The proxy must own token refresh for subscription runtimes.** Codex refreshes after any 401. The cell must never perform a refresh, and the PoC denial works. The trusted side therefore has to keep the injected access token fresh, using the refresh token it holds and never the cell.
