@@ -21,6 +21,8 @@ Start with the [project overview](../README.md), [Getting started](GETTING_START
 | [Agent team design](architecture/AGENT_TEAM_DESIGN.md) | v2 design: daemon, per-task cells, credential-injecting proxy |
 | [Agent team phase 1 plan](architecture/AGENT_TEAM_PHASE1_PLAN.md) | Milestones, decisions, acceptance and status for phase 1 |
 | [Agent team phase 2 plan](architecture/AGENT_TEAM_PHASE2_PLAN.md) | Milestones, decisions, acceptance and status for phase 2 |
+| [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Proposal: containment, automatic checks and remaining acceptance |
+| [Host directories](architecture/HOST_DIRECTORIES_PLAN.md) | Workspaces of the Mac in agent cells |
 | [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md) | Agent configuration, client protocol, guest commands and cell runner protocol |
 
 ## Development and releases
