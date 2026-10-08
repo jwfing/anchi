@@ -601,6 +601,8 @@ describe('App', () => {
     ui.stdin.write('q');
     expect(await frameWith(ui, 'Approve a write by @dev?')).toContain('Approve a write by @dev?');
     ui.stdin.write('\u001b'); // later
+    // b's dialog is closed before a arrives, so the next wait sees a's dialog, not b's.
+    await frameWith(ui, 'waiting for approval');
     emit('approvals', { approvals: [approval] });
     const frame = await frameWith(ui, 'Approve a write by @dev?');
     expect(frame).toContain('Approve a write by @dev?');
