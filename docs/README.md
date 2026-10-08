@@ -24,7 +24,7 @@ Start with the [project overview](../README.md), [Getting started](GETTING_START
 | [Agent team phase 2 plan](architecture/AGENT_TEAM_PHASE2_PLAN.md) | Milestones, decisions, acceptance and status for phase 2 |
 | [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Proposal: containment, automatic checks and remaining acceptance |
 | [Host directories](architecture/HOST_DIRECTORIES_PLAN.md) | Workspaces of the Mac in agent cells |
-| [Backlog](architecture/BACKLOG.md) | Recorded requirements not yet planned: file preview plugins, deleting agents, new sessions, skills, builder |
+| [Backlog](architecture/BACKLOG.md) | Recorded requirements not yet planned: file preview plugins, deleting agents, new sessions, skills, builder, key bindings |
 | [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md) | Agent configuration, client protocol, guest commands and cell runner protocol |
 
 ## Development and releases
