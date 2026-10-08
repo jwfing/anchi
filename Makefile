@@ -36,4 +36,4 @@ verify-vm:
 	bash scripts/verify.sh
 
 verify-anchi:
-	limactl shell $(VM) -- sudo /usr/bin/python3 /opt/secure-vm/check-anchi.py
+	limactl shell $(VM) -- sudo /usr/bin/python3 /opt/secure-vm/check-anchi.py $(START_BUDGET_MS)
