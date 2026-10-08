@@ -1,5 +1,6 @@
 /** @jsxRuntime automatic */
 import type {
+  AgentSettings,
   AgentSummary,
   Notifications,
   RuntimeEvent,
@@ -50,12 +51,16 @@ const task = (id: string, agentId: string, over: Partial<TaskRow> = {}): TaskRow
   ...over,
 });
 
-function fakeClient(events: Record<string, StoredEvent[]> = {}) {
+function fakeClient(
+  events: Record<string, StoredEvent[]> = {},
+  answers: Record<string, (params: unknown) => unknown> = {},
+) {
   const listeners: Record<string, ((p: unknown) => void)[]> = {};
   const calls: [string, unknown][] = [];
   const client = {
     call: vi.fn(async (method: string, params?: unknown) => {
       calls.push([method, params]);
+      if (answers[method]) return answers[method]!(params);
       if (method === 'tasks.events') return events[(params as { taskId: string }).taskId] ?? [];
       if (method === 'tasks.create')
         return task('t-new0000000', (params as { agentId: string }).agentId, { status: 'queued' });
@@ -640,6 +645,7 @@ describe('App', () => {
         agentDiff: `+ runtime: codex\n+ prompt: ${ESC}[2Jhidden`,
         imageDiff: '',
         errors: [],
+        warnings: [],
       },
     });
     await tick();
@@ -667,6 +673,7 @@ describe('App', () => {
         agentDiff: '',
         imageDiff: '',
         errors: ['bad'],
+        warnings: [],
       },
     });
     await tick();
@@ -844,6 +851,205 @@ describe('key bindings in the TUI', () => {
     });
     ui.stdin.write('\u0007'); // ^G: the leader now, no longer the editor key
     expect(await frameWith(ui, 'Next key')).toContain('^G …');
+    ui.unmount();
+  });
+});
+
+describe('agent settings panel', () => {
+  const LEADER = '\u0018';
+  const settings = (over: Partial<AgentSettings['current']> = {}): AgentSettings => ({
+    agentId: 'dev',
+    editable: true,
+    current: { skills: [], connectors: ['github'], workspaces: [], ...over },
+    inventory: {
+      skills: [{ id: 'review', name: 'review', description: 'Reviews pull requests' }],
+      connectors: [
+        { id: 'github', connected: true },
+        { id: 'notion', connected: false },
+      ],
+      workspaces: { shared: true, dirs: ['projects/webapp'] },
+      agents: ['dev'],
+      images: [],
+    },
+  });
+  const update = {
+    diff: '  runtime: codex\n+ skills: [review]',
+    errors: [],
+    warnings: [],
+    base: 'b1',
+    applied: false,
+  };
+
+  it('selects skills, connectors and workspaces, shows the change and saves only after y', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'agents.settings': () => settings(),
+        'agents.update': (p) => ({ ...update, applied: Boolean((p as { apply?: boolean }).apply) }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('s');
+    let frame = await frameWith(ui, 'Reviews pull requests');
+    expect(frame).toContain('@dev: settings');
+    expect(frame).toMatch(/\[x\] +github +connected/);
+    expect(frame).toMatch(/\[ \] +notion +not connected/);
+    ui.stdin.write(' '); // the first row: skill review
+    await tick();
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) ui.stdin.write('j'); // down to the workspace
+    await tick();
+    ui.stdin.write(' ');
+    await tick();
+    ui.stdin.write(' '); // ro → rw
+    frame = await frameWith(ui, '[rw]');
+    expect(frame).toContain('writes go straight to your Mac');
+    ui.stdin.write('\r');
+    frame = await frameWith(ui, 'save these settings?');
+    expect(frame).toContain('+ skills: [review]');
+    expect(calls.filter(([m]) => m === 'agents.update')).toEqual([
+      [
+        'agents.update',
+        {
+          agentId: 'dev',
+          patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+        },
+      ],
+    ]);
+    ui.stdin.write('y');
+    expect(await frameWith(ui, 'settings saved')).toContain('@dev settings saved');
+    expect(calls.at(-1)).toEqual([
+      'agents.update',
+      {
+        agentId: 'dev',
+        patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+        apply: true,
+        base: 'b1',
+      },
+    ]);
+    ui.unmount();
+  });
+
+  it('cannot save a change with errors, and n goes back to the panel', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'agents.settings': () => settings({ skills: ['gone'] }),
+        'agents.update': () => ({ ...update, errors: ['skill "gone" is not installed'] }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('s');
+    expect(await frameWith(ui, 'not installed')).toMatch(/\[x\] +gone +not installed/);
+    ui.stdin.write('j');
+    await tick();
+    ui.stdin.write(' '); // select review as well
+    await tick();
+    ui.stdin.write('\r');
+    const frame = await frameWith(ui, 'save these settings?');
+    expect(frame).toContain('✗ skill "gone" is not installed');
+    expect(frame).not.toContain('[y] save');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m, p]) => m === 'agents.update' && (p as { apply?: boolean }).apply)).toBe(
+      false,
+    );
+    ui.stdin.write('n');
+    expect(await frameWith(ui, '@dev: settings')).toContain('Space select');
+    ui.unmount();
+  });
+
+  it('revises a builder proposal from its dialog', async () => {
+    const proposal = {
+      id: 'p-1',
+      agentId: 'rev',
+      agentYaml: 'runtime: codex\n',
+      imageYaml: null,
+      agentDiff: '+ runtime: codex',
+      imageDiff: '',
+      errors: [],
+      warnings: [],
+    };
+    const { client, calls, emit } = fakeClient(
+      {},
+      {
+        'agents.settings': () => ({ ...settings({ connectors: [] }), agentId: 'rev' }),
+        'builder.revise': () => ({
+          ...proposal,
+          agentYaml: 'runtime: codex\nskills: [review]\n',
+          agentDiff: '+ runtime: codex\n+ skills: [review]',
+          warnings: ['notion is not connected yet'],
+        }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('builder')]} initialTasks={[]} />);
+    await tick();
+    emit('proposal', { proposal });
+    expect(await frameWith(ui, '[s] settings')).toContain('Builder proposal');
+    ui.stdin.write('s');
+    expect(await frameWith(ui, 'Proposal for @rev: settings')).toContain('review');
+    ui.stdin.write(' ');
+    await tick();
+    ui.stdin.write('\r');
+    const frame = await frameWith(ui, '+ skills: [review]');
+    expect(frame).toContain('! notion is not connected yet');
+    expect(calls.find(([m]) => m === 'agents.settings')?.[1]).toEqual({ proposalId: 'p-1' });
+    expect(calls.find(([m]) => m === 'builder.revise')?.[1]).toEqual({
+      proposalId: 'p-1',
+      patch: { skills: ['review'] },
+    });
+    ui.unmount();
+  });
+
+  it('updates a GitHub skill after showing what changes', async () => {
+    const skill = {
+      id: 'review',
+      name: 'review',
+      description: 'Reviews',
+      source: 'https://github.com/acme/s/tree/main/review',
+      commit: '1'.repeat(40),
+    };
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'skills.list': () => [skill],
+        'skills.checkUpdate': () => ({
+          id: 'review',
+          url: skill.source,
+          current: '1'.repeat(40),
+          latest: '2'.repeat(40),
+          upToDate: false,
+          added: ['checklist.md'],
+          changed: ['SKILL.md'],
+          removed: [],
+        }),
+        'skills.update': () => skill,
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('1'); // Configure
+    await tick();
+    ui.stdin.write('\u000e'); // ^N: Runtimes → Skills
+    await frameWith(ui, 'acme/s');
+    ui.stdin.write('u');
+    const frame = await frameWith(ui, 'Update skill review');
+    expect(frame).toContain('1111111111 → 2222222222');
+    expect(frame).toContain('added: checklist.md');
+    expect(frame).toContain('changed: SKILL.md');
+    ui.stdin.write('y');
+    await frameWith(ui, 'done');
+    expect(calls.find(([m]) => m === 'skills.update')?.[1]).toEqual({
+      id: 'review',
+      commit: '2'.repeat(40),
+    });
     ui.unmount();
   });
 });

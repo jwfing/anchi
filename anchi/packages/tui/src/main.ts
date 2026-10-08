@@ -238,6 +238,39 @@ skillsCmd
       console.log(`added ${s.id}${s.commit ? ` at ${s.commit.slice(0, 10)}` : ''}`);
     }),
   );
+skillsCmd
+  .command('update [id]')
+  .description('Update GitHub skills to the latest commit of their URL, after showing what changes')
+  .option('-y, --yes', 'update without asking')
+  .action((id: string | undefined, opts: { yes?: boolean }) =>
+    withClient(async (client) => {
+      const ids = id
+        ? [id]
+        : (await client.call('skills.list')).filter((s) => s.commit).map((s) => s.id);
+      if (!ids.length) return console.log('no skill was added from a URL');
+      for (const sid of ids) {
+        const u = await client.call('skills.checkUpdate', { id: sid });
+        if (u.upToDate) {
+          console.log(`${sid}: up to date (${u.latest.slice(0, 10)})`);
+          continue;
+        }
+        console.log(
+          `${sid}: ${u.current?.slice(0, 10) ?? '?'} → ${u.latest.slice(0, 10)}  ${sanitizeLine(u.url)}`,
+        );
+        for (const [label, files] of [
+          ['added', u.added],
+          ['changed', u.changed],
+          ['removed', u.removed],
+        ] as const) {
+          if (files.length) console.log(`  ${label}: ${files.map(sanitizeLine).join(', ')}`);
+        }
+        if (!opts.yes && (await ask(`update ${sid}? [y/N] `)).trim().toLowerCase() !== 'y')
+          continue;
+        await client.call('skills.update', { id: sid, commit: u.latest });
+        console.log(`  updated to ${u.latest.slice(0, 10)}`);
+      }
+    }),
+  );
 skillsCmd.command('rm <id>').action((id: string) =>
   withClient(async (client) => {
     await client.call('skills.remove', { id });

@@ -46,7 +46,7 @@ The recipe's content hash names the built layer. A changed recipe is a new image
 JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON frames of at most 8 MiB. Request `{id, method, params}`, response `{id, result}` or `{id, error: {message}}`, notification `{method, params}`. The method table is `Methods` in `protocol/src/rpc.ts`.
 
 - **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, and `tasks.scan` (credential-invariant scan of the task's live cell).
-- **Agents and builder:** `agents.list`, `agents.reload`, `builder.proposal`, `builder.apply`, `builder.discard`. `builder.apply` is the only method that writes agent or image files. The TUI calls it only after a confirmation modal.
+- **Agents and builder:** `agents.list`, `agents.reload`, `agents.settings`, `agents.update`, `builder.proposal`, `builder.revise`, `builder.apply`, `builder.discard`. Only `builder.apply` and `agents.update` with `apply` write agent or image files, and the TUI calls them only after a dialog showing the change. `agents.update` changes `skills`, `connectors` and `workspaces` of an agent file, keeping the rest; with `apply` it requires the digest (`base`) of the file the reviewed diff was made from. Proposals and settings changes are checked against what exists: missing skills, delegates or directories block, connectors not yet connected warn.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;
   - `setup.run` runs one setup step at a time: `vm-start`, `install`, `vault-init` or `vault-unlock`. Each is a fixed host command from the checkout (`limactl start`, `scripts/up.sh` then `scripts/install-anchi.sh` then the base image build, `scripts/vault.py`). The vault key is read by `vault.py`, not by the daemon. Output lines arrive as `setup` notifications;
@@ -56,7 +56,7 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
   - `tasks.search` (agent, status, words, time), `tasks.tree`, `tasks.delete`;
   - `approvals.list`, `approvals.decide` (called only after a full-screen dialog);
   - `triggers.list`;
-  - `skills.list`, `skills.add` (local directory or GitHub URL), `skills.remove`;
+  - `skills.list`, `skills.add` (local directory or GitHub URL), `skills.remove`, `skills.checkUpdate` (what the latest commit of the URL changes, nothing written), `skills.update` (installs the commit the user reviewed);
   - `setup.importClaude`; `services.setToken`, `services.disconnect`, `services.setMode`, `services.googleClient`, `services.googleLogin`.
 - **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`, `setup` (a line of setup output), `approvals`, `oauth`, `tasksDeleted`.
 

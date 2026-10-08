@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
+  type AgentPatch,
   agentFile,
   agentLayerSchema,
   BASE_IMAGE,
@@ -10,10 +11,12 @@ import {
   imageFile,
   imageRecipeSchema,
   parseYamlAs,
+  patchAgentYaml,
   type ResolvedAgent,
   resolvedAgentSchema,
 } from '@anchi/core';
-import type { BuilderProposal } from '@anchi/protocol';
+import type { BuilderProposal, Inventory } from '@anchi/protocol';
+import { checkReferences } from './inventory.ts';
 
 export const BUILDER_ID = 'builder';
 
@@ -31,6 +34,15 @@ An agent is a YAML file. Fields:
 - connectors: any of github, aws, linear (credentials injected outside the agent's cell) and
   gmail, drive, notion, slack (served by trusted services). Never put tokens anywhere. Grant
   only what the job needs.
+- skills: ids of installed skills the agent can use (optional), e.g. [code-review]. Each turn
+  starts with an <anchi-inventory> block listing the installed skills, connectors (and whether
+  they are connected), directories under ~/AnchiWorkspaces, agents and images. Propose only
+  what it lists; if something is missing, tell the user how to add it instead.
+- triggers: start tasks without the user (optional): { schedule: '0 9 * * 1-5', text: ... }
+  (cron, local time), or { poll: { type: linear-issues, team?, label?, state? } or
+  { type: github-issues, query: 'repo:o/r is:issue is:open label:agent' }, text: ...,
+  every?: minutes } where text may use {title}, {url} and {id}. Outside content then reaches
+  the agent: prefer approvals for its writes.
 - delegates: ids of agents this agent may hand tasks to (optional).
 - approvals: per connector, ask to hold its writes for the user's approval (optional), e.g.
   { github: ask }.
@@ -135,13 +147,21 @@ function read(file: string): string {
 
 const MAX_YAML = 100_000;
 
-/** Validates builder output against the schemas; returns a proposal with errors listed. */
+/** What proposals are checked against: installed skills, agents, connectors, directories. */
+export interface ProposalRefs {
+  inventory: Pick<Inventory, 'skills' | 'connectors' | 'agents'>;
+  workspaceRoot: string;
+}
+
+/** Validates builder output against the schemas and what exists; nothing is written. */
 export function makeProposal(
   layout: HomeLayout,
   blocks: ParsedBlocks,
+  refs?: ProposalRefs,
 ): BuilderProposal | undefined {
   if (!blocks.agent) return undefined;
   const errors: string[] = [];
+  const warnings: string[] = [];
   const { id, yaml } = blocks.agent;
   if (id === BUILDER_ID) errors.push(`"${BUILDER_ID}" is reserved`);
   if (yaml.length > MAX_YAML || (blocks.image?.yaml.length ?? 0) > MAX_YAML) {
@@ -159,6 +179,11 @@ export function makeProposal(
       prompt: layer.prompt ?? {},
     });
     if (!resolved.success) errors.push(resolved.error.issues.map((i) => i.message).join('; '));
+    else if (refs) {
+      const found = checkReferences(resolved.data, refs.inventory, refs.workspaceRoot);
+      errors.push(...found.errors);
+      warnings.push(...found.warnings);
+    }
     const image = layer.image;
     if (
       image &&
@@ -192,6 +217,7 @@ export function makeProposal(
       ? lineDiff(read(imageFile(layout, blocks.image.id)), blocks.image.yaml)
       : '',
     errors,
+    warnings,
   };
 }
 
@@ -206,10 +232,13 @@ function writeAtomic(file: string, text: string) {
 export class Proposals {
   private items = new Map<string, { proposal: BuilderProposal; imageId?: string }>();
 
-  constructor(private layout: HomeLayout) {}
+  constructor(
+    private layout: HomeLayout,
+    private refs?: () => ProposalRefs,
+  ) {}
 
   add(blocks: ParsedBlocks): BuilderProposal | undefined {
-    const proposal = makeProposal(this.layout, blocks);
+    const proposal = makeProposal(this.layout, blocks, this.refs?.());
     if (!proposal) return undefined;
     this.items.set(proposal.id, { proposal, imageId: blocks.image?.id });
     return proposal;
@@ -225,18 +254,43 @@ export class Proposals {
     this.items.delete(id);
   }
 
+  /** The proposal with a settings patch applied, checked again; it keeps its id. */
+  revise(id: string, patch: AgentPatch): BuilderProposal {
+    const item = this.items.get(id);
+    if (!item) throw new Error(`unknown proposal "${id}"`);
+    const yaml = patchAgentYaml(item.proposal.agentYaml, patch);
+    const revised = makeProposal(
+      this.layout,
+      {
+        agent: { id: item.proposal.agentId, yaml },
+        image:
+          item.imageId && item.proposal.imageYaml
+            ? { id: item.imageId, yaml: item.proposal.imageYaml }
+            : undefined,
+      },
+      this.refs?.(),
+    )!;
+    const proposal = { ...revised, id };
+    this.items.set(id, { ...item, proposal });
+    return proposal;
+  }
+
   /** Writes the proposal; returns the image to prebuild, if any. */
   apply(id: string): { agentId: string; imageId?: string } {
     const item = this.items.get(id);
     if (!item) throw new Error(`unknown proposal "${id}"`);
-    // Validate again against the files as they are now.
-    const fresh = makeProposal(this.layout, {
-      agent: { id: item.proposal.agentId, yaml: item.proposal.agentYaml },
-      image:
-        item.imageId && item.proposal.imageYaml
-          ? { id: item.imageId, yaml: item.proposal.imageYaml }
-          : undefined,
-    })!;
+    // Validate again against the files and what exists now.
+    const fresh = makeProposal(
+      this.layout,
+      {
+        agent: { id: item.proposal.agentId, yaml: item.proposal.agentYaml },
+        image:
+          item.imageId && item.proposal.imageYaml
+            ? { id: item.imageId, yaml: item.proposal.imageYaml }
+            : undefined,
+      },
+      this.refs?.(),
+    )!;
     if (fresh.errors.length) throw new Error(`proposal is invalid: ${fresh.errors.join('; ')}`);
     if (item.imageId && item.proposal.imageYaml) {
       writeAtomic(imageFile(this.layout, item.imageId), item.proposal.imageYaml);
