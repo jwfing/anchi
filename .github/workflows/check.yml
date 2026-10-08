@@ -33,7 +33,7 @@ jobs:
       - name: shellcheck
         if: runner.os == 'Linux'
         run: shellcheck -S warning -x scripts/*.sh guest/*.sh guest/cell-run
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: anchi/package.json
       - run: pnpm --dir anchi install --frozen-lockfile
