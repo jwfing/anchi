@@ -118,9 +118,9 @@ def main():
     tasks = real_tasks()
     if tasks and os.environ.get('ANCHI_CHECK_WITH_TASKS') != '1':
         raise SystemExit(
-            f'Tasks are running in the VM: {" ".join(tasks)}. These checks would end them; run them '
-            'again once the tasks finish (scripts/anchi tasks). ANCHI_CHECK_WITH_TASKS=1 runs anyway, '
-            'leaving those cells alone.'
+            f'Task cells are live in the VM: {" ".join(tasks)}. These checks could end them; run them '
+            'again once the tasks finish and their cells close (10 minutes after the last turn). '
+            'ANCHI_CHECK_WITH_TASKS=1 runs anyway, leaving those cells alone.'
         )
     subprocess.run(['anchi-cell', 'reap', *tasks], capture_output=True)
     t0 = time.time()

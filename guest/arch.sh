@@ -42,9 +42,10 @@ except ValueError:
 print(" ".join(c["task"] for c in cells if c.get("active") and not c["task"].startswith("chk-")))
 ' || true)
   if [[ -n $running ]]; then
-    echo "Tasks are running in the VM: $running" >&2
-    echo "Installing restarts the egress proxy and would end them. Wait for them to finish (scripts/anchi tasks)," >&2
-    echo "or cancel them, then run this again. ANCHI_FORCE_RESTART=1 installs anyway." >&2
+    echo "Task cells are live in the VM: $running" >&2
+    echo "Installing restarts the egress proxy, which cuts them off the network. A cell stays up for 10 minutes" >&2
+    echo "after its task's last turn; wait for running tasks to finish and idle cells to close (scripts/anchi tasks)," >&2
+    echo "or cancel the tasks, then run this again. ANCHI_FORCE_RESTART=1 installs anyway." >&2
     return 1
   fi
 }
