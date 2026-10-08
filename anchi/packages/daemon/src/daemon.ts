@@ -549,6 +549,7 @@ export class Daemon {
     },
     'tasks.send': ({ taskId: id, text }) =>
       this.hub.sendTask(taskId(id), str(text, 'text', 200_000)),
+    'tasks.retry': ({ taskId: id, fresh }) => this.hub.retryTask(taskId(id), fresh === true),
     'tasks.cancel': ({ taskId: id }) => {
       this.hub.cancelTask(taskId(id));
       return null;

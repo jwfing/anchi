@@ -29,6 +29,9 @@ else:
     print('unknown')
 PY
 )
+if limactl list --format '{{.Name}} {{.Status}}' | grep -Fqx "$vm_name Running"; then
+  refuse_if_tasks_running "$vm_name"
+fi
 if limactl list --format '{{.Name}}' | grep -Fqx "$vm_name"; then
   limactl start --tty=false "$vm_name"
 else

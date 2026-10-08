@@ -27,3 +27,25 @@ host_vm_type() {
       ;;
   esac
 }
+# Installing restarts the egress proxy, which cuts every running cell off the network and so
+# ends its task. Refuse while task cells run (live check cells, `chk-*`, do not count), unless
+# ANCHI_FORCE_RESTART=1. A VM that is not running has no cells.
+refuse_if_tasks_running() {
+  local vm=$1 running
+  [[ ${ANCHI_FORCE_RESTART:-} == 1 ]] && return 0
+  running=$(limactl shell "$vm" -- sudo -n anchi-cell list 2>/dev/null | python3 -c '
+import json, sys
+try:
+    cells = json.load(sys.stdin).get("cells", [])
+except ValueError:
+    cells = []
+print(" ".join(c["task"] for c in cells if c.get("active") and not c["task"].startswith("chk-")))
+' || true)
+  if [[ -n $running ]]; then
+    echo "Task cells are live in the VM: $running" >&2
+    echo "Installing restarts the egress proxy, which cuts them off the network. A cell stays up for 10 minutes" >&2
+    echo "after its task's last turn; wait for running tasks to finish and idle cells to close (scripts/anchi tasks)," >&2
+    echo "or cancel the tasks, then run this again. ANCHI_FORCE_RESTART=1 installs anyway." >&2
+    return 1
+  fi
+}

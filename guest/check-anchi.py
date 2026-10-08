@@ -101,10 +101,28 @@ def audit_since(ts, task):
     return rows
 
 
+def real_tasks():
+    """Cells of real tasks: everything but the `chk-*` cells these checks start."""
+    out = subprocess.run(['anchi-cell', 'list'], capture_output=True, text=True).stdout
+    try:
+        cells = json.loads(out).get('cells', [])
+    except ValueError:
+        cells = []
+    return sorted(c['task'] for c in cells if not c['task'].startswith('chk-'))
+
+
 def main():
     if os.getuid() != 0:
         raise SystemExit('run as guest root')
-    subprocess.run(['anchi-cell', 'reap'], capture_output=True)
+    # These checks start, kill and reap cells; a real task's cell must never be among them.
+    tasks = real_tasks()
+    if tasks and os.environ.get('ANCHI_CHECK_WITH_TASKS') != '1':
+        raise SystemExit(
+            f'Task cells are live in the VM: {" ".join(tasks)}. These checks could end them; run them '
+            'again once the tasks finish and their cells close (10 minutes after the last turn). '
+            'ANCHI_CHECK_WITH_TASKS=1 runs anyway, leaving those cells alone.'
+        )
+    subprocess.run(['anchi-cell', 'reap', *tasks], capture_output=True)
     t0 = time.time()
 
     # ── M1: concurrency and isolation ──
@@ -325,7 +343,7 @@ def main():
     proc.send_signal(signal.SIGKILL)
     proc.wait()
     time.sleep(0.5)
-    subprocess.run(['anchi-cell', 'reap'], capture_output=True)
+    subprocess.run(['anchi-cell', 'reap', *real_tasks()], capture_output=True)
     mounts = [line for line in Path('/proc/mounts').read_text().splitlines() if str(CELLS) in line]
     active = subprocess.run(['systemctl', 'is-active', '--quiet', 'anchi-cell-chk-r.service']).returncode == 0
     check(

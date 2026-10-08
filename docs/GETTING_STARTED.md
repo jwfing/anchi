@@ -32,6 +32,7 @@ Model calls consume your subscription quota. Anything an agent reads can reach t
 ## Recovery
 
 - **Installation failed:** check networking and disk space, then run `scripts/anchi setup install` again. Completed steps are reused; workspaces and credentials are kept.
+- **Installation refused because tasks are running:** installing restarts the egress proxy, which would end them. Wait for them (`scripts/anchi tasks`) or cancel them, then run it again; `ANCHI_FORCE_RESTART=1` installs anyway. `make verify-anchi` refuses for the same reason (`ANCHI_CHECK_WITH_TASKS=1` runs it beside them, leaving their cells alone).
 - **Interrupted installation:** run it again. Installer-marked incomplete root filesystems are kept as `rootfs-incomplete-*` before rebuilding; unmarked ones are never modified automatically.
 - **Stopped VM:** `scripts/anchi setup vm`, then `scripts/anchi setup vault unlock`.
 - **Vault cannot unlock:** restore the original master key.

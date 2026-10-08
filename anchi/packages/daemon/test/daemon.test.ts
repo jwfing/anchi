@@ -288,6 +288,41 @@ describe('daemon tasks', () => {
     expect(done.result).toMatch(/turn timed out/);
   });
 
+  it('runs a failed task again, continuing its session or starting over', async () => {
+    transport.mode = 'bad-frame';
+    const { client } = await start();
+    const task = await client.call('tasks.create', { agentId: 'dev', text: 'fix issue 7' });
+    const failed = await client.call('tasks.wait', { taskId: task.id });
+    expect(failed.status).toBe('failed');
+    await expect(
+      client.call('tasks.retry', {
+        taskId: (await client.call('tasks.create', { agentId: 'dev', text: 'y' })).id,
+      }),
+    ).rejects.toThrow(/only failed or cancelled tasks/);
+
+    transport.mode = 'ok';
+    const resumed = await client.call('tasks.retry', { taskId: task.id });
+    expect(resumed.id).toBe(task.id);
+    const after = await client.call('tasks.wait', { taskId: task.id });
+    expect(after.status).toBe('done');
+    expect(after.result).toMatch(
+      /Your previous turn ended before it finished \(.+\)\. Continue where you stopped/,
+    );
+
+    transport.mode = 'bad-frame';
+    const again = await client.call('tasks.create', { agentId: 'dev', text: 'fix issue 8' });
+    await client.call('tasks.wait', { taskId: again.id });
+    transport.mode = 'ok';
+    const fresh = await client.call('tasks.retry', { taskId: again.id, fresh: true });
+    expect(fresh.id).not.toBe(again.id);
+    expect(fresh.title).toBe('fix issue 8');
+    expect((await client.call('tasks.wait', { taskId: fresh.id })).result).toMatch(/fix issue 8/);
+    const notes = (await client.call('tasks.events', { taskId: again.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notes).toContain(`↻ started again as ${fresh.id}`);
+  });
+
   it('cancels a running task', async () => {
     transport.mode = 'slow';
     const { client, daemon } = await start();

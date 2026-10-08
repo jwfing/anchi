@@ -5,6 +5,11 @@ set -euo pipefail
 vm_name=${ANCHI_INSTALL_VM:-secure-vm}
 [[ "$vm_name" =~ ^secure-vm(-[a-z0-9-]+)?$ ]] || { echo "Invalid VM name" >&2; exit 1; }
 cd "$(dirname "$0")/.."
+# shellcheck source=guest/arch.sh
+source guest/arch.sh
+if limactl list --format '{{.Name}} {{.Status}}' 2>/dev/null | grep -Fqx "$vm_name Running"; then
+  refuse_if_tasks_running "$vm_name"
+fi
 runner=anchi/packages/cell-runner/dist
 if [[ ! -f $runner/mcp.mjs || ${ANCHI_REBUNDLE:-1} == 1 ]]; then
   command -v pnpm >/dev/null || { echo 'pnpm is required to bundle the cell runner' >&2; exit 1; }

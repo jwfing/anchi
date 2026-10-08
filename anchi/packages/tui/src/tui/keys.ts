@@ -48,6 +48,7 @@ export const ACTIONS = {
   'task:new': { title: 'New task (a new session) for this agent', contexts: ['global'] },
   'task:cancel': { title: 'Cancel the running task', contexts: ['global'] },
   'task:continue': { title: "Continue the task in its agent's chat", contexts: ['task'] },
+  'task:retry': { title: 'Run a failed or cancelled task again', contexts: ['global'] },
   'task:delete': { title: 'Delete the task and the tasks it delegated', contexts: ['task'] },
   'approvals:open': { title: 'Review a write waiting for approval', contexts: ['global'] },
   'agent:delete': {
@@ -132,6 +133,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     '<leader> /': 'tasks:filter',
     '<leader> n': 'task:new',
     '<leader> c': 'task:cancel',
+    '<leader> r': 'task:retry',
     '<leader> a': 'approvals:open',
     '<leader> s': 'agent:settings',
     '<leader> D': 'agent:delete',
@@ -178,6 +180,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     ...BACK,
     enter: 'task:continue',
     c: 'task:cancel',
+    R: 'task:retry',
     D: 'task:delete',
     '[': 'tasks:pagePrev',
     ']': 'tasks:pageNext',

@@ -335,6 +335,11 @@ export interface Methods {
   'tasks.get': [{ taskId: string }, TaskRow];
   /** Follow-up turn in the same task (and cell, while it is alive). */
   'tasks.send': [{ taskId: string; text: string }, TaskRow];
+  /**
+   * Runs a failed or cancelled task again: a follow-up that continues its session (keeping its
+   * work), or with `fresh` a new task with the original request. Returns the task that runs.
+   */
+  'tasks.retry': [{ taskId: string; fresh?: boolean }, TaskRow];
   'tasks.cancel': [{ taskId: string }, null];
   'tasks.events': [{ taskId: string; afterSeq?: number }, StoredEvent[]];
   /**
