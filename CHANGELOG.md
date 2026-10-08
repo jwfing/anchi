@@ -14,6 +14,7 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 - Delegation between agents, approvals of held writes, schedule and polling triggers, skills, task search, trees, deletion and retention.
 - S3 `aws-chunked` uploads, signed or unsigned, re-signed by the proxy, also when streamed. S3 multi-object deletes, expiry rules, bucket policies and ACLs always ask.
 - Linux hosts (experimental): notifications through `notify-send`, Google sign-in through `xdg-open`, `daemon install` as a systemd user unit, `/dev/kvm` and QEMU checks before installing.
+- TUI key bindings: every action through the leader key Ctrl+X with a panel of the keys that follow, plain keys in views without text input, a command palette (^X Space), shell line editing in the chat input, and `~/.anchi/keybindings.json` (`anchi keys`). Ctrl+X alone, Ctrl+A, Ctrl+E, Ctrl+T and Ctrl+O no longer act as before: new task is ^X n, approvals ^X a, the editor Ctrl+G or ^X e, tool calls ^X t, the builder proposal ^X o.
 - Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
 
 ### Fixed

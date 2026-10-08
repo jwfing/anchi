@@ -12,7 +12,7 @@ export interface Line {
 }
 
 export interface TranscriptOptions {
-  /** Show every tool call with its output (^V). */
+  /** Show every tool call with its output (transcript:verbose). */
   verbose?: boolean;
   /** Ids of tool-call groups the user expanded. */
   expanded?: ReadonlySet<string>;

@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
 import { App, filterTasks } from '../src/tui/App.tsx';
+import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
 import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
 
@@ -228,7 +229,7 @@ describe('App', () => {
     ui.unmount();
   });
 
-  it('sends a follow-up to the shown task and starts a new task after ^X', async () => {
+  it('sends a follow-up to the shown task and starts a new task after ^X n', async () => {
     const { client, calls } = fakeClient();
     const ui = render(
       <App
@@ -246,7 +247,10 @@ describe('App', () => {
       taskId: 't-a000000001',
       text: 'more please',
     });
-    ui.stdin.write('\u0018');
+    ui.stdin.write('\u0018'); // leader…
+    await tick();
+    expect(ui.lastFrame()).toContain('New task (a new session) for this agent'); // which-key
+    ui.stdin.write('n'); // …n: new task
     await tick();
     ui.stdin.write('new job\r');
     await tick();
@@ -307,7 +311,7 @@ describe('App', () => {
     ui.unmount();
   });
 
-  it('expands tool calls on click and with ^T', async () => {
+  it('expands tool calls on click and with ^X t', async () => {
     const events = {
       't-a000000001': [
         {
@@ -340,7 +344,9 @@ describe('App', () => {
     await tick();
     expect(ui.lastFrame()).toContain('▾ 2 tool calls');
     expect(ui.lastFrame()).toContain('▸ shell ls');
-    ui.stdin.write('\u0014'); // ^T collapses all
+    ui.stdin.write('\u0018'); // ^X t collapses all
+    await tick();
+    ui.stdin.write('t');
     await tick();
     expect(ui.lastFrame()).not.toContain('▾');
     ui.unmount();
@@ -436,10 +442,10 @@ describe('App', () => {
     await tick();
     ui.stdin.write('?');
     await tick();
-    expect(ui.lastFrame()).toContain('switch between the sidebar and the main pane');
+    expect(ui.lastFrame()).toContain('Switch between the sidebar and the main pane');
     ui.stdin.write('\u001b');
     await tick();
-    expect(ui.lastFrame()).not.toContain('Esc or ? to close');
+    expect(ui.lastFrame()).not.toContain('Esc or ? close');
     ui.unmount();
   });
 
@@ -586,7 +592,9 @@ describe('App', () => {
     ui.stdin.write('\u001b'); // to the sidebar
     await tick();
     ui.stdin.write('?');
-    expect(await frameWith(ui, 'Tab / Shift+Tab')).toContain('Tab / Shift+Tab');
+    expect(await frameWith(ui, 'Switch between the sidebar')).toContain(
+      'Switch between the sidebar',
+    );
     emit('approvals', { approvals: [{ ...approval, id: 'b'.repeat(16) }] });
     await tick();
     expect(ui.lastFrame()).not.toContain('Approve a write by @dev?');
@@ -601,10 +609,12 @@ describe('App', () => {
     expect(frame).toContain('git push: refs/heads/fix');
     expect(frame).not.toContain(']52;');
     ui.stdin.write('\u001b'); // later
-    expect(await frameWith(ui, '1 write waiting for approval (^A)')).toContain(
-      '1 write waiting for approval (^A)',
+    expect(await frameWith(ui, '1 write waiting for approval (^X a)')).toContain(
+      '1 write waiting for approval (^X a)',
     );
-    ui.stdin.write('\u0001'); // ^A
+    ui.stdin.write('\u0018'); // ^X a
+    await tick();
+    ui.stdin.write('a');
     await frameWith(ui, 'Approve a write by @dev?');
     ui.stdin.write('n');
     await tick();
@@ -698,5 +708,140 @@ describe('CLI renderer', () => {
     expect(s.text().replace(/\u001b\[[0-9;]*m/g, '')).toMatch(
       /2 tool calls · last: shell false\n$/,
     );
+  });
+});
+
+describe('key bindings in the TUI', () => {
+  const LEADER = '\u0018'; // ^X
+
+  it('edits the draft at the cursor with standard line-editing keys', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('helo world');
+    await tick();
+    ui.stdin.write('\u0001'); // ^A: start of the line
+    await tick();
+    for (const _ of [1, 2, 3]) ui.stdin.write(`${ESC}[C`); // →
+    await tick();
+    ui.stdin.write('l');
+    await tick();
+    ui.stdin.write('\u0005'); // ^E: end
+    await tick();
+    ui.stdin.write('\u0017'); // ^W: delete the word before
+    await tick();
+    ui.stdin.write('there\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: 'hello there',
+    });
+    ui.unmount();
+  });
+
+  it('runs commands from the palette, filtered by what you type', async () => {
+    const { client } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write(' ');
+    expect(await frameWith(ui, 'Commands · Agent chat')).toContain('Compose in $EDITOR');
+    ui.stdin.write('new task');
+    await tick();
+    const frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('New task (a new session) for this agent');
+    expect(frame).toContain('^X n');
+    expect(frame).not.toContain('Compose in $EDITOR');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'the next message starts a new task')).toContain('· new task');
+    ui.unmount();
+  });
+
+  it('shows the keys of the focused view, with line editing in the chat', async () => {
+    const { client } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('?');
+    const frame = await frameWith(ui, 'Agent chat');
+    expect(frame).toContain('Compose in $EDITOR');
+    expect(frame).toContain('Everywhere (leader ^X');
+    ui.unmount();
+  });
+
+  it('handles a chord that arrives in one read', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(`${LEADER}nfre\u0001x\u0005sh\r`); // ^A x ^E within the same read
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: 'xfresh',
+    });
+    ui.unmount();
+  });
+
+  it('cancels a chord with Esc and names a chord that is not bound', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    expect(await frameWith(ui, '^X …')).toContain('Next key');
+    ui.stdin.write(ESC);
+    await tick();
+    expect(ui.lastFrame()).not.toContain('Next key');
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('z');
+    expect(await frameWith(ui, 'is not bound')).toContain('^X z is not bound here');
+    // Neither key reached the input.
+    ui.stdin.write('ok\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({ agentId: 'dev', text: 'ok' });
+    ui.unmount();
+  });
+
+  it('follows a configured leader and bindings', async () => {
+    const { client, calls } = fakeClient();
+    const { keymap } = buildKeyMap({
+      leader: 'ctrl+g',
+      bindings: [{ context: 'chat', bindings: { 'alt+n': 'task:new' } }],
+    });
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+        keymap={keymap}
+        keyWarnings={['one']}
+      />,
+    );
+    expect(await frameWith(ui, 'keybindings.json: 1 problem')).toContain('run `anchi keys`');
+    ui.stdin.write(`${ESC}n`); // Alt+N
+    await tick();
+    ui.stdin.write('fresh\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: 'fresh',
+    });
+    ui.stdin.write('\u0007'); // ^G: the leader now, no longer the editor key
+    expect(await frameWith(ui, 'Next key')).toContain('^G …');
+    ui.unmount();
   });
 });

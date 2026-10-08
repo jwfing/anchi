@@ -8,6 +8,7 @@ Start with the [project overview](../README.md), [Getting started](GETTING_START
 |---|---|
 | [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault and connect a runtime |
 | [Agent team](AGENT_TEAM.md) | Connect accounts, create agents, delegation, approvals, triggers, skills and tasks |
+| [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, and Slack operations, scopes, and authorization |
 | [Gmail setup](GMAIL_SETUP.md) | Create the Google OAuth client for Gmail and Drive |
 

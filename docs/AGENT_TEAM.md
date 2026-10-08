@@ -140,12 +140,13 @@ A writable directory lets an agent leave code that your own tools later run. Anc
 
 In the TUI, select an agent and type a task. **Enter** sends it.
 
-- Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft). **?** lists every key.
+- Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft).
+- Every action is also reachable through the leader key **Ctrl+X** and one more key; a panel shows what can follow. **^X Space** opens the command palette and **^X ?** lists the keys of the current view. Keys can be changed in `~/.anchi/keybindings.json`: see [Key bindings](KEYBINDINGS.md).
 - A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the Codex session in a new cell.
-- **Ctrl+X** starts a new task. **Esc** cancels the running turn.
-- **Ctrl+E** composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
+- **^X n** starts a new task, which is also a new Codex or Claude session; **Enter** otherwise sends a follow-up to the task shown. **Esc** cancels the running turn.
+- The input edits like a shell line (**Ctrl+A**, **Ctrl+E**, **Ctrl+W**, **Ctrl+U**, arrows). **Ctrl+G** (or **^X e**) composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
 - The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript; **Enter** continues it in its agent's chat, **c** cancels it, **[** and **]** turn the page. Clicking works too.
-- Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **Ctrl+T**) expands the list.
+- Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **^X t**) expands the list.
 
 The CLI does the same:
 

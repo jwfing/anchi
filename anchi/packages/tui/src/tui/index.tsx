@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink';
-import { App } from './App.tsx';
+import { App, type AppProps } from './App.tsx';
+import { loadKeyMap, watchKeyMap } from './keyconfig.ts';
 import { captureMouse, MOUSE_OFF, MOUSE_ON, type MouseEvent } from './mouse.ts';
 
 /** Composes a message in $EDITOR: the fallback when a terminal's IME input misbehaves. */
@@ -24,8 +25,11 @@ export function composeInEditor(draft: string): string {
   }
 }
 
-/** Full-screen client. Quitting leaves the daemon and running tasks alive. */
-export async function runTui(client: DaemonClient): Promise<void> {
+/**
+ * Full-screen client. Quitting leaves the daemon and running tasks alive. Key bindings come from
+ * `keysFile` and follow its changes while the client runs.
+ */
+export async function runTui(client: DaemonClient, keysFile?: string): Promise<void> {
   const [agents, tasks] = await Promise.all([
     client.call('agents.list'),
     client.call('tasks.list', { limit: 500 }),
@@ -34,7 +38,7 @@ export async function runTui(client: DaemonClient): Promise<void> {
   const releaseMouse = process.stdin.isTTY
     ? captureMouse(process.stdin, process.stdout, (e) => mouseHandler?.(e))
     : () => {};
-  const instance = render(
+  const app = (keys: Pick<AppProps, 'keymap' | 'keyWarnings'>) => (
     <App
       client={client}
       initialAgents={agents}
@@ -43,12 +47,26 @@ export async function runTui(client: DaemonClient): Promise<void> {
         mouseHandler = h;
       }}
       compose={composeInEditor}
-    />,
-    { alternateScreen: true, exitOnCtrlC: false, patchConsole: true },
+      keymap={keys.keymap}
+      keyWarnings={keys.keyWarnings}
+    />
   );
+  const load = (r: ReturnType<typeof loadKeyMap>) => ({
+    keymap: r.keymap,
+    keyWarnings: r.warnings,
+  });
+  const instance = render(app(keysFile ? load(loadKeyMap(keysFile)) : {}), {
+    alternateScreen: true,
+    exitOnCtrlC: false,
+    patchConsole: true,
+  });
+  const stopWatching = keysFile
+    ? watchKeyMap(keysFile, (r) => instance.rerender(app(load(r))))
+    : () => {};
   try {
     await instance.waitUntilExit();
   } finally {
+    stopWatching();
     releaseMouse();
     client.close();
   }
