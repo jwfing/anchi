@@ -36,6 +36,7 @@ import {
   type TaskStatus,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
+import { summarizeAudit } from './audit.ts';
 import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
 import {
@@ -549,6 +550,16 @@ export class Daemon {
     },
     'tasks.send': ({ taskId: id, text }) =>
       this.hub.sendTask(taskId(id), str(text, 'text', 200_000)),
+    'tasks.audit': async ({ taskId: id }) => {
+      const task = this.hub.getTask(taskId(id));
+      const scan = this.store
+        .events(task.id)
+        .map((e) => e.event)
+        .filter((e) => e.type === 'notice' && e.text.startsWith('credential scan'))
+        .map((e) => (e as { text: string }).text)
+        .at(-1);
+      return summarizeAudit(task.id, await this.guest.audit(task.id), scan ?? null);
+    },
     'tasks.retry': ({ taskId: id, fresh }) => this.hub.retryTask(taskId(id), fresh === true),
     'tasks.cancel': ({ taskId: id }) => {
       this.hub.cancelTask(taskId(id));
@@ -614,6 +625,34 @@ export class Daemon {
     'approvals.list': () => this.approvals.list(),
     'triggers.list': () => this.triggers.list(),
     'skills.list': () => this.skills.list(),
+    'usage.quota': async () => {
+      const runtimes: Record<string, string> = { codex: 'codex', anthropic: 'claude-code' };
+      return Object.entries(await this.guest.quota()).map(([rule, q]) => ({
+        runtime: runtimes[rule] ?? rule,
+        ts: Math.round(q.ts * 1000),
+        status: q.status,
+        headers: q.headers ?? {},
+        ...(q.windows
+          ? {
+              plan: q.plan ?? null,
+              limited: q.limited === true,
+              windows: q.windows.map((w) => ({
+                name: w.name,
+                usedPercent: w.used_percent,
+                windowMinutes: w.window_minutes,
+                resetAt: typeof w.reset_at === 'number' ? w.reset_at * 1000 : null,
+              })),
+            }
+          : {}),
+      }));
+    },
+    'usage.summary': ({ since, by }) => {
+      const group = by ?? 'agent';
+      if (!['agent', 'runtime', 'model', 'day'].includes(group))
+        throw new Error('unknown grouping');
+      const from = typeof since === 'number' && since >= 0 ? since : Date.now() - 30 * 86_400_000;
+      return this.store.usageSummary(from, group);
+    },
     'services.setToken': async ({ id, token }) => {
       await this.services.setToken(serviceId(id), str(token, 'token', 500).trim());
       return null;

@@ -18,6 +18,22 @@ import { sanitizeLine } from './sanitize.ts';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
+import { accessLines, GROUPS, type ReportLine, usageLines } from './tui/reports.ts';
+import type { UsageGroup } from '@anchi/protocol';
+
+/** Prints report lines, coloured on a terminal. */
+function printReport(lines: ReportLine[]) {
+  const colors = new Set(['red', 'yellow', 'green', 'gray']);
+  for (const l of lines) {
+    let text = l.text;
+    if (process.stdout.isTTY) {
+      if (l.bold) text = styleText('bold', text);
+      if (l.dim) text = styleText('dim', text);
+      if (l.color && colors.has(l.color)) text = styleText(l.color as 'red', text);
+    }
+    console.log(text);
+  }
+}
 
 const layout = homeLayout();
 const keysFile = join(layout.root, 'keybindings.json');
@@ -172,6 +188,51 @@ program
       const done = await follow(client, task, Boolean(opts.verbose));
       console.log(taskLine(done));
       if (done.status !== 'done') process.exitCode = 1;
+    }),
+  );
+
+program
+  .command('audit <task>')
+  .description(
+    "A task's external access: hosts reached, credentials injected, refusals (egress audit log)",
+  )
+  .option('--json', 'the full report as JSON')
+  .action((taskId: string, opts: { json?: boolean }) =>
+    withClient(async (client) => {
+      const a = await client.call('tasks.audit', { taskId });
+      if (opts.json) return console.log(JSON.stringify(a, null, 2));
+      printReport(accessLines(a, process.stdout.columns || 120));
+    }),
+  );
+
+program
+  .command('usage')
+  .description('Token use by agent, model, runtime or day, and the subscription limits last seen')
+  .option('--since <age>', 'period, e.g. 24h or 7d', '7d')
+  .option('--by <group>', 'agent, model, runtime or day', 'agent')
+  .option('--json', 'totals and limits as JSON')
+  .action((opts: { since: string; by: string; json?: boolean }) =>
+    withClient(async (client) => {
+      const age = /^(\d+)([hd])$/.exec(opts.since);
+      if (!age) fail('--since takes a number of hours or days, such as 24h or 7d');
+      if (!GROUPS.includes(opts.by as UsageGroup)) fail('--by takes agent, model, runtime or day');
+      const ms = Number(age![1]) * (age![2] === 'h' ? 3_600_000 : 86_400_000);
+      const by = opts.by as UsageGroup;
+      const [rows, quota] = await Promise.all([
+        client.call('usage.summary', { since: Date.now() - ms, by }),
+        client.call('usage.quota').catch(() => []),
+      ]);
+      if (opts.json)
+        return console.log(JSON.stringify({ since: opts.since, by, rows, quota }, null, 2));
+      const lines = usageLines(rows, quota, 0, by, process.stdout.columns || 120);
+      // The period label of the screen does not fit a free --since: name it as asked.
+      printReport(
+        lines.map((l) =>
+          l.text.startsWith('Tokens, ')
+            ? { ...l, text: `Tokens, last ${opts.since}, by ${by}` }
+            : l,
+        ),
+      );
     }),
   );
 

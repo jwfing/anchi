@@ -15,6 +15,7 @@ export const CONTEXTS = [
   'runtimes',
   'skills',
   'connectors',
+  'usage',
 ] as const;
 export type Context = (typeof CONTEXTS)[number];
 
@@ -32,7 +33,7 @@ export const ACTIONS = {
   'focus:main': { title: 'Open the selected item', contexts: ['sidebar'] },
   'focus:sidebar': {
     title: 'Back to the sidebar',
-    contexts: ['task', 'runtimes', 'skills', 'connectors'],
+    contexts: ['task', 'runtimes', 'skills', 'connectors', 'usage'],
   },
   'nav:next': { title: 'Next sidebar item', contexts: ['global'] },
   'nav:prev': { title: 'Previous sidebar item', contexts: ['global'] },
@@ -49,6 +50,13 @@ export const ACTIONS = {
   'task:cancel': { title: 'Cancel the running task', contexts: ['global'] },
   'task:continue': { title: "Continue the task in its agent's chat", contexts: ['task'] },
   'task:retry': { title: 'Run a failed or cancelled task again', contexts: ['global'] },
+  'task:access': {
+    title: 'External access of the task: hosts, credentials injected, refusals (audit log)',
+    contexts: ['global'],
+  },
+  'usage:period': { title: 'Usage: next period (24 hours, 7 days, 30 days)', contexts: ['usage'] },
+  'usage:group': { title: 'Usage: group by agent, model, runtime or day', contexts: ['usage'] },
+  'usage:refresh': { title: 'Usage: refresh', contexts: ['usage'] },
   'task:delete': { title: 'Delete the task and the tasks it delegated', contexts: ['task'] },
   'approvals:open': { title: 'Review a write waiting for approval', contexts: ['global'] },
   'agent:delete': {
@@ -63,8 +71,8 @@ export const ACTIONS = {
   'builder:proposal': { title: 'Reopen the pending builder proposal', contexts: ['global'] },
   'transcript:tools': { title: 'Expand or collapse tool calls', contexts: ['global'] },
   'transcript:verbose': { title: 'Verbose tool output', contexts: ['global'] },
-  'scroll:up': { title: 'Scroll up', contexts: ['chat', 'task'] },
-  'scroll:down': { title: 'Scroll down', contexts: ['chat', 'task'] },
+  'scroll:up': { title: 'Scroll up', contexts: ['chat', 'task', 'usage'] },
+  'scroll:down': { title: 'Scroll down', contexts: ['chat', 'task', 'usage'] },
   'scroll:pageUp': { title: 'Scroll up a page', contexts: ['chat', 'task'] },
   'scroll:pageDown': { title: 'Scroll down a page', contexts: ['chat', 'task'] },
   'chat:submit': { title: 'Send', contexts: ['chat'] },
@@ -134,6 +142,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     '<leader> n': 'task:new',
     '<leader> c': 'task:cancel',
     '<leader> r': 'task:retry',
+    '<leader> l': 'task:access',
     '<leader> a': 'approvals:open',
     '<leader> s': 'agent:settings',
     '<leader> D': 'agent:delete',
@@ -181,6 +190,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     enter: 'task:continue',
     c: 'task:cancel',
     R: 'task:retry',
+    a: 'task:access',
     D: 'task:delete',
     '[': 'tasks:pagePrev',
     ']': 'tasks:pageNext',
@@ -201,6 +211,17 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     i: 'setup:codex',
     c: 'setup:claude',
     r: 'setup:refresh',
+  },
+  usage: {
+    ...VIEW,
+    ...BACK,
+    p: 'usage:period',
+    b: 'usage:group',
+    r: 'usage:refresh',
+    up: 'scroll:up',
+    k: 'scroll:up',
+    down: 'scroll:down',
+    j: 'scroll:down',
   },
   skills: { ...VIEW, ...BACK, ...LIST, a: 'skills:add', d: 'skills:remove', u: 'skills:update' },
   connectors: {

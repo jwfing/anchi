@@ -297,7 +297,8 @@ describe('App', () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    // Sidebar: runtimes, skills, connectors, builder, agents, tasks; no agents, so the builder.
+    // Sidebar: runtimes, skills, connectors, usage, builder, agents, tasks; no agents, so the builder.
+    ui.stdin.write('\u0010'); // ^P → usage
     ui.stdin.write('\u0010'); // ^P → connectors
     await tick();
     expect(ui.lastFrame()).toContain('github');
@@ -384,8 +385,8 @@ describe('App', () => {
     const frame = ui.lastFrame() ?? '';
     for (const header of ['CONFIGURE', 'AGENTS', 'TASKS']) expect(frame).toContain(header);
     expect(frame).toContain('@dev fix the bug');
-    // Rows: title, CONFIGURE, 3 settings, AGENTS, builder, dev, TASKS, then the tasks.
-    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 9 });
+    // Rows: title, CONFIGURE, 4 settings, AGENTS, builder, dev, TASKS, then the tasks.
+    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 10 });
     await tick();
     expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
     expect(ui.lastFrame()).toContain('https://github.com/o/r/pull/9');
@@ -529,6 +530,7 @@ describe('App', () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
+    ui.stdin.write('\u0010'); // ^P → usage
     ui.stdin.write('\u0010'); // ^P → connectors
     await tick();
     ui.stdin.write('g');
@@ -559,7 +561,7 @@ describe('App', () => {
     const { client, calls, emit } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    for (const _ of [1, 2, 3]) ui.stdin.write('\u0010'); // ^P ×3 → runtimes
+    for (const _ of [1, 2, 3, 4]) ui.stdin.write('\u0010'); // ^P ×4 → runtimes
     await tick();
     expect(ui.lastFrame()).toContain('start VM');
     ui.stdin.write('u');
@@ -1201,6 +1203,78 @@ describe('running a failed task again', () => {
       taskId: 't-a000000001',
       fresh: true,
     });
+    ui.unmount();
+  });
+});
+
+describe('access and usage views', () => {
+  it("opens a task's external access with a, and the usage screen with its periods and groupings", async () => {
+    const audit = {
+      taskId: 't-a000000001',
+      total: 1,
+      truncated: false,
+      cells: 1,
+      registration: {
+        connectors: ['github'],
+        services: [],
+        egress: ['github.com'],
+        ask: ['github'],
+      },
+      requests: 1,
+      injected: { 'github-api': 1 },
+      credentialsSent: { placeholder: 1 },
+      hosts: [{ host: 'api.github.com', requests: 1, injected: 1, decisions: { inject: 1 } }],
+      refused: [],
+      held: [],
+      streamed: 0,
+      bridge: [],
+      scan: 'credential scan before closing the cell: clean (3 files)',
+      rows: [],
+    };
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'tasks.audit': () => audit,
+        'usage.summary': () => [],
+        'usage.quota': () => [],
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(ESC);
+    await tick();
+    ui.stdin.write('3');
+    await tick();
+    ui.stdin.write('\t');
+    expect(await frameWith(ui, 'a access')).toContain('a access');
+    ui.stdin.write('a');
+    const frame = await frameWith(ui, 'External access of t-a000000001');
+    expect(frame).toContain('1 with credentials injected by the proxy');
+    expect(frame).toContain('egress       github.com');
+    ui.stdin.write(ESC);
+    await tick();
+    ui.stdin.write('\t'); // the sidebar
+    await tick();
+    ui.stdin.write('1'); // Configure: runtimes
+    await tick();
+    for (const _ of [1, 2, 3]) ui.stdin.write('j'); // → usage
+    await tick();
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Not seen yet')).toContain('Tokens, last 7 days, by agent');
+    ui.stdin.write('p');
+    expect(await frameWith(ui, 'last 30 days')).toContain('Tokens, last 30 days, by agent');
+    ui.stdin.write('b');
+    expect(await frameWith(ui, 'by model')).toContain('Tokens, last 30 days, by model');
+    const asked = calls
+      .filter(([m]) => m === 'usage.summary')
+      .map(([, p]) => (p as { by: string }).by);
+    expect(asked).toEqual(['agent', 'agent', 'model']);
     ui.unmount();
   });
 });

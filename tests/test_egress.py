@@ -802,6 +802,115 @@ class RegistryTests(unittest.TestCase):
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertEqual([r['decision'] for r in rows], ['pass:streamed', 'held-denied', 'pass:streamed'])
 
+    def test_quota_headers_of_runtime_responses_are_kept(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.proxy_with_cell()
+
+        def response(rule, status, headers):
+            flow = NS(metadata={'anchi-quota': rule} if rule else {}, response=NS(status_code=status, headers=headers))
+            proxy.responseheaders(flow)
+
+        response(
+            'codex',
+            200,
+            {
+                'X-Codex-Primary-Used-Percent': '38',
+                'x-codex-primary-window-minutes': '300',
+                'set-cookie': 'session=secret',
+                'authorization': 'Bearer secret',
+                'x-codex-bad': 'a\nb',
+            },
+        )
+        response('anthropic', 429, {'anthropic-ratelimit-unified-status': 'rejected', 'retry-after': '120'})
+        response(None, 200, {'x-codex-primary-used-percent': '99'})  # not a runtime response
+        response('codex', 200, {'content-type': 'text/event-stream'})  # nothing new: kept as it was
+        self.assertEqual(
+            proxy.quota['codex']['headers'],
+            {'x-codex-primary-used-percent': '38', 'x-codex-primary-window-minutes': '300'},
+        )
+        self.assertEqual(
+            proxy.quota['anthropic'],
+            {
+                'ts': proxy.quota['anthropic']['ts'],
+                'status': 429,
+                'headers': {'anthropic-ratelimit-unified-status': 'rejected', 'retry-after': '120'},
+            },
+        )
+
+    def test_codex_rate_limit_messages_are_kept(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.proxy_with_cell()
+        limits = {
+            'type': 'codex.rate_limits',
+            'plan_type': 'team',
+            'rate_limits': {
+                'allowed': True,
+                'limit_reached': False,
+                'primary': {'used_percent': 40, 'window_minutes': 300, 'reset_at': 1791500157, 'extra': 'x'},
+                'secondary': {'used_percent': 76, 'window_minutes': 10080, 'reset_at': '1791995645'},
+            },
+        }
+
+        def message(content, rule='codex', from_client=False):
+            flow = NS(
+                metadata={'anchi-quota': rule} if rule else {},
+                websocket=NS(messages=[NS(from_client=from_client, content=content)]),
+            )
+            proxy.websocket_message(flow)
+
+        message(json.dumps({**limits, 'plan_type': 'other'}).encode(), rule=None)  # not a runtime stream
+        message(json.dumps({**limits, 'plan_type': 'other'}).encode(), from_client=True)
+        message(b'{"type":"response.output_text.delta","delta":"codex.rate_limits"}')
+        message(b'{"type":"codex.rate_limits", broken')
+        self.assertNotIn('codex', proxy.quota)
+        # The server puts `type` anywhere in the object.
+        message(
+            json.dumps(
+                {'plan_type': 'team', 'rate_limits': limits['rate_limits'], 'type': 'codex.rate_limits'}
+            ).encode()
+        )
+        self.assertEqual(
+            proxy.quota['codex'],
+            {
+                'ts': proxy.quota['codex']['ts'],
+                'status': 200,
+                'headers': {},
+                'plan': 'team',
+                'limited': False,
+                'windows': [
+                    {'name': 'primary', 'used_percent': 40, 'window_minutes': 300, 'reset_at': 1791500157},
+                    {'name': 'secondary', 'used_percent': 76, 'window_minutes': 10080, 'reset_at': None},
+                ],
+            },
+        )
+        limits['rate_limits']['limit_reached'] = True
+        message(json.dumps(limits).encode())
+        self.assertTrue(proxy.quota['codex']['limited'])
+
+    def test_injected_runtime_requests_are_marked_for_quota(self):
+        import time
+
+        def fetch(request):
+            if request.get('op') == 'codex_token':
+                return {'access_token': 'real', 'account_id': 'acct', 'expires_at': time.time() + 3600}
+            return GITHUB
+
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)), credentials=self.module.Credentials(fetch)
+        )
+        cell = self.module.Cell('t1', 'dev', {'codex', 'github'})
+        proxy.registry.client_cell = lambda client: cell
+        flow, _ = self.proxy_flow(
+            'POST', 'chatgpt.com', '/backend-api/codex/responses', {'authorization': 'Bearer anchi-placeholder'}, False
+        )
+        asyncio.run(proxy.request(flow))
+        self.assertEqual(flow.metadata.get('anchi-quota'), 'codex')
+        flow, _ = self.proxy_flow('GET', 'api.github.com', '/user', {'authorization': 'Bearer x'}, False)
+        asyncio.run(proxy.request(flow))
+        self.assertNotIn('anchi-quota', flow.metadata)
+
     def test_audit_never_contains_credentials(self):
         self.module.audit({'decision': 'inject', 'host': 'api.github.com'})
         text = Path(self.tmp, 'audit.jsonl').read_text()

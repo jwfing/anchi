@@ -97,12 +97,30 @@ export function* mapClaudeMessage(m: SDKMessage): Generator<RuntimeEvent> {
       }
       return;
     }
-    case 'result':
-      yield {
-        type: 'usage',
-        inputTokens: m.usage.input_tokens,
-        outputTokens: m.usage.output_tokens,
-      };
+    case 'result': {
+      // modelUsage covers subagents and internal calls too, as running totals for the session.
+      const models = Object.entries(m.modelUsage ?? {});
+      if (models.length) {
+        for (const [model, u] of models) {
+          yield {
+            type: 'usage',
+            model: model.slice(0, 100),
+            inputTokens: u.inputTokens,
+            outputTokens: u.outputTokens,
+            cachedInputTokens: u.cacheReadInputTokens,
+            cacheWriteTokens: u.cacheCreationInputTokens,
+            reasoningTokens: u.thinkingTokens,
+            costUsd: u.costUSD,
+            cumulative: true,
+          };
+        }
+      } else {
+        yield {
+          type: 'usage',
+          inputTokens: m.usage.input_tokens,
+          outputTokens: m.usage.output_tokens,
+        };
+      }
       if (m.subtype !== 'success' || m.is_error) {
         const errors = 'errors' in m && Array.isArray(m.errors) ? m.errors.join('; ') : '';
         yield {
@@ -113,6 +131,7 @@ export function* mapClaudeMessage(m: SDKMessage): Generator<RuntimeEvent> {
       }
       yield { type: 'turn.completed' };
       return;
+    }
   }
 }
 

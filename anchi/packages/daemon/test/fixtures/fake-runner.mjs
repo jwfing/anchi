@@ -58,6 +58,11 @@ rl.on('line', (line) => {
       turn: cmd.turn,
       event: { type: 'session.started', resumeId: 'thread-1' },
     });
+  // Input "usage <json list>" reports those usage events, as the runtimes do at a turn's end.
+  const usage = /^usage (.*)$/.exec(cmd.input ?? '');
+  if (usage)
+    for (const u of JSON.parse(usage[1]))
+      send({ type: 'event', turn: cmd.turn, event: { type: 'usage', ...u } });
   send({
     type: 'event',
     turn: cmd.turn,

@@ -1,6 +1,21 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import type { ConnectorId, ConnectorSecret } from '@anchi/protocol';
 
+/** What the proxy kept of a runtime's limits (snake case, seconds). */
+interface GuestQuota {
+  ts: number;
+  status: number;
+  headers?: Record<string, string>;
+  plan?: string | null;
+  limited?: boolean;
+  windows?: {
+    name: string;
+    used_percent: number | null;
+    window_minutes: number | null;
+    reset_at: number | null;
+  }[];
+}
+
 /**
  * The daemon's only path into the VM: fixed guest-root commands over `limactl shell ... sudo`.
  * Arguments are validated before they get here; secrets go on stdin, never in arguments.
@@ -220,6 +235,24 @@ export class Guest {
       skills: boolean;
       policy: string[];
     };
+  }
+
+  /** A task's rows of the egress audit log (the latest 2,000), read by guest root. */
+  async audit(
+    task: string,
+  ): Promise<{ rows: Record<string, unknown>[]; total: number; truncated: boolean }> {
+    return parse(
+      await this.transport.exec(['anchi-cell', 'audit', check(task, 'task')], '', 60_000),
+    ) as {
+      rows: Record<string, unknown>[];
+      total: number;
+      truncated: boolean;
+    };
+  }
+
+  /** The latest limits the proxy saw in the runtimes' responses, by injection rule. */
+  async quota(): Promise<Record<string, GuestQuota>> {
+    return parse(await this.transport.exec(['anchi-cell', 'quota'])) as Record<string, GuestQuota>;
   }
 
   async imageStatus(image: string, hash: string): Promise<boolean> {

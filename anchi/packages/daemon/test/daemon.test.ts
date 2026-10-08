@@ -14,8 +14,10 @@ import {
   LimaTransport,
   lineDiff,
   parseBlocks,
+  summarizeAudit,
+  auditHeadline,
 } from '../src/index.ts';
-import { extractLinks } from '../src/store.ts';
+import { extractLinks, Store } from '../src/store.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
@@ -23,6 +25,8 @@ class FakeTransport implements GuestTransport {
   mode = 'ok';
   /** The fake VM cannot be reached for agent purges. */
   purgeFails = false;
+  /** Rows the fake egress audit log holds. */
+  auditRows: Record<string, unknown>[] = [];
   starts: string[][] = [];
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
@@ -53,6 +57,28 @@ class FakeTransport implements GuestTransport {
     this.execs.push({ args, stdin });
     const ok = (v: unknown) => ({ code: 0, stdout: JSON.stringify(v), stderr: '' });
     if (args[0] === 'anchi-cell' && args[1] === 'reap') return ok({ reaped: ['t-old'] });
+    if (args[0] === 'anchi-cell' && args[1] === 'audit') {
+      return ok({
+        rows: this.auditRows.filter((r) => r.task === args[2]),
+        total: 3,
+        truncated: false,
+      });
+    }
+    if (args[0] === 'anchi-cell' && args[1] === 'quota') {
+      return ok({
+        codex: {
+          ts: 1791500000.5,
+          status: 200,
+          headers: {},
+          plan: 'team',
+          limited: false,
+          windows: [
+            { name: 'primary', used_percent: 40, window_minutes: 300, reset_at: 1791500157 },
+          ],
+        },
+        anthropic: { ts: 1791500001, status: 429, headers: { 'retry-after': '120' } },
+      });
+    }
     if (args[0] === 'anchi-cell' && args[1] === 'purge-agent') {
       if (this.purgeFails) return { code: 1, stdout: '{"error": "VM_STOPPED"}', stderr: '' };
       return ok({ agent: args[2], home: true, skills: true, policy: [`notion:${args[2]}`] });
@@ -883,6 +909,234 @@ describe('builder', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen).toEqual(['devops']);
     expect(transport.starts[0]![6]).toBe('-');
+  });
+});
+
+describe('task audit', () => {
+  const rows = (task: string) => [
+    {
+      event: 'register',
+      task,
+      agent: 'dev',
+      grants: ['codex', 'github'],
+      egress: ['github.com'],
+      ask: ['github'],
+      services: ['notion'],
+      ts: 1,
+    },
+    {
+      task,
+      agent: 'dev',
+      method: 'POST',
+      host: 'chatgpt.com',
+      path: '/backend-api/codex/responses',
+      rule: 'codex',
+      op: 'POST /backend-api/codex/responses',
+      decision: 'inject',
+      client_cred: 'placeholder',
+      ts: 2,
+    },
+    {
+      task,
+      agent: 'dev',
+      method: 'GET',
+      host: 'api.github.com',
+      path: '/repos/o/r',
+      rule: 'github-api',
+      op: 'GET /repos/o/r',
+      decision: 'inject',
+      client_cred: 'placeholder',
+      ts: 3,
+    },
+    {
+      task,
+      agent: 'dev',
+      method: 'PUT',
+      host: 'api.github.com',
+      path: '/repos/o/r/pulls/1/merge',
+      rule: 'github-api',
+      op: 'PUT /repos/o/r/pulls/1/merge',
+      decision: 'held-denied',
+      approval: 'denied',
+      risk: 'github-merge',
+      client_cred: 'placeholder',
+      ts: 4,
+    },
+    {
+      task,
+      agent: 'dev',
+      method: 'GET',
+      host: 'registry.npmjs.org',
+      path: '/left-pad',
+      rule: null,
+      op: null,
+      decision: 'pass',
+      client_cred: 'none',
+      ts: 5,
+    },
+    { decision: 'egress-denied', host: 'example.com', task, agent: 'dev', ts: 6 },
+    { event: 'service', service: 'notion', op: 'search', task, agent: 'dev', ts: 7 },
+    { event: 'service', service: 'notion', op: 'search', task, agent: 'dev', ts: 8 },
+  ];
+
+  it('summarizes what a task reached, what got credentials and what was refused', () => {
+    const a = summarizeAudit(
+      't-1',
+      { rows: rows('t-1'), total: 8, truncated: false },
+      'credential scan before closing the cell: clean (12 files)',
+    );
+    expect(a).toMatchObject({
+      cells: 1,
+      registration: {
+        connectors: ['codex', 'github'],
+        egress: ['github.com'],
+        ask: ['github'],
+        services: ['notion'],
+      },
+      requests: 4,
+      injected: { codex: 1, 'github-api': 1 },
+      credentialsSent: { placeholder: 3, none: 1 },
+      streamed: 0,
+      bridge: [{ service: 'notion', operation: 'search', calls: 2 }],
+      held: [
+        {
+          operation: 'PUT /repos/o/r/pulls/1/merge',
+          host: 'api.github.com',
+          risk: 'github-merge',
+          outcome: 'denied',
+        },
+      ],
+    });
+    expect(a.hosts.map((h) => [h.host, h.requests, h.injected])).toEqual([
+      ['api.github.com', 2, 1],
+      ['chatgpt.com', 1, 1],
+      ['registry.npmjs.org', 1, 0],
+    ]);
+    expect(a.refused.map((r) => [r.host, r.decision])).toEqual([
+      ['api.github.com', 'held-denied'],
+      ['example.com', 'egress-denied'],
+    ]);
+    expect(a.rows).toHaveLength(4);
+    expect(a.rows[0]).toMatchObject({ ts: 2000, credential: 'placeholder' });
+    expect(auditHeadline(a)).toBe(
+      '4 requests; 2 with credentials injected by the proxy; the cell sent only placeholders or no credential; 2 refused or held; credential scan before closing the cell: clean (12 files)',
+    );
+    const leaked = summarizeAudit(
+      't-2',
+      { rows: [{ ...rows('t-2')[2], client_cred: 'other' }], total: 1, truncated: false },
+      null,
+    );
+    expect(auditHeadline(leaked)).toContain(
+      'the cell sent something other than a placeholder 1 time',
+    );
+  });
+
+  it('serves a task audit and the latest quota over RPC', async () => {
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await client.call('tasks.wait', { taskId: t.id });
+    transport.auditRows = [...rows(t.id), ...rows('t-other')];
+    const a = await client.call('tasks.audit', { taskId: t.id });
+    expect(a).toMatchObject({ taskId: t.id, requests: 4, total: 3 });
+    expect(transport.execs.some((e) => e.args.join(' ') === `anchi-cell audit ${t.id}`)).toBe(true);
+    await expect(client.call('tasks.audit', { taskId: '../x' })).rejects.toThrow();
+    expect(await client.call('usage.quota')).toEqual([
+      {
+        runtime: 'codex',
+        ts: 1791500000500,
+        status: 200,
+        headers: {},
+        plan: 'team',
+        limited: false,
+        windows: [{ name: 'primary', usedPercent: 40, windowMinutes: 300, resetAt: 1791500157000 }],
+      },
+      { runtime: 'claude-code', ts: 1791500001000, status: 429, headers: { 'retry-after': '120' } },
+    ]);
+  });
+});
+
+describe('token usage', () => {
+  const zero = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, costUsd: 0 };
+
+  it('turns running totals into per-turn amounts and sums turns into totals', () => {
+    const store = new Store(join(mkdtempSync(join(tmpdir(), 'anchi-usage-')), 'a.db'));
+    const t = store.createTask({ agentId: 'dev', trigger: 'user', title: 'x' });
+    const row = { taskId: t.id, agentId: 'dev', runtime: 'claude-code', model: 'opus' };
+    expect(
+      store.recordUsage(row, { ...zero, input: 100, output: 10, costUsd: 0.5 }, true),
+    ).toMatchObject({
+      input: 100,
+      output: 10,
+      costUsd: 0.5,
+    });
+    expect(
+      store.recordUsage(row, { ...zero, input: 150, output: 25, costUsd: 0.75 }, true),
+    ).toMatchObject({
+      input: 50,
+      output: 15,
+      costUsd: 0.25,
+    });
+    // A cleared session starts its totals again: counted from zero.
+    expect(store.recordUsage(row, { ...zero, input: 20, output: 5 }, true)).toMatchObject({
+      input: 20,
+      output: 5,
+    });
+    // Nothing new: no row.
+    store.recordUsage(row, { ...zero, input: 20, output: 5 }, true);
+    const codex = { taskId: t.id, agentId: 'ops', runtime: 'codex', model: 'gpt-5.5' };
+    store.recordUsage(codex, { ...zero, input: 1000, cachedInput: 800, output: 40, reasoning: 12 });
+    store.recordUsage(codex, { ...zero, input: 500, cachedInput: 100, output: 10 }, false);
+    expect(store.getTask(t.id)).toMatchObject({ inputTokens: 1670, outputTokens: 80 });
+    const byModel = store.usageSummary(0, 'model');
+    expect(byModel.map((r) => [r.key, r.turns, r.inputTokens, r.outputTokens])).toEqual([
+      ['gpt-5.5', 2, 1500, 50],
+      ['opus', 3, 170, 30],
+    ]);
+    expect(byModel[0]).toMatchObject({ cachedInputTokens: 900, reasoningTokens: 12 });
+    expect(byModel[1]!.costUsd).toBeCloseTo(0.75);
+    expect(store.usageSummary(0, 'agent').map((r) => r.key)).toEqual(['ops', 'dev']);
+    expect(store.usageSummary(0, 'day')).toHaveLength(1);
+    expect(store.usageSummary(Date.now() + 1000, 'agent')).toEqual([]);
+    // Deleting the task keeps the totals.
+    store.deleteTasks([t.id]);
+    expect(
+      store
+        .usageSummary(0, 'runtime')
+        .map((r) => r.key)
+        .sort(),
+    ).toEqual(['claude-code', 'codex']);
+  });
+
+  it('records the usage a turn reports, with the agent runtime and model', async () => {
+    write('agents/dev.yaml', 'runtime: codex\nmodel: gpt-5.5\n');
+    const { client } = await start();
+    const report = [
+      { inputTokens: 300, outputTokens: 20, cachedInputTokens: 200, reasoningTokens: 5 },
+    ];
+    const t = await client.call('tasks.create', {
+      agentId: 'dev',
+      text: `usage ${JSON.stringify(report)}`,
+    });
+    expect(await client.call('tasks.wait', { taskId: t.id })).toMatchObject({
+      inputTokens: 300,
+      outputTokens: 20,
+    });
+    expect(await client.call('usage.summary', { by: 'model' })).toEqual([
+      {
+        key: 'gpt-5.5',
+        turns: 1,
+        inputTokens: 300,
+        cachedInputTokens: 200,
+        cacheWriteTokens: 0,
+        outputTokens: 20,
+        reasoningTokens: 5,
+        costUsd: 0,
+      },
+    ]);
+    expect((await client.call('usage.summary', { by: 'runtime' }))[0]?.key).toBe('codex');
+    await expect(client.call('usage.summary', { by: 'host' as never })).rejects.toThrow(
+      /unknown grouping/,
+    );
   });
 });
 

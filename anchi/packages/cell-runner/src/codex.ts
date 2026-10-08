@@ -165,6 +165,9 @@ export function* mapCodexEvent(ev: ThreadEvent, state: MapState): Generator<Runt
         type: 'usage',
         inputTokens: ev.usage.input_tokens,
         outputTokens: ev.usage.output_tokens,
+        cachedInputTokens: ev.usage.cached_input_tokens,
+        cacheWriteTokens: ev.usage.cache_write_input_tokens,
+        reasoningTokens: ev.usage.reasoning_output_tokens,
       };
       yield { type: 'turn.completed' };
       return;

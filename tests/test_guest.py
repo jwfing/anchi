@@ -34,3 +34,20 @@ class PurgeGuardTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AuditRowsTests(unittest.TestCase):
+    def test_reads_one_task_across_rotated_files_newest_last(self):
+        import json
+        import tempfile
+
+        tmp = Path(tempfile.mkdtemp())
+        old, cur = tmp / 'audit.jsonl.1', tmp / 'audit.jsonl'
+        row = lambda task, n: json.dumps({'task': task, 'n': n, 'host': 'h'}, sort_keys=True)  # noqa: E731
+        old.write_text('\n'.join([row('t-a', 1), row('t-b', 2), 'not json', row('t-a', 3)]) + '\n')
+        cur.write_text('\n'.join([row('t-a', 4), row('t-ab', 5)]) + '\n')
+        found = anchi_cell.audit_rows('t-a', [old, cur, tmp / 'missing'])
+        self.assertEqual([r['n'] for r in found['rows']], [1, 3, 4])
+        self.assertEqual((found['total'], found['truncated']), (3, False))
+        limited = anchi_cell.audit_rows('t-a', [old, cur], limit=2)
+        self.assertEqual(([r['n'] for r in limited['rows']], limited['truncated']), ([3, 4], True))

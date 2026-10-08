@@ -2,7 +2,15 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { RuntimeEvent, StoredEvent, TaskQuery, TaskRow, TaskStatus } from '@anchi/protocol';
+import type {
+  RuntimeEvent,
+  StoredEvent,
+  TaskQuery,
+  TaskRow,
+  TaskStatus,
+  UsageGroup,
+  UsageRow,
+} from '@anchi/protocol';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -43,7 +51,53 @@ CREATE TABLE IF NOT EXISTS events (
   payload TEXT NOT NULL,
   PRIMARY KEY (task_id, seq)
 );
+-- Tokens per turn and model. Kept when tasks are deleted: totals cover the history.
+CREATE TABLE IF NOT EXISTS turn_usage (
+  ts INTEGER NOT NULL,
+  task_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  runtime TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input INTEGER NOT NULL DEFAULT 0,
+  cached_input INTEGER NOT NULL DEFAULT 0,
+  cache_write INTEGER NOT NULL DEFAULT 0,
+  output INTEGER NOT NULL DEFAULT 0,
+  reasoning INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS turn_usage_ts ON turn_usage(ts);
+-- The last running totals a session reported per model, to turn the next ones into a turn's use.
+CREATE TABLE IF NOT EXISTS usage_snapshot (
+  task_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  totals TEXT NOT NULL,
+  PRIMARY KEY (task_id, model)
+);
 `;
+
+/** Token counts of one turn and model. */
+export interface TurnUsage {
+  input: number;
+  cachedInput: number;
+  cacheWrite: number;
+  output: number;
+  reasoning: number;
+  costUsd: number;
+}
+const USAGE_FIELDS = [
+  'input',
+  'cachedInput',
+  'cacheWrite',
+  'output',
+  'reasoning',
+  'costUsd',
+] as const;
+const BY: Record<UsageGroup, string> = {
+  agent: 'agent_id',
+  runtime: 'runtime',
+  model: 'model',
+  day: "date(ts / 1000, 'unixepoch', 'localtime')",
+};
 
 /** Events kept per task; the oldest are dropped beyond this (bounded session view). */
 export const MAX_EVENTS_PER_TASK = 5000;
@@ -303,10 +357,80 @@ export class Store {
     this.db.prepare('DELETE FROM trigger_state WHERE agent_id = ?').run(agentId);
   }
 
+  /**
+   * Records a turn's use. With `cumulative` totals (a session's running figures), the amount
+   * since the session's last report is recorded; totals that went down (a cleared or restarted
+   * session) count from zero. Returns what was recorded.
+   */
+  recordUsage(
+    row: { taskId: string; agentId: string; runtime: string; model: string; ts?: number },
+    counts: TurnUsage,
+    cumulative = false,
+  ): TurnUsage {
+    let turn = counts;
+    if (cumulative) {
+      const prev = this.db
+        .prepare('SELECT totals FROM usage_snapshot WHERE task_id = ? AND model = ?')
+        .get(row.taskId, row.model) as { totals: string } | undefined;
+      const last = prev ? (JSON.parse(prev.totals) as TurnUsage) : undefined;
+      const grew = last && USAGE_FIELDS.every((f) => counts[f] >= (last[f] ?? 0));
+      turn = Object.fromEntries(
+        USAGE_FIELDS.map((f) => [f, grew ? counts[f] - (last[f] ?? 0) : counts[f]]),
+      ) as unknown as TurnUsage;
+      this.db
+        .prepare('INSERT OR REPLACE INTO usage_snapshot (task_id, model, totals) VALUES (?, ?, ?)')
+        .run(row.taskId, row.model, JSON.stringify(counts));
+    }
+    if (USAGE_FIELDS.every((f) => turn[f] === 0)) return turn;
+    this.db
+      .prepare(
+        `INSERT INTO turn_usage (ts, task_id, agent_id, runtime, model, input, cached_input, cache_write, output, reasoning, cost_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.ts ?? Date.now(),
+        row.taskId,
+        row.agentId,
+        row.runtime,
+        row.model,
+        turn.input,
+        turn.cachedInput,
+        turn.cacheWrite,
+        turn.output,
+        turn.reasoning,
+        turn.costUsd,
+      );
+    this.addUsage(row.taskId, turn.input, turn.output);
+    return turn;
+  }
+
+  /** Totals since `since` (ms), grouped by agent, runtime, model or day, largest first. */
+  usageSummary(since: number, by: UsageGroup): UsageRow[] {
+    return this.db
+      .prepare(
+        `SELECT ${BY[by]} AS key, COUNT(*) AS turns, SUM(input) AS input, SUM(cached_input) AS cached,
+           SUM(cache_write) AS cache_write, SUM(output) AS output, SUM(reasoning) AS reasoning,
+           SUM(cost_usd) AS cost
+         FROM turn_usage WHERE ts >= ? GROUP BY key ORDER BY ${by === 'day' ? 'key DESC' : 'SUM(input + output) DESC'}`,
+      )
+      .all(since)
+      .map((r) => ({
+        key: String(r.key),
+        turns: Number(r.turns),
+        inputTokens: Number(r.input),
+        cachedInputTokens: Number(r.cached),
+        cacheWriteTokens: Number(r.cache_write),
+        outputTokens: Number(r.output),
+        reasoningTokens: Number(r.reasoning),
+        costUsd: Number(r.cost),
+      }));
+  }
+
   /** Deletes tasks (and their events) by id; returns how many went. */
   deleteTasks(ids: string[]): number {
     let n = 0;
     for (const id of ids) {
+      this.db.prepare('DELETE FROM usage_snapshot WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM events WHERE task_id = ?').run(id);
       n += Number(this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes);
     }

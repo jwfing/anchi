@@ -54,6 +54,13 @@ def load_settings():
 
 
 APPROVALS_PENDING_MAX = 32
+# Rate-limit and usage information that subscription responses carry, by injection rule. Only
+# headers with these prefixes are kept; their values are numbers and times, never credentials.
+QUOTA_HEADERS = {'codex': ('x-codex-',), 'anthropic': ('anthropic-ratelimit-',)}
+QUOTA_MAX_HEADERS = 40
+# Codex sends its plan's windows in the model stream (WebSocket), as one JSON message of this type.
+CODEX_RATE_LIMITS = b'codex.rate_limits'
+QUOTA_MESSAGE_MAX = 16 * 1024
 GIT_REF_UPDATE = re.compile(rb'[0-9a-f]{40} [0-9a-f]{40} (refs/[^\x00\s]{1,200})')
 log = logging.getLogger('anchi-egress')
 
@@ -68,6 +75,37 @@ def audit(entry):
         pass
     with AUDIT.open('a', encoding='utf-8') as file:
         file.write(json.dumps(entry, sort_keys=True) + '\n')
+
+
+def codex_windows(content):
+    """Plan and windows from a `codex.rate_limits` message, or None if it is not one."""
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return None
+    limits = data.get('rate_limits') if isinstance(data, dict) else None
+    if data.get('type') != 'codex.rate_limits' or not isinstance(limits, dict):
+        return None
+    windows = []
+    for name in ('primary', 'secondary'):
+        w = limits.get(name)
+        if not isinstance(w, dict):
+            continue
+        number = lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+        windows.append(
+            {
+                'name': name,
+                'used_percent': number(w.get('used_percent')),
+                'window_minutes': number(w.get('window_minutes')),
+                'reset_at': number(w.get('reset_at')),
+            }
+        )
+    plan = data.get('plan_type')
+    return {
+        'plan': plan[:40] if isinstance(plan, str) else None,
+        'limited': limits.get('limit_reached') is True or limits.get('allowed') is False,
+        'windows': windows,
+    }
 
 
 def auth_rpc(request):
@@ -388,6 +426,8 @@ class EgressProxy:
         self.settings = load_settings()
         self.call = call
         self.control = None
+        # Latest quota headers per runtime rule: {rule: {ts, status, headers}}.
+        self.quota = {}
         # Server connection id → the (host, port) the client asked for, while it is being opened.
         self.requested = {}
 
@@ -442,6 +482,8 @@ class EgressProxy:
                 result = self.set_settings(request.get('settings'))
             elif op == 'poll':
                 result = await self.poll(request.get('kind'), request.get('params'))
+            elif op == 'quota':
+                result = self.quota
             elif op == 'list':
                 result = {t: {'agent': c.agent, 'grants': sorted(c.grants)} for t, c in self.registry.cells.items()}
             else:
@@ -636,6 +678,49 @@ class EgressProxy:
         if refusal is not None:
             self.respond(flow, *refusal)
 
+    def responseheaders(self, flow):
+        """Keeps the quota information of a runtime's response (and notes a 429), so the user can
+        see how much of a subscription is used without trusting what runs in the cells."""
+        rule = flow.metadata.get('anchi-quota')
+        if rule is None or flow.response is None:
+            return
+        prefixes = QUOTA_HEADERS[rule]
+        headers = {}
+        for name, value in flow.response.headers.items():
+            key = name.lower()
+            if key.startswith(prefixes) and len(value) <= 200 and value.isprintable():
+                headers[key] = value
+                if len(headers) >= QUOTA_MAX_HEADERS:
+                    break
+        status = flow.response.status_code
+        if headers or status == 429:
+            if status == 429 and 'retry-after' in flow.response.headers:
+                headers['retry-after'] = flow.response.headers['retry-after'][:40]
+            self.quota[rule] = {
+                **self.quota.get(rule, {}),
+                'ts': round(time.time(), 3),
+                'status': status,
+                'headers': headers,
+            }
+
+    def websocket_message(self, flow):
+        """Codex's rate-limit message in the model stream: its plan and usage windows. Only this
+        message type is parsed; model output passes untouched."""
+        if flow.metadata.get('anchi-quota') != 'codex' or flow.websocket is None:
+            return
+        message = flow.websocket.messages[-1]
+        content = message.content
+        if message.from_client or len(content) > QUOTA_MESSAGE_MAX or CODEX_RATE_LIMITS not in content:
+            return
+        windows = codex_windows(content)
+        if windows is not None:
+            self.quota['codex'] = {
+                **self.quota.get('codex', {'headers': {}}),
+                'ts': round(time.time(), 3),
+                'status': 200,
+                **windows,
+            }
+
     async def handle(self, flow, cell, body, streamed, late=False):
         """Decide, hold for approval and inject. Returns None, or (status, content, headers) to refuse."""
         req = flow.request
@@ -723,6 +808,8 @@ class EgressProxy:
         req.headers.clear()
         for key, value in new.items():
             req.headers[key] = value
+        if decision.rule.name in QUOTA_HEADERS:
+            flow.metadata['anchi-quota'] = decision.rule.name
         audit(entry)
         return None
 

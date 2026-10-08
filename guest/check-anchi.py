@@ -294,6 +294,22 @@ def main():
     finally:
         stop(f)
 
+    # ── the audit log is read per task, and quota is a fixed control op ──
+    rows = json.loads(subprocess.run(['anchi-cell', 'audit', 'chk-f'], capture_output=True, text=True).stdout or '{}')
+    tasks = {r.get('task') for r in rows.get('rows', [])}
+    check(
+        "a task's audit rows are its own",
+        tasks == {'chk-f'} and any(r.get('decision') == 'pass:streamed' for r in rows['rows']),
+        f'{len(rows.get("rows", []))} rows of {sorted(t for t in tasks if t)}',
+    )
+    bad = subprocess.run(['anchi-cell', 'audit', '../x'], capture_output=True, text=True).stdout
+    quota = subprocess.run(['anchi-cell', 'quota'], capture_output=True, text=True).stdout
+    check(
+        'audit refuses bad task ids; quota answers',
+        'BAD_TASK' in bad and isinstance(json.loads(quota or 'null'), dict),
+        f'{bad.strip()[:40]} / {quota.strip()[:60]}',
+    )
+
     # ── deleting an agent removes its VM files and never reaches a workspace ──
     check_purge()
 

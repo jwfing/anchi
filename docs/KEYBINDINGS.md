@@ -25,6 +25,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X s | Agent settings: skills, connectors, workspaces |
 | ^X D | Delete the agent with its tasks (type its id to confirm) |
 | ^X o | Reopen the pending builder proposal |
+| ^X l | External access of the task shown |
 | ^X t, ^X v | Expand tool calls, verbose tool output |
 | ^X / | Filter tasks |
 | ^X Space, ^X p | Command palette |
@@ -51,13 +52,16 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 
 ### Task
 
-Enter continues the task in its agent's chat, R runs a failed or cancelled one again, c cancels it, D deletes it, [ ] turn task pages, ↑ ↓ (k j) PgUp PgDn scroll, Esc ← (h) back to the sidebar.
+Enter continues the task in its agent's chat, a shows its external access, R runs a failed or cancelled one again, c cancels it, D deletes it, [ ] turn task pages, ↑ ↓ (k j) PgUp PgDn scroll, Esc ← (h) back to the sidebar.
 
 ### Configure
 
 - **Runtimes:** s start the VM, I install, u unlock the vault, W share workspaces, i import Codex, c connect Claude Code, r refresh.
 - **Skills:** ↑ ↓ (k j) choose, a add, u update to the latest commit of its URL, d remove.
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
+- **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.
+
+The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc.
 
 The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Approval, confirmation and proposal dialogs always use **y**, **n** and **Esc** (and **s** in a proposal for its settings); they are not rebindable, so a held write is never approved by a key you configured for something else.
 
