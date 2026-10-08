@@ -1,7 +1,7 @@
 # Python style for trusted services, host scripts, guest checks and tests.
 line-length = 120
 target-version = "py311"
-extend-exclude = ["artifacts", "desktop", "pi", "prototype"]
+extend-exclude = ["artifacts", "desktop", "pi"]
 
 [lint]
 # Errors and undefined/unused names only; style is handled by `ruff format`.
