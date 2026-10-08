@@ -6,6 +6,8 @@ export interface AgentPatch {
   skills?: string[];
   connectors?: Connector[];
   workspaces?: Workspace[];
+  /** Set by the daemon only (removing a deleted agent); clients cannot send it. */
+  delegates?: string[];
 }
 
 /**
@@ -36,6 +38,7 @@ export function patchAgentYaml(text: string, patch: AgentPatch): string {
   };
   set('skills', patch.skills, true);
   set('connectors', patch.connectors, true);
+  set('delegates', patch.delegates, true);
   // `ro` is the default mode; name only when it differs from the path's last segment.
   set(
     'workspaces',

@@ -276,6 +276,9 @@ def main():
     finally:
         stop(f)
 
+    # ── deleting an agent removes its VM files and never reaches a workspace ──
+    check_purge()
+
     # ── host workspaces (macOS, when ~/AnchiWorkspaces is shared) ──
     if os.path.ismount('/mnt/anchi-host'):
         check_workspaces()
@@ -334,6 +337,73 @@ def main():
     failed = [n for n, ok, _ in results if not ok]
     print(f'\n{len(results) - len(failed)}/{len(results)} checks passed in {round(time.time() - t0)} s')
     sys.exit(1 if failed else 0)
+
+
+def check_purge():
+    import base64
+    import shutil
+
+    homes = Path('/var/lib/anchi/agents/chk-purge')
+    admin = ['/usr/bin/python3', '/opt/secure-vm/services/policy_admin.py']
+    shared = os.path.ismount('/mnt/anchi-host')
+    spec = '-'
+    keep = None
+    if shared:
+        base = Path('/mnt/anchi-host/.anchi-check-purge')
+        shutil.rmtree(base, ignore_errors=True)
+        base.mkdir(parents=True)
+        keep = base / 'keep.txt'
+        keep.write_text('the Mac keeps this')
+        items = [{'name': 'w', 'path': '.anchi-check-purge', 'mode': 'rw'}]
+        spec = base64.urlsafe_b64encode(json.dumps(items).encode()).decode().rstrip('=')
+    subprocess.run([*admin, 'mode', 'notion:chk-purge', 'ask'], capture_output=True)
+    proc, ready = start('chk-p', 'chk-purge', '-', spec)
+    try:
+        r = subprocess.run(['anchi-cell', 'purge-agent', 'chk-purge'], capture_output=True, text=True)
+        check(
+            'an agent with a live cell is not purged',
+            'AGENT_HAS_CELLS' in r.stdout and homes.exists(),
+            r.stdout.strip()[:80],
+        )
+    finally:
+        stop(proc)
+        subprocess.run(['anchi-cell', 'stop', 'chk-p'], capture_output=True)
+    trap = Path('/run/anchi-check-purge')
+    trap.mkdir(exist_ok=True)
+    (trap / 'canary').write_text('outside')
+    inside = homes / 'home' / 'mnt'
+    inside.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['mount', '--bind', str(trap), str(inside)], check=True)
+    try:
+        r = subprocess.run(['anchi-cell', 'purge-agent', 'chk-purge'], capture_output=True, text=True)
+        check(
+            'a mount below the home stops the purge',
+            'AGENT_HOME_HAS_MOUNTS' in r.stdout and (trap / 'canary').exists(),
+            r.stdout.strip()[:80],
+        )
+    finally:
+        subprocess.run(['umount', str(inside)])
+    r = subprocess.run(['anchi-cell', 'purge-agent', 'chk-purge'], capture_output=True, text=True)
+    rules = json.loads(subprocess.run([*admin, 'rules'], capture_output=True, text=True).stdout or '{}').get(
+        'rules', {}
+    )
+    try:
+        removed = json.loads(r.stdout)
+    except ValueError:
+        removed = {}
+    check(
+        'purging removes the home and policy rules, and leaves workspaces as they were',
+        removed.get('home') is True
+        and removed.get('policy') == ['notion:chk-purge']
+        and not homes.exists()
+        and 'notion:chk-purge' not in rules
+        and (trap / 'canary').exists()
+        and (keep is None or keep.read_text() == 'the Mac keeps this'),
+        f'{r.stdout.strip()[:80]}{" · workspace kept" if keep and keep.exists() else ""}',
+    )
+    shutil.rmtree(trap, ignore_errors=True)
+    if keep:
+        shutil.rmtree(keep.parent, ignore_errors=True)
 
 
 def check_workspaces():

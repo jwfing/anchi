@@ -183,6 +183,9 @@ describe('patchAgentYaml', () => {
     expect(patchAgentYaml('extends: base\nskills: [a]\n', { skills: [] })).toContain('skills: []');
     expect(patchAgentYaml('', { skills: ['a'] })).toBe('skills: [a]\n');
     expect(() => patchAgentYaml('- a list\n', { skills: [] })).toThrow(/mapping/);
+    expect(patchAgentYaml('delegates: [dev, qa] # team\n', { delegates: ['qa'] })).toBe(
+      'delegates: [qa] # team\n',
+    );
   });
 
   it('lets resolveAgent validate a change before it is written', () => {

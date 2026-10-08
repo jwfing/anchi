@@ -262,6 +262,32 @@ export interface AgentUpdate {
   applied: boolean;
 }
 
+/** What deleting an agent deletes and changes, for the confirmation dialog. */
+export interface AgentDeletionPreview {
+  agentId: string;
+  /** Whether the agent file exists (false: only leftovers remain). */
+  exists: boolean;
+  /** The agent's tasks, and tasks of other agents in their delegation trees. */
+  tasks: number;
+  delegated: number;
+  /** Running or queued among them; cancelled first. */
+  running: number;
+  /** Agents whose `delegates` list it; it is removed from them. */
+  delegatedBy: string[];
+  triggers: number;
+  /** Its workspaces: directories of the Mac, left as they are. */
+  workspaces: string[];
+}
+
+export interface AgentDeletion {
+  agentId: string;
+  deletedTasks: number;
+  editedAgents: string[];
+  /** What the VM removed; null when it could not be reached (run the deletion again). */
+  vm: { home: boolean; skills: boolean; policy: string[] } | null;
+  warnings: string[];
+}
+
 /** What updating a GitHub skill to the latest commit of its ref would change. */
 export interface SkillUpdate {
   id: string;
@@ -339,6 +365,14 @@ export interface Methods {
   /** Writes a proposal after the user confirmed it in a modal. */
   'builder.apply': [{ proposalId: string }, AgentSummary[]];
   'builder.discard': [{ proposalId: string }, null];
+  /** What deleting the agent would delete; changes nothing. */
+  'agents.deletePreview': [{ agentId: string }, AgentDeletionPreview];
+  /**
+   * Deletes the agent: its file, its tasks (cancelled first) with what they delegated, its
+   * trigger state, its entry in other agents' delegates, and its home, skills and policy rules
+   * in the VM. Workspaces on the Mac are not touched. `confirm` is the id the user typed.
+   */
+  'agents.delete': [{ agentId: string; confirm: string }, AgentDeletion];
   /** The proposal with a settings patch applied (checked again); replaces the old one. */
   'builder.revise': [{ proposalId: string; patch: AgentPatch }, BuilderProposal];
   'approvals.list': [Record<string, never>, Approval[]];

@@ -12,13 +12,18 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createServer, type Server } from 'node:net';
 import {
+  agentFile,
   agentLayerSchema,
   type HomeLayout,
+  idSchema,
+  listAgentIds,
   listImageIds,
   parseYamlAs,
   resolveAgent,
 } from '@anchi/core';
 import {
+  type AgentDeletion,
+  type AgentDeletionPreview,
   type AgentSettings,
   type ConnectorSecret,
   type ConnectorStatus,
@@ -61,7 +66,13 @@ import {
 } from './setup.ts';
 import { Store } from './store.ts';
 import { SERVICE_IDS, ServiceSetup } from './services.ts';
-import { parsePatch, settingsOf, updateAgentFile } from './settings.ts';
+import {
+  delegatorsOf,
+  parsePatch,
+  removeDelegate,
+  settingsOf,
+  updateAgentFile,
+} from './settings.ts';
 import { type SkillRemote, SkillStore } from './skills.ts';
 import { TriggerRunner } from './triggers.ts';
 import { parse as parseYaml } from 'yaml';
@@ -407,6 +418,78 @@ export class Daemon {
     }
   }
 
+  private deletableId(raw: unknown): string {
+    const id = idSchema.safeParse(raw);
+    if (!id.success) throw new Error('invalid agent id');
+    if (id.data === BUILDER_ID) throw new Error('the builder is built in and cannot be deleted');
+    return id.data;
+  }
+
+  deletionPreview(raw: unknown): AgentDeletionPreview {
+    const id = this.deletableId(raw);
+    const tree = this.hub.agentTaskTree(id);
+    const own = tree.filter((t) => t.agentId === id).length;
+    let agent: ReturnType<typeof resolveAgent> | undefined;
+    try {
+      agent = resolveAgent(id, this.opts.layout);
+    } catch {
+      // A broken file can be deleted too; it just has no triggers or workspaces to list.
+    }
+    return {
+      agentId: id,
+      exists: listAgentIds(this.opts.layout).includes(id),
+      tasks: own,
+      delegated: tree.length - own,
+      running: tree.filter((t) => t.status === 'running' || t.status === 'queued').length,
+      delegatedBy: delegatorsOf(this.opts.layout, id),
+      triggers: agent?.triggers.length ?? 0,
+      workspaces: agent?.workspaces.map((w) => w.path) ?? [],
+    };
+  }
+
+  /**
+   * Deletes an agent and what Anchi keeps for it; see `agents.delete`. The steps on this machine
+   * run first, so a VM that is not running only leaves its part for a later run.
+   */
+  async deleteAgent(raw: unknown, confirm: unknown): Promise<AgentDeletion> {
+    const id = this.deletableId(raw);
+    if (confirm !== id) throw new Error(`type the agent id "${id}" to confirm`);
+    const preview = this.deletionPreview(id);
+    const warnings: string[] = [];
+    const editedAgents: string[] = [];
+    let deletedTasks = 0;
+    this.hub.beginDeleting(id);
+    try {
+      deletedTasks = await this.hub.deleteAgentTasks(id);
+      for (const other of preview.delegatedBy) {
+        try {
+          removeDelegate(this.opts.layout, other, id);
+          editedAgents.push(other);
+        } catch (err) {
+          warnings.push(`@${other} still lists @${id} as a delegate: ${(err as Error).message}`);
+        }
+      }
+      if (preview.exists) rmSync(agentFile(this.opts.layout, id), { force: true });
+      this.store.deleteTriggerState(id);
+    } finally {
+      this.hub.endDeleting(id);
+      this.hub.reload();
+      this.broadcast('tasksDeleted', {});
+    }
+    let vm: AgentDeletion['vm'] = null;
+    try {
+      vm = await this.guest.purgeAgent(id);
+    } catch (err) {
+      warnings.push(
+        `the VM kept @${id}'s home and skills (${(err as Error).message}); delete @${id} again once the VM runs`,
+      );
+    }
+    this.log(
+      `agent ${id} deleted: ${deletedTasks} tasks, delegates edited in ${editedAgents.length}`,
+    );
+    return { agentId: id, deletedTasks, editedAgents, vm, warnings };
+  }
+
   private broadcast(method: string, params: unknown) {
     for (const peer of this.clients.values()) peer.notify(method, params);
   }
@@ -426,6 +509,8 @@ export class Daemon {
     'agents.list': () => this.hub.summaries(),
     'agents.reload': () => this.hub.reload(),
     'agents.settings': async (params) => this.agentSettings(params),
+    'agents.deletePreview': ({ agentId }) => this.deletionPreview(agentId),
+    'agents.delete': ({ agentId, confirm }) => this.deleteAgent(agentId, confirm),
     'agents.update': async ({ agentId, patch, apply, base }) => {
       const id = str(agentId, 'agent', 40);
       if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
