@@ -22,6 +22,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X c | Cancel the running task |
 | ^X a | Review a write waiting for approval |
 | ^X s | Agent settings: skills, connectors, workspaces |
+| ^X D | Delete the agent with its tasks (type its id to confirm) |
 | ^X o | Reopen the pending builder proposal |
 | ^X t, ^X v | Expand tool calls, verbose tool output |
 | ^X / | Filter tasks |
@@ -45,7 +46,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 
 ### Sidebar
 
-↑ ↓ (j k) move, Home End (g G) first and last, PgUp PgDn ([ ]) task pages, 1 2 3 sections, Enter → (l) open, s agent settings, / filter, ? keys, q quit.
+↑ ↓ (j k) move, Home End (g G) first and last, PgUp PgDn ([ ]) task pages, 1 2 3 sections, Enter → (l) open, s agent settings, D delete the selected agent or task, / filter, ? keys, q quit.
 
 ### Task
 

@@ -1053,3 +1053,105 @@ describe('agent settings panel', () => {
     ui.unmount();
   });
 });
+
+describe('deleting agents', () => {
+  const preview = {
+    agentId: 'dev',
+    exists: true,
+    tasks: 3,
+    delegated: 1,
+    running: 1,
+    delegatedBy: ['lead'],
+    triggers: 0,
+    workspaces: ['projects/web'],
+  };
+  const answers = {
+    'agents.deletePreview': () => preview,
+    'agents.delete': () => ({
+      agentId: 'dev',
+      deletedTasks: 4,
+      editedAgents: ['lead'],
+      vm: { home: true, skills: true, policy: [] },
+      warnings: [],
+    }),
+  };
+
+  it('lists what goes and what stays, and deletes only after the id is typed', async () => {
+    const { client, calls } = fakeClient({}, answers);
+    const ui = render(
+      <App client={client} initialAgents={[agent('dev'), agent('lead')]} initialTasks={[]} />,
+    );
+    await tick();
+    ui.stdin.write(ESC); // to the sidebar, on @dev
+    await tick();
+    ui.stdin.write('D');
+    const frame = await frameWith(ui, 'Delete @dev?');
+    expect(frame).toContain('3 tasks and their transcripts, with 1 task other agents did for them');
+    expect(frame).toContain('1 running or queued: cancelled first');
+    expect(frame).toContain('Changed: removed from the delegates of @lead');
+    expect(frame).toContain('Kept: ~/AnchiWorkspaces/projects/web (workspaces are never touched)');
+    ui.stdin.write('\r'); // nothing typed yet
+    await tick();
+    ui.stdin.write('de');
+    await tick();
+    ui.stdin.write('\r'); // not the id
+    await tick();
+    expect(calls.some(([m]) => m === 'agents.delete')).toBe(false);
+    ui.stdin.write('v');
+    expect(await frameWith(ui, 'Enter delete')).toContain('Type dev to confirm:');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, '@dev deleted')).toContain(
+      '@dev deleted with 4 tasks; removed from the delegates of @lead',
+    );
+    expect(calls.find(([m]) => m === 'agents.delete')?.[1]).toEqual({
+      agentId: 'dev',
+      confirm: 'dev',
+    });
+    ui.unmount();
+  });
+
+  it('D on a task in the sidebar deletes the task, not its agent; D in the settings panel deletes the agent', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        ...answers,
+        'agents.settings': () => ({
+          agentId: 'dev',
+          editable: true,
+          current: { skills: [], connectors: [], workspaces: [] },
+          inventory: {
+            skills: [],
+            connectors: [],
+            workspaces: { shared: true, dirs: [] },
+            agents: [],
+            images: [],
+          },
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(ESC);
+    await tick();
+    ui.stdin.write('3'); // Tasks: the task is selected
+    await tick();
+    ui.stdin.write('D');
+    expect(await frameWith(ui, 'Delete t-a000000001')).toContain('Delete t-a000000001');
+    expect(calls.some(([m]) => m === 'agents.deletePreview')).toBe(false);
+    ui.stdin.write('n');
+    await tick();
+    ui.stdin.write('2'); // Agents
+    await tick();
+    ui.stdin.write('s');
+    expect(await frameWith(ui, 'D delete the agent')).toContain('@dev: settings');
+    ui.stdin.write('D');
+    expect(await frameWith(ui, 'Delete @dev?')).toContain('Type dev to confirm:');
+    ui.unmount();
+  });
+});

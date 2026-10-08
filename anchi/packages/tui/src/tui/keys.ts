@@ -50,6 +50,11 @@ export const ACTIONS = {
   'task:continue': { title: "Continue the task in its agent's chat", contexts: ['task'] },
   'task:delete': { title: 'Delete the task and the tasks it delegated', contexts: ['task'] },
   'approvals:open': { title: 'Review a write waiting for approval', contexts: ['global'] },
+  'agent:delete': {
+    title: 'Delete the agent with its tasks and its files in the VM',
+    contexts: ['global'],
+  },
+  'sidebar:delete': { title: 'Delete the selected agent or task', contexts: ['sidebar'] },
   'agent:settings': {
     title: 'Agent settings: skills, connectors, workspaces',
     contexts: ['global'],
@@ -129,6 +134,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     '<leader> c': 'task:cancel',
     '<leader> a': 'approvals:open',
     '<leader> s': 'agent:settings',
+    '<leader> D': 'agent:delete',
     '<leader> o': 'builder:proposal',
     '<leader> t': 'transcript:tools',
     '<leader> v': 'transcript:verbose',
@@ -155,6 +161,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     l: 'focus:main',
     '/': 'tasks:filter',
     s: 'agent:settings',
+    D: 'sidebar:delete',
   },
   chat: {
     enter: 'chat:submit',

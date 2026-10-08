@@ -208,6 +208,20 @@ export class Guest {
     ) as { clean: boolean; findings: unknown[]; files: number };
   }
 
+  /**
+   * Removes a deleted agent's home, skills bundle and policy rules in the VM. The guest refuses
+   * while the agent has a cell, and never crosses a mount (workspaces stay untouched).
+   */
+  async purgeAgent(agent: string): Promise<{ home: boolean; skills: boolean; policy: string[] }> {
+    return parse(
+      await this.transport.exec(['anchi-cell', 'purge-agent', check(agent, 'agent')]),
+    ) as {
+      home: boolean;
+      skills: boolean;
+      policy: string[];
+    };
+  }
+
   async imageStatus(image: string, hash: string): Promise<boolean> {
     return Boolean(
       parse(await this.transport.exec(['anchi-image', 'status', check(image, 'image'), hash]))

@@ -1,5 +1,6 @@
 /** @jsxRuntime automatic */
 import type {
+  AgentDeletionPreview,
   AgentPatch,
   AgentSettings,
   AgentSummary,
@@ -144,6 +145,13 @@ type Modal =
       data: AgentSettings | null;
       state: SettingsState | null;
       cursor: number;
+    }
+  | {
+      kind: 'deleteAgent';
+      agentId: string;
+      preview: AgentDeletionPreview | null;
+      /** What the user typed; the agent id confirms. */
+      input: string;
     }
   | {
       kind: 'settingsReview';
@@ -659,6 +667,42 @@ export function App({
       });
   };
 
+  /** Asks to delete an agent, listing everything that goes and what stays. */
+  const openDelete = (id: string) => {
+    setModal({ kind: 'deleteAgent', agentId: id, preview: null, input: '' });
+    void client
+      .call('agents.deletePreview', { agentId: id })
+      .then((preview) =>
+        setModal((m) => (m?.kind === 'deleteAgent' && m.agentId === id ? { ...m, preview } : m)),
+      )
+      .catch((e: Error) => {
+        setModal(null);
+        say(e.message);
+      });
+  };
+
+  const deleteAgent = (id: string) => {
+    setModal(null);
+    say(`deleting @${id}…`);
+    void client
+      .call('agents.delete', { agentId: id, confirm: id })
+      .then((r) => {
+        setSelected(BUILDER);
+        setFocusTask((f) => {
+          const { [id]: _gone, ...rest } = f;
+          return rest;
+        });
+        say(
+          `@${id} deleted with ${r.deletedTasks} task${r.deletedTasks === 1 ? '' : 's'}` +
+            (r.editedAgents.length
+              ? `; removed from the delegates of ${r.editedAgents.map((a) => `@${a}`).join(', ')}`
+              : '') +
+            (r.warnings.length ? ` · ${r.warnings.join(' · ')}` : ''),
+        );
+      })
+      .catch((e: Error) => say(e.message));
+  };
+
   /** Shows what the panel's changes do to the agent file, or revises the proposal. */
   const reviewSettings = (m: Extract<Modal, { kind: 'settings' }>) => {
     if (!m.data || !m.state) return;
@@ -769,6 +813,14 @@ export function App({
             setSelected(detail.agentId);
           },
         });
+      case 'agent:delete': {
+        if (!agent || agent.id === BUILDER)
+          return say('select an agent first (the builder cannot be deleted)');
+        return openDelete(agent.id);
+      }
+      case 'sidebar:delete':
+        if (detail) return run('task:delete');
+        return run('agent:delete');
       case 'agent:settings': {
         const id = agent?.id ?? detail?.agentId;
         if (!id) return say('select an agent first');
@@ -1113,6 +1165,7 @@ export function App({
       if (key.escape)
         return setModal(modal.proposalId ? (proposalModal(modal.proposalId) ?? null) : null);
       if (!modal.data || !modal.state) return;
+      if (ch === 'D' && !modal.proposalId) return openDelete(modal.agentId);
       // From the latest panel state: keys repeated faster than a render all count.
       type Panel = Extract<Modal, { kind: 'settings' }>;
       const edit = (f: (m: Panel, items: SettingsRow[]) => Partial<Panel>) =>
@@ -1135,6 +1188,26 @@ export function App({
           if (m?.kind === 'settings') queueMicrotask(() => reviewSettings(m));
           return m;
         });
+      }
+      return;
+    }
+    if (modal?.kind === 'deleteAgent') {
+      if (key.escape) return setModal(null);
+      if (key.return) {
+        if (modal.preview && modal.input === modal.agentId) return deleteAgent(modal.agentId);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        return setModal((m) =>
+          m?.kind === 'deleteAgent' ? { ...m, input: [...m.input].slice(0, -1).join('') } : m,
+        );
+      }
+      if (ch && !key.ctrl && !key.meta) {
+        return setModal((m) =>
+          m?.kind === 'deleteAgent'
+            ? { ...m, input: (m.input + ch.replace(/[\r\n]/g, '')).slice(0, 40) }
+            : m,
+        );
       }
       return;
     }
@@ -1999,7 +2072,74 @@ function ModalView({
           ),
         )}
       </Box>,
-      `↑↓ choose · Space ${'select (workspaces: off → ro → rw)'} · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'} · Esc cancel`,
+      `↑↓ choose · Space select (workspaces: off → ro → rw) · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'}${modal.proposalId ? '' : ' · D delete the agent'} · Esc cancel`,
+    );
+  }
+  if (modal.kind === 'deleteAgent') {
+    const p = modal.preview;
+    const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+    const lines: { text: string; color?: string }[] = p
+      ? [
+          { text: 'Deleted, and not recoverable:' },
+          {
+            text: `  ${p.exists ? `the agent file ~/.anchi/agents/${p.agentId}.yaml` : 'the agent file is already gone'}`,
+          },
+          {
+            text: `  ${plural(p.tasks, 'task')} and their transcripts${p.delegated ? `, with ${plural(p.delegated, 'task')} other agents did for them` : ''}`,
+          },
+          ...(p.running
+            ? [{ text: `  ${p.running} running or queued: cancelled first`, color: 'yellow' }]
+            : []),
+          ...(p.triggers
+            ? [{ text: `  ${plural(p.triggers, 'trigger')} and what they have seen` }]
+            : []),
+          {
+            text: '  in the VM: its home (work directory, Codex and Claude sessions), its skills and its policy rules',
+          },
+          ...(p.delegatedBy.length
+            ? [
+                {
+                  text: `Changed: removed from the delegates of ${p.delegatedBy.map((a) => `@${a}`).join(', ')}`,
+                },
+              ]
+            : []),
+          { text: '' },
+          {
+            text: `Kept: ${p.workspaces.length ? p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') : 'directories of your Mac'} (workspaces are never touched), and the audit logs.`,
+            color: 'green',
+          },
+        ]
+      : [{ text: 'Loading…' }];
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="red"
+        paddingX={2}
+      >
+        <Text bold color="red">
+          Delete @{modal.agentId}?
+        </Text>
+        {lines.map((l, i) => (
+          <Text key={i} color={l.color} wrap="truncate">
+            {truncate(sanitizeLine(l.text), inner) || ' '}
+          </Text>
+        ))}
+        <Text> </Text>
+        <Text>{`Type ${modal.agentId} to confirm:`}</Text>
+        <Box borderStyle="single" paddingX={1}>
+          <Text>
+            {sanitizeLine(modal.input)}
+            <Text inverse> </Text>
+          </Text>
+        </Box>
+        <Box flexGrow={1} />
+        <Text bold>
+          {modal.input === modal.agentId && p ? 'Enter delete · Esc cancel' : 'Esc cancel'}
+        </Text>
+      </Box>
     );
   }
   if (modal.kind === 'settingsReview') {

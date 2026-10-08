@@ -285,6 +285,24 @@ export class Store {
       .run(input, output, id);
   }
 
+  /** Ids of every task of an agent, whatever its status. */
+  taskIdsOfAgent(agentId: string): string[] {
+    return this.db
+      .prepare('SELECT id FROM tasks WHERE agent_id = ? ORDER BY created_at')
+      .all(agentId)
+      .map((r) => r.id as string);
+  }
+
+  /** Forgets an agent's trigger runs and the items its polls have seen. */
+  deleteTriggerState(agentId: string): void {
+    const keys = this.db
+      .prepare('SELECT key FROM trigger_state WHERE agent_id = ?')
+      .all(agentId)
+      .map((r) => r.key as string);
+    for (const key of keys) this.db.prepare('DELETE FROM trigger_seen WHERE key = ?').run(key);
+    this.db.prepare('DELETE FROM trigger_state WHERE agent_id = ?').run(agentId);
+  }
+
   /** Deletes tasks (and their events) by id; returns how many went. */
   deleteTasks(ids: string[]): number {
     let n = 0;

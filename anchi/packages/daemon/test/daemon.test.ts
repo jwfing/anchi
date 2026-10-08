@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +21,8 @@ const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
 class FakeTransport implements GuestTransport {
   mode = 'ok';
+  /** The fake VM cannot be reached for agent purges. */
+  purgeFails = false;
   starts: string[][] = [];
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
@@ -51,6 +53,10 @@ class FakeTransport implements GuestTransport {
     this.execs.push({ args, stdin });
     const ok = (v: unknown) => ({ code: 0, stdout: JSON.stringify(v), stderr: '' });
     if (args[0] === 'anchi-cell' && args[1] === 'reap') return ok({ reaped: ['t-old'] });
+    if (args[0] === 'anchi-cell' && args[1] === 'purge-agent') {
+      if (this.purgeFails) return { code: 1, stdout: '{"error": "VM_STOPPED"}', stderr: '' };
+      return ok({ agent: args[2], home: true, skills: true, policy: [`notion:${args[2]}`] });
+    }
     if (args[0] === 'anchi-image' && args[1] === 'status') {
       return ok({ present: this.images.has(`${args[2]}@${args[3]}`) });
     }
@@ -842,6 +848,99 @@ describe('builder', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen).toEqual(['devops']);
     expect(transport.starts[0]![6]).toBe('-');
+  });
+});
+
+describe('deleting agents', () => {
+  it('deletes an agent with its task trees, cancelling running work, and edits its delegators', async () => {
+    write('agents/lead.yaml', '# the lead\nruntime: codex\ndelegates: [dev, qa] # team\n');
+    write(
+      'agents/dev.yaml',
+      'runtime: codex\ndelegates: [qa]\nworkspaces: [{ path: projects/web, mode: rw }]\n',
+    );
+    write('agents/qa.yaml', 'runtime: codex\n');
+    mkdirSync(join(root, 'ws/projects/web'), { recursive: true });
+    writeFileSync(join(root, 'ws/projects/web/keep.txt'), 'mine');
+    const { client } = await start(60_000, undefined, join(root, 'ws'));
+    const turn = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      return client.call('tasks.wait', { taskId: task.id });
+    };
+    const lead = await turn('lead', 'call anchi_delegate_task {"agent":"dev","task":"fix it"}');
+    const own = await turn('dev', 'call anchi_delegate_task {"agent":"qa","task":"check it"}');
+    transport.mode = 'slow';
+    const busy = await client.call('tasks.create', { agentId: 'dev', text: 'long job' });
+    await new Promise((r) => setTimeout(r, 300));
+    const all = await client.call('tasks.list', { limit: 50 });
+    const fromLead = all.find((t) => t.parentId === lead.id)!;
+    const toQa = all.find((t) => t.parentId === own.id)!;
+
+    expect(await client.call('agents.deletePreview', { agentId: 'dev' })).toEqual({
+      agentId: 'dev',
+      exists: true,
+      tasks: 3,
+      delegated: 1,
+      running: 1,
+      delegatedBy: ['lead'],
+      triggers: 0,
+      workspaces: ['projects/web'],
+    });
+    await expect(client.call('agents.delete', { agentId: 'dev', confirm: 'yes' })).rejects.toThrow(
+      /type the agent id "dev"/,
+    );
+    const done = await client.call('agents.delete', { agentId: 'dev', confirm: 'dev' });
+    expect(done).toEqual({
+      agentId: 'dev',
+      deletedTasks: 4,
+      editedAgents: ['lead'],
+      vm: { agent: 'dev', home: true, skills: true, policy: ['notion:dev'] },
+      warnings: [],
+    });
+
+    for (const t of [fromLead, own, toQa, busy]) {
+      await expect(client.call('tasks.get', { taskId: t.id })).rejects.toThrow();
+    }
+    expect(existsSync(join(root, 'agents/dev.yaml'))).toBe(false);
+    expect(readFileSync(join(root, 'agents/lead.yaml'), 'utf8')).toBe(
+      '# the lead\nruntime: codex\ndelegates: [qa] # team\n',
+    );
+    // The lead's task survives, with a note of what went.
+    const notices = (await client.call('tasks.events', { taskId: lead.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices.at(-1)).toBe(`delegated task ${fromLead.id} (@dev) was deleted with @dev`);
+    expect((await client.call('agents.list')).map((a) => a.id)).not.toContain('dev');
+    await expect(client.call('tasks.create', { agentId: 'dev', text: 'x' })).rejects.toThrow(
+      /unknown agent/,
+    );
+    expect(transport.execs.some((e) => e.args.join(' ') === 'anchi-cell purge-agent dev')).toBe(
+      true,
+    );
+    // The Mac's directory was only ever bound into cells; it is left as it was.
+    expect(readFileSync(join(root, 'ws/projects/web/keep.txt'), 'utf8')).toBe('mine');
+  });
+
+  it('finishes the VM part on a later run when the VM is down, and refuses the builder', async () => {
+    write('agents/qa.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    transport.purgeFails = true;
+    const first = await client.call('agents.delete', { agentId: 'qa', confirm: 'qa' });
+    expect(first.vm).toBeNull();
+    expect(first.warnings[0]).toMatch(/the VM kept @qa's home and skills .*delete @qa again/);
+    expect(existsSync(join(root, 'agents/qa.yaml'))).toBe(false);
+    transport.purgeFails = false;
+    expect(await client.call('agents.deletePreview', { agentId: 'qa' })).toMatchObject({
+      exists: false,
+      tasks: 0,
+    });
+    const again = await client.call('agents.delete', { agentId: 'qa', confirm: 'qa' });
+    expect(again).toMatchObject({ deletedTasks: 0, vm: { home: true }, warnings: [] });
+    await expect(
+      client.call('agents.delete', { agentId: 'builder', confirm: 'builder' }),
+    ).rejects.toThrow(/built in/);
+    await expect(client.call('agents.deletePreview', { agentId: '../x' })).rejects.toThrow(
+      /invalid agent id/,
+    );
   });
 });
 

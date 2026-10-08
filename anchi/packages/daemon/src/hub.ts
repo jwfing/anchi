@@ -196,7 +196,19 @@ export class Hub extends EventEmitter<HubEvents> {
     return list;
   }
 
+  /** Agents being deleted: no task or turn starts for them meanwhile. */
+  private deleting = new Set<string>();
+
+  beginDeleting(agentId: string): void {
+    this.deleting.add(agentId);
+  }
+
+  endDeleting(agentId: string): void {
+    this.deleting.delete(agentId);
+  }
+
   private state(agentId: string): AgentState {
+    if (this.deleting.has(agentId)) throw new Error(`@${agentId} is being deleted`);
     // A file created just now may not have reached the watcher yet.
     if (!this.states.has(agentId)) this.reload();
     const s = this.states.get(agentId);
@@ -352,6 +364,46 @@ export class Hub extends EventEmitter<HubEvents> {
     if (!state?.running || state.running.job.taskId !== taskId) {
       this.finish(taskId, 'cancelled', 'cancelled');
     }
+  }
+
+  /**
+   * Every task of an agent with the tasks they delegated, whoever ran them: what deleting the
+   * agent deletes.
+   */
+  agentTaskTree(agentId: string): TaskRow[] {
+    const out = new Map<string, TaskRow>();
+    const walk = (t: TaskRow) => {
+      if (out.has(t.id)) return;
+      out.set(t.id, t);
+      for (const child of this.opts.store.children(t.id)) walk(child);
+    };
+    for (const id of this.opts.store.taskIdsOfAgent(agentId)) walk(this.getTask(id));
+    return [...out.values()];
+  }
+
+  /**
+   * Deletes an agent's task tree (see `agentTaskTree`), cancelling running and queued tasks
+   * first and closing their cells. A surviving task that had delegated one of them gets a
+   * notice. Returns how many tasks went.
+   */
+  async deleteAgentTasks(agentId: string): Promise<number> {
+    const tasks = this.agentTaskTree(agentId);
+    const ids = new Set(tasks.map((t) => t.id));
+    const busy = tasks.filter((t) => t.status === 'running' || t.status === 'queued');
+    for (const t of busy) this.cancelTask(t.id);
+    const settle = (id: string) =>
+      Promise.race([this.wait(id), new Promise((r) => setTimeout(r, 60_000).unref())]);
+    await Promise.all(busy.map((t) => settle(t.id)));
+    await Promise.all([...ids].map((id) => this.closeCell(id, `@${agentId} deleted`)));
+    for (const t of tasks) {
+      if (t.parentId && !ids.has(t.parentId)) {
+        this.notice(
+          t.parentId,
+          `delegated task ${t.id} (@${t.agentId}) was deleted with @${agentId}`,
+        );
+      }
+    }
+    return this.opts.store.deleteTasks([...ids]);
   }
 
   /** Resolves when the task's current turn ends. */

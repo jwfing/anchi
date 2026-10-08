@@ -465,6 +465,46 @@ def agent_home(agent, uid):
     return home
 
 
+def mounts_under(path, mountinfo):
+    """Mount points at or below `path` in a /proc/self/mountinfo text (octal escapes decoded)."""
+    root = str(path).rstrip('/')
+    out = []
+    for line in mountinfo.splitlines():
+        fields = line.split()
+        if len(fields) < 5:
+            continue
+        point = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m.group(1), 8)), fields[4])
+        if point == root or point.startswith(root + '/'):
+            out.append(point)
+    return out
+
+
+def agent_purge(agent):
+    """Removes what the VM keeps for a deleted agent: its home (work directory, runtime
+    sessions), its skills bundle and its policy rules. Workspaces are directories of the user's
+    Mac bound only inside a cell's own mount namespace; to never reach them, this refuses while
+    the agent has a cell, refuses if anything below its home is a mount point, and does not
+    cross file systems while removing."""
+    name(agent, 'BAD_AGENT')
+    if any(m.get('agent') == agent for m in cell_metas()):
+        raise Failure('AGENT_HAS_CELLS')
+    removed = {'agent': agent, 'home': False, 'skills': False, 'policy': []}
+    for key, path in (('home', HOMES / agent), ('skills', SKILLS / agent)):
+        if not path.exists():
+            continue
+        if mounts_under(path, Path('/proc/self/mountinfo').read_text()):
+            raise Failure('AGENT_HOME_HAS_MOUNTS')
+        run('rm', '-rf', '--one-file-system', '--', str(path))
+        removed[key] = True
+    admin = ['/usr/bin/python3', str(SERVICES / 'policy_admin.py')]
+    rules = json.loads(run(*admin, 'rules').stdout).get('rules', {})
+    for principal in sorted(rules):
+        if principal.endswith(f':{agent}'):
+            run(*admin, 'clear', principal)
+            removed['policy'].append(principal)
+    emit(removed)
+
+
 def write_owned(path, text, uid, mode=0o600):
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chown(path.parent, uid, uid)
@@ -1026,6 +1066,8 @@ def main(argv):
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.
         return emit(egress({'op': 'settings.set', 'settings': json.loads(sys.stdin.read(65536) or '{}')}))
+    if command == 'purge-agent' and len(rest) == 1:
+        return agent_purge(rest[0])
     if command == 'skills' and len(rest) == 2 and rest[0] == 'set':
         return skills_set(rest[1])
     if command == 'poll' and not rest:

@@ -332,19 +332,58 @@ program.command('cancel <task>').action(async (taskId: string) => {
   await withClient((client) => client.call('tasks.cancel', { taskId }));
 });
 
-program
-  .command('agents')
-  .description('List agents')
-  .action(() =>
-    withClient(async (client) => {
-      for (const a of await client.call('agents.list')) {
-        const extra = a.error
-          ? styleText('red', ` ${sanitizeLine(a.error)}`)
-          : ` ${a.connectors.join(',') || '-'} · ${a.image}`;
-        console.log(`${a.id.padEnd(14)} ${a.status.padEnd(8)}${extra}`);
-      }
-    }),
-  );
+const agentsCmd = program.command('agents').description('List agents');
+agentsCmd
+  .command('rm <id>')
+  .description('Delete an agent with its tasks and its files in the VM (workspaces are kept)')
+  .option('-y, --yes', 'delete without typing the id')
+  .action((id: string, opts: { yes?: boolean }) => deleteAgentCli(id, opts.yes === true));
+agentsCmd.action(() =>
+  withClient(async (client) => {
+    for (const a of await client.call('agents.list')) {
+      const extra = a.error
+        ? styleText('red', ` ${sanitizeLine(a.error)}`)
+        : ` ${a.connectors.join(',') || '-'} · ${a.image}`;
+      console.log(`${a.id.padEnd(14)} ${a.status.padEnd(8)}${extra}`);
+    }
+  }),
+);
+
+async function deleteAgentCli(id: string, yes: boolean) {
+  await withClient(async (client) => {
+    const p = await client.call('agents.deletePreview', { agentId: id });
+    console.log(`Deleting @${p.agentId} deletes, and nothing can bring back:`);
+    console.log(`  ${p.exists ? 'its agent file' : 'its agent file: already gone'}`);
+    console.log(
+      `  ${p.tasks} task(s) and their transcripts, with ${p.delegated} task(s) other agents did for them`,
+    );
+    if (p.running)
+      console.log(styleText('yellow', `  ${p.running} running or queued: cancelled first`));
+    if (p.triggers) console.log(`  ${p.triggers} trigger(s)`);
+    console.log(
+      '  in the VM: its home (work directory, sessions), its skills and its policy rules',
+    );
+    if (p.delegatedBy.length)
+      console.log(
+        `It is removed from the delegates of ${p.delegatedBy.map((a) => `@${a}`).join(', ')}.`,
+      );
+    console.log(
+      styleText(
+        'green',
+        `Kept: ${p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') || 'directories of your Mac'} and the audit logs.`,
+      ),
+    );
+    if (!yes && (await ask(`Type ${p.agentId} to confirm: `)).trim() !== p.agentId) {
+      return console.log('not deleted');
+    }
+    const r = await client.call('agents.delete', { agentId: p.agentId, confirm: p.agentId });
+    console.log(
+      `deleted @${r.agentId}: ${r.deletedTasks} task(s)${r.editedAgents.length ? `; delegates edited in ${r.editedAgents.join(', ')}` : ''}`,
+    );
+    for (const w of r.warnings) console.log(styleText('yellow', w));
+    if (r.warnings.length) process.exitCode = 1;
+  });
+}
 
 const setup = program.command('setup').description('Runtime and connector setup');
 

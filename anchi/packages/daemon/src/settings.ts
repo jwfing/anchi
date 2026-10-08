@@ -3,6 +3,9 @@ import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'n
 import {
   type AgentLayer,
   agentFile,
+  agentLayerSchema,
+  listAgentIds,
+  parseYamlAs,
   type AgentPatch,
   ConfigError,
   connectorSchema,
@@ -85,10 +88,44 @@ export function updateAgentFile(
   if (!opts.apply) return result;
   if (opts.base !== base) throw new Error(`${file} changed since you reviewed it; review again`);
   if (errors.length) throw new Error(`cannot save: ${errors.join('; ')}`);
-  if (next !== text) {
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, next, { mode: statSync(file).mode & 0o777 });
-    renameSync(tmp, file);
-  }
+  if (next !== text) replaceFile(file, next);
   return { ...result, applied: true };
+}
+
+/** Replaces a file's text atomically, keeping its mode. */
+export function replaceFile(file: string, text: string): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, text, { mode: statSync(file).mode & 0o777 });
+  renameSync(tmp, file);
+}
+
+/** An agent's delegates as resolved, or as written when the agent does not load. */
+function delegatesOf(layout: HomeLayout, id: string): string[] {
+  try {
+    return resolveAgent(id, layout).delegates;
+  } catch {
+    try {
+      return (
+        parseYamlAs(readFileSync(agentFile(layout, id), 'utf8'), agentLayerSchema).delegates ?? []
+      );
+    } catch {
+      return [];
+    }
+  }
+}
+
+/** Agents that may delegate to `id`. */
+export function delegatorsOf(layout: HomeLayout, id: string): string[] {
+  return listAgentIds(layout).filter(
+    (other) => other !== id && delegatesOf(layout, other).includes(id),
+  );
+}
+
+/** Removes `id` from another agent's delegates, keeping the rest of its file. */
+export function removeDelegate(layout: HomeLayout, other: string, id: string): void {
+  const file = agentFile(layout, other);
+  const next = patchAgentYaml(readFileSync(file, 'utf8'), {
+    delegates: delegatesOf(layout, other).filter((d) => d !== id),
+  });
+  replaceFile(file, next);
 }

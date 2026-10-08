@@ -85,6 +85,18 @@ Press `y` to write the files, `n` to discard the proposal, or `s` to pick its sk
 
 **^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel: every installed skill, every connector (marked connected or not) and every directory under `~/AnchiWorkspaces`. **Space** selects; a workspace goes off → `ro` → `rw`. **Enter** shows the change to the agent file as a diff, checked like a proposal; **y** saves it. Only those three fields change, and the rest of the file, comments included, stays as it is. The change applies to the agent's next cell.
 
+## Delete an agent
+
+**D** on the agent in the sidebar, **D** in its settings panel, **^X D** in its chat, or `scripts/anchi agents rm <id>`. A dialog lists what goes and what stays; type the agent's id to confirm. Deleting:
+
+- removes the agent file;
+- deletes all its tasks and transcripts, with the tasks they delegated to other agents; running and queued ones are cancelled first. A task of another agent that had delegated to it stays, with a note;
+- forgets its triggers and what its polls have seen;
+- removes it from other agents' `delegates`, keeping the rest of their files;
+- in the VM, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
+
+Directories of your Mac in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.
+
 Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images/`. You can also edit them directly; the daemon reloads them on change. See [Agent configuration](architecture/AGENT_TEAM_CONTRACTS.md#agent-configuration).
 
 ```yaml

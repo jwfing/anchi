@@ -46,7 +46,7 @@ The recipe's content hash names the built layer. A changed recipe is a new image
 JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON frames of at most 8 MiB. Request `{id, method, params}`, response `{id, result}` or `{id, error: {message}}`, notification `{method, params}`. The method table is `Methods` in `protocol/src/rpc.ts`.
 
 - **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, and `tasks.scan` (credential-invariant scan of the task's live cell).
-- **Agents and builder:** `agents.list`, `agents.reload`, `agents.settings`, `agents.update`, `builder.proposal`, `builder.revise`, `builder.apply`, `builder.discard`. Only `builder.apply` and `agents.update` with `apply` write agent or image files, and the TUI calls them only after a dialog showing the change. `agents.update` changes `skills`, `connectors` and `workspaces` of an agent file, keeping the rest; with `apply` it requires the digest (`base`) of the file the reviewed diff was made from. Proposals and settings changes are checked against what exists: missing skills, delegates or directories block, connectors not yet connected warn.
+- **Agents and builder:** `agents.list`, `agents.reload`, `agents.settings`, `agents.update`, `agents.deletePreview`, `agents.delete` (the id typed by the user confirms it), `builder.proposal`, `builder.revise`, `builder.apply`, `builder.discard`. Only `builder.apply` and `agents.update` with `apply` write agent or image files, and the TUI calls them only after a dialog showing the change. `agents.update` changes `skills`, `connectors` and `workspaces` of an agent file, keeping the rest; with `apply` it requires the digest (`base`) of the file the reviewed diff was made from. Proposals and settings changes are checked against what exists: missing skills, delegates or directories block, connectors not yet connected warn.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;
   - `setup.run` runs one setup step at a time: `vm-start`, `install`, `vault-init` or `vault-unlock`. Each is a fixed host command from the checkout (`limactl start`, `scripts/up.sh` then `scripts/install-anchi.sh` then the base image build, `scripts/vault.py`). The vault key is read by `vault.py`, not by the daemon. Output lines arrive as `setup` notifications;
@@ -73,6 +73,7 @@ The daemon runs only fixed commands: `limactl shell secure-vm -- sudo <command>`
 | `anchi-cell approvals decide ID allow\|deny` | Answers a held write |
 | `anchi-cell poll` | Runs a polling trigger's fixed read-only query (spec on stdin) in the egress service; prints the items |
 | `anchi-cell skills set AGENT` | Replaces the agent's skill bundle (`{files: {path: base64}}` on stdin) |
+| `anchi-cell purge-agent AGENT` | Removes a deleted agent's home, skills bundle and `<service>:AGENT` policy rules. Refused while the agent has a cell or a mount point exists under its home; removal does not cross file systems |
 | `anchi-cell stop TASK` | Stop a cell and release its overlay, sockets and proxy registration |
 | `anchi-cell list` | Running cells, as JSON |
 | `anchi-cell reap [TASK...]` | Stop every cell not named, and unmount stale overlays |
