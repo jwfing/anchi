@@ -79,7 +79,8 @@ jobs:
           print(json.dumps({'access_token': token, 'account_id': 'ci-synthetic'}))
           PY
       - name: Agent-team isolation checks
-        run: make verify-anchi VM="$ANCHI_INSTALL_VM"
+        # Nested KVM on hosted runners is slower than a real host; the 100 ms target is for real hosts.
+        run: make verify-anchi VM="$ANCHI_INSTALL_VM" START_BUDGET_MS=250
       - name: Collect Lima logs
         if: always()
         run: |
