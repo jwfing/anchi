@@ -91,6 +91,12 @@ function fakeClient(events: Record<string, StoredEvent[]> = {}) {
 }
 
 const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+/** Waits until the frame shows `text` (renders that follow an effect can lag one tick on CI). */
+async function frameWith(ui: { lastFrame: () => string | undefined }, text: string, ms = 2000) {
+  const deadline = Date.now() + ms;
+  while (!(ui.lastFrame() ?? '').includes(text) && Date.now() < deadline) await tick(10);
+  return ui.lastFrame() ?? '';
+}
 
 describe('sanitize', () => {
   it('removes OSC 52, OSC 8, CSI, C1 and bidi controls but keeps text and newlines', () => {
@@ -576,19 +582,30 @@ describe('App', () => {
       reason: 'high-risk: push to main or master',
       origin: 'poll → @lead (t-a000000000) → @dev (t-a000000001)',
     };
-    emit('approvals', { approvals: [approval] });
+    // A write held while another dialog is open gets its dialog once that one closes.
+    ui.stdin.write('\u001b'); // to the sidebar
     await tick();
-    const frame = ui.lastFrame() ?? '';
+    ui.stdin.write('?');
+    expect(await frameWith(ui, 'Tab / Shift+Tab')).toContain('Tab / Shift+Tab');
+    emit('approvals', { approvals: [{ ...approval, id: 'b'.repeat(16) }] });
+    await tick();
+    expect(ui.lastFrame()).not.toContain('Approve a write by @dev?');
+    ui.stdin.write('q');
+    expect(await frameWith(ui, 'Approve a write by @dev?')).toContain('Approve a write by @dev?');
+    ui.stdin.write('\u001b'); // later
+    emit('approvals', { approvals: [approval] });
+    const frame = await frameWith(ui, 'Approve a write by @dev?');
     expect(frame).toContain('Approve a write by @dev?');
     expect(frame).toContain('why        high-risk: push to main or master');
     expect(frame).toContain('started by poll → @lead (t-a000000000) → @dev (t-a000000001)');
     expect(frame).toContain('git push: refs/heads/fix');
     expect(frame).not.toContain(']52;');
     ui.stdin.write('\u001b'); // later
-    await tick();
-    expect(ui.lastFrame()).toContain('1 write waiting for approval (^A)');
+    expect(await frameWith(ui, '1 write waiting for approval (^A)')).toContain(
+      '1 write waiting for approval (^A)',
+    );
     ui.stdin.write('\u0001'); // ^A
-    await tick();
+    await frameWith(ui, 'Approve a write by @dev?');
     ui.stdin.write('n');
     await tick();
     expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({

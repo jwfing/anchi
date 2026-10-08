@@ -243,11 +243,13 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       .catch((e: Error) => say(e.message));
   }, [client, say]);
 
-  // A new held write opens its dialog unless another dialog is up; ^A reopens it.
+  // A new held write opens its dialog once no other dialog is up; ^A reopens it.
   useEffect(() => {
     const fresh = approvals.find((a) => !seenApprovals.current.has(a.id));
-    for (const a of approvals) seenApprovals.current.add(a.id);
-    if (fresh && !modal) setModal({ kind: 'approval', approval: fresh });
+    if (fresh && !modal) {
+      seenApprovals.current.add(fresh.id);
+      setModal({ kind: 'approval', approval: fresh });
+    }
     if (modal?.kind === 'approval' && !approvals.some((a) => a.id === modal.approval.id)) {
       setModal(null);
     }
