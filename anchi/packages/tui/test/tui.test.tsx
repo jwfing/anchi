@@ -1,10 +1,17 @@
 /** @jsxRuntime automatic */
-import type { AgentSummary, Notifications, StoredEvent, TaskRow } from '@anchi/protocol';
+import type {
+  AgentSummary,
+  Notifications,
+  RuntimeEvent,
+  StoredEvent,
+  TaskRow,
+} from '@anchi/protocol';
 import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
+import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
-import { App } from '../src/tui/App.tsx';
+import { App, filterTasks } from '../src/tui/App.tsx';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
 import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
 
@@ -33,6 +40,12 @@ const task = (id: string, agentId: string, over: Partial<TaskRow> = {}): TaskRow
   finishedAt: 2,
   result: 'ok',
   links: [],
+  parentId: null,
+  rootId: id,
+  depth: 0,
+  turns: 1,
+  inputTokens: 0,
+  outputTokens: 0,
   ...over,
 });
 
@@ -395,7 +408,7 @@ describe('App', () => {
     await tick();
     ui.stdin.write('\u001b'); // ...then moves to the sidebar
     await tick();
-    expect(ui.lastFrame()).toContain('Tab switch pane');
+    expect(ui.lastFrame()).toContain('Tab pane');
     ui.stdin.write('3'); // Tasks section
     await tick();
     expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
@@ -421,6 +434,46 @@ describe('App', () => {
     ui.stdin.write('\u001b');
     await tick();
     expect(ui.lastFrame()).not.toContain('Esc or ? to close');
+    ui.unmount();
+  });
+
+  it('filters the task list', async () => {
+    const { client } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev'), agent('ops')]}
+        initialTasks={[
+          task('t-a000000003', 'ops', { title: 'rotate logs', status: 'failed' }),
+          task('t-a000000002', 'dev', { title: 'fix login' }),
+          task('t-a000000001', 'dev', { title: 'fix signup', status: 'failed' }),
+        ]}
+      />,
+    );
+    await tick();
+    expect(filterTasks([task('t-1', 'dev', { title: 'Fix X' })], '@dev fix')).toHaveLength(1);
+    ui.stdin.write('\u001b'); // to the sidebar
+    await tick();
+    ui.stdin.write('/');
+    await tick();
+    ui.stdin.write('@dev status:failed');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    let frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('TASKS · filtered');
+    expect(frame).toContain('fix signup');
+    expect(frame).not.toContain('fix login');
+    expect(frame).not.toContain('rotate logs');
+    // An empty filter shows everything again.
+    ui.stdin.write('/');
+    await tick();
+    for (const _ of '@dev status:failed') ui.stdin.write('\u007f');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('rotate logs');
     ui.unmount();
   });
 
@@ -505,6 +558,46 @@ describe('App', () => {
     ui.unmount();
   });
 
+  it('asks for approval of held writes in a full-screen dialog', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    const approval = {
+      id: 'a'.repeat(16),
+      kind: 'proxy' as const,
+      task: 't-a000000001',
+      agent: 'dev',
+      connector: 'github',
+      operation: 'POST /o/r.git/git-receive-pack',
+      host: 'github.com',
+      summary: `git push: refs/heads/fix${ESC}]52;c;AAAA\u0007`,
+      createdAt: Date.now(),
+      timeout: 300,
+      reason: 'high-risk: push to main or master',
+      origin: 'poll → @lead (t-a000000000) → @dev (t-a000000001)',
+    };
+    emit('approvals', { approvals: [approval] });
+    await tick();
+    const frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('Approve a write by @dev?');
+    expect(frame).toContain('why        high-risk: push to main or master');
+    expect(frame).toContain('started by poll → @lead (t-a000000000) → @dev (t-a000000001)');
+    expect(frame).toContain('git push: refs/heads/fix');
+    expect(frame).not.toContain(']52;');
+    ui.stdin.write('\u001b'); // later
+    await tick();
+    expect(ui.lastFrame()).toContain('1 write waiting for approval (^A)');
+    ui.stdin.write('\u0001'); // ^A
+    await tick();
+    ui.stdin.write('n');
+    await tick();
+    expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({
+      id: 'a'.repeat(16),
+      allow: false,
+    });
+    ui.unmount();
+  });
+
   it('shows builder proposals in a full-screen modal and applies only on y', async () => {
     const { client, calls, emit } = fakeClient();
     const ui = render(<App client={client} initialAgents={[agent('builder')]} initialTasks={[]} />);
@@ -553,5 +646,40 @@ describe('App', () => {
     expect(calls.some(([m]) => m === 'builder.apply')).toBe(false);
     expect(ui.lastFrame()).toContain('Cannot apply');
     ui.unmount();
+  });
+});
+
+describe('CLI renderer', () => {
+  const sink = (isTTY: boolean) => {
+    let text = '';
+    const out = { isTTY, columns: 80, write: (s: string) => ((text += s), true) };
+    return { out: out as unknown as NodeJS.WriteStream, text: () => text };
+  };
+  const events: RuntimeEvent[] = [
+    { type: 'tool.call', id: '1', name: 'shell', input: '{"command":"ls"}' },
+    { type: 'tool.result', id: '1', output: 'x', isError: false },
+    { type: 'tool.call', id: '2', name: 'shell', input: '{"command":"false"}' },
+    { type: 'tool.result', id: '2', output: 'boom', isError: true },
+    { type: 'message', text: 'done' },
+  ];
+
+  it('folds a run of tool calls into one summary line when piped', () => {
+    const s = sink(false);
+    const r = new TerminalRenderer(s.out);
+    for (const e of events) r.render(e);
+    const plain = s.text().replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toBe('▸ 2 tool calls (1 failed) · last: shell false\ndone\n');
+  });
+
+  it('rewrites the line in place on a terminal', () => {
+    const s = sink(true);
+    const r = new TerminalRenderer(s.out);
+    for (const e of events.slice(0, 3)) r.render(e);
+    expect(s.text()).toContain('\r\u001b[2K');
+    expect(s.text()).not.toContain('\n');
+    r.flush();
+    expect(s.text().replace(/\u001b\[[0-9;]*m/g, '')).toMatch(
+      /2 tool calls · last: shell false\n$/,
+    );
   });
 });

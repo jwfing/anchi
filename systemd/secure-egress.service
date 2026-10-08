@@ -2,7 +2,7 @@
 Description=Install fail-closed per-service network rules
 Wants=network-online.target
 After=network-online.target
-Before=secure-auth.service secure-gmail.service secure-inference.service secure-policy.service
+Before=secure-auth.service secure-gmail.service secure-policy.service
 
 [Service]
 Type=oneshot

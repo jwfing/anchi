@@ -17,6 +17,8 @@ import json
 import logging
 import os
 import re
+import secrets
+import shutil
 import socket
 import struct
 import time
@@ -33,6 +35,26 @@ AUTH_SOCKET = os.environ.get('ANCHI_EGRESS_AUTH', '/run/secure-auth/token.sock')
 CREDENTIAL_TTL = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
+SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+SERVICE_SOCKET = '/run/secure-{}/api.sock'
+SERVICE_MAX = 256 * 1024
+# Writes held by the policy service return at once; this bounds a slow upstream.
+SERVICE_TIMEOUT = 150
+APPROVAL_TIMEOUT = 300
+SETTINGS = Path(os.environ.get('ANCHI_EGRESS_STATE', '/var/lib/anchi-egress')) / 'settings.json'
+
+
+def load_settings():
+    try:
+        value = json.loads(SETTINGS.read_text())
+        known = {entry[0] for entry in rules.HIGH_RISK}
+        return {'high_risk_disabled': [d for d in value.get('high_risk_disabled', []) if d in known]}
+    except (OSError, ValueError, AttributeError):
+        return {'high_risk_disabled': []}
+
+
+APPROVALS_PENDING_MAX = 32
+GIT_REF_UPDATE = re.compile(rb'[0-9a-f]{40} [0-9a-f]{40} (refs/[^\x00\s]{1,200})')
 log = logging.getLogger('anchi-egress')
 
 
@@ -76,7 +98,9 @@ class Credentials:
         hit = self.cache.get(grant)
         if hit and hit[0] > self.clock():
             return hit[1]
-        if grant == 'codex':
+        if grant == 'claude':
+            value = self.fetch({'op': 'claude_token'})
+        elif grant == 'codex':
             value = self.fetch({'op': 'codex_token'})
             if value.get('expires_at', 0) <= time.time() + 30:
                 raise LookupError('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
@@ -103,11 +127,86 @@ def https_call(method, url, headers, body):
         return exc.code, exc.read(65536)
 
 
+def write_summary(decision, method, path, body):
+    """What the user approves: the git refs a push updates, or the start of the request body."""
+    if decision.rule.name == 'github-git':
+        refs = [r.decode() for r in GIT_REF_UPDATE.findall(body[:65536])]
+        return 'git push: ' + (', '.join(refs) if refs else 'no ref updates found')
+    if not body:
+        return f'{method} {path[:300]}'
+    if b'\x00' in body[:4096]:
+        return f'{method} {path[:300]} (binary body, {len(body)} bytes)'
+    return f'{method} {path[:300]}\n' + body[:2000].decode('utf-8', 'replace')
+
+
+class Approvals:
+    """Writes held for the user. The daemon watches this queue over the control socket and
+    answers; an unanswered request is refused after APPROVAL_TIMEOUT seconds."""
+
+    def __init__(self, timeout=APPROVAL_TIMEOUT):
+        self.timeout = timeout
+        self.pending = {}
+        self.watchers = set()
+
+    def broadcast(self, event):
+        line = json.dumps(event).encode() + b'\n'
+        for writer in list(self.watchers):
+            try:
+                writer.write(line)
+            except (ConnectionError, RuntimeError):
+                self.watchers.discard(writer)
+
+    async def ask(self, item):
+        """'approved', 'denied' or 'timeout'."""
+        if len(self.pending) >= APPROVALS_PENDING_MAX:
+            return 'denied'
+        item = {**item, 'id': secrets.token_hex(8), 'created_at': time.time(), 'timeout': self.timeout}
+        future = asyncio.get_running_loop().create_future()
+        self.pending[item['id']] = (item, future)
+        self.broadcast({'type': 'pending', 'approval': item})
+        try:
+            return 'approved' if await asyncio.wait_for(future, self.timeout) else 'denied'
+        except TimeoutError:
+            return 'timeout'
+        finally:
+            self.pending.pop(item['id'], None)
+            self.broadcast({'type': 'resolved', 'id': item['id']})
+
+    def decide(self, approval_id, allow):
+        entry = self.pending.get(approval_id)
+        if entry is None or entry[1].done():
+            raise ValueError('UNKNOWN_APPROVAL')
+        entry[1].set_result(bool(allow))
+        return {'id': approval_id, 'allowed': bool(allow)}
+
+    async def watch(self, writer):
+        """Streams pending approvals and changes until the watcher disconnects."""
+        for item, _ in self.pending.values():
+            writer.write(json.dumps({'type': 'pending', 'approval': item}).encode() + b'\n')
+        self.watchers.add(writer)
+        try:
+            while not writer.is_closing():
+                writer.write(b'{"type": "ping"}\n')
+                await writer.drain()
+                await asyncio.sleep(15)
+        except (ConnectionError, RuntimeError):
+            pass
+        finally:
+            self.watchers.discard(writer)
+
+
 class Cell:
-    def __init__(self, task, agent, grants):
+    def __init__(self, task, agent, grants, ask=(), egress=None):
         self.task, self.agent, self.grants = task, agent, frozenset(grants)
+        # Connectors whose writes wait for the user's approval.
+        self.ask = frozenset(ask)
+        # Hosts the cell may reach; None is open egress.
+        self.egress = rules.egress_allowlist(egress, self.grants)
         self.server = None
         self.writers = set()
+        # Connector services this cell reaches through the bridge, and their sockets.
+        self.services = frozenset()
+        self.service_servers = []
 
     @property
     def directory(self):
@@ -125,19 +224,36 @@ class Registry:
 
     def validate(self, request):
         task, agent, connectors = request.get('task'), request.get('agent'), request.get('connectors')
+        runtime = request.get('runtime', 'codex')
+        if runtime not in rules.RUNTIMES:
+            raise ValueError('BAD_RUNTIME')
         if not isinstance(task, str) or not NAME.fullmatch(task):
             raise ValueError('BAD_TASK')
         if not isinstance(agent, str) or not NAME.fullmatch(agent):
             raise ValueError('BAD_AGENT')
         if not isinstance(connectors, list) or not all(c in rules.CONNECTORS for c in connectors):
             raise ValueError('BAD_CONNECTORS')
+        ask = request.get('ask', [])
+        if not isinstance(ask, list) or not all(c in connectors for c in ask):
+            raise ValueError('BAD_APPROVALS')
+        services = request.get('services', [])
+        if not isinstance(services, list) or not all(s in SERVICE_CONNECTORS for s in services):
+            raise ValueError('BAD_SERVICES')
+        egress = request.get('egress')
+        if egress is not None and (
+            not isinstance(egress, list)
+            or len(egress) > 100
+            or not all(isinstance(p, str) and rules.EGRESS_PATTERN.fullmatch(p) for p in egress)
+        ):
+            raise ValueError('BAD_EGRESS')
         if task in self.cells:
             raise ValueError('CELL_EXISTS')
-        return task, agent, set(connectors) | set(rules.RUNTIMES)
+        # The cell gets its own runtime's credential only.
+        return task, agent, set(connectors) | {runtime}
 
     async def register(self, request):
         task, agent, grants = self.validate(request)
-        cell = Cell(task, agent, grants)
+        cell = Cell(task, agent, grants, request.get('ask', []), request.get('egress'))
         cell.directory.mkdir(parents=True, exist_ok=False)
         # The service runs with UMask=0077; the cell's agent user must traverse this directory.
         os.chmod(cell.directory, 0o755)
@@ -145,20 +261,79 @@ class Registry:
         cell.server = await asyncio.start_unix_server(lambda r, w: self.bridge(cell, r, w), path=str(path))
         # Only this cell has the directory bound in; the agent user must be able to connect.
         os.chmod(path, 0o666)
+        cell.services = frozenset(request.get('services', []))
+        for service in sorted(cell.services):
+            directory = cell.directory / 'connectors' / service
+            directory.mkdir(parents=True)
+            os.chmod(directory.parent, 0o755)
+            os.chmod(directory, 0o755)
+            server = await asyncio.start_unix_server(
+                lambda r, w, s=service: self.service_bridge(cell, s, r, w),
+                path=str(directory / 'api.sock'),
+                limit=SERVICE_MAX,
+            )
+            os.chmod(directory / 'api.sock', 0o666)
+            cell.service_servers.append(server)
         self.cells[task] = cell
-        audit({'event': 'register', 'task': task, 'agent': agent, 'grants': sorted(grants)})
+        audit(
+            {
+                'event': 'register',
+                'task': task,
+                'agent': agent,
+                'grants': sorted(grants),
+                'ask': sorted(cell.ask),
+                'egress': None if cell.egress is None else sorted(cell.egress),
+                'services': sorted(cell.services),
+            }
+        )
         return {'directory': str(cell.directory)}
+
+    async def service_bridge(self, cell, service, reader, writer):
+        """One request from the cell to a connector service, naming the cell's agent. The
+        service accepts an agent only from this UID; the cell's own `agent` field is replaced."""
+        try:
+            line = await asyncio.wait_for(reader.readline(), 30)
+            request = json.loads(line) if line.endswith(b'\n') else None
+            if not isinstance(request, dict):
+                raise ValueError('BAD_REQUEST')
+            request['agent'] = cell.agent
+            up_reader, up_writer = await asyncio.open_unix_connection(SERVICE_SOCKET.format(service), limit=SERVICE_MAX)
+            try:
+                up_writer.write(json.dumps(request, ensure_ascii=False).encode() + b'\n')
+                await up_writer.drain()
+                answer = await asyncio.wait_for(up_reader.readline(), SERVICE_TIMEOUT)
+            finally:
+                up_writer.close()
+            audit(
+                {
+                    'event': 'service',
+                    'service': service,
+                    'op': str(request.get('op'))[:40],
+                    'task': cell.task,
+                    'agent': cell.agent,
+                }
+            )
+            writer.write(answer if answer.endswith(b'\n') else b'{"ok":false,"error":"SERVICE_UNAVAILABLE"}\n')
+        except (ValueError, asyncio.LimitOverrunError, asyncio.IncompleteReadError):
+            writer.write(b'{"ok":false,"error":"BAD_REQUEST"}\n')
+        except (OSError, TimeoutError):
+            writer.write(b'{"ok":false,"error":"SERVICE_UNAVAILABLE"}\n')
+        try:
+            await writer.drain()
+        except ConnectionError:
+            pass
+        writer.close()
 
     async def unregister(self, task):
         cell = self.cells.pop(task, None)
         if cell is None:
             return {'removed': False}
         cell.server.close()
+        for server in cell.service_servers:
+            server.close()
         for writer in list(cell.writers):
             writer.close()
-        for path in cell.directory.glob('*'):
-            path.unlink(missing_ok=True)
-        cell.directory.rmdir()
+        shutil.rmtree(cell.directory, ignore_errors=True)
         audit({'event': 'unregister', 'task': task, 'agent': cell.agent})
         return {'removed': True}
 
@@ -209,6 +384,8 @@ class EgressProxy:
     def __init__(self, registry=None, credentials=None, call=https_call):
         self.registry = registry or Registry(('127.0.0.1', 18080))
         self.credentials = credentials or Credentials()
+        self.approvals = Approvals()
+        self.settings = load_settings()
         self.call = call
         self.control = None
         # Server connection id → the (host, port) the client asked for, while it is being opened.
@@ -246,9 +423,14 @@ class EgressProxy:
                 raise ValueError('BAD_REQUEST')
             request = json.loads(line)
             op = request.get('op') if isinstance(request, dict) else None
-            if op == 'register':
+            if op == 'approvals.watch':
+                # A stream, not a request: it stays open while the daemon watches.
+                return await self.approvals.watch(writer)
+            if op == 'approvals.decide':
+                result = self.approvals.decide(str(request.get('id', '')), request.get('allow') is True)
+            elif op == 'register':
                 result = await self.registry.register(request)
-                result['identifiers'] = self.identifiers(set(request.get('connectors', [])))
+                result['identifiers'] = self.identifiers(self.registry.cells[request['task']].grants)
             elif op == 'unregister':
                 task = request.get('task')
                 if not isinstance(task, str) or not NAME.fullmatch(task):
@@ -256,6 +438,10 @@ class EgressProxy:
                 result = await self.registry.unregister(task)
             elif op == 'verify':
                 result = await self.verify(request.get('connector'))
+            elif op == 'settings.set':
+                result = self.set_settings(request.get('settings'))
+            elif op == 'poll':
+                result = await self.poll(request.get('kind'), request.get('params'))
             elif op == 'list':
                 result = {t: {'agent': c.agent, 'grants': sorted(c.grants)} for t, c in self.registry.cells.items()}
             else:
@@ -285,6 +471,41 @@ class EgressProxy:
         audit({'event': 'verify', 'connector': connector, 'status': status})
         return {'connector': connector, 'account': rules.verify_account(connector, status, content)}
 
+    def set_settings(self, value):
+        """Settings the daemon owns (the user's high-risk exceptions), kept across restarts."""
+        if not isinstance(value, dict):
+            raise ValueError('BAD_SETTINGS')
+        known = {entry[0] for entry in rules.HIGH_RISK}
+        disabled = value.get('high_risk_disabled', [])
+        if not isinstance(disabled, list) or not all(d in known for d in disabled):
+            raise ValueError('BAD_SETTINGS')
+        self.settings = {'high_risk_disabled': sorted(set(disabled))}
+        SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        temporary = SETTINGS.with_suffix('.tmp')
+        temporary.write_text(json.dumps(self.settings))
+        os.replace(temporary, SETTINGS)
+        audit({'event': 'settings', 'high_risk_disabled': self.settings['high_risk_disabled']})
+        return self.settings
+
+    async def poll(self, kind, params):
+        """One fixed read-only query for a polling trigger, with the connector's credential."""
+        connector = rules.POLL_CONNECTOR.get(kind)
+        if connector is None or not isinstance(params, dict):
+            raise ValueError('BAD_POLL')
+        loop = asyncio.get_running_loop()
+        try:
+            credential = await loop.run_in_executor(None, self.credentials.get, connector)
+        except LookupError as exc:
+            raise ValueError(f'NO_CREDENTIAL:{exc}') from None
+        method, url, headers, body = rules.poll_request(kind, params, credential)
+        try:
+            status, content = await loop.run_in_executor(None, self.call, method, url, headers, body)
+        except OSError:
+            raise ValueError('POLL_UNREACHABLE') from None
+        items = rules.poll_items(kind, status, content)
+        audit({'event': 'poll', 'kind': kind, 'status': status, 'items': len(items)})
+        return {'items': items}
+
     def identifiers(self, grants):
         """Non-secret values a cell needs locally, such as the Codex account id."""
         out = {}
@@ -292,6 +513,11 @@ class EgressProxy:
             out['codex_account_id'] = self.credentials.fetch({'op': 'codex_account'})['account_id']
         except (LookupError, OSError, ValueError, KeyError):
             pass
+        if 'claude' in grants:
+            try:
+                out['claude_kind'] = self.credentials.get('claude')['kind']
+            except (LookupError, OSError, ValueError, KeyError):
+                pass
         if 'aws' in grants:
             try:
                 out['aws_region'] = self.credentials.get('aws')['region']
@@ -316,6 +542,10 @@ class EgressProxy:
         """Resolve once, refuse non-public destinations and connect to the checked address."""
         host, port = data.server.address
         cell = self.registry.client_cell(data.client)
+        if cell is not None and not rules.egress_allowed(cell.egress, str(host).lower().rstrip('.')):
+            data.server.error = f'anchi: {host} is not in this agent\'s egress list'
+            audit({'decision': 'egress-denied', 'host': str(host)[:200], 'task': cell.task, 'agent': cell.agent})
+            return
         try:
             infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except OSError as exc:
@@ -376,14 +606,41 @@ class EgressProxy:
         if cell is None:
             self.respond(flow, 403, b'anchi: unknown cell\n')
 
-    async def request(self, flow):
+    async def requestheaders(self, flow):
+        """A streamed body (over 8 MiB) follows its headers upstream before `request` runs, so
+        streamed requests are decided here. Only S3 calls are injected on this path: their
+        operation and risk come from the method and path. Other streamed requests leave without
+        injection. A refusal here can only drop the connection."""
         req = flow.request
+        if not req.stream:
+            return
+        flow.metadata['anchi-streamed'] = True
+        cell = self.registry.client_cell(flow.client_conn)
+        if cell is None:
+            return flow.kill()
+        refusal = await self.handle(flow, cell, b'', streamed=True)
+        if refusal is not None:
+            flow.kill()
+
+    async def request(self, flow):
+        if flow.metadata.get('anchi-streamed'):
+            return
         cell = self.registry.client_cell(flow.client_conn)
         if cell is None:
             return self.respond(flow, 403, b'anchi: unknown cell\n')
+        # A body without a length that grew past 8 MiB switched to streaming after
+        # `requestheaders`: its headers have left unchanged, and only the audit remains.
+        late = bool(flow.request.stream)
+        body = b'' if late else (flow.request.get_content(strict=False) or b'')
+        refusal = await self.handle(flow, cell, body, streamed=late, late=late)
+        if refusal is not None:
+            self.respond(flow, *refusal)
+
+    async def handle(self, flow, cell, body, streamed, late=False):
+        """Decide, hold for approval and inject. Returns None, or (status, content, headers) to refuse."""
+        req = flow.request
         req.headers.pop('proxy-authorization', None)
         headers = {k.lower(): v for k, v in req.headers.items()}
-        body = b'' if req.stream else (req.get_content(strict=False) or b'')
         host = req.pretty_host
         path = req.path.split('?', 1)[0]
         decision = rules.decide(req.method, host, req.path, headers, body, cell.grants)
@@ -398,32 +655,76 @@ class EgressProxy:
             'op': decision.op,
             'decision': decision.action if decision.reason is None else f'{decision.action}:{decision.reason}',
         }
+        if late and decision.action != 'pass':
+            entry['decision'] = 'pass:streamed'
+            audit(entry)
+            return None
         if decision.action == 'deny':
             audit(entry)
-            status, content, extra = rules.deny_response(decision, headers)
-            return self.respond(flow, status, content, extra)
+            return rules.deny_response(decision, headers)
         if decision.action == 'pass':
             audit(entry)
-            return
+            return None
+        if streamed and not (decision.rule.kind == 'aws_sigv4' and (decision.op or '').startswith('s3:')):
+            entry['decision'] = 'pass:streamed'
+            audit(entry)
+            return None
+        # High-risk operations wait for the user for every agent (phase 3, F1); other writes
+        # wait when the agent's approvals ask for its connector.
+        risk = rules.high_risk(decision, req.method, req.path, body, self.settings['high_risk_disabled'])
+        if risk or (decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body)):
+            entry['risk'] = risk[0] if risk else None
+            outcome = await self.approvals.ask(
+                {
+                    'task': cell.task,
+                    'agent': cell.agent,
+                    'connector': decision.rule.grant,
+                    'operation': entry['op'],
+                    'host': host,
+                    'summary': write_summary(decision, req.method, path, body),
+                    'reason': f'high-risk: {risk[1]}' if risk else f'approvals: {decision.rule.grant} asks',
+                }
+            )
+            entry['approval'] = outcome
+            if outcome != 'approved':
+                entry['decision'] = 'held-' + outcome
+                audit(entry)
+                reason = 'timed out' if outcome == 'timeout' else 'was denied'
+                return 403, f'anchi: approval for this write {reason}\n'.encode(), None
         try:
             credential = await asyncio.get_running_loop().run_in_executor(
                 None, self.credentials.get, decision.rule.grant
             )
             new = rules.apply(decision, req.method, req.url, headers, body, credential)
+            resigner = rules.aws_chunk_resigner(new, credential) if decision.rule.kind == 'aws_sigv4' else None
+            if resigner is not None and not streamed:
+                req.raw_content = resigner.feed(req.raw_content or b'') + resigner.feed(b'')
         except LookupError as exc:
             entry['decision'] = 'missing-credential'
             entry['reason'] = str(exc)[:100]
             audit(entry)
-            return self.respond(flow, 502, f'anchi: credential unavailable ({exc})\n'.encode())
+            return 502, f'anchi: credential unavailable ({exc})\n'.encode(), None
         except ValueError as exc:
             entry['decision'] = 'rejected'
             entry['reason'] = str(exc)[:200]
             audit(entry)
-            return self.respond(flow, 403, f'anchi: {exc}\n'.encode())
+            return 403, f'anchi: {exc}\n'.encode(), None
+        if resigner is not None and streamed:
+
+            def stream(data):
+                # Raising ends the connection, so upstream gets a truncated body, never a forged one.
+                try:
+                    return resigner.feed(data)
+                except ValueError as exc:
+                    audit({**entry, 'decision': 'rejected', 'reason': str(exc)[:200]})
+                    raise
+
+            req.stream = stream
         req.headers.clear()
         for key, value in new.items():
             req.headers[key] = value
         audit(entry)
+        return None
 
     @staticmethod
     def respond(flow, status, content, headers=None):

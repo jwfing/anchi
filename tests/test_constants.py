@@ -1,6 +1,5 @@
 """guest/cell.env is the single source for cell identity and pinned versions."""
 
-import json
 from pathlib import Path
 import re
 import subprocess
@@ -45,11 +44,6 @@ class CellEnvTests(unittest.TestCase):
         self.assertEqual(run('host_vm_type', 'Darwin').stdout.strip(), 'vz')
         self.assertEqual(run('host_vm_type', 'Linux').stdout.strip(), 'qemu')
         self.assertNotEqual(run('host_vm_type', 'Windows_NT').returncode, 0)
-
-    def test_pi_version_matches_lockfile(self):
-        package = json.loads((ROOT / 'pi/package.json').read_text())
-        self.assertEqual(package['dependencies']['@earendil-works/pi-coding-agent'], common.PI_VERSION)
-        self.assertEqual(package['dependencies']['@earendil-works/pi-ai'], common.PI_VERSION)
 
     def test_no_hardcoded_cell_uids_outside_env(self):
         pattern = re.compile(r'\b52[45]288\b')

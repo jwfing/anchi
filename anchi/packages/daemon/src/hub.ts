@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
 import {
   agentFile,
   BASE_IMAGE,
@@ -7,9 +8,13 @@ import {
   loadImage,
   type ResolvedAgent,
   resolveAgent,
+  workspaceName,
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
 import { CellSession } from './cell.ts';
+import type { SkillStore } from './skills.ts';
+import { audit, snapshot, type Snapshot } from './workspace-audit.ts';
+import { ToolDispatcher } from './tools.ts';
 import type { Guest } from './guest.ts';
 import { instructions, WORKDIR } from './prompt.ts';
 import type { Store } from './store.ts';
@@ -40,12 +45,28 @@ interface LiveCell {
 }
 
 export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
+const SCAN_TIMEOUT_MS = 120_000;
+const SHUTDOWN_SCAN_MS = 30_000;
+
+/**
+ * Delegation limits. They stop runaway loops and cost; they are not a security control (the
+ * `delegates` allowlist is).
+ */
+export const DELEGATION = { maxDepth: 3, maxChildren: 10, maxTreeTurns: 60 };
 
 export interface HubOptions {
   layout: HomeLayout;
   store: Store;
   guest: Guest;
   idleMs?: number;
+  /** Scan each cell for real credential values before closing it (default true). */
+  scanOnClose?: boolean;
+  /** Skills copied into an agent's cells. */
+  skills?: SkillStore;
+  /** ~/AnchiWorkspaces on the Mac, where writable workspaces are audited after each turn. */
+  workspaceRoot?: string;
+  /** A connector service holds a cell's write for approval (see ApprovalWatcher.addPolicy). */
+  onPolicyApproval?(task: TaskRow, connector: string, id: string): Promise<void>;
   /** Longest a single turn may run before it is cancelled and the task fails. */
   turnTimeoutMs?: number;
   log?(msg: string): void;
@@ -59,10 +80,20 @@ export interface HubEvents {
   agents: [AgentSummary[]];
   /** A turn ended; `reply` is the final message (agent-originated). */
   turnEnded: [{ task: TaskRow; reply: string }];
+  /** The credential scan taken before a cell closed found real credential values. */
+  scanFinding: [{ taskId: string; agentId: string; labels: string[] }];
 }
 
 function cellKey(agent: ResolvedAgent, imageHash: string): string {
-  return JSON.stringify([agent.image, imageHash, agent.connectors, agent.sandbox]);
+  return JSON.stringify([
+    agent.runtime,
+    agent.image,
+    imageHash,
+    agent.connectors,
+    agent.sandbox,
+    agent.workspaces,
+    agent.egress ?? null,
+  ]);
 }
 
 /**
@@ -76,9 +107,23 @@ export class Hub extends EventEmitter<HubEvents> {
   private builds = new Map<string, Promise<void>>();
   private log: (msg: string) => void;
 
+  readonly tools: ToolDispatcher;
+
   constructor(private opts: HubOptions) {
     super();
     this.log = opts.log ?? (() => {});
+    this.tools = new ToolDispatcher({
+      agents: () => this.summaries(),
+      delegate: (parent, agent, target, text) => this.delegate(parent, agent, target, text),
+      sendTask: (id, text) => this.sendTask(id, text),
+      getTask: (id) => this.getTask(id),
+      children: (id) => this.children(id),
+      wait: (id) => this.wait(id),
+      policyApproval: async (task, connector, id) => {
+        if (!this.opts.onPolicyApproval) throw new Error('approvals are not available');
+        await this.opts.onPolicyApproval(task, connector, id);
+      },
+    });
     this.reload();
   }
 
@@ -112,6 +157,11 @@ export class Hub extends EventEmitter<HubEvents> {
     return this.emitAgents();
   }
 
+  /** Agents that loaded without errors, as configured (triggers, connectors…). */
+  resolvedAgents(): ResolvedAgent[] {
+    return [...this.states.values()].flatMap((s) => (s.agent ? [s.agent] : []));
+  }
+
   summaries(): AgentSummary[] {
     return [...this.states.values()]
       .sort((a, b) => a.id.localeCompare(b.id))
@@ -128,6 +178,9 @@ export class Hub extends EventEmitter<HubEvents> {
           sandbox: s.agent?.sandbox,
           status,
           queued: s.queue.length,
+          triggers: s.agent?.triggers.length ?? 0,
+          workspaces: s.agent?.workspaces.map((w) => `${workspaceName(w)} (${w.mode})`) ?? [],
+          delegates: s.agent?.delegates ?? [],
           error: s.error,
           file: s.agent?.sourceFiles.at(-1) ?? agentFile(this.opts.layout, s.id),
         };
@@ -187,8 +240,103 @@ export class Hub extends EventEmitter<HubEvents> {
     return task;
   }
 
+  /**
+   * Starts a task for `targetId` on behalf of a running task. The parent agent must list the
+   * target in `delegates`, and the target must not already work on an ancestor of this task:
+   * that agent would wait for itself.
+   */
+  delegate(parent: TaskRow, parentAgent: ResolvedAgent, targetId: string, text: string): TaskRow {
+    if (!parentAgent.delegates.includes(targetId)) {
+      throw new Error(`@${parentAgent.id} may not delegate to @${targetId}; see list_agents`);
+    }
+    if (parent.depth + 1 > DELEGATION.maxDepth) {
+      throw new Error(`delegation is limited to ${DELEGATION.maxDepth} levels`);
+    }
+    if (this.opts.store.children(parent.id).length >= DELEGATION.maxChildren) {
+      throw new Error(`a task may start at most ${DELEGATION.maxChildren} delegated tasks`);
+    }
+    if (this.opts.store.treeTurns(parent.rootId) >= DELEGATION.maxTreeTurns) {
+      throw new Error(`this task tree used its ${DELEGATION.maxTreeTurns} turns`);
+    }
+    for (
+      let t: TaskRow | undefined = parent;
+      t;
+      t = t.parentId ? this.opts.store.getTask(t.parentId) : undefined
+    ) {
+      if (t.agentId === targetId) {
+        throw new Error(`@${targetId} is already working on a task above this one`);
+      }
+    }
+    const state = this.state(targetId);
+    if (!state.agent) throw new Error(`agent "${targetId}" has a config error: ${state.error}`);
+    if (!text.trim()) throw new Error('empty task');
+    const task = this.opts.store.createTask({
+      agentId: targetId,
+      trigger: 'delegation',
+      title: text,
+      parent,
+    });
+    this.emit('task', task);
+    this.record(parent, { type: 'notice', text: `↳ delegated to @${targetId} as ${task.id}` });
+    this.enqueue(state, { taskId: task.id, text });
+    return task;
+  }
+
+  /**
+   * How a task came to exist, root first: `you`, `schedule`, `poll`, then each delegation,
+   * e.g. `poll → @lead (t-1) → @developer (t-2)`.
+   */
+  origin(taskId: string): string {
+    const chain: TaskRow[] = [];
+    for (let t = this.opts.store.getTask(taskId); t && chain.length < 10;) {
+      chain.unshift(t);
+      t = t.parentId ? this.opts.store.getTask(t.parentId) : undefined;
+    }
+    if (!chain.length) return '';
+    const root = chain[0]!.trigger === 'user' ? 'you' : chain[0]!.trigger;
+    return [root, ...chain.map((t) => `@${t.agentId} (${t.id})`)].join(' → ');
+  }
+
+  /** A line from Anchi in a task's transcript (approvals, delegation). */
+  notice(taskId: string, text: string): void {
+    const task = this.opts.store.getTask(taskId);
+    if (task) this.record(task, { type: 'notice', text: text.slice(0, 2000) });
+  }
+
+  /**
+   * Deletes a task with the tasks it delegated (and theirs), once none of them is running.
+   * The task's cell, if still idle, goes too.
+   */
+  async deleteTask(taskId: string): Promise<number> {
+    const task = this.getTask(taskId);
+    const ids: string[] = [];
+    const walk = (t: TaskRow) => {
+      if (t.status === 'running' || t.status === 'queued') {
+        throw new Error(`${t.id} is still ${t.status}; cancel it first`);
+      }
+      ids.push(t.id);
+      for (const child of this.opts.store.children(t.id)) walk(child);
+    };
+    walk(task);
+    await Promise.all(ids.map((id) => this.closeCell(id, 'task deleted')));
+    return this.opts.store.deleteTasks(ids);
+  }
+
+  /** Deletes finished tasks older than `days`; their cells are long gone. */
+  purge(days: number, now = Date.now()): number {
+    return this.opts.store.deleteTasks(this.opts.store.finishedBefore(now - days * 86_400_000));
+  }
+
+  children(taskId: string): TaskRow[] {
+    return this.opts.store.children(taskId);
+  }
+
   cancelTask(taskId: string): void {
     const task = this.getTask(taskId);
+    // Delegated work goes with the task that asked for it.
+    for (const child of this.opts.store.children(taskId)) {
+      if (child.status === 'running' || child.status === 'queued') this.cancelTask(child.id);
+    }
     const state = this.states.get(task.agentId);
     if (state) {
       const before = state.queue.length;
@@ -238,6 +386,8 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   private record(task: TaskRow, event: RuntimeEvent): void {
+    if (event.type === 'usage')
+      this.opts.store.addUsage(task.id, event.inputTokens, event.outputTokens);
     const seq =
       event.type === 'text.delta' ? undefined : this.opts.store.appendEvent(task.id, event);
     this.emit('event', { taskId: task.id, agentId: task.agentId, seq, event });
@@ -248,6 +398,15 @@ export class Hub extends EventEmitter<HubEvents> {
     const row = this.opts.store.setStatus(taskId, status);
     this.emit('task', row);
     if (status === 'done') this.emit('turnEnded', { task: row, reply: result ?? '' });
+    if (row.parentId) {
+      const parent = this.opts.store.getTask(row.parentId);
+      const outcome = row.links[0] ?? (row.result ?? '').replace(/\s+/g, ' ').slice(0, 120);
+      if (parent)
+        this.record(parent, {
+          type: 'notice',
+          text: `↳ ${row.id} (@${row.agentId}) ${status}: ${outcome}`,
+        });
+    }
     for (const resolve of this.waiters.get(taskId) ?? []) resolve(row);
     this.waiters.delete(taskId);
   }
@@ -256,15 +415,30 @@ export class Hub extends EventEmitter<HubEvents> {
     let task = this.getTask(job.taskId);
     const agent = this.resolve(state.id);
     state.agent = agent;
+    if (task.depth > 0 && this.opts.store.treeTurns(task.rootId) >= DELEGATION.maxTreeTurns) {
+      return this.finish(
+        task.id,
+        'failed',
+        `this task tree used its ${DELEGATION.maxTreeTurns} turns`,
+      );
+    }
+    this.opts.store.countTurn(task.id);
     task = this.opts.store.setStatus(task.id, 'running');
     this.emit('task', task);
-    this.record(task, { type: 'input', text: job.text.slice(0, 64_000), source: 'user' });
+    this.record(task, {
+      type: 'input',
+      text: job.text.slice(0, 64_000),
+      source: task.trigger === 'user' ? 'user' : 'task',
+    });
 
     let reply = '';
     let failure: string | undefined;
     let timedOut = false;
+    let before = new Map<string, Snapshot>();
     try {
       const hash = await this.ensureImage(agent, task);
+      await this.syncSkills(agent);
+      before = this.snapshotWorkspaces(agent);
       if (signal.aborted) throw new Error('cancelled');
       const cell = await this.cellFor(task, agent, hash);
       const turnId = `turn-${Date.now().toString(36)}`;
@@ -302,6 +476,7 @@ export class Hub extends EventEmitter<HubEvents> {
         }
       } finally {
         clearTimeout(timer);
+        this.auditWorkspaces(agent, task, before);
         signal.removeEventListener('abort', onAbort);
         cell.lastUsed = Date.now();
         this.armIdle(task.id);
@@ -325,6 +500,41 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   // ── images and cells ─────────────────────────────────────
+
+  private skillDigests = new Map<string, string>();
+
+  private workspaceDirs(agent: ResolvedAgent): [string, string][] {
+    const root = this.opts.workspaceRoot;
+    if (!root) return [];
+    return agent.workspaces
+      .filter((w) => w.mode === 'rw')
+      .map((w) => [workspaceName(w), join(root, ...w.path.split('/'))]);
+  }
+
+  private snapshotWorkspaces(agent: ResolvedAgent): Map<string, Snapshot> {
+    return new Map(this.workspaceDirs(agent).map(([name, dir]) => [name, snapshot(dir)]));
+  }
+
+  /** Reports code-running paths a turn added to writable workspaces (see workspace-audit). */
+  private auditWorkspaces(agent: ResolvedAgent, task: TaskRow, before: Map<string, Snapshot>) {
+    for (const [name, dir] of this.workspaceDirs(agent)) {
+      const was = before.get(name);
+      if (!was) continue;
+      for (const finding of audit(dir, was, snapshot(dir)).slice(0, 20)) {
+        this.record(task, { type: 'notice', text: `⚠ workspace ${name}: ${finding}` });
+      }
+    }
+  }
+
+  /** Sends the agent's skills to the VM when they changed since the last cell. */
+  private async syncSkills(agent: ResolvedAgent): Promise<void> {
+    if (!this.opts.skills) return;
+    if (!agent.skills.length && !this.skillDigests.has(agent.id)) return;
+    const { files, digest } = this.opts.skills.bundle(agent.skills);
+    if (this.skillDigests.get(agent.id) === digest) return;
+    await this.opts.guest.setSkills(agent.id, agent.skills.length ? files : {});
+    this.skillDigests.set(agent.id, digest);
+  }
 
   private async ensureImage(agent: ResolvedAgent, task: TaskRow): Promise<string> {
     const image = loadImage(agent.image, this.opts.layout);
@@ -366,13 +576,13 @@ export class Hub extends EventEmitter<HubEvents> {
       clearTimeout(existing.idle);
       return existing;
     }
-    if (existing) this.closeCell(task.id, 'agent settings changed');
+    if (existing) await this.closeCell(task.id, 'agent settings changed');
     // The guest limits concurrent cells; make room by closing the longest-idle one.
     if (this.cells.size >= MAX_CELLS) {
       const idle = [...this.cells.entries()]
         .filter(([, c]) => c.idle)
         .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (idle) this.closeCell(idle[0], 'making room for another task');
+      if (idle) await this.closeCell(idle[0], 'making room for another task');
     }
     const child = this.opts.guest.startCell({
       task: task.id,
@@ -381,8 +591,21 @@ export class Hub extends EventEmitter<HubEvents> {
       hash,
       connectors: agent.connectors,
       sandbox: agent.sandbox,
+      runtime: agent.runtime,
+      ask: Object.entries(agent.approvals)
+        .filter(([, mode]) => mode === 'ask')
+        .map(([connector]) => connector),
+      workspaces: agent.workspaces.map((w) => ({
+        name: workspaceName(w),
+        path: w.path,
+        mode: w.mode,
+      })),
+      egress: agent.egress,
     });
     const session = new CellSession(task.id, child);
+    // The cell belongs to this task; its tool calls act as this task's agent.
+    session.toolHandler = ({ tool, args }) =>
+      this.tools.call({ task: this.getTask(task.id), agent: this.resolve(agent.id) }, tool, args);
     const cell: LiveCell = { session, agentId: agent.id, key, lastUsed: Date.now() };
     this.cells.set(task.id, cell);
     session.on('exit', (reason) => {
@@ -406,12 +629,70 @@ export class Hub extends EventEmitter<HubEvents> {
     cell.idle.unref();
   }
 
-  closeCell(taskId: string, reason: string): void {
+  /**
+   * Closes a task's cell. A live cell is scanned for real credential values first (the
+   * credential invariant, checked on every cell rather than on request); the result goes to
+   * the task's transcript, and a finding is reported. No longer reusable from the start.
+   */
+  closeCell(taskId: string, reason: string): Promise<void> {
     const cell = this.cells.get(taskId);
-    if (!cell) return;
+    if (!cell) return Promise.resolve();
     clearTimeout(cell.idle);
     this.cells.delete(taskId);
-    cell.session.close(reason);
+    const closing = this.scanBeforeClose(taskId, cell).finally(() => {
+      cell.session.close(reason);
+      this.closing.delete(closing);
+    });
+    this.closing.add(closing);
+    return closing;
+  }
+
+  private closing = new Set<Promise<void>>();
+
+  private async scanBeforeClose(taskId: string, cell: LiveCell): Promise<void> {
+    if (this.opts.scanOnClose === false || cell.session.closed) return;
+    const task = this.opts.store.getTask(taskId);
+    if (!task) return;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('timed out')), SCAN_TIMEOUT_MS);
+    });
+    try {
+      const r = await Promise.race([this.opts.guest.scan(taskId), timeout]);
+      if (!this.opts.store.getTask(taskId)) return; // deleted meanwhile
+      if (r.clean) {
+        this.record(task, {
+          type: 'notice',
+          text: `credential scan before closing the cell: clean (${r.files} files)`,
+        });
+      } else {
+        const labels = [
+          ...new Set(
+            (r.findings as { credential?: unknown; where?: unknown }[]).map(
+              (f) =>
+                `${String(f.credential ?? 'credential').slice(0, 40)} in ${String(f.where ?? '?').slice(0, 80)}`,
+            ),
+          ),
+        ].slice(0, 10);
+        this.record(task, {
+          type: 'error',
+          message: `credential scan before closing the cell found real credential values: ${labels.join(', ')}`,
+          fatal: false,
+        });
+        this.emit('scanFinding', { taskId, agentId: task.agentId, labels });
+      }
+    } catch (err) {
+      if (!this.opts.store.getTask(taskId)) return;
+      this.record(task, {
+        type: 'notice',
+        text: `credential scan before closing the cell did not complete: ${(err as Error).message}`.slice(
+          0,
+          500,
+        ),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Marks tasks interrupted by a daemon restart as failed; their cells were reaped. */
@@ -426,7 +707,14 @@ export class Hub extends EventEmitter<HubEvents> {
     }
   }
 
-  shutdown(): void {
-    for (const id of [...this.cells.keys()]) this.closeCell(id, 'daemon stopping');
+  /** Closes every cell, waiting for their scans up to SHUTDOWN_SCAN_MS. */
+  async shutdown(): Promise<void> {
+    for (const id of [...this.cells.keys()]) void this.closeCell(id, 'daemon stopping');
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      Promise.allSettled([...this.closing]),
+      new Promise((r) => (timer = setTimeout(r, SHUTDOWN_SCAN_MS))),
+    ]);
+    clearTimeout(timer);
   }
 }

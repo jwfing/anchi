@@ -1,31 +1,24 @@
 # Anchi / 安栖
 
-Anchi is a permission runtime for local agents. The environment holds account credentials; agents use resources through controlled interfaces. This is an **MVP development build**, not a publicly distributable release. The isolation proof of concept and desktop control plane are implemented.
+Anchi runs a team of Codex and Claude Code agents on your Mac. Each task runs in a disposable cell inside a Linux VM, and upstream credentials stay outside the cells: a trusted egress proxy and trusted connector services use them on the agents' behalf. This is an **MVP development build**, not a publicly distributable release.
 
-Start with the [getting started guide](docs/GETTING_STARTED.md). You do not need to deploy a VM manually before using desktop setup. System installation prompts and browser sign-in require your participation.
+You drive the team from a terminal UI or a CLI (`scripts/anchi`). Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md).
 
 ## Current capabilities
 
 | Capability | Status |
 |---|---|
-| Lima VM, systemd-nspawn cell, separate service identities | Implemented; live isolation checks completed |
-| Independent auth, policy, Gmail and inference services | Implemented; Gmail remains read-only |
-| Google Drive, Notion and Slack connectors | Implemented; standing authorization by default, optional per-request approval, revision-bound updates; real-account validation remains incomplete |
-| Pi, Codex subscription authentication and multi-turn JSONL RPC | Implemented; credentials never enter the cell |
-| Desktop chat, session recovery, cancellation and independent approval | Implemented against the real runtime |
-| Native read-only/read-write directory grants | Implemented through a host file broker; grants persist until revoked and restore only when directory identity matches; synthetic round-trip verified in a real cell |
-| Recoverable file deletion and overwrite | Old content moves to a hidden `.anchi-trash` inside the granted directory, inaccessible to the agent |
-| Desktop Google OAuth, disconnect, authorization modes and reauthentication | Implemented; the account owner completes browser consent |
-| First-run setup, dependencies, VM/Pi installation, vault unlock and model login | Implemented; fresh VM installation and retry verified; expired model authentication can be reimported without disconnecting Pi |
-| First example task and approval guidance | Implemented; model calls use standing authorization by default, with optional per-turn approval |
-| Approval summaries, pending badge, durable activity metadata and VM audit access | Implemented; desktop activity does not persist chat or approval bodies |
-| Task-scoped grants, multiple agent instances and automatic context compaction | Not implemented |
-| Gmail sending | Deferred; remains a design proposal |
-| API-key inference (`inference.openai`) | Used only by the legacy restricted workflow in `guest/agent.py`; integration with Pi or removal remains undecided |
-| Developer ID signing and notarization | Release pipeline implemented; no formal signed artifact has been validated without the required certificate |
-| Automatic updates and public distribution | Not complete |
+| Lima VM with long-running trusted services and per-task systemd-nspawn cells | Implemented; `make verify-vm` and `make verify-anchi` run the live isolation checks |
+| Codex and Claude Code runtimes in cells, holding placeholders only | Implemented; the egress proxy substitutes subscription tokens replace-only |
+| GitHub, AWS (re-signing, SSO profiles) and Linear through the egress proxy | Implemented; credential minting denied; credentials verified at import |
+| Gmail, Drive, Notion and Slack through trusted services bound per agent | Implemented; Gmail is read-only; writes follow each service's policy (`auto` or `ask`) |
+| Delegation between agents, schedule and polling triggers, skills | Implemented |
+| Approval of writes in a full-screen dialog (`approvals: {github: ask}`) | Implemented for git push, API writes, AWS writes and GraphQL mutations |
+| Agent builder, task history with search and delegation trees | Implemented |
+| Live acceptance with real accounts | Partly done; see the [phase 1](docs/architecture/AGENT_TEAM_PHASE1_PLAN.md#status) and [phase 2](docs/architecture/AGENT_TEAM_PHASE2_PLAN.md#status) status |
+| Remote machines, public distribution, signed packages | Not planned or not complete |
 
-Content an agent reads may enter a cloud model. Credential isolation does **not** mean data stays on the machine. See the [security model](SECURITY.md) for authorization defaults, limits and remaining risks.
+Content an agent reads may reach a cloud model or any public host. Credential isolation does **not** mean data isolation. See the [security model](SECURITY.md) for the boundaries and their limits.
 
 ## Supported hosts
 
@@ -35,55 +28,49 @@ Content an agent reads may enter a cloud model. Credential isolation does **not*
 | Linux x86_64 (Ubuntu 22.04+ / Debian 12+) | Experimental; KVM CI coverage uses Ubuntu 24.04 | Lima + QEMU/KVM |
 | Other platforms | Unsupported | — |
 
-On Linux, setup downloads pinned Lima and Codex CLI builds with SHA-256 verification into `~/.local/share/anchi/tools`. QEMU installation and any required KVM group changes are commands you run in a terminal; the app does not request an administrator password. See [Linux setup](docs/GETTING_STARTED.md#linux).
-
 ## Development
 
-Requires Node 22+, npm and Python 3.11+.
+Requires Node 22+, pnpm, Python 3.11+ and Lima.
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-test.txt
-npm ci --prefix desktop
-npm ci --prefix pi
+pnpm --dir anchi install
 make check PYTHON=.venv/bin/python
-make desktop
 ```
 
-`make check` runs Ruff, shellcheck when installed, Prettier, syntax checks and offline tests. It does not access a VM, Google account or model. Some OAuth tests open a local loopback listener.
+`make check` runs Ruff, shellcheck when installed, Prettier, the trust-zone dependency check, syntax checks and the offline tests. It does not access a VM, an account or a model. Some tests open local loopback listeners.
 
 ```bash
-make help        # List entry points
-make lint        # Ruff, shellcheck and Prettier checks
-make format      # Format Python, desktop and Pi sources
-make verify-vm   # Explicit live VM isolation checks
+make help          # List entry points
+make lint          # Ruff, shellcheck and Prettier checks
+make format        # Format Python and anchi sources
+make verify-vm     # Live VM and service isolation checks
+make verify-anchi  # Live agent-team cell and egress proxy checks
 ```
 
-Desktop setup can install or connect to `secure-vm`. For command-line deployment, see [Pi installation and authentication](docs/PI_AGENT.md); `bash scripts/up.sh` remains the base VM entry point. Deployment changes the host or VM and is separate from default checks.
-
-Package locally with `make package PYTHON=.venv/bin/python`. Version 0.1.1 produces `artifacts/releases/0.1.1/Anchi-darwin-arm64/Anchi.app` on macOS, or a Linux archive on Linux. Packaged apps include their runtime scripts and do not depend on a developer checkout. Lima and a configured VM are still required at runtime. See [desktop usage](docs/DESKTOP_APP.md) and [release engineering](docs/engineering/RELEASE.md).
+`scripts/anchi setup install` creates or updates the VM and installs everything; deployment changes the host and the VM and is separate from the default checks.
 
 ## Repository layout
 
 | Directory | Responsibility |
 |---|---|
-| `desktop/` | Electron UI, trusted host control plane, configuration and Pi process management |
-| `pi/` | Pi adapter and RPC inside the untrusted cell |
-| `services/` | Trusted authentication, policy, connectors and model gateway |
-| `guest/`, `systemd/`, `lima/` | Isolation environment, deployment and service configuration |
-| `scripts/` | Stable host CLI entry points and explicit live checks |
-| `tests/` | Offline service regression tests |
-| `prototype/` | Simulated UX reference; excluded from app packaging |
-| `landing/` | Static product landing page for `anchi.elseward.xyz`; see [preview and deployment notes](landing/README.md) |
-| `docs/` | Current user guides, architecture and release procedures |
+| `anchi/` | Daemon, TUI and CLI (trusted, on the host) and the cell runner (untrusted, in cells); a pnpm workspace split by trust zone |
+| `services/` | Trusted VM services: vault and auth, policy, connectors, the egress proxy |
+| `guest/`, `systemd/`, `lima/` | VM bring-up, the task-cell manager, service units and VM configuration |
+| `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.py`) and live checks |
+| `tests/` | Offline tests of the Python services |
+| `poc/` | Phase 0 spikes and their results |
+| `prototype/`, `landing/` | UX reference and the static landing page |
+| `docs/` | Guides, architecture and engineering notes |
 
-See [module responsibilities](docs/architecture/REPOSITORY.md). Existing guest and script paths remain stable to avoid breaking deployed environments.
+See [module responsibilities](docs/architecture/REPOSITORY.md).
 
 ## Contributing
 
 Bug reports, documentation, tests and code contributions are welcome. Discuss substantial feature or architecture changes in an issue first. Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
-Follow [CONTRIBUTING.md](CONTRIBUTING.md) to prepare a branch and run checks. Each PR should explain the problem, resulting behavior, validation and known limitations. Include sanitized screenshots for UI changes and live evidence for installation or isolation changes. Do not commit credentials, real messages or sessions, dependencies, or build artifacts.
+Follow [CONTRIBUTING.md](CONTRIBUTING.md) to prepare a branch and run checks. Each PR should explain the problem, resulting behavior, validation and known limitations, with live evidence for installation or isolation changes. Do not commit credentials, real messages or sessions, dependencies, or build artifacts.
 
 All maintained documentation is written in English. See the [documentation index](docs/README.md) and [changelog](CHANGELOG.md).
 

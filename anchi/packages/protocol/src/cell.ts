@@ -7,7 +7,16 @@ import { runtimeEventSchema } from './events.ts';
  * fixed `anchi-cell start` command. One runner serves one task and runs one turn at a time.
  */
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
+
+export const runtimeIdSchema = z.enum(['codex', 'claude-code']);
+export type RuntimeId = z.infer<typeof runtimeIdSchema>;
+
+/** Name of an Anchi tool the in-cell MCP server offers (delegation, task status, connectors). */
+const toolName = z.string().regex(/^[a-z][a-z0-9_.]{0,63}$/);
+const callId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+/** Tool arguments and results stay small: they are JSON, bounded like events. */
+const toolPayload = z.record(z.string(), z.unknown());
 
 const turnId = z.string().regex(/^[a-z0-9-]{1,64}$/);
 
@@ -35,6 +44,14 @@ export const cellCommandSchema = z.discriminatedUnion('type', [
     options: turnOptionsSchema,
   }),
   z.strictObject({ type: z.literal('cancel'), turn: turnId }),
+  /** The daemon's answer to a `tool.request`. */
+  z.strictObject({
+    type: z.literal('tool.response'),
+    id: callId,
+    ok: z.boolean(),
+    result: toolPayload.optional(),
+    error: z.string().max(2000).optional(),
+  }),
 ]);
 export type CellCommand = z.infer<typeof cellCommandSchema>;
 
@@ -43,10 +60,18 @@ export const cellMessageSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('ready'),
     protocol: z.literal(PROTOCOL_VERSION),
-    runtime: z.enum(['codex']),
+    runtime: runtimeIdSchema,
     version: z.string().max(100),
   }),
   z.strictObject({ type: z.literal('event'), turn: turnId, event: runtimeEventSchema }),
   z.strictObject({ type: z.literal('turn.end'), turn: turnId, ok: z.boolean() }),
+  /** An Anchi tool call from the in-cell MCP server, relayed by the runner. */
+  z.strictObject({
+    type: z.literal('tool.request'),
+    turn: turnId,
+    id: callId,
+    tool: toolName,
+    args: toolPayload,
+  }),
 ]);
 export type CellMessage = z.infer<typeof cellMessageSchema>;

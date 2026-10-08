@@ -43,7 +43,20 @@ APPARMOR_PROFILE = Path('/etc/apparmor.d/anchi-cell-bwrap')
 MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '4'))
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 HASH = re.compile(r'^(base|[0-9a-f]{16})$')
-CONNECTORS = ('github', 'aws', 'linear')
+# Credentials injected by the egress proxy, and services reached through per-cell sockets.
+PROXY_CONNECTORS = ('github', 'aws', 'linear')
+# Codex reads its MCP servers from config.toml; `anchi` is the in-cell Anchi tool server.
+CODEX_CONFIG = '''cli_auth_credentials_store = "file"
+
+[mcp_servers.anchi]
+command = "/opt/node/bin/node"
+args = ["/opt/anchi/mcp.mjs"]
+startup_timeout_sec = 10
+# Delegation tools wait for another agent's turn; the daemon bounds the wait (55 minutes).
+tool_timeout_sec = 3600
+'''
+SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+CONNECTORS = PROXY_CONNECTORS + SERVICE_CONNECTORS
 SANDBOXES = ('cell', 'codex-workspace-write')
 BASE_IMAGE = 'codex'
 PROXY = 'http://127.0.0.1:3128'
@@ -117,11 +130,71 @@ def egress(request, timeout=15):
     return response['result']
 
 
+SKILLS = Path('/var/lib/anchi/skills')
+SKILL_PATH = re.compile(r'^(\.claude-plugin/plugin\.json|skills/[a-z0-9][a-z0-9-]{0,39}/[A-Za-z0-9._ /-]{1,200})$')
+
+
+def skills_set(agent):
+    """Replaces the agent's skill bundle: {"files": {path: base64}} on stdin. Root-owned and
+    bound read-only into the agent's cells; the content is untrusted like any cell input."""
+    import base64
+
+    name(agent, 'BAD_AGENT')
+    raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
+        raise Failure('INPUT_TOO_LARGE')
+    files = json.loads(raw).get('files')
+    if not isinstance(files, dict) or len(files) > 2000:
+        raise Failure('BAD_SKILLS')
+    SKILLS.mkdir(parents=True, exist_ok=True, mode=0o755)
+    target, staged = SKILLS / agent, SKILLS / f'.{agent}.new'
+    shutil.rmtree(staged, ignore_errors=True)
+    total = 0
+    for path, data in files.items():
+        if not isinstance(path, str) or not SKILL_PATH.fullmatch(path) or '..' in path.split('/') or '//' in path:
+            raise Failure('BAD_SKILL_PATH')
+        content = base64.b64decode(data, validate=True)
+        total += len(content)
+        if total > 6 * 1024 * 1024:
+            raise Failure('SKILLS_TOO_LARGE')
+        out = staged / path
+        out.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        out.write_bytes(content)
+        out.chmod(0o644)
+    shutil.rmtree(target, ignore_errors=True)
+    if files:
+        staged.rename(target)
+    else:
+        shutil.rmtree(staged, ignore_errors=True)
+    emit({'agent': agent, 'files': len(files)})
+
+
+def approvals_watch():
+    """Relays the proxy's approval stream to stdout (the daemon's watcher) until it ends."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(60)
+            conn.connect(str(EGRESS_CONTROL))
+            conn.sendall(b'{"op": "approvals.watch"}\n')
+            while block := conn.recv(65536):
+                sys.stdout.buffer.write(block)
+                sys.stdout.buffer.flush()
+    except OSError:
+        raise Failure('EGRESS_UNAVAILABLE') from None
+
+
+def approvals_decide(approval_id, verdict):
+    if not re.fullmatch(r'[0-9a-f]{16}', approval_id) or verdict not in ('allow', 'deny'):
+        raise Failure('USAGE')
+    emit(egress({'op': 'approvals.decide', 'id': approval_id, 'allow': verdict == 'allow'}))
+
+
 # ── images ──────────────────────────────────────────────────
 
 
 def base_version():
-    return 'codex-' + cell_env()['ANCHI_CODEX_VERSION']
+    env = cell_env()
+    return f'codex-{env["ANCHI_CODEX_VERSION"]}-claude-{env["ANCHI_CLAUDE_VERSION"]}'
 
 
 def layer_dir(image, digest):
@@ -239,7 +312,9 @@ def image_build(image, digest):
     (build_dir / 'build.sh').write_text(script)
     env = cell_env()
     (build_dir / 'env').write_text(
-        ''.join(f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith('ANCHI_CODEX'))
+        ''.join(
+            f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith(('ANCHI_CODEX', 'ANCHI_CLAUDE'))
+        )
         + ''.join(f'export {k}={shell_quote(v)}\n' for k, v in proxy_env().items())
     )
     log_path = building / 'build.log'
@@ -427,7 +502,7 @@ def codex_placeholder(account):
     return json.dumps({'OPENAI_API_KEY': None, 'tokens': tokens, 'last_refresh': now})
 
 
-def cell_environment(task, agent, connectors, identifiers):
+def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
     env = {
         'HOME': '/home/agent',
         'USER': 'agent',
@@ -441,8 +516,19 @@ def cell_environment(task, agent, connectors, identifiers):
         'GIT_COMMITTER_NAME': f'{agent} (Anchi agent)',
         'GIT_COMMITTER_EMAIL': f'{agent}@agents.anchi.invalid',
         'GIT_TERMINAL_PROMPT': '0',
+        'ANCHI_RUNTIME': runtime,
         **proxy_env(),
     }
+    if runtime == 'claude-code':
+        name, placeholder = CLAUDE_PLACEHOLDERS[identifiers['claude_kind']]
+        env[name] = placeholder
+        env['PATH'] = '/opt/claude/bin:' + env['PATH']
+        env['CLAUDE_CONFIG_DIR'] = '/home/agent/.claude'
+        # No auto-update (the image is pinned) and no telemetry or error reporting.
+        env['DISABLE_AUTOUPDATER'] = '1'
+        env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
+        # Delegation tools wait for another agent's turn (bounded by the daemon at 55 minutes).
+        env['MCP_TOOL_TIMEOUT'] = '3600000'
     if 'github' in connectors:
         env['GH_TOKEN'] = f'{PLACEHOLDER}-github'
         env['GH_PROMPT_DISABLED'] = '1'
@@ -487,7 +573,126 @@ def cleanup(task):
     shutil.rmtree(work, ignore_errors=True)
 
 
-def cell_start(task, agent, image, digest, connectors_arg, sandbox):
+RUNTIMES = {'codex': 'codex', 'claude-code': 'claude'}  # agent runtime -> proxy grant
+CLAUDE_PLACEHOLDERS = {
+    'oauth': ('CLAUDE_CODE_OAUTH_TOKEN', 'sk-ant-oat01-anchi-placeholder-' + '0' * 40),
+    'api_key': ('ANTHROPIC_API_KEY', 'sk-ant-api03-anchi-placeholder-' + '0' * 40),
+}
+
+
+WORKSPACE_ROOT = Path('/mnt/anchi-host')
+WORKSPACE_SEGMENT = re.compile(r'^[A-Za-z0-9._ -]{1,100}$')
+# Paths in a writable workspace that make the Mac run code later; mounted read-only over it.
+WORKSPACE_MASKS = ('.gitattributes', '.envrc', '.vscode', '.idea')
+GIT_MASKS = ('hooks', 'config', 'info')
+MAX_REPO_DEPTH = 4
+
+
+def parse_workspaces(arg):
+    """[(name, absolute host path in the VM, mode)] from base64url JSON, checked again here: the
+    daemon is trusted, but this command is the boundary the cell's mounts depend on."""
+    import base64
+
+    if arg == '-':
+        return []
+    try:
+        items = json.loads(base64.urlsafe_b64decode(arg + '=' * (-len(arg) % 4)))
+    except ValueError:
+        raise Failure('BAD_WORKSPACES') from None
+    if not isinstance(items, list) or len(items) > 10:
+        raise Failure('BAD_WORKSPACES')
+    if items and not os.path.ismount(WORKSPACE_ROOT):
+        raise Failure('WORKSPACES_NOT_MOUNTED')
+    out, names = [], set()
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {'name', 'path', 'mode'}:
+            raise Failure('BAD_WORKSPACES')
+        name, path, mode = item['name'], item['path'], item['mode']
+        parts = path.split('/') if isinstance(path, str) else []
+        if (
+            not isinstance(name, str)
+            or not NAME.fullmatch(name)
+            or name in names
+            or mode not in ('ro', 'rw')
+            or not parts
+            or any(p in ('.', '..') or not WORKSPACE_SEGMENT.fullmatch(p) for p in parts)
+        ):
+            raise Failure('BAD_WORKSPACES')
+        full = WORKSPACE_ROOT.joinpath(*parts)
+        # No symlink anywhere on the way: the real path must be the path as written.
+        if os.path.realpath(full) != str(full) or not full.is_dir():
+            raise Failure(f'WORKSPACE_NOT_A_DIRECTORY:{name}')
+        names.add(name)
+        out.append((name, full, mode))
+    return out
+
+
+def sync_policy_modes(agent, services, ask):
+    """The agent's own write mode per connector service: `ask` when its approvals ask, else its
+    rule is cleared and the connector's mode applies. Changed only when needed, since every
+    policy rule change revokes outstanding grants."""
+    if not services:
+        return
+    admin = ['/usr/bin/python3', str(SERVICES / 'policy_admin.py')]
+    rules = json.loads(run(*admin, 'rules').stdout).get('rules', {})
+    for service in services:
+        principal = f'{service}:{agent}'
+        if service in ask and rules.get(principal) != 'ask':
+            run(*admin, 'mode', principal, 'ask')
+        elif service not in ask and principal in rules:
+            run(*admin, 'clear', principal)
+
+
+def parse_egress(arg):
+    """The agent's egress host patterns (base64url JSON list), or None for open egress."""
+    import base64
+
+    if arg == '-':
+        return None
+    try:
+        value = json.loads(base64.urlsafe_b64decode(arg + '=' * (-len(arg) % 4)))
+    except ValueError:
+        raise Failure('BAD_EGRESS') from None
+    if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+        raise Failure('BAD_EGRESS')
+    return value  # the proxy validates each pattern
+
+
+def workspace_masks(full):
+    """Existing paths under a writable workspace to mount read-only: git hooks, config and
+    info of repositories near the top, and editor and shell configuration that runs commands."""
+    masks = []
+    for current, dirs, _files in os.walk(full):
+        depth = len(Path(current).relative_to(full).parts)
+        if '.git' in dirs and (Path(current) / '.git').is_dir() and not (Path(current) / '.git').is_symlink():
+            masks += [Path(current) / '.git' / m for m in GIT_MASKS if (Path(current) / '.git' / m).exists()]
+        masks += [Path(current) / m for m in WORKSPACE_MASKS if (Path(current) / m).exists()]
+        dirs[:] = [d for d in dirs if depth < MAX_REPO_DEPTH and not d.startswith('.') and d != 'node_modules']
+    return [m for m in masks if not m.is_symlink()]
+
+
+def workspace_binds(workspaces):
+    binds = []
+    for name, full, mode in workspaces:
+        inside = f'/home/agent/workspaces/{name}'
+        binds.append(f'--bind{"" if mode == "rw" else "-ro"}={full}:{inside}')
+        if mode == 'rw':
+            binds += [f'--bind-ro={m}:{inside}/{m.relative_to(full)}' for m in workspace_masks(full)]
+    return binds
+
+
+def cell_start(
+    task,
+    agent,
+    image,
+    digest,
+    connectors_arg,
+    sandbox,
+    runtime='codex',
+    ask_arg='-',
+    workspaces_arg='-',
+    egress_arg='-',
+):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
     name(image, 'BAD_IMAGE')
@@ -498,6 +703,13 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
         raise Failure('BAD_CONNECTORS')
     if sandbox not in SANDBOXES:
         raise Failure('BAD_SANDBOX')
+    if runtime not in RUNTIMES or (runtime != 'codex' and sandbox != 'cell'):
+        raise Failure('BAD_RUNTIME')
+    workspaces = parse_workspaces(workspaces_arg)
+    egress_hosts = parse_egress(egress_arg)
+    ask = [] if ask_arg == '-' else ask_arg.split(',')
+    if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
+        raise Failure('BAD_APPROVALS')
     env = cell_env()
     uid = int(env['SECURE_CELL_UID_BASE']) + int(env['SECURE_CELL_AGENT_UID'])
     work = CELLS / task
@@ -519,6 +731,8 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
                     'hash': digest,
                     'connectors': connectors,
                     'sandbox': sandbox,
+                    'runtime': runtime,
+                    'workspaces': [{'name': n, 'path': str(f), 'mode': m} for n, f, m in workspaces],
                     'started_at': time.time(),
                 }
             )
@@ -527,16 +741,38 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
         root = work / 'root'
         root.mkdir()
         run('mount', '-t', 'overlay', 'overlay', '-o', f'ro,lowerdir={lower}', str(root))
-        registration = egress({'op': 'register', 'task': task, 'agent': agent, 'connectors': connectors})
+        proxied = [c for c in connectors if c in PROXY_CONNECTORS]
+        registration = egress(
+            {
+                'op': 'register',
+                'task': task,
+                'agent': agent,
+                'connectors': proxied,
+                'runtime': RUNTIMES[runtime],
+                'ask': [c for c in ask if c in PROXY_CONNECTORS],
+                'egress': egress_hosts,
+                # Connector services reached through the proxy's bridge, which names the agent.
+                'services': [c for c in connectors if c in SERVICE_CONNECTORS],
+            }
+        )
         identifiers = registration.get('identifiers', {})
-        if not identifiers.get('codex_account_id'):
-            raise Failure('CODEX_NOT_CONFIGURED')
+        sync_policy_modes(agent, [c for c in connectors if c in SERVICE_CONNECTORS], ask)
         home = agent_home(agent, uid)
-        write_owned(home / '.codex/auth.json', codex_placeholder(identifiers['codex_account_id']), uid)
-        write_owned(home / '.codex/config.toml', 'cli_auth_credentials_store = "file"\n', uid)
+        if runtime == 'codex':
+            if not identifiers.get('codex_account_id'):
+                raise Failure('CODEX_NOT_CONFIGURED')
+            write_owned(home / '.codex/auth.json', codex_placeholder(identifiers['codex_account_id']), uid)
+            write_owned(home / '.codex/config.toml', CODEX_CONFIG, uid)
+        elif identifiers.get('claude_kind') not in CLAUDE_PLACEHOLDERS:
+            raise Failure('CLAUDE_NOT_CONFIGURED')
         if sandbox == 'codex-workspace-write':
             ensure_bwrap_profile()
-        cell = cell_environment(task, agent, connectors, identifiers)
+        cell = cell_environment(task, agent, connectors, identifiers, runtime)
+        if workspaces:
+            # virtiofs shows files as owned by their reader; git would refuse every workspace.
+            # The check protects a trusting user from an untrusted repository, and here the agent
+            # is the untrusted side.
+            cell.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='safe.directory', GIT_CONFIG_VALUE_0='*')
         command = [
             'systemd-run',
             '--quiet',
@@ -570,6 +806,17 @@ def cell_start(task, agent, image, digest, connectors_arg, sandbox):
             f'--bind-ro={EGRESS_CELLS / task}:/run/anchi',
             f'--bind-ro={LIB}:/opt/anchi',
             f'--bind-ro={CA_BUNDLE}:{CA_IN_CELL}',
+            # The agent's skills: a Claude Code plugin root, whose skills/ Codex reads too.
+            *(
+                [
+                    f'--bind-ro={SKILLS / agent}:/opt/anchi-skills',
+                    f'--bind-ro={SKILLS / agent}/skills:/home/agent/.codex/skills',
+                ]
+                if (SKILLS / agent / 'skills').is_dir()
+                else []
+            ),
+            # The agent's directories of the Mac, with the code-running paths of rw ones read-only.
+            *workspace_binds(workspaces),
             '--tmpfs=/tmp:mode=1777,size=512M',
             '--tmpfs=/var/tmp:mode=1777,size=512M',
             '--system-call-filter=~io_uring_setup io_uring_enter io_uring_register bpf perf_event_open',
@@ -707,6 +954,7 @@ def real_secrets():
             ('linear', 'linear.json', ('token',)),
             ('aws', 'aws.json', ('access_key_id', 'secret_access_key', 'session_token')),
             ('codex', 'codex.json', ('access_token',)),
+            ('claude', 'claude.json', ('token',)),
         ):
             if not vault.exists(auth.STORE, file):
                 continue
@@ -773,8 +1021,21 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) == 6:
+    if command == 'start' and len(rest) in (6, 7, 8, 9, 10):
         return cell_start(*rest)
+    if command == 'egress-settings' and not rest:
+        # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.
+        return emit(egress({'op': 'settings.set', 'settings': json.loads(sys.stdin.read(65536) or '{}')}))
+    if command == 'skills' and len(rest) == 2 and rest[0] == 'set':
+        return skills_set(rest[1])
+    if command == 'poll' and not rest:
+        # The trigger spec arrives on stdin: {"kind": ..., "params": {...}}.
+        spec = json.loads(sys.stdin.read(4096) or '{}')
+        return emit(egress({'op': 'poll', 'kind': spec.get('kind'), 'params': spec.get('params')}, timeout=40))
+    if command == 'approvals' and rest == ['watch']:
+        return approvals_watch()
+    if command == 'approvals' and len(rest) == 3 and rest[0] == 'decide':
+        return approvals_decide(rest[1], rest[2])
     if command == 'stop' and len(rest) == 1:
         return cell_stop(*rest)
     if command == 'list' and not rest:
@@ -783,7 +1044,7 @@ def main(argv):
         return cell_reap(rest)
     if command == 'scan' and len(rest) == 1:
         return cell_scan(*rest)
-    if command == 'verify' and len(rest) == 1 and rest[0] in CONNECTORS:
+    if command == 'verify' and len(rest) == 1 and rest[0] in PROXY_CONNECTORS:
         return emit(egress({'op': 'verify', 'connector': rest[0]}, timeout=40))
     if command == 'exec' and len(rest) >= 3 and rest[1] == '--':
         return cell_exec(rest[0], rest[2:])

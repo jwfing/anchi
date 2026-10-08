@@ -132,6 +132,19 @@ export interface CellStart {
   hash: string;
   connectors: string[];
   sandbox: 'cell' | 'codex-workspace-write';
+  runtime: 'codex' | 'claude-code';
+  /** Connectors whose writes wait for approval. */
+  ask: string[];
+  /** Directories under ~/AnchiWorkspaces bound into the cell. */
+  workspaces: { name: string; path: string; mode: 'ro' | 'rw' }[];
+  /** Allowed hosts, or undefined for open egress. */
+  egress?: string[];
+}
+
+export interface PollItem {
+  id: string;
+  title: string;
+  url: string;
 }
 
 export interface ImageMeta {
@@ -163,6 +176,10 @@ export class Guest {
       c.hash,
       connectors,
       c.sandbox,
+      c.runtime,
+      c.ask.filter((x) => c.connectors.includes(x)).join(',') || '-',
+      c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
+      c.egress ? Buffer.from(JSON.stringify(c.egress)).toString('base64url') : '-',
     ]);
   }
 
@@ -271,6 +288,83 @@ export class Guest {
     return parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/codex_admin.py`, 'status']),
     ) as { configured: boolean; account_id: string | null; expires_at: number | null };
+  }
+
+  /** Replaces an agent's skill bundle in the VM (files base64-encoded, on stdin). */
+  async setSkills(agent: string, files: Record<string, string>): Promise<void> {
+    check(agent, 'agent');
+    parse(
+      await this.transport.exec(
+        ['anchi-cell', 'skills', 'set', agent],
+        JSON.stringify({ files }),
+        60_000,
+      ),
+    );
+  }
+
+  /** Runs a polling trigger's fixed query in the egress service; returns the items found. */
+  async poll(kind: string, params: Record<string, unknown>): Promise<PollItem[]> {
+    const r = parse(
+      await this.transport.exec(['anchi-cell', 'poll'], JSON.stringify({ kind, params }), 60_000),
+    ) as { items?: unknown };
+    if (!Array.isArray(r.items)) throw new GuestError('GUEST_BAD_OUTPUT');
+    return r.items
+      .filter((i): i is PollItem => typeof i?.id === 'string')
+      .map((i) => ({
+        id: i.id.slice(0, 100),
+        title: String(i.title ?? '').slice(0, 300),
+        url: String(i.url ?? '').slice(0, 500),
+      }));
+  }
+
+  /** A pending connector-service write, as the policy service recorded it. */
+  async policyShow(id: string): Promise<{
+    id: string;
+    digest: string;
+    state: string;
+    principal: string;
+    expires: number;
+    created: number;
+    action: { operation?: string; params?: unknown };
+  }> {
+    if (!/^[0-9a-f]{32}$/.test(id)) throw new Error('invalid approval id');
+    return parse(
+      await this.transport.exec(['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'show', id]),
+    ) as never;
+  }
+
+  async policyDecide(id: string, allow: boolean, digest: string): Promise<void> {
+    if (!/^[0-9a-f]{32}$/.test(id) || !/^[0-9a-f]{64}$/.test(digest))
+      throw new Error('invalid approval');
+    parse(
+      await this.transport.exec(
+        allow
+          ? ['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'approve', id, '--digest', digest]
+          : ['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'deny', id],
+      ),
+    );
+  }
+
+  /** Whether ~/AnchiWorkspaces is mounted in the VM. */
+  async workspacesMounted(): Promise<boolean> {
+    const r = await this.transport.exec(['mountpoint', '-q', '/mnt/anchi-host']);
+    return r.code === 0;
+  }
+
+  async claudeStatus(): Promise<{ configured: boolean; kind: 'oauth' | 'api_key' | null }> {
+    return parse(
+      await this.transport.exec(['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'status']),
+    ) as { configured: boolean; kind: 'oauth' | 'api_key' | null };
+  }
+
+  /** A `claude setup-token` token or an API key, on stdin only. */
+  async importClaude(token: string): Promise<void> {
+    parse(
+      await this.transport.exec(
+        ['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'import-token'],
+        JSON.stringify({ token }),
+      ),
+    );
   }
 
   async importCodex(accessToken: string, accountId: string): Promise<{ expires_at: number }> {

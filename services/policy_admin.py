@@ -29,6 +29,7 @@ def main():
     approve.add_argument('id')
     approve.add_argument('--digest', required=True, help='Exact digest shown with the full action')
     sub.add_parser('rules')
+    sub.add_parser('clear').add_argument('principal')
     rule = sub.add_parser('mode')
     rule.add_argument('principal')
     rule.add_argument('mode', choices=('auto', 'ask'))
@@ -48,6 +49,8 @@ def main():
         value = policy.inspect_rules()
     elif args.op == 'mode':
         value = policy.set_mode(args.principal, args.mode)
+    elif args.op == 'clear':
+        value = policy.clear_mode(args.principal)
     elif args.op == 'read':
         value = policy.set_read(args.connector, args.mode == 'allow')
     elif args.op == 'gmail-read':

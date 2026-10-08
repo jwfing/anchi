@@ -10,9 +10,8 @@ import struct
 from pathlib import Path
 import time
 
-# Shared with pi/limits.mjs and desktop/src/shared/protocol.cjs; a test keeps them identical.
-LIMITS = {'rpc_bytes': 65536, 'prompt_chars': 8000, 'host_file_text_bytes': 24000}
-MAX_RPC = LIMITS['rpc_bytes']
+# Largest JSON line a connector, auth or policy socket accepts or returns.
+MAX_RPC = 65536
 TARGETS_FILE = Path('/run/secure-egress/targets.json')
 CELL_ENV_PATHS = (Path('/opt/secure-vm/cell.env'), Path(__file__).resolve().parents[1] / 'guest/cell.env')
 
@@ -41,7 +40,6 @@ CELL_UID_BASE = int(CELL['SECURE_CELL_UID_BASE'])
 CELL_UID_COUNT = int(CELL['SECURE_CELL_UID_COUNT'])
 CELL_AGENT_UID = int(CELL['SECURE_CELL_AGENT_UID'])
 CELL_AGENT_HOST_UID = CELL_UID_BASE + CELL_AGENT_UID
-PI_VERSION = CELL['SECURE_PI_VERSION']
 
 
 class Denied(Exception):

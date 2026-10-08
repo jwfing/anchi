@@ -1,8 +1,30 @@
 # Changelog
 
-Follows the Keep a Changelog structure. The app version comes from `desktop/package.json`.
+Follows the Keep a Changelog structure. The version comes from `anchi/package.json`.
 
-## Unreleased
+## 0.2.0 — Unreleased
+
+The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install` to update an existing VM; it disables the Pi inference gateway and removes Pi from the cell root filesystem. Credentials in the vault are kept.
+
+### Added
+
+- Daemon, TUI and CLI (`scripts/anchi`) for a team of Codex and Claude Code agents, each task in a disposable nspawn cell on layered images, with an agent builder.
+- Egress proxy that keeps credentials out of cells: replace-only runtime tokens, GitHub, AWS (re-signing, SSO profiles) and Linear injection, credential-minting denials, destination filtering against SSRF and DNS rebinding, connector verification at import.
+- Gmail, Drive, Notion and Slack for agents through a per-cell bridge that names the agent to the service, so `approvals` holds one agent's writes; Google sign-in, tokens and write modes set up from the daemon.
+- Delegation between agents, approvals of held writes, schedule and polling triggers, skills, task search, trees, deletion and retention.
+- S3 `aws-chunked` uploads, signed or unsigned, re-signed by the proxy, also when streamed. S3 multi-object deletes, expiry rules, bucket policies and ACLs always ask.
+- Linux hosts (experimental): notifications through `notify-send`, Google sign-in through `xdg-open`, `daemon install` as a systemd user unit, `/dev/kvm` and QEMU checks before installing.
+- Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
+
+### Fixed
+
+- Request bodies over 8 MiB were audited as injected although their headers had already left; they are now audited as `pass:streamed`.
+
+### Removed
+
+- The Electron desktop app (`desktop/`), Pi (`pi/`), the Pi inference gateway (`secure-inference`) and the host directory broker. Use the TUI or CLI.
+
+## 0.1.x — desktop app (retired in 0.2.0)
 
 ### Added
 

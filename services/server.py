@@ -2,6 +2,7 @@
 
 import os
 import pwd
+import re
 import socket
 import sqlite3
 import sys
@@ -12,11 +13,11 @@ import importlib
 
 import auth
 import connectors
-import inference
+import policy_client
 import policy
 from common import CELL_AGENT_HOST_UID, Denied, peer_uid, recv_json, send_json
 
-MODES = ('auth', 'inference', 'policy', *connectors.CONNECTORS)
+MODES = ('auth', 'policy', *connectors.CONNECTORS)
 RATE_LIMIT, RATE_WINDOW = 60, 60
 
 
@@ -24,8 +25,6 @@ def handler_for(mode):
     """Connector handlers are imported lazily so one broken connector cannot take the others down."""
     if mode == 'auth':
         return auth.handle
-    if mode == 'inference':
-        return inference.handle
     if mode == 'policy':
         return policy.handle
     return importlib.import_module(connectors.CONNECTORS[mode].module).handle
@@ -33,10 +32,8 @@ def handler_for(mode):
 
 def credential_ops(caller):
     """Which auth operations a trusted service identity may request; the kernel UID picks the caller."""
-    if caller == 'inference':
-        return ('model_key', 'codex_token')
     if caller == 'egress':
-        return ('egress_credential', 'codex_token', 'codex_account')
+        return ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
     connector = connectors.CONNECTORS.get(caller)
     if connector is None:
         return ()
@@ -64,6 +61,10 @@ class Service:
             raise ValueError('Unknown service')
         self.mode, self.service_uids, self.clock, self.peer = mode, service_uids, clock, peer
         self.allowed_uids = set(service_uids) if mode in ('auth', 'policy') else {cell_uid}
+        # Agent cells reach connector services through the egress bridge, which names the agent.
+        self.bridge_uids = {uid for uid, name in service_uids.items() if name == 'egress'}
+        if mode in connectors.CONNECTORS:
+            self.allowed_uids |= self.bridge_uids
         self.writes_ready = True
         self._handler = None
         self.recent = deque()
@@ -94,6 +95,11 @@ class Service:
                 raise Denied('CALLER_DENIED')
             self.throttle()
             request = recv_json(conn)
+            agent = None
+            if uid in self.bridge_uids and self.mode in connectors.CONNECTORS and isinstance(request, dict):
+                agent = request.pop('agent', None)
+                if not isinstance(agent, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', agent):
+                    raise Denied('BAD_AGENT')
             connector = connectors.CONNECTORS.get(self.mode)
             if (
                 connector
@@ -104,7 +110,11 @@ class Service:
             caller = self.service_uids.get(uid)
             if self.mode == 'auth' and request.get('op') not in credential_ops(caller):
                 raise Denied('CREDENTIAL_SCOPE_DENIED')
-            result = self.handler(request, caller) if self.mode in ('auth', 'policy') else self.handler(request)
+            policy_client.AGENT = agent
+            try:
+                result = self.handler(request, caller) if self.mode in ('auth', 'policy') else self.handler(request)
+            finally:
+                policy_client.AGENT = None
             send_json(conn, {'ok': True, 'result': result})
         except Denied as exc:
             self.reply_error(conn, str(exc))
@@ -124,7 +134,6 @@ def main():
     if mode not in MODES:
         raise SystemExit('Unknown service')
     service_uids = {pwd.getpwnam(c.user).pw_uid: c.id for c in connectors.CONNECTORS.values()}
-    service_uids[pwd.getpwnam('secure-inference').pw_uid] = 'inference'
     try:
         service_uids[pwd.getpwnam('anchi-egress').pw_uid] = 'egress'
     except KeyError:
@@ -132,8 +141,6 @@ def main():
     if os.environ.get('LISTEN_PID') != str(os.getpid()) or os.environ.get('LISTEN_FDS') != '1':
         raise SystemExit('Socket activation required')
     listener = socket.socket(fileno=3)
-    if mode == 'inference':
-        inference.recover()
     service = Service(mode, service_uids)
     service.writes_ready = recover_connector(mode)
     while True:

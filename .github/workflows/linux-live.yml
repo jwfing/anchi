@@ -1,8 +1,8 @@
 name: Linux live validation
 
-# Creates the guest from scratch on an x86_64 runner with KVM, installs the trusted
-# services and Pi, then runs the same onboarding, isolation and service checks used on
-# macOS. Synthetic credentials only: no Codex login, no Google, no model calls.
+# Creates the guest from scratch on an x86_64 runner with KVM, installs the trusted services
+# and the agent team, then runs the service and isolation checks. Synthetic credentials only:
+# no Codex or Claude login, no Google, no model calls.
 on:
   workflow_dispatch:
   schedule:
@@ -16,11 +16,7 @@ on:
       - 'scripts/**'
       - 'services/**'
       - 'systemd/**'
-      - 'pi/**'
-      - 'desktop/host-tools.json'
-      - 'desktop/src/main/downloader.cjs'
-      - 'desktop/src/main/platform.cjs'
-      - 'desktop/scripts/install-host-tool.cjs'
+      - 'anchi/packages/cell-runner/**'
 
 permissions:
   contents: read
@@ -30,7 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      ANCHI_INSTALL_VM: secure-vm-onboarding-test
+      ANCHI_INSTALL_VM: secure-vm-live-test
+      LIMA_VERSION: 2.2.0
+      LIMA_SHA256: a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -39,6 +37,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
+      - uses: pnpm/action-setup@v5
+        with:
+          package_json_file: anchi/package.json
+      - run: pnpm --dir anchi install --frozen-lockfile
       - name: Enable KVM for the runner user
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -50,19 +52,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 qemu-utils
           qemu-system-x86_64 --version | head -1
-      - name: Install Lima with the app downloader
+      - name: Install Lima (pinned, checksum verified)
         run: |
-          node desktop/scripts/install-host-tool.cjs lima
-          echo "$HOME/.local/share/anchi/tools/lima/current/bin" >> "$GITHUB_PATH"
+          curl -fsSL -o lima.tgz "https://github.com/lima-vm/lima/releases/download/v$LIMA_VERSION/lima-$LIMA_VERSION-Linux-x86_64.tar.gz"
+          echo "$LIMA_SHA256  lima.tgz" | sha256sum -c -
+          mkdir -p "$HOME/.local/lima" && tar -xzf lima.tgz -C "$HOME/.local/lima"
+          echo "$HOME/.local/lima/bin" >> "$GITHUB_PATH"
       - run: limactl --version
-      - name: Create the guest and install Pi
-        run: bash scripts/install-pi.sh
-      - name: Onboarding checks with synthetic credentials
-        run: python3 scripts/verify-onboarding.py
-      - name: Installer retry keeps state
-        run: python3 scripts/verify-onboarding.py --retry
+      - name: Create the guest and install the trusted services and the agent team
+        run: |
+          bash scripts/up.sh
+          bash scripts/install-anchi.sh
       - name: Isolation and service checks
         run: bash scripts/verify.sh
+      - name: Vault, base image and a synthetic Codex account
+        # The token is well-formed but belongs to no account; the agent-team checks never call
+        # a model, and the proxy never forwards it anywhere they reach.
+        run: |
+          python3 scripts/vault.py init
+          limactl shell "$ANCHI_INSTALL_VM" -- sudo anchi-image build codex base
+          python3 - <<'PY' | limactl shell "$ANCHI_INSTALL_VM" -- sudo /usr/bin/python3 /opt/secure-vm/services/codex_admin.py import-token
+          import base64, json, time
+          b64 = lambda v: base64.urlsafe_b64encode(json.dumps(v).encode()).decode().rstrip('=')
+          claims = {'exp': int(time.time()) + 7200, 'https://api.openai.com/auth': {'chatgpt_account_id': 'ci-synthetic'}}
+          token = f"{b64({'alg': 'none'})}.{b64(claims)}.{'s' * 80}"
+          print(json.dumps({'access_token': token, 'account_id': 'ci-synthetic'}))
+          PY
+      - name: Agent-team isolation checks
+        run: make verify-anchi VM="$ANCHI_INSTALL_VM"
       - name: Collect Lima logs
         if: always()
         run: |

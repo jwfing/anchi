@@ -1,45 +1,56 @@
-# Getting started with Anchi and Pi
+# Getting started
 
-macOS on Apple Silicon is supported; Linux x86_64 is experimental. Current builds are internal development packages. Public macOS distribution still requires Developer ID signing and notarization.
+macOS on Apple Silicon is supported; Linux x86_64 is experimental. Anchi runs from a checkout of this repository: there is no packaged app.
 
-The desktop opens in English by default. Use the language button beside the sidebar expand/collapse control to switch between English and Simplified Chinese. The choice is saved locally and applies to pages, status messages, token entry and confirmation dialogs. Chat content and full approval payloads retain their original language.
+## macOS
 
-## macOS: from launch to the first task
+1. Install the prerequisites: `brew install lima node pnpm python`. Keep at least 8 GB of free disk; the VM uses 4 GB of RAM and up to 30 GB of dynamically allocated disk.
+2. In the checkout, install the workspace and the whole system:
 
-1. Open `Anchi.app`. It starts on First-time setup. Select Recheck to inspect actual readiness.
-2. If Homebrew is missing, open its installer download page and install the official `.pkg` through the macOS installer. Do not enter an administrator password into Anchi.
-3. Select Install dependencies and confirm installation of Lima, Python and Codex CLI. This requires networking; Homebrew may first need system developer tools. macOS handles system permission prompts.
-4. Select Install Pi. The app creates a VM without host mounts, an isolated cell and trusted services, then installs the pinned Pi version. The VM uses 4 GB RAM and up to 30 GB of dynamically allocated disk. Keep at least 8 GB free before installation and leave the app open while it runs.
-5. Select Initialize / Unlock. First use creates `~/.config/secure-vm/vault.key`; existing keys are reused. Back up this file: a replacement key cannot decrypt existing accounts. Unlock again after restarting the VM.
-6. Select Sign in / Reauthenticate and complete Codex ChatGPT subscription login in the system browser, or import an existing Codex login. Only the short-lived access token is imported through stdin into the encrypted VM vault; the refresh token stays on the host. Setup shows expiry. Reimport or sign in again after expiry without disconnecting Pi. Never paste a token into chat.
-7. Connect Pi, wait for the connected state, then start the example task. It turns three fictional project statements into a task list without requiring mail or directory access.
-8. Model calls use standing authorization by default, so the example runs directly and is audited. If you changed model calls to per-turn approval in the setup page's fourth section, open Approvals, refresh from the policy service, inspect the full action and approve it. In that mode, the model is not called before approval.
-9. Return to Agent for the result. First-task completion requires both a text reply and successful completion for the same session and turn. Then connect accounts or grant directories as needed under Connectors. Directory grants persist until revoked; overwritten or deleted files remain recoverable in the directory's hidden `.anchi-trash`.
+   ```bash
+   pnpm --dir anchi install
+   scripts/anchi setup install        # VM, trusted services, agent team, base image; several minutes
+   ```
 
-Model calls may consume subscription quota. Files or mail already read can enter model context. The example starts a new session to avoid inheriting old context.
+   `setup install` runs `scripts/up.sh` (VM without host mounts, trusted services), `scripts/install-anchi.sh` (egress proxy, cell manager, cell runner) and the base image build. It is safe to run again to update.
+3. Create and unlock the vault:
+
+   ```bash
+   scripts/anchi setup vault init     # first time: creates ~/.config/secure-vm/vault.key
+   scripts/anchi setup vault unlock   # after each VM start
+   ```
+
+   Back up `vault.key`. A replacement key cannot decrypt the stored accounts, and Anchi refuses to generate one while encrypted data exists.
+4. Connect a runtime. Codex: run `codex login` on the Mac, then `scripts/anchi setup codex`. Claude Code: run `claude setup-token`, then `scripts/anchi setup claude` and paste the token. Only short-lived or dedicated tokens go to the vault, through stdin; refresh tokens stay with the CLIs on the Mac.
+5. Check the isolation: `make verify-anchi` (no credentials are used).
+6. Open the TUI with `scripts/anchi`, select **Agent builder** and describe your first agent, or follow the [agent team guide](AGENT_TEAM.md).
+
+The TUI's **Runtimes** screen does steps 2–4 too (`I` install, `s` start the VM, `u` unlock, `i` Codex, `c` Claude), and **Connectors** connects GitHub, AWS, Linear, Gmail, Drive, Notion and Slack. `scripts/anchi daemon install` starts the daemon at login.
+
+Model calls consume your subscription quota. Anything an agent reads can reach the model and, through the proxy, any public host.
 
 ## Recovery
 
-- **Installation failed:** check networking and disk space, then retry the same step. Completed base setup can be reused without deleting workspaces or credentials.
-- **Interrupted installation:** reopen, recheck and retry. Installer-marked incomplete root filesystems are preserved as `rootfs-incomplete-*` before rebuilding. Unknown, unmarked root filesystems are not automatically modified.
-- **Closing during installation:** normal close is blocked while installation runs. Browser-login waits can be cancelled. After forced termination or shutdown, use the retry flow.
-- **Stopped VM:** start it and unlock the vault; reinstalling Pi is unnecessary.
-- **Vault cannot unlock:** restore the original master key. The app refuses to generate a replacement when encrypted data already exists.
-- **Expired model authentication:** sign in or import the existing Codex login again; Pi can remain connected.
-- **Gmail requires reauthentication:** reconnect Google. Testing-mode OAuth refresh tokens commonly expire after seven days.
-- **Directory changed or inaccessible:** check whether it moved, was replaced or is on an unmounted disk, then reconfirm the grant.
-- **Approval denied or timed out:** resolve the cause and restart the task. New approvals are created; old ones are not silently reused.
-
-References: [Homebrew installation](https://docs.brew.sh/Installation), [OpenAI authentication](https://developers.openai.com/zh-Hans/docs/auth). Organization restrictions on login or credential caching are respected; the app reports failure rather than bypassing them.
+- **Installation failed:** check networking and disk space, then run `scripts/anchi setup install` again. Completed steps are reused; workspaces and credentials are kept.
+- **Interrupted installation:** run it again. Installer-marked incomplete root filesystems are kept as `rootfs-incomplete-*` before rebuilding; unmarked ones are never modified automatically.
+- **Stopped VM:** `scripts/anchi setup vm`, then `scripts/anchi setup vault unlock`.
+- **Vault cannot unlock:** restore the original master key.
+- **Expired Codex token:** run `codex` on the Mac once, then `scripts/anchi setup codex` again.
+- **Google requires sign-in again:** `scripts/anchi setup service gmail` (or `drive`). Testing-mode OAuth refresh tokens commonly expire after seven days.
+- **Approval refused or timed out:** the agent sees the refusal; send the task a follow-up once the cause is fixed.
 
 ## Linux
 
-The target is x86_64 Ubuntu 22.04+ or Debian 12+ with CPU virtualization and `/dev/kvm`. Arch and Fedora receive package-manager-specific commands but are not covered by CI. The recorded KVM CI environment used Ubuntu 24.04 and QEMU 8.2. Reserve 4 GB RAM, up to 30 GB dynamic VM storage and at least 8 GB free disk before setup.
+The target is x86_64 Ubuntu 22.04+ or Debian 12+ with CPU virtualization and `/dev/kvm`. Arch and Fedora are not covered by CI; the KVM CI environment uses Ubuntu 24.04.
 
-1. Extract `Anchi-linux-x64.tar.gz` and run `Anchi-linux-x64/Anchi`. If unprivileged user namespaces are disabled and Electron reports a sandbox error, run `sudo chown root Anchi-linux-x64/chrome-sandbox && sudo chmod 4755 Anchi-linux-x64/chrome-sandbox` once. Do not bypass the sandbox with `--no-sandbox`.
-2. In setup step 1, select Download Lima and Codex. Pinned, SHA-256-verified files install into `~/.local/share/anchi/tools` without administrator access. Failed verification installs nothing.
-3. Run the displayed QEMU/KVM commands yourself. Debian/Ubuntu: `sudo apt-get install -y qemu-system-x86 qemu-utils`; Arch: `sudo pacman -S --needed qemu-base`; Fedora: `sudo dnf install -y qemu-system-x86 qemu-img`. If `/dev/kvm` is not readable and writable, setup also shows `sudo usermod -aG kvm "$USER"`; log out and back in afterwards. Arch commonly grants `0666` access through udev and does not need this step. Select Recheck when done.
-4. Continue with the same Pi installation, unlock and login flow as macOS. Configuration is in `~/.config/Anchi`, the master key in `~/.config/secure-vm/vault.key`, and the VM in `~/.lima/secure-vm`.
-5. Codex login opens the system browser. The Linux Codex binary is downloaded by the app and updated through pinned application releases.
+1. Install QEMU yourself: Debian/Ubuntu `sudo apt-get install -y qemu-system-x86 qemu-utils`, Arch `sudo pacman -S --needed qemu-base`, Fedora `sudo dnf install -y qemu-system-x86 qemu-img`. If `/dev/kvm` is not readable and writable, run `sudo usermod -aG kvm "$USER"` and log in again.
+2. Install Lima from its [release page](https://github.com/lima-vm/lima/releases) and verify the published SHA-256; the CI workflow pins version 2.2.0.
+3. Install Node 22+, pnpm and Python 3.11+, then follow the macOS steps from step 2; `setup install` stops early if `/dev/kvm` or QEMU is missing. The master key is in `~/.config/secure-vm/vault.key` and the VM in `~/.lima/secure-vm`.
 
-For CLI deployment, add `~/.local/share/anchi/tools/lima/current/bin` to `PATH`, then run `bash scripts/install-pi.sh`.
+Differences from macOS:
+
+- **Codex login:** run `codex login` on this machine; Anchi reads `~/.codex/auth.json` as on the Mac. Codex must store its login in that file, not in a keyring.
+- **Notifications** use `notify-send` (Debian/Ubuntu `libnotify-bin`); without it they are skipped.
+- **Google sign-in** opens the browser with `xdg-open` and also prints the URL. Google redirects to a port on `127.0.0.1`, so the browser must run on the same machine; over SSH, forward the printed port or sign in on a desktop session.
+- **`scripts/anchi daemon install`** writes a systemd user unit (`~/.config/systemd/user/anchi-daemon.service`). To keep it running after you log out, run `loginctl enable-linger "$USER"`.
+- **Workspaces** (`~/AnchiWorkspaces`) are macOS only until the Linux mount is verified.

@@ -1,5 +1,15 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, rmSync, watch, type FSWatcher } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  watch,
+  type FSWatcher,
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { createServer, type Server } from 'node:net';
 import type { HomeLayout } from '@anchi/core';
 import {
@@ -9,7 +19,10 @@ import {
   type Methods,
   SETUP_ACTIONS,
   type SetupAction,
+  type ServiceConnectorId,
+  type TaskStatus,
 } from '@anchi/protocol';
+import { ApprovalWatcher } from './approvals.ts';
 import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
 import {
@@ -28,13 +41,27 @@ import { tryConnect } from './launch.ts';
 import { desktopNotify } from './notify.ts';
 import { Peer } from './rpc.ts';
 import {
+  claudeStatus,
   codexStatus,
+  HOST_CODEX_LOGIN,
+  jwtExpiry,
   CONNECTOR_IDS,
   connectorStatuses,
   readHostCodexLogin,
   setupStatus,
 } from './setup.ts';
 import { Store } from './store.ts';
+import { SERVICE_IDS, ServiceSetup } from './services.ts';
+import { SkillStore } from './skills.ts';
+import { TriggerRunner } from './triggers.ts';
+import { parse as parseYaml } from 'yaml';
+
+function serviceId(v: unknown): ServiceConnectorId {
+  if (!SERVICE_IDS.includes(v as ServiceConnectorId)) throw new Error('unknown service connector');
+  return v as ServiceConnectorId;
+}
+
+const STATUSES: TaskStatus[] = ['queued', 'running', 'done', 'failed', 'cancelled'];
 
 const AWS_REFRESH_EVERY_MS = 5 * 60_000;
 const AWS_REFRESH_AHEAD_MS = 15 * 60_000;
@@ -51,6 +78,18 @@ export interface DaemonOptions {
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
   hostRun?: typeof hostOutput;
+  /** Keep the vault's Codex token in step with the Mac's login (default true). */
+  codexSync?: boolean;
+  /** The Mac's Codex login file; tests point it elsewhere. */
+  codexLogin?: string;
+  /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
+  workspaceRoot?: string;
+  /** Opens a URL for the user (Google sign-in); tests replace it. */
+  openUrl?: (url: string) => void;
+  /** Run schedule and polling triggers (default true). */
+  triggers?: boolean;
+  /** Watch the egress proxy's approval queue (default true). */
+  approvals?: boolean;
   /** Reap guest cells at start (default true). */
   reap?: boolean;
 }
@@ -96,6 +135,10 @@ export class Daemon {
   readonly guest: Guest;
   readonly lima: LimaTransport;
   readonly proposals: Proposals;
+  readonly approvals: ApprovalWatcher;
+  readonly triggers: TriggerRunner;
+  readonly skills: SkillStore;
+  readonly services: ServiceSetup;
   private server?: Server;
   private watchers: FSWatcher[] = [];
   private clients = new Map<string, Peer>();
@@ -104,6 +147,79 @@ export class Daemon {
   private setup: SetupRunner;
   private hostRun: typeof hostOutput;
   private awsTimer?: NodeJS.Timeout;
+  private purgeTimer?: NodeJS.Timeout;
+  private codexTimer?: NodeJS.Timeout;
+  private codexImporting = false;
+
+  /**
+   * Keeps the vault's Codex access token current (phase 3, F4: on by default, off with
+   * `codexAutoImport: false`). When the Mac's Codex CLI has refreshed its login, the newer
+   * access token and the account id are imported, as `setup codex` does; the refresh token
+   * stays on the Mac.
+   */
+  async syncCodex(file = this.opts.codexLogin ?? HOST_CODEX_LOGIN): Promise<boolean> {
+    if (this.settings().codexAutoImport === false || this.codexImporting) return false;
+    let login: { accessToken: string; accountId: string };
+    try {
+      login = readHostCodexLogin(file);
+    } catch {
+      return false; // not logged in on this Mac
+    }
+    const hostExpiry = jwtExpiry(login.accessToken);
+    if (!hostExpiry || hostExpiry <= Date.now() + 60_000) return false;
+    this.codexImporting = true;
+    try {
+      const vault = await codexStatus(this.guest).catch(() => null);
+      if (!vault || (vault.connected && (vault.expiresAt ?? 0) >= hostExpiry)) return false;
+      await this.guest.importCodex(login.accessToken, login.accountId);
+      this.log(`codex token imported; valid until ${new Date(hostExpiry).toISOString()}`);
+      return true;
+    } catch (err) {
+      this.log(`codex token import failed: ${(err as Error).message}`);
+      return false;
+    } finally {
+      this.codexImporting = false;
+    }
+  }
+
+  private settings(): Record<string, unknown> {
+    try {
+      const value = parseYaml(
+        readFileSync(join(this.opts.layout.root, 'settings.yaml'), 'utf8'),
+      ) as unknown;
+      return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Sends the user's high-risk exceptions (`highRisk: {disable: [ids]}`) to the egress proxy. */
+  async pushEgressSettings(): Promise<void> {
+    const highRisk = this.settings().highRisk as { disable?: unknown } | undefined;
+    const disabled = Array.isArray(highRisk?.disable) ? highRisk.disable.map(String) : [];
+    try {
+      const r = await this.guest.transport.exec(
+        ['anchi-cell', 'egress-settings'],
+        JSON.stringify({ high_risk_disabled: disabled }),
+      );
+      if (r.code !== 0) this.log(`egress settings not applied: ${r.stdout.trim().slice(0, 200)}`);
+    } catch (err) {
+      this.log(`egress settings not applied: ${(err as Error).message}`);
+    }
+  }
+
+  /** Days finished tasks are kept: `retentionDays` in ~/.anchi/settings.yaml, default 90. */
+  retentionDays(): number {
+    const file = join(this.opts.layout.root, 'settings.yaml');
+    try {
+      const value = parseYaml(readFileSync(file, 'utf8')) as { retentionDays?: unknown } | null;
+      const days = Number(value?.retentionDays);
+      if (Number.isInteger(days) && days >= 1 && days <= 3650) return days;
+    } catch {
+      // No settings file: the default.
+    }
+    return 90;
+  }
   private awsRefreshFailing = false;
 
   constructor(private opts: DaemonOptions) {
@@ -112,7 +228,28 @@ export class Daemon {
     this.guest = opts.guest ?? new Guest(this.lima);
     this.store = new Store(opts.layout.dbFile);
     this.proposals = new Proposals(opts.layout);
+    this.skills = new SkillStore(join(opts.layout.root, 'skills'));
+    this.services = new ServiceSetup(this.guest, (r) => this.broadcast('oauth', r), opts.openUrl);
     this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
+    this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
+      this.hub.origin(id),
+    );
+    this.approvals.on('changed', (approvals) => this.broadcast('approvals', { approvals }));
+    this.approvals.on('added', (a) => {
+      this.hub.notice(
+        a.task,
+        `⏸ waiting for your approval: ${a.operation} (${a.reason || a.connector})`,
+      );
+      if (!this.opts.quiet && this.clients.size === 0) {
+        void desktopNotify(
+          `Anchi: @${a.agent} asks for approval`,
+          `${a.connector}: ${a.operation}`,
+        );
+      }
+    });
+    this.approvals.on('resolved', ({ approval, decided }) => {
+      if (!decided) this.hub.notice(approval.task, `⏹ approval for ${approval.operation} expired`);
+    });
     this.hostRun = opts.hostRun ?? hostOutput;
     this.hub = new Hub({
       layout: opts.layout,
@@ -120,11 +257,33 @@ export class Daemon {
       guest: this.guest,
       idleMs: opts.idleMs,
       turnTimeoutMs: opts.turnTimeoutMs,
+      skills: this.skills,
+      workspaceRoot: opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces'),
+      onPolicyApproval: (task, connector, id) =>
+        this.approvals.addPolicy(this.guest, task, connector, id),
       log: this.log,
       builtins: [builderAgent()],
     });
+    this.triggers = new TriggerRunner(
+      {
+        agents: () => this.hub.resolvedAgents(),
+        start: (agentId, text, trigger) => this.hub.createTask(agentId, text, trigger),
+      },
+      this.store,
+      this.guest,
+      this.log,
+    );
     this.hub.on('event', (e) => this.broadcast('event', e));
     this.hub.on('agents', (agents) => this.broadcast('agents', { agents }));
+    this.hub.on('scanFinding', ({ taskId, agentId, labels }) => {
+      this.log(`credential scan of ${taskId} found ${labels.join(', ')}`);
+      if (!this.opts.quiet) {
+        void desktopNotify(
+          `Anchi: credential found in @${agentId}'s cell`,
+          `${taskId}: ${labels.join(', ')}`,
+        );
+      }
+    });
     this.hub.on('task', (task) => {
       this.broadcast('tasks', { task });
       if (task.status === 'done' || task.status === 'failed') {
@@ -164,6 +323,22 @@ export class Daemon {
     'tasks.list': ({ agentId, limit }) =>
       this.store.listTasks(agentId, Math.min(Math.max(Number(limit) || 100, 1), 500)),
     'tasks.get': ({ taskId: id }) => this.hub.getTask(taskId(id)),
+    'tasks.search': (q) =>
+      this.store.search({
+        agentId: q.agentId ? str(q.agentId, 'agent', 40) : undefined,
+        status: q.status && STATUSES.includes(q.status) ? q.status : undefined,
+        text: q.text ? str(q.text, 'text', 200) : undefined,
+        since: typeof q.since === 'number' ? q.since : undefined,
+        until: typeof q.until === 'number' ? q.until : undefined,
+        limit: typeof q.limit === 'number' ? q.limit : undefined,
+        offset: typeof q.offset === 'number' ? q.offset : undefined,
+      }),
+    'tasks.tree': ({ taskId: id }) => this.store.tree(this.hub.getTask(taskId(id)).rootId),
+    'tasks.delete': async ({ taskId: id }) => {
+      const deleted = await this.hub.deleteTask(taskId(id));
+      this.broadcast('tasksDeleted', {});
+      return { deleted };
+    },
     'tasks.send': ({ taskId: id, text }) =>
       this.hub.sendTask(taskId(id), str(text, 'text', 200_000)),
     'tasks.cancel': ({ taskId: id }) => {
@@ -180,7 +355,11 @@ export class Daemon {
       }
       return this.guest.scan(task);
     },
-    'setup.status': () => setupStatus(this.guest, this.lima),
+    'setup.status': () => setupStatus(this.guest, this.lima, this.services),
+    'setup.importClaude': async ({ token }) => {
+      await this.guest.importClaude(str(token, 'token', 500).trim());
+      return claudeStatus(this.guest);
+    },
     'setup.importCodex': async () => {
       const login = readHostCodexLogin();
       await this.guest.importCodex(login.accessToken, login.accountId);
@@ -222,6 +401,49 @@ export class Daemon {
       const agents = this.hub.reload();
       if (imageId) this.log(`image "${imageId}" will be built on the first task that uses it`);
       return agents;
+    },
+    'approvals.list': () => this.approvals.list(),
+    'triggers.list': () => this.triggers.list(),
+    'skills.list': () => this.skills.list(),
+    'services.setToken': async ({ id, token }) => {
+      await this.services.setToken(serviceId(id), str(token, 'token', 500).trim());
+      return null;
+    },
+    'services.disconnect': async ({ id }) => {
+      await this.services.disconnect(serviceId(id));
+      return null;
+    },
+    'services.setMode': async ({ id, mode }) => {
+      if (mode !== 'auto' && mode !== 'ask') throw new Error('mode is auto or ask');
+      await this.services.setMode(serviceId(id), mode);
+      return null;
+    },
+    'services.googleClient': async ({ json }) => {
+      await this.services.setGoogleClient(str(json, 'client JSON', 16_384));
+      return null;
+    },
+    'services.googleLogin': async ({ id }) => ({
+      url: await this.services.googleLogin(serviceId(id)),
+    }),
+    'skills.add': async ({ source, id }) => {
+      const skill = await this.skills.add(
+        str(source, 'source', 500),
+        id ? str(id, 'id', 40) : undefined,
+      );
+      this.hub.reload();
+      return skill;
+    },
+    'skills.remove': ({ id }) => {
+      this.skills.remove(str(id, 'id', 40));
+      this.hub.reload();
+      return null;
+    },
+    'approvals.decide': async ({ id, allow }) => {
+      const a = this.approvals.list().find((x) => x.id === id);
+      await this.approvals.decide(str(id, 'approval', 40), allow === true, this.guest);
+      if (a)
+        this.hub.notice(a.task, `${allow === true ? '✓ approved' : '✗ denied'}: ${a.operation}`);
+      return null;
     },
     'builder.discard': ({ proposalId }) => {
       this.proposals.discard(str(proposalId, 'proposal', 20));
@@ -326,6 +548,32 @@ export class Daemon {
     });
     chmodSync(layout.socketFile, 0o600);
     this.watchConfig();
+    if (this.opts.approvals !== false) this.approvals.start();
+    if (this.opts.triggers !== false) this.triggers.start();
+    void this.pushEgressSettings();
+    if (this.opts.codexSync !== false) {
+      void this.syncCodex();
+      this.codexTimer = setInterval(() => void this.syncCodex(), 5 * 60_000);
+      this.codexTimer.unref();
+      try {
+        const file = this.opts.codexLogin ?? HOST_CODEX_LOGIN;
+        this.watchers.push(
+          watch(dirname(file), (_e, name) => {
+            if (String(name) === basename(file)) setTimeout(() => void this.syncCodex(), 1000);
+          }),
+        );
+      } catch {
+        // No ~/.codex yet; the timer still checks.
+      }
+    }
+    // Retention: finished tasks older than the configured number of days.
+    const purge = () => {
+      const n = this.hub.purge(this.retentionDays());
+      if (n) this.log(`retention: deleted ${n} task(s) older than ${this.retentionDays()} days`);
+    };
+    purge();
+    this.purgeTimer = setInterval(purge, 6 * 3600_000);
+    this.purgeTimer.unref();
     this.awsTimer = setInterval(() => void this.refreshAws(), AWS_REFRESH_EVERY_MS);
     this.awsTimer.unref();
     this.log(`daemon ${process.pid} listening on ${layout.socketFile}`);
@@ -349,10 +597,27 @@ export class Daemon {
         // Watching is a convenience; `agents.reload` still works.
       }
     }
+    let settingsTimer: NodeJS.Timeout | undefined;
+    try {
+      this.watchers.push(
+        watch(layout.root, (_e, name) => {
+          if (String(name) !== 'settings.yaml') return;
+          clearTimeout(settingsTimer);
+          settingsTimer = setTimeout(() => void this.pushEgressSettings(), 300);
+        }),
+      );
+    } catch {
+      // Settings also apply at the next start.
+    }
   }
 
   async stop(): Promise<void> {
-    this.hub.shutdown();
+    await this.hub.shutdown();
+    this.approvals.stop();
+    this.triggers.stop();
+    this.services.stop();
+    clearInterval(this.purgeTimer);
+    clearInterval(this.codexTimer);
     clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();
     for (const p of this.clients.values()) p.close();

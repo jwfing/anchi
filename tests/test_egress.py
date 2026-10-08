@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,11 +19,13 @@ GITHUB = {'token': 'ghp_fakefakefakefakefakefake', 'generation': 'g'}
 CODEX = {'token': 'fake-codex-access', 'account_id': 'acct-123'}
 LINEAR = {'token': 'lin_api_fakefakefakefakefake', 'generation': 'g'}
 AWS = {
-    'access_key_id': 'AKIAFAKEREAL00000000',
+    'access_key_id': 'AKIAI44QH8DHBEXAMPLE',
     'secret_access_key': 'fake/secret/key/0000000000',
     'region': 'us-east-1',
 }
-ALL = {'github', 'aws', 'linear', 'codex'}
+CLAUDE_OAUTH = {'token': 'sk-ant-oat01-fakefakefakefakefakefakefakefake', 'kind': 'oauth'}
+CLAUDE_KEY = {'token': 'sk-ant-api03-fakefakefakefakefakefakefakefake', 'kind': 'api_key'}
+ALL = {'github', 'aws', 'linear', 'codex', 'claude'}
 
 
 def decide(method, host, path, headers=None, body=b'', grants=ALL):
@@ -44,6 +47,17 @@ def signed(service, region='us-east-1', target=None, body=b'', path='/', host=No
     return host, {k.lower(): v for k, v in request.headers.items()}
 
 
+def example_resigner(seed, trailer):
+    """A ChunkResigner keyed like the S3 reference's streaming examples (the documented example secret)."""
+    import hashlib
+    import hmac
+
+    key = b'AWS4wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+    for part in ('20130524', 'us-east-1', 's3', 'aws4_request'):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    return rules.ChunkResigner(key, '20130524T000000Z', '20130524/us-east-1/s3/aws4_request', seed, trailer)
+
+
 class DecisionTests(unittest.TestCase):
     def test_unmatched_hosts_pass_through(self):
         self.assertEqual(decide('GET', 'example.com', '/').action, 'pass')
@@ -60,6 +74,26 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(decide('GET', 'chatgpt.com', '/backend-api/plugins').reason, 'no-placeholder')
         other = decide('GET', 'chatgpt.com', '/x', {'authorization': 'Bearer someone-else'})
         self.assertEqual((other.action, other.reason), ('pass', 'no-placeholder'))
+
+    def test_claude_is_replace_only_for_either_credential_kind(self):
+        oauth = {'authorization': f'Bearer {rules.PLACEHOLDER_CLAUDE_OAUTH}', 'anthropic-beta': 'oauth-2025-04-20'}
+        decision = decide('POST', 'api.anthropic.com', '/v1/messages', oauth)
+        self.assertEqual(decision.action, 'inject')
+        headers = rules.apply(decision, 'POST', 'https://api.anthropic.com/v1/messages', oauth, b'', CLAUDE_OAUTH)
+        self.assertEqual(headers['authorization'], f'Bearer {CLAUDE_OAUTH["token"]}')
+        self.assertEqual(headers['anthropic-beta'], 'oauth-2025-04-20')
+        key = {'x-api-key': rules.PLACEHOLDER_CLAUDE_KEY}
+        decision = decide('POST', 'api.anthropic.com', '/v1/messages', key)
+        headers = rules.apply(decision, 'POST', 'https://api.anthropic.com/v1/messages', key, b'', CLAUDE_KEY)
+        self.assertEqual(headers['x-api-key'], CLAUDE_KEY['token'])
+        self.assertNotIn('authorization', headers)
+        # No placeholder, no credential; a Codex agent gets nothing here either.
+        self.assertEqual(decide('GET', 'api.anthropic.com', '/mcp-registry/v0/servers').reason, 'no-placeholder')
+        codex_only = decide('POST', 'api.anthropic.com', '/v1/messages', oauth, grants={'codex'})
+        self.assertEqual((codex_only.action, codex_only.reason), ('pass', 'not-granted'))
+        self.assertEqual(decide('POST', 'api.anthropic.com', '/v1/organizations/api_keys', oauth).action, 'deny')
+        self.assertEqual(decide('POST', 'console.anthropic.com', '/v1/oauth/token').action, 'deny')
+        self.assertEqual(decide('POST', 'claude.ai', '/v1/oauth/token').action, 'deny')
 
     def test_token_refresh_is_denied_for_everyone(self):
         for grants in (ALL, set()):
@@ -150,12 +184,119 @@ class DecisionTests(unittest.TestCase):
         host, headers = signed('iam', body=b'Action=ListUsers&Version=2010-05-08')
         self.assertEqual(decide('POST', host, '/', headers, b'Action=ListUsers&Version=2010-05-08').action, 'inject')
 
-    def test_aws_streaming_uploads_rejected(self):
-        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
-        headers['x-amz-content-sha256'] = 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD'
-        decision = decide('PUT', host, '/key', headers)
+    def test_aws_chunk_signatures_match_the_aws_example(self):
+        # The worked example of "Signature Calculations for the Authorization Header: Transferring
+        # Payload in Multiple Chunks" in the S3 API reference: its seed and chunk signatures.
+        seed = '4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9'
+        expected = (
+            'ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648',
+            '0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497',
+            'b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9',
+        )
+        placeholder = '0' * 64
+        body = b''.join(
+            f'{len(c):x};chunk-signature={placeholder}\r\n'.encode() + c + b'\r\n'
+            for c in (b'a' * 65536, b'a' * 1024, b'')
+        )
+        for step in (len(body), 1, 7, 4096):
+            resigner = example_resigner(seed, trailer=False)
+            out = b''.join(resigner.feed(body[i : i + step]) for i in range(0, len(body), step))
+            out += resigner.feed(b'')
+            self.assertEqual(len(out), len(body))
+            self.assertEqual(
+                [line.split(b'=')[1].decode() for line in out.split(b'\r\n') if b'chunk-signature' in line],
+                list(expected),
+            )
+            self.assertEqual(out.replace(b'a', b'').count(b'\r\n'), 6)
+
+    def test_aws_chunked_trailer_is_re_signed(self):
+        seed = '106e2a8a18243abcf37539882f36619c00e2dfc72633413f02d3b74544bfeb8e'
+        placeholder = '0' * 64
+        body = (
+            f'10000;chunk-signature={placeholder}\r\n'.encode()
+            + b'a' * 65536
+            + f'\r\n400;chunk-signature={placeholder}\r\n'.encode()
+            + b'a' * 1024
+            + f'\r\n0;chunk-signature={placeholder}\r\n'.encode()
+            + f'x-amz-checksum-crc32c:sOO8/Q==\r\nx-amz-trailer-signature:{placeholder}\r\n\r\n'.encode()
+        )
+        resigner = example_resigner(seed, trailer=True)
+        out = resigner.feed(body[:70000]) + resigner.feed(body[70000:]) + resigner.feed(b'')
+        self.assertEqual(len(out), len(body))
+        signatures = [line.split(b'=', 1)[1] for line in out.split(b'\r\n') if b'chunk-signature' in line]
+        # Chunk signatures of the trailer example in the same reference.
+        self.assertEqual(
+            [s.decode() for s in signatures],
+            [
+                'b474d8862b1487a5145d686f57f013e54db672cee1c953b3010fb58501ef5aa2',
+                '1c1344b170168f8e65b41376b44b20fe354e373826ccbbe2c1d40a8cae51e5c7',
+                '2ca2aba2005185cf7159c6277faf83795951dd77a3a99e6e65d5c9f85863f992',
+            ],
+        )
+        trailer = out.split(b'x-amz-trailer-signature:')[1]
+        self.assertRegex(trailer, rb'^[0-9a-f]{64}\r\n\r\n$')
+        self.assertNotIn(placeholder.encode(), out)
+
+    def test_malformed_aws_chunked_bodies_are_refused(self):
+        sig = '0' * 64
+        cases = (
+            b'zz;chunk-signature=' + sig.encode() + b'\r\n',
+            b'1000001;chunk-signature=' + sig.encode() + b'\r\n',
+            b'1;chunk-signature=' + sig.encode() + b'\r\naXX',
+            b'x' * 200,
+        )
+        for body in cases:
+            with self.assertRaises(ValueError, msg=body[:30]):
+                example_resigner(sig, trailer=False).feed(body)
+        resigner = example_resigner(sig, trailer=False)
+        resigner.feed(b'1;chunk-signature=' + sig.encode() + b'\r\na\r\n')
         with self.assertRaises(ValueError):
-            rules.apply(decision, 'PUT', f'https://{host}/key', headers, b'', AWS)
+            resigner.feed(b'')
+        with self.assertRaises(ValueError):
+            example_resigner(sig, trailer=False).feed(b'')
+        resigner = example_resigner(sig, trailer=False)
+        resigner.feed(b'0;chunk-signature=' + sig.encode() + b'\r\n\r\n')
+        with self.assertRaises(ValueError):
+            resigner.feed(b'more')
+
+    def test_aws_streaming_payloads_are_re_signed(self):
+        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
+        for payload, chunked in (
+            ('STREAMING-UNSIGNED-PAYLOAD-TRAILER', False),
+            ('STREAMING-AWS4-HMAC-SHA256-PAYLOAD', True),
+            ('STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER', True),
+        ):
+            sent = {**headers, 'x-amz-content-sha256': payload, 'content-encoding': 'aws-chunked'}
+            decision = decide('PUT', host, '/key', sent)
+            new = rules.apply(decision, 'PUT', f'https://{host}/key', sent, b'', AWS)
+            self.assertEqual(new['x-amz-content-sha256'], payload)
+            self.assertIn('x-amz-content-sha256', new['authorization'])
+            self.assertIn(f'Credential={AWS["access_key_id"]}/', new['authorization'])
+            resigner = rules.aws_chunk_resigner(new, AWS)
+            self.assertEqual(resigner is not None, chunked)
+            if resigner:
+                self.assertEqual(resigner.previous, new['authorization'].rsplit('Signature=', 1)[1])
+        sent = {**headers, 'x-amz-content-sha256': 'STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD'}
+        decision = decide('PUT', host, '/key', sent)
+        with self.assertRaises(ValueError):
+            rules.apply(decision, 'PUT', f'https://{host}/key', sent, b'', AWS)
+
+    def test_s3_subresources_name_the_operation_and_risk(self):
+        host, headers = signed('s3', host='s3.us-east-1.amazonaws.com')
+        cases = (
+            ('POST', '/bucket?delete', 's3:POST /bucket?delete', 'aws-s3-delete'),
+            ('PUT', '/bucket?lifecycle', 's3:PUT /bucket?lifecycle', 'aws-s3-delete'),
+            ('PUT', '/bucket?policy', 's3:PUT /bucket?policy', 'aws-s3-access'),
+            ('PUT', '/bucket/key?acl', 's3:PUT /bucket/key?acl', 'aws-s3-access'),
+            ('DELETE', '/bucket/key', 's3:DELETE /bucket/key', 'aws-s3-delete'),
+            ('PUT', '/bucket/key?partNumber=1&uploadId=x', 's3:PUT /bucket/key', None),
+            ('GET', '/bucket?list-type=2', 's3:GET /bucket', None),
+        )
+        for method, path, op, risk in cases:
+            decision = decide(method, host, path, headers)
+            self.assertEqual(decision.op, op)
+            found = rules.high_risk(decision, method, path, b'')
+            self.assertEqual(found and found[0], risk, path)
 
     def test_proxy_authorization_never_forwarded(self):
         decision = decide('GET', 'api.github.com', '/user')
@@ -187,6 +328,92 @@ class DecisionTests(unittest.TestCase):
                 rules.verify_account(connector, status, body)
         with self.assertRaisesRegex(ValueError, 'VERIFY_UNEXPECTED_RESPONSE'):
             rules.verify_account('github', 200, b'<html>')
+
+    def test_writes_are_classified_for_approval(self):
+        def write(method, host, path, body=b'', headers=None):
+            d = decide(method, host, path, headers or {}, body)
+            return rules.is_write(d, method, path, body)
+
+        self.assertTrue(write('POST', 'github.com', '/o/r.git/git-receive-pack'))
+        self.assertFalse(write('POST', 'github.com', '/o/r.git/git-upload-pack'))
+        self.assertTrue(write('POST', 'api.github.com', '/repos/o/r/pulls'))
+        self.assertFalse(write('GET', 'api.github.com', '/repos/o/r/pulls'))
+        self.assertFalse(write('POST', 'api.github.com', '/graphql', b'{"query": "query { viewer { login } }"}'))
+        self.assertTrue(write('POST', 'api.github.com', '/graphql', b'{"query": "mutation { addComment }"}'))
+        self.assertTrue(write('POST', 'api.linear.app', '/graphql', b'{"query":"mutation { commentCreate }"}'))
+        self.assertFalse(write('POST', 'api.linear.app', '/graphql', b'{"query":"{ issue(id: 1) { title } }"}'))
+        host, headers = signed('logs', target='Logs_20140328.FilterLogEvents')
+        self.assertFalse(write('POST', host, '/', headers=headers))
+        host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
+        self.assertTrue(write('POST', host, '/', headers=headers))
+
+    def test_high_risk_operations_are_recognized_for_every_agent(self):
+        def risk(method, host, path, body=b'', headers=None, disabled=()):
+            d = decide(method, host, path, headers or {}, body)
+            found = rules.high_risk(d, method, path, body, disabled)
+            return found and found[0]
+
+        push = lambda ref, new=b'1' * 40: b'00a8' + b'2' * 40 + b' ' + new + b' ' + ref + b'\x00 report-status\n0000'  # noqa: E731
+        self.assertEqual(risk('PUT', 'api.github.com', '/repos/o/r/pulls/7/merge'), 'github-merge')
+        self.assertEqual(risk('DELETE', 'api.github.com', '/repos/o/r'), 'github-repo-delete')
+        self.assertEqual(
+            risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/main')), 'git-default-branch'
+        )
+        self.assertEqual(
+            risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/fix', b'0' * 40)),
+            'git-ref-delete',
+        )
+        self.assertIsNone(risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/fix')))
+        self.assertEqual(
+            risk('POST', 'api.github.com', '/graphql', b'{"query":"mutation { mergePullRequest(input: {}) { x } }"}'),
+            'github-graphql',
+        )
+        self.assertIsNone(risk('POST', 'api.github.com', '/graphql', b'{"query":"query { viewer { login } }"}'))
+        self.assertIsNone(risk('POST', 'api.github.com', '/repos/o/r/pulls'))
+        host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
+        self.assertEqual(risk('POST', host, '/', headers=headers), 'aws-destroy')
+        host, headers = signed('logs', target='Logs_20140328.FilterLogEvents')
+        self.assertIsNone(risk('POST', host, '/', headers=headers))
+        self.assertEqual(
+            risk('POST', 'api.linear.app', '/graphql', b'{"query":"mutation { issueDelete(id: 1) { success } }"}'),
+            'linear-delete',
+        )
+        # The user can switch an entry off.
+        self.assertIsNone(risk('PUT', 'api.github.com', '/repos/o/r/pulls/7/merge', disabled=('github-merge',)))
+
+    def test_git_push_summary_names_the_refs(self):
+        import egress_proxy
+
+        d = decide('POST', 'github.com', '/o/r.git/git-receive-pack')
+        body = b'00a8' + b'0' * 40 + b' ' + b'1' * 40 + b' refs/heads/fix-12\x00 report-status\n0000PACK...'
+        self.assertEqual(egress_proxy.write_summary(d, 'POST', '/o/r', body), 'git push: refs/heads/fix-12')
+
+    def test_polls_run_fixed_read_only_queries(self):
+        method, url, headers, body = rules.poll_request('linear-issues', {'team': 'ENG', 'label': 'agent'}, LINEAR)
+        self.assertEqual((method, url), ('POST', 'https://api.linear.app/graphql'))
+        query = json.loads(body)
+        self.assertTrue(query['query'].startswith('query'))
+        self.assertEqual(query['variables']['filter']['labels'], {'name': {'eq': 'agent'}})
+        self.assertEqual(headers['authorization'], LINEAR['token'])
+        method, url, headers, _ = rules.poll_request('github-issues', {'query': 'repo:o/r is:open label:x'}, GITHUB)
+        self.assertEqual(method, 'GET')
+        self.assertTrue(url.startswith('https://api.github.com/search/issues?q=repo%3Ao%2Fr'))
+        with self.assertRaises(ValueError):
+            rules.poll_request('jira', {}, GITHUB)
+        items = rules.poll_items(
+            'linear-issues',
+            200,
+            b'{"data":{"issues":{"nodes":[{"id":"u1","identifier":"ENG-1","title":"Crash","url":"https://linear.app/x/issue/ENG-1"}]}}}',
+        )
+        self.assertEqual(items, [{'id': 'u1', 'title': 'ENG-1 Crash', 'url': 'https://linear.app/x/issue/ENG-1'}])
+        items = rules.poll_items(
+            'github-issues',
+            200,
+            b'{"items":[{"node_id":"I_1","title":"Bug","html_url":"https://github.com/o/r/issues/1"}]}',
+        )
+        self.assertEqual(items[0]['id'], 'I_1')
+        with self.assertRaisesRegex(ValueError, 'CREDENTIAL_REJECTED'):
+            rules.poll_items('github-issues', 401, b'{}')
 
     def test_credential_classification_reveals_nothing(self):
         self.assertEqual(rules.classify_credential({}), 'none')
@@ -293,6 +520,136 @@ class RegistryTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_register_grants_only_the_cell_runtime(self):
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            await registry.register({'task': 'tc', 'agent': 'a', 'connectors': [], 'runtime': 'claude'})
+            await registry.register({'task': 'tx', 'agent': 'a', 'connectors': ['github']})
+            self.assertEqual(registry.cells['tc'].grants, frozenset({'claude'}))
+            self.assertEqual(registry.cells['tx'].grants, frozenset({'github', 'codex'}))
+            with self.assertRaises(ValueError):
+                registry.validate({'task': 'ty', 'agent': 'a', 'connectors': [], 'runtime': 'gpt'})
+            for task in ('tc', 'tx'):
+                await registry.unregister(task)
+
+        asyncio.run(scenario())
+
+    def test_claude_import_accepts_tokens_and_keys_only(self):
+        import claude_admin
+
+        self.assertEqual(claude_admin.validate({'token': CLAUDE_OAUTH['token']})['kind'], 'oauth')
+        self.assertEqual(claude_admin.validate({'token': CLAUDE_KEY['token']})['kind'], 'api_key')
+        for bad in (
+            'sk-ant-sid01-' + 'x' * 40,
+            'short',
+            rules.PLACEHOLDER_CLAUDE_OAUTH,
+            'sk-ant-oat01-' + 'x' * 40 + ' ',
+        ):
+            with self.assertRaises(Exception):
+                claude_admin.validate({'token': bad})
+
+    def test_approvals_wait_for_the_user_and_time_out(self):
+        async def scenario():
+            approvals = self.module.Approvals(timeout=0.2)
+            seen = []
+
+            class Watcher:
+                def write(self, line):
+                    seen.append(json.loads(line))
+
+                def is_closing(self):
+                    return False
+
+            approvals.watchers.add(Watcher())
+            ask = asyncio.create_task(approvals.ask({'task': 't1', 'connector': 'github', 'summary': 'git push'}))
+            await asyncio.sleep(0.01)
+            approval_id = seen[0]['approval']['id']
+            approvals.decide(approval_id, True)
+            self.assertEqual(await ask, 'approved')
+            self.assertEqual(seen[-1], {'type': 'resolved', 'id': approval_id})
+            denied = asyncio.create_task(approvals.ask({'task': 't1'}))
+            await asyncio.sleep(0.01)
+            approvals.decide(seen[-1]['approval']['id'], False)
+            self.assertEqual(await denied, 'denied')
+            self.assertEqual(await approvals.ask({'task': 't1'}), 'timeout')
+            with self.assertRaises(ValueError):
+                approvals.decide('0' * 16, True)
+
+        asyncio.run(scenario())
+
+    def test_settings_accept_known_high_risk_ids_only(self):
+        proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+        with patch.object(self.module, 'SETTINGS', Path(self.tmp, 'settings.json')):
+            self.assertEqual(
+                proxy.set_settings({'high_risk_disabled': ['github-merge']}), {'high_risk_disabled': ['github-merge']}
+            )
+            self.assertEqual(self.module.load_settings(), {'high_risk_disabled': ['github-merge']})
+            with self.assertRaises(ValueError):
+                proxy.set_settings({'high_risk_disabled': ['everything']})
+
+    def test_egress_allowlists_add_runtime_and_connector_hosts(self):
+        allow = rules.egress_allowlist(['registry.npmjs.org', '*.pypi.org'], {'codex', 'github'})
+        for host in ('registry.npmjs.org', 'files.pypi.org', 'chatgpt.com', 'api.github.com', 'github.com'):
+            self.assertTrue(rules.egress_allowed(allow, host), host)
+        for host in ('example.com', 'pypi.org.evil.com', 'api.anthropic.com', 'api.linear.app'):
+            self.assertFalse(rules.egress_allowed(allow, host), host)
+        self.assertTrue(rules.egress_allowed(rules.egress_allowlist(None, {'codex'}), 'example.com'))
+
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            await registry.register({'task': 'te', 'agent': 'a', 'connectors': [], 'egress': ['example.org']})
+            self.assertEqual(registry.cells['te'].egress, frozenset({'example.org', 'chatgpt.com', '*.chatgpt.com'}))
+            for bad in (['http://x.com'], ['*'], 'example.org', ['a' * 70 + '.com']):
+                with self.assertRaises(ValueError):
+                    registry.validate({'task': 'tf', 'agent': 'a', 'connectors': [], 'egress': bad})
+            await registry.unregister('te')
+
+        asyncio.run(scenario())
+
+    def test_connector_bridge_names_the_cell_agent(self):
+        async def scenario():
+            seen = []
+
+            async def service(reader, writer):
+                seen.append(json.loads(await reader.readline()))
+                writer.write(b'{"ok": true, "result": {"pages": []}}\n')
+                await writer.drain()
+                writer.close()
+
+            sock = Path(self.tmp, 'notion.sock')
+            server = await asyncio.start_unix_server(service, path=str(sock))
+            # Unix socket paths are short (104 bytes on macOS); the default temporary directory is long.
+            short = tempfile.mkdtemp(prefix='ae', dir='/tmp')
+            self.addCleanup(shutil.rmtree, short, True)
+            with (
+                patch.object(self.module, 'SERVICE_SOCKET', str(Path(self.tmp, '{}.sock'))),
+                patch.object(self.module, 'CELLS', Path(short)),
+            ):
+                registry = self.module.Registry(('127.0.0.1', 1))
+                result = await registry.register(
+                    {'task': 'tb', 'agent': 'dev', 'connectors': [], 'services': ['notion']}
+                )
+                bridge = Path(result['directory'], 'connectors', 'notion', 'api.sock')
+                self.assertEqual(sorted(p.name for p in Path(result['directory'], 'connectors').iterdir()), ['notion'])
+                reader, writer = await asyncio.open_unix_connection(str(bridge))
+                writer.write(b'{"op": "search", "query": "x", "limit": 1, "agent": "someone-else"}\n')
+                await writer.drain()
+                self.assertEqual(json.loads(await reader.readline()), {'ok': True, 'result': {'pages': []}})
+                writer.close()
+                self.assertEqual(seen, [{'op': 'search', 'query': 'x', 'limit': 1, 'agent': 'dev'}])
+                reader, writer = await asyncio.open_unix_connection(str(bridge))
+                writer.write(b'[1, 2]\n')
+                await writer.drain()
+                self.assertEqual(json.loads(await reader.readline())['error'], 'BAD_REQUEST')
+                writer.close()
+                with self.assertRaises(ValueError):
+                    registry.validate({'task': 'tc', 'agent': 'dev', 'connectors': [], 'services': ['github']})
+                await registry.unregister('tb')
+                self.assertFalse(bridge.exists())
+            server.close()
+
+        asyncio.run(scenario())
+
     def test_register_validates_names_and_connectors(self):
         registry = self.module.Registry(('127.0.0.1', 1))
         for request in (
@@ -300,6 +657,7 @@ class RegistryTests(unittest.TestCase):
             {'task': 't', 'agent': 'A', 'connectors': []},
             {'task': 't', 'agent': 'a', 'connectors': ['gmail']},
             {'task': 't', 'agent': 'a', 'connectors': 'github'},
+            {'task': 't', 'agent': 'a', 'connectors': ['github'], 'ask': ['aws']},
         ):
             with self.assertRaises(ValueError):
                 registry.validate(request)
@@ -364,6 +722,86 @@ class RegistryTests(unittest.TestCase):
             asyncio.run(proxy.verify('gmail'))
         self.assertNotIn(GITHUB['token'], Path(self.tmp, 'audit.jsonl').read_text())
 
+    def proxy_flow(self, method, host, path, headers, stream, content=b''):
+        from types import SimpleNamespace as NS
+
+        killed = []
+        request = NS(
+            method=method,
+            path=path,
+            url=f'https://{host}{path}',
+            pretty_host=host,
+            headers=dict(headers),
+            stream=stream,
+            raw_content=content,
+            get_content=lambda strict=False: content,
+        )
+        flow = NS(request=request, client_conn=NS(id='c1'), metadata={}, response=None, kill=lambda: killed.append(1))
+        return flow, killed
+
+    def proxy_with_cell(self, grants=frozenset({'aws', 'github'})):
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)),
+            credentials=self.module.Credentials(lambda r: {'aws': AWS, 'github': GITHUB}[r['connector']]),
+        )
+        cell = self.module.Cell('t1', 'dev', grants)
+        proxy.registry.client_cell = lambda client: cell
+        return proxy
+
+    def test_streamed_s3_uploads_are_re_signed_before_their_headers_leave(self):
+        proxy = self.proxy_with_cell()
+        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
+        headers.update(
+            {'x-amz-content-sha256': 'STREAMING-AWS4-HMAC-SHA256-PAYLOAD', 'content-encoding': 'aws-chunked'}
+        )
+        flow, killed = self.proxy_flow('PUT', host, '/key', headers, stream=True)
+        asyncio.run(proxy.requestheaders(flow))
+        self.assertEqual(killed, [])
+        self.assertIn(f'Credential={AWS["access_key_id"]}/', flow.request.headers['authorization'])
+        self.assertTrue(callable(flow.request.stream))
+        body = b'1;chunk-signature=' + b'0' * 64 + b'\r\na\r\n0;chunk-signature=' + b'0' * 64 + b'\r\n\r\n'
+        out = flow.request.stream(body) + flow.request.stream(b'')
+        self.assertEqual(len(out), len(body))
+        self.assertNotIn(b'0' * 64, out)
+        # The request hook comes after the body: it must not touch the request again.
+        before = dict(flow.request.headers)
+        asyncio.run(proxy.request(flow))
+        self.assertEqual(flow.request.headers, before)
+        # The buffered path re-signs the whole body.
+        flow, killed = self.proxy_flow('PUT', host, '/key', headers, stream=False, content=body)
+        asyncio.run(proxy.requestheaders(flow))
+        asyncio.run(proxy.request(flow))
+        self.assertEqual((len(flow.request.raw_content), flow.response), (len(body), None))
+        self.assertNotIn(b'0' * 64, flow.request.raw_content)
+        flow, killed = self.proxy_flow('PUT', host, '/key', headers, stream=False, content=b'garbage')
+        responses = []
+        with patch.object(self.module.EgressProxy, 'respond', staticmethod(lambda f, *a: responses.append(a[0]))):
+            asyncio.run(proxy.request(flow))
+        self.assertEqual(responses, [403])
+
+    def test_other_streamed_requests_leave_uninjected_and_say_so(self):
+        proxy = self.proxy_with_cell()
+        flow, killed = self.proxy_flow('POST', 'api.github.com', '/repos/o/r/releases', {'authorization': 'x'}, True)
+        asyncio.run(proxy.requestheaders(flow))
+        self.assertEqual((killed, flow.request.headers), ([], {'authorization': 'x'}))
+        host, headers = signed('s3', host='bucket.s3.amazonaws.com')
+        flow, killed = self.proxy_flow('POST', host, '/bucket?delete', headers, True)
+
+        async def denied(request):
+            return 'denied'
+
+        with patch.object(proxy.approvals, 'ask', denied):
+            asyncio.run(proxy.requestheaders(flow))
+        self.assertEqual(killed, [1])
+        # Streaming that starts after the headers hook (a chunked body past 8 MiB): too late to inject.
+        flow, killed = self.proxy_flow('POST', 'github.com', '/o/r.git/git-receive-pack', {'authorization': 'x'}, False)
+        asyncio.run(proxy.requestheaders(flow))
+        flow.request.stream = True
+        asyncio.run(proxy.request(flow))
+        self.assertEqual((flow.request.headers, flow.response), ({'authorization': 'x'}, None))
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertEqual([r['decision'] for r in rows], ['pass:streamed', 'held-denied', 'pass:streamed'])
+
     def test_audit_never_contains_credentials(self):
         self.module.audit({'decision': 'inject', 'host': 'api.github.com'})
         text = Path(self.tmp, 'audit.jsonl').read_text()
@@ -375,7 +813,9 @@ class AuthEgressScopeTests(unittest.TestCase):
     def test_only_the_egress_caller_reads_connector_credentials(self):
         import server
 
-        self.assertEqual(server.credential_ops('egress'), ('egress_credential', 'codex_token', 'codex_account'))
+        self.assertEqual(
+            server.credential_ops('egress'), ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
+        )
         self.assertNotIn('egress_credential', server.credential_ops('inference'))
         self.assertEqual(server.credential_ops(None), ())
 
@@ -389,13 +829,13 @@ class AuthEgressScopeTests(unittest.TestCase):
             patch.object(auth.vault, 'KEY', Path(store) / 'key'),
         ):
             Path(store, 'key').write_bytes(os.urandom(32))
-            good = {'access_key_id': 'AKIAABCDEFGHIJKLMNOP', 'secret_access_key': 'a' * 40, 'region': 'us-west-2'}
+            good = {'access_key_id': 'AKIAIOSFODNN7EXAMPLE', 'secret_access_key': 'a' * 40, 'region': 'us-west-2'}
             self.assertTrue(auth.import_aws(good)['connected'])
             self.assertEqual(auth.egress_credential('aws')['region'], 'us-west-2')
             for bad in (
                 {**good, 'access_key_id': 'nope'},
                 {**good, 'region': 'mars'},
-                {**good, 'access_key_id': 'ASIAABCDEFGHIJKLMNOP'},
+                {**good, 'access_key_id': 'ASIAIOSFODNN7EXAMPLE'},
                 {**good, 'extra': 1},
             ):
                 with self.assertRaises(Denied):

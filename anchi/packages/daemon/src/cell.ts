@@ -16,6 +16,25 @@ export const TURN_MAX_BYTES = 64 * 1024 * 1024;
 export const READY_TIMEOUT_MS = 90_000;
 export const TURN_TIMEOUT_MS = 60 * 60_000;
 const STDERR_KEEP = 8 * 1024;
+/** What the user can do about guest errors that stop a cell from starting. */
+const START_HINTS: Record<string, string> = {
+  CODEX_NOT_CONFIGURED: 'run `anchi setup codex` (Runtimes → i in the TUI)',
+  CLAUDE_NOT_CONFIGURED:
+    'run `claude setup-token` on this Mac, then `anchi setup claude` (Runtimes → c in the TUI)',
+  BASE_IMAGE_NOT_BUILT: 'run `anchi setup install`',
+  TOO_MANY_CELLS: 'too many tasks are running; try again when one finishes',
+  EGRESS_UNAVAILABLE: 'the egress proxy is not running; run `anchi setup install`',
+};
+
+/** Anchi tool calls one turn may make; a limit on runaway loops, not a security control. */
+export const TURN_MAX_TOOL_CALLS = 200;
+
+export interface ToolCall {
+  turn: string;
+  tool: string;
+  args: Record<string, unknown>;
+}
+export type ToolHandler = (call: ToolCall) => Promise<Record<string, unknown>>;
 
 export interface TurnRequest {
   turn: string;
@@ -39,6 +58,9 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
   private decoder: FrameDecoder;
   private current?: TurnState;
   private turnBytes = 0;
+  private turnToolCalls = 0;
+  /** Answers the in-cell MCP server's calls; set by the hub, which knows the task and agent. */
+  toolHandler?: ToolHandler;
   private stderr = '';
   private readyResolve?: (version: string) => void;
   private readyReject?: (err: Error) => void;
@@ -93,7 +115,10 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
       'error' in value &&
       !('type' in value)
     ) {
-      return this.fail(`cell start failed: ${String((value as { error: unknown }).error)}`);
+      const code = String((value as { error: unknown }).error);
+      return this.fail(
+        `cell start failed: ${code}${START_HINTS[code] ? ` — ${START_HINTS[code]}` : ''}`,
+      );
     }
     const parsed = cellMessageSchema.safeParse(value);
     if (!parsed.success) return this.fail('runner sent an invalid message');
@@ -106,7 +131,25 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
       return this.fail('runner sent a message for a turn that is not running');
     }
     if (msg.type === 'event') this.current.push(msg.event);
+    else if (msg.type === 'tool.request') void this.onTool(msg);
     else this.current.end(msg.ok);
+  }
+
+  private async onTool(msg: Extract<CellMessage, { type: 'tool.request' }>) {
+    const answer = (r: { ok: boolean; result?: Record<string, unknown>; error?: string }) =>
+      this.send({ type: 'tool.response', id: msg.id, ...r });
+    if (++this.turnToolCalls > TURN_MAX_TOOL_CALLS) {
+      return answer({
+        ok: false,
+        error: `more than ${TURN_MAX_TOOL_CALLS} Anchi tool calls in one turn`,
+      });
+    }
+    if (!this.toolHandler) return answer({ ok: false, error: 'no Anchi tools in this cell' });
+    try {
+      answer({ ok: true, result: await this.toolHandler(msg) });
+    } catch (err) {
+      answer({ ok: false, error: String((err as Error).message).slice(0, 2000) });
+    }
   }
 
   private send(cmd: CellCommand) {
@@ -126,6 +169,7 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
       wake = undefined;
     };
     this.turnBytes = 0;
+    this.turnToolCalls = 0;
     this.current = {
       turn: req.turn,
       push: (e) => {

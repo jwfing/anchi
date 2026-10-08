@@ -4,10 +4,16 @@ import argparse
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import resource
 import subprocess
+
+
+VM = os.environ.get('ANCHI_INSTALL_VM', 'secure-vm')
+if not re.fullmatch(r'secure-vm(-[a-z0-9-]+)?', VM):
+    raise SystemExit('ANCHI_INSTALL_VM must look like secure-vm or secure-vm-<suffix>')
 
 
 def remote(action, value=None):
@@ -15,7 +21,7 @@ def remote(action, value=None):
         [
             'limactl',
             'shell',
-            'secure-vm',
+            VM,
             '--',
             'sudo',
             '/usr/bin/python3',

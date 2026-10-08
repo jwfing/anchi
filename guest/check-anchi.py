@@ -28,10 +28,10 @@ def check(name, ok, detail=''):
     print(f'{"PASS" if ok else "FAIL"}  {name}{f"  ({detail})" if detail else ""}', flush=True)
 
 
-def start(task, agent, connectors='-'):
+def start(task, agent, connectors='-', workspaces='-', egress='-'):
     """Starts a cell whose runner idles on an open stdin."""
     proc = subprocess.Popen(
-        ['anchi-cell', 'start', task, agent, 'codex', 'base', connectors, 'cell'],
+        ['anchi-cell', 'start', task, agent, 'codex', 'base', connectors, 'cell', 'codex', '-', workspaces, egress],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -181,11 +181,104 @@ def main():
             out.startswith('401') and rows and rows[-1]['decision'] == 'pass:not-granted',
             f'{out[:20]} {rows[-1]["decision"] if rows else "no audit row"}',
         )
+        _, none = sh('chk-a', 'ls /run/anchi/connectors 2>&1 || true')
+        check('a cell without service connectors has no connector sockets', 'No such file' in none, none[:80])
         text = AUDIT.read_text()
         check('audit log carries no placeholder or header values', 'anchi-placeholder-github' not in text)
     finally:
         stop(a)
         stop(b)
+
+    # ── service connectors are reached through the per-cell bridge ──
+    c, ready_c = start('chk-c', 'chk-gamma', 'gmail')
+    try:
+        _, listing = sh(
+            'chk-c',
+            'ls /run/anchi/connectors; test -S /run/anchi/connectors/gmail/api.sock && echo socket; '
+            'ls -d /run/secure-* /run/anchi-connectors 2>/dev/null | wc -l',
+        )
+        check(
+            'a cell reaches only its own connector services, through the bridge',
+            ready_c and listing.split() == ['gmail', 'socket', '0'],
+            listing[:80],
+        )
+    finally:
+        stop(c)
+        subprocess.run(['rm', '-rf', '/var/lib/anchi/agents/chk-gamma'])
+
+    # ── phase 3: per-agent egress ──
+    import base64
+
+    since = time.time()
+    allow = base64.urlsafe_b64encode(json.dumps(['example.com']).encode()).decode().rstrip('=')
+    e, ready_e = start('chk-e', 'chk-alpha', '-', '-', allow)
+    try:
+        allowed = proxied('chk-e', 'https://example.com/') if ready_e else ''
+        refused = proxied('chk-e', 'https://example.org/') if ready_e else ''
+        rows = [r for r in audit_since(since, 'chk-e') if r.get('decision') == 'egress-denied']
+        check(
+            'egress lists allow listed hosts and refuse others',
+            allowed.startswith('200') and not refused.startswith('200') and rows,
+            f'{allowed[:12]} / {refused[:12]} / {len(rows)} denied',
+        )
+    finally:
+        stop(e)
+
+    # ── phase 3: streamed bodies (over 8 MiB) are decided before their headers leave ──
+    since = time.time()
+    f, ready_f = start('chk-f', 'chk-alpha', 'github,aws')
+    try:
+        big = 'head -c 9437184 /dev/zero > /tmp/big; '
+        github = (
+            sh(
+                'chk-f',
+                big + "curl -sS -m 60 -o /dev/null -w '%{http_code}' -X POST --data-binary @/tmp/big "
+                "-H 'Authorization: Bearer anchi-placeholder-github' https://api.github.com/markdown/raw",
+                timeout=90,
+            )[1]
+            if ready_f
+            else ''
+        )
+        signature = (
+            'Credential=AKIAI44QH8DHBEXAMPLE/20260101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature='
+            + '0' * 64
+        )
+        s3 = (
+            sh(
+                'chk-f',
+                big + "curl -sS -m 60 -o /dev/null -w '%{http_code}' -X PUT --data-binary @/tmp/big "
+                f"-H 'Authorization: AWS4-HMAC-SHA256 {signature}' "
+                "-H 'x-amz-content-sha256: STREAMING-AWS4-HMAC-SHA256-PAYLOAD' -H 'content-encoding: aws-chunked' "
+                'https://anchi-check-nonexistent.s3.amazonaws.com/key',
+                timeout=90,
+            )[1]
+            if ready_f
+            else ''
+        )
+        if ready_f:
+            # No length: buffered first, streamed once past 8 MiB, after the headers hook.
+            sh(
+                'chk-f',
+                "curl -sS -m 60 -o /dev/null -X POST --data-binary @/tmp/big -H 'Transfer-Encoding: chunked' "
+                "-H 'Authorization: Basic eDphbmNoaS1wbGFjZWhvbGRlcg==' https://github.com/o/r.git/git-receive-pack",
+                timeout=90,
+            )
+        rows = audit_since(since, 'chk-f')
+        decisions = {r.get('rule'): r.get('decision') for r in rows}
+        check(
+            'streamed requests are decided before their headers leave',
+            decisions.get('github-api') == 'pass:streamed'
+            and decisions.get('github-git') == 'pass:streamed'
+            and decisions.get('aws') in ('missing-credential', 'rejected')
+            and s3.startswith('000'),
+            f'{decisions} / github {github[:3]} / s3 {s3[:60]}',
+        )
+    finally:
+        stop(f)
+
+    # ── host workspaces (macOS, when ~/AnchiWorkspaces is shared) ──
+    if os.path.ismount('/mnt/anchi-host'):
+        check_workspaces()
 
     # ── M1: start-up time ──
     import importlib.util
@@ -239,6 +332,65 @@ def main():
     failed = [n for n, ok, _ in results if not ok]
     print(f'\n{len(results) - len(failed)}/{len(results)} checks passed in {round(time.time() - t0)} s')
     sys.exit(1 if failed else 0)
+
+
+def check_workspaces():
+    import base64
+    import shutil
+
+    base = Path('/mnt/anchi-host/.anchi-check')
+    shutil.rmtree(base, ignore_errors=True)
+    for d in ('rw/repo/.git/hooks', 'ro', 'secret'):
+        (base / d).mkdir(parents=True)
+    (base / 'rw/repo/.git/config').write_text('[core]\n')
+    (base / 'ro/doc.txt').write_text('read me')
+    (base / 'secret/key.txt').write_text('not for this agent')
+    (base / 'link').symlink_to('rw')
+
+    def arg(items):
+        return base64.urlsafe_b64encode(json.dumps(items).encode()).decode().rstrip('=')
+
+    spec = arg(
+        [
+            {'name': 'rw', 'path': '.anchi-check/rw', 'mode': 'rw'},
+            {'name': 'ro', 'path': '.anchi-check/ro', 'mode': 'ro'},
+        ]
+    )
+    proc, ready = start('chk-w', 'chk-alpha', '-', spec)
+    try:
+        check('workspace cell starts', ready)
+        _, seen = sh('chk-w', 'ls /home/agent/workspaces')
+        check('a cell sees only its workspaces', seen.split() == ['ro', 'rw'], seen)
+        _, ro = sh('chk-w', 'cat ~/workspaces/ro/doc.txt; echo x > ~/workspaces/ro/new.txt 2>&1 || echo RO')
+        check('ro workspaces are readable and refuse writes', 'read me' in ro and 'RO' in ro, ro[:120])
+        _, rw = sh('chk-w', 'echo agent > ~/workspaces/rw/out.txt && echo RW')
+        check('rw workspaces accept writes', 'RW' in rw and (base / 'rw/out.txt').exists(), rw[:120])
+        _, masked = sh(
+            'chk-w',
+            'cd ~/workspaces/rw/repo; echo x > .git/hooks/post-checkout 2>&1 || echo HOOKS; '
+            'echo x >> .git/config 2>&1 || echo CONFIG',
+        )
+        check('git hooks and config are read-only in rw workspaces', 'HOOKS' in masked and 'CONFIG' in masked, masked)
+        _, escape = sh(
+            'chk-w',
+            'ln -s ../secret ~/workspaces/rw/up; cat ~/workspaces/rw/up/key.txt 2>&1; ls ~/workspaces/rw/up 2>&1',
+        )
+        check('symlinks cannot reach other directories of the Mac', 'not for this agent' not in escape, escape[:120])
+    finally:
+        stop(proc)
+    bad = {
+        'dotdot': arg([{'name': 'x', 'path': '.anchi-check/../.anchi-check/secret', 'mode': 'ro'}]),
+        'via symlink': arg([{'name': 'x', 'path': '.anchi-check/link', 'mode': 'rw'}]),
+    }
+    for label, spec in bad.items():
+        out = subprocess.run(
+            ['anchi-cell', 'start', 'chk-x', 'chk-alpha', 'codex', 'base', '-', 'cell', 'codex', '-', spec],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        ).stdout
+        check(f'workspace refused: {label}', '"error"' in out and 'WORKSPACE' in out.upper(), out[:80])
+    shutil.rmtree(base, ignore_errors=True)
 
 
 def measure_nspawn():

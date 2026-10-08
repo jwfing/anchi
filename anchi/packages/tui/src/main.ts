@@ -1,13 +1,14 @@
 #!/usr/bin/env -S node --import tsx
+import { readFileSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
 import {
   connectOrStart,
   type DaemonClient,
-  installLaunchd,
+  installAutostart,
   tryConnect,
-  uninstallLaunchd,
+  uninstallAutostart,
 } from '@anchi/daemon';
 import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow } from '@anchi/protocol';
 import { Command } from 'commander';
@@ -89,6 +90,7 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
   }
   const done = await client.call('tasks.wait', { taskId: task.id });
   off();
+  renderer.flush();
   return done;
 }
 
@@ -130,12 +132,38 @@ program
 
 program
   .command('tasks')
-  .description('List recent tasks')
+  .description('List tasks, newest first')
   .option('-a, --agent <id>')
-  .action((opts: { agent?: string }) =>
+  .option('-s, --status <status>', 'queued, running, done, failed or cancelled')
+  .option('-q, --search <words>', 'words in the title or result')
+  .option('--since <age>', 'created within, e.g. 24h or 7d')
+  .option('-n, --limit <n>', 'how many', '50')
+  .action(
+    (opts: { agent?: string; status?: string; search?: string; since?: string; limit: string }) =>
+      withClient(async (client) => {
+        const age = opts.since ? /^(\d+)([hd])$/.exec(opts.since) : null;
+        if (opts.since && !age) fail('--since takes a number of hours or days, such as 24h or 7d');
+        const since = age
+          ? Date.now() - Number(age[1]) * (age[2] === 'h' ? 3600_000 : 86_400_000)
+          : undefined;
+        const list = await client.call('tasks.search', {
+          agentId: opts.agent,
+          status: opts.status as TaskRow['status'] | undefined,
+          text: opts.search,
+          since,
+          limit: Number(opts.limit) || 50,
+        });
+        for (const t of list) console.log(taskLine(t));
+      }),
+  );
+
+program
+  .command('rm <task>')
+  .description('Delete a finished task, the tasks it delegated and their transcripts')
+  .action((taskId: string) =>
     withClient(async (client) => {
-      for (const t of await client.call('tasks.list', { agentId: opts.agent, limit: 50 }))
-        console.log(taskLine(t));
+      const { deleted } = await client.call('tasks.delete', { taskId });
+      console.log(`deleted ${deleted} task(s)`);
     }),
   );
 
@@ -156,6 +184,86 @@ program
       if (!r.clean) process.exitCode = 1;
     });
   });
+
+const skillsCmd = program.command('skills').description('Skills agents can use');
+skillsCmd.action(() =>
+  withClient(async (client) => {
+    const list = await client.call('skills.list');
+    if (!list.length)
+      return console.log('no skills; add one with `anchi skills add <dir or GitHub URL>`');
+    for (const s of list) {
+      console.log(
+        `${s.id.padEnd(20)} ${sanitizeLine(s.description).slice(0, 60)}  ${s.commit ? `${sanitizeLine(s.source)} @ ${s.commit.slice(0, 10)}` : 'local'}`,
+      );
+    }
+  }),
+);
+skillsCmd
+  .command('add <source>')
+  .description('From a local directory with SKILL.md, or a GitHub tree URL (pinned to its commit)')
+  .option('--id <id>')
+  .action((source: string, opts: { id?: string }) =>
+    withClient(async (client) => {
+      const s = await client.call('skills.add', { source, id: opts.id });
+      console.log(`added ${s.id}${s.commit ? ` at ${s.commit.slice(0, 10)}` : ''}`);
+    }),
+  );
+skillsCmd.command('rm <id>').action((id: string) =>
+  withClient(async (client) => {
+    await client.call('skills.remove', { id });
+    console.log('removed');
+  }),
+);
+
+program
+  .command('triggers')
+  .description("Agents' schedules and polls, with their next run and last result")
+  .action(() =>
+    withClient(async (client) => {
+      const list = await client.call('triggers.list');
+      if (!list.length) return console.log('no triggers; add `triggers:` to an agent');
+      const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : '-');
+      for (const t of list) {
+        console.log(
+          `@${t.agentId.padEnd(12)} ${t.kind.padEnd(9)} ${sanitizeLine(t.spec).padEnd(24)} next ${when(t.nextRun)}  last ${when(t.lastRun)}  ${sanitizeLine(t.lastResult ?? '')}`,
+        );
+      }
+    }),
+  );
+
+program
+  .command('approvals')
+  .description('Writes waiting for your approval')
+  .action(() =>
+    withClient(async (client) => {
+      const list = await client.call('approvals.list');
+      if (!list.length) return console.log('no writes waiting for approval');
+      for (const a of list) {
+        console.log(
+          `${a.id}  @${sanitizeLine(a.agent)} ${sanitizeLine(a.task)}  ${sanitizeLine(a.connector)}: ${sanitizeLine(a.operation)}`,
+        );
+        if (a.reason) console.log(`    why: ${sanitizeLine(a.reason)}`);
+        if (a.origin) console.log(`    started by: ${sanitizeLine(a.origin)}`);
+        for (const line of sanitizeLine(a.summary).slice(0, 300).split('\n'))
+          console.log(`    ${line}`);
+      }
+    }),
+  );
+
+for (const [name, allow] of [
+  ['approve', true],
+  ['deny', false],
+] as const) {
+  program
+    .command(`${name} <id>`)
+    .description(`${allow ? 'Approve' : 'Deny'} a write waiting for approval`)
+    .action((id: string) =>
+      withClient(async (client) => {
+        await client.call('approvals.decide', { id, allow });
+        console.log(allow ? 'approved' : 'denied');
+      }),
+    );
+}
 
 program.command('cancel <task>').action(async (taskId: string) => {
   await withClient((client) => client.call('tasks.cancel', { taskId }));
@@ -216,6 +324,33 @@ function runSetup(action: SetupAction, yes: boolean, consent: string) {
     );
   });
 }
+
+setup
+  .command('claude')
+  .description('Store a `claude setup-token` token or an Anthropic API key in the VM vault')
+  .action(() =>
+    withClient(async (client) => {
+      const token = process.stdin.isTTY
+        ? await askSecret('Claude Code token (from `claude setup-token`) or API key: ')
+        : await readStdin();
+      const s = await client.call('setup.importClaude', { token });
+      console.log(
+        `Claude Code connected (${s.kind === 'api_key' ? 'API key' : 'subscription token'})`,
+      );
+    }),
+  );
+
+setup
+  .command('workspaces')
+  .description('Share ~/AnchiWorkspaces with the VM (macOS; restarts the VM once)')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action((opts: { yes?: boolean }) =>
+    runSetup(
+      'workspaces',
+      Boolean(opts.yes),
+      'Mount ~/AnchiWorkspaces into the VM? The VM restarts: running tasks stop, and the vault is unlocked again afterwards.',
+    ),
+  );
 
 setup
   .command('vm')
@@ -300,9 +435,62 @@ setup
     }),
   );
 
+const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack'] as const;
+type ServiceId = (typeof SERVICE_IDS)[number];
+const isService = (id: string): id is ServiceId => (SERVICE_IDS as readonly string[]).includes(id);
+
 setup.command('disconnect <id>').action(async (id: string) => {
-  await withClient((client) => client.call('connectors.remove', { id: id as ConnectorId }));
+  await withClient((client) =>
+    isService(id)
+      ? client.call('services.disconnect', { id })
+      : client.call('connectors.remove', { id: id as ConnectorId }),
+  );
 });
+
+setup
+  .command('service <id>')
+  .description('Connect gmail or drive (Google sign-in) or notion or slack (token, without echo)')
+  .action((id: string) =>
+    withClient(async (client) => {
+      if (!isService(id)) fail('service must be gmail, drive, notion or slack');
+      if (id === 'notion' || id === 'slack') {
+        const token = process.stdin.isTTY ? await askSecret(`${id} token: `) : await readStdin();
+        await client.call('services.setToken', { id, token });
+        return console.log(`${id} connected`);
+      }
+      const done = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        client.on('oauth', (r) => r.id === id && resolve(r));
+      });
+      const { url } = await client.call('services.googleLogin', { id });
+      console.log(`Sign in to Google in your browser. If it did not open:\n${url}`);
+      const r = await done;
+      if (!r.ok) fail(r.error ?? 'sign-in failed');
+      console.log(`${id} connected`);
+    }),
+  );
+
+setup
+  .command('google-client <path>')
+  .description('Store the Google Cloud Desktop app OAuth client JSON (needed for Gmail and Drive)')
+  .action((path: string) =>
+    withClient(async (client) => {
+      if (statSync(path).size > 16_384) fail('that file is too large for a client JSON');
+      await client.call('services.googleClient', { json: readFileSync(path, 'utf8') });
+      console.log('Google client stored');
+    }),
+  );
+
+setup
+  .command('service-mode <id> <mode>')
+  .description('Writes of a service: auto, or ask (each write waits for approval)')
+  .action((id: string, mode: string) =>
+    withClient(async (client) => {
+      if (!isService(id) || (mode !== 'auto' && mode !== 'ask'))
+        fail('usage: service-mode <gmail|drive|notion|slack> <auto|ask>');
+      await client.call('services.setMode', { id, mode });
+      console.log(`${id} writes: ${mode}`);
+    }),
+  );
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -332,10 +520,10 @@ daemon.command('status').action(async () => {
 });
 daemon
   .command('install')
-  .description('Run the daemon at login (launchd)')
-  .action(() => console.log(`installed ${installLaunchd(layout)}`));
+  .description('Run the daemon at login (launchd on macOS, a systemd user unit on Linux)')
+  .action(() => console.log(`installed ${installAutostart(layout)}`));
 daemon
   .command('uninstall')
-  .action(() => console.log(uninstallLaunchd() ? 'uninstalled' : 'not installed'));
+  .action(() => console.log(uninstallAutostart() ? 'uninstalled' : 'not installed'));
 
 await program.parseAsync();

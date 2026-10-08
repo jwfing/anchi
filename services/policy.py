@@ -48,6 +48,23 @@ def database():
         conn.close()
 
 
+AGENT_PRINCIPAL = re.compile(r'^([a-z]+):[a-z0-9][a-z0-9-]{0,39}$')
+
+
+def base(principal):
+    """The connector of a principal: `notion` for `notion` and for the agent principal `notion:dev`."""
+    return principal.split(':', 1)[0]
+
+
+def valid_principal(principal):
+    if not isinstance(principal, str):
+        return False
+    if principal in PRINCIPALS:
+        return True
+    match = AGENT_PRINCIPAL.fullmatch(principal)
+    return bool(match) and match.group(1) in PRINCIPALS
+
+
 def normalize(action, principal):
     if not isinstance(action, dict):
         raise Denied('BAD_ACTION')
@@ -59,35 +76,10 @@ def normalize(action, principal):
         or not re.fullmatch('[a-zA-Z0-9._:-]{1,128}', action['account'])
     ):
         raise Denied('BAD_ACTION')
-    if principal != 'inference':
-        connector = connectors.CONNECTORS.get(principal)
-        if connector is None or op not in connector.ops:
-            raise Denied('OPERATION_DENIED')
-        importlib.import_module(connector.module).validate(op, params)
-    elif principal == 'inference' and op == 'inference.codex':
-        from codex_schema import validate_payload
-
-        validate_payload(params)
-    elif principal == 'inference' and op == 'inference.openai':
-        fields(
-            params,
-            ('model', 'instructions', 'input', 'max_output_tokens', 'store', 'tools', 'stream'),
-            ('model', 'instructions', 'input', 'max_output_tokens', 'store', 'tools', 'stream'),
-        )
-        if (
-            params['store'] is not False
-            or params['stream'] is not False
-            or params['tools'] != []
-            or type(params['max_output_tokens']) is not int
-            or not 1 <= params['max_output_tokens'] <= 2048
-        ):
-            raise Denied('BAD_ACTION')
-        if not isinstance(params['model'], str) or not re.fullmatch('[a-zA-Z0-9._:-]{1,100}', params['model']):
-            raise Denied('BAD_ACTION')
-        if not isinstance(params['instructions'], str) or not isinstance(params['input'], list):
-            raise Denied('BAD_ACTION')
-    else:
+    connector = connectors.CONNECTORS.get(base(principal))
+    if connector is None or op not in connector.ops:
         raise Denied('OPERATION_DENIED')
+    importlib.import_module(connector.module).validate(op, params)
     # Digest canonical form stays ASCII for stability; the size bound counts UTF-8 bytes.
     encoded = json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     if len(json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()) > 56000:
@@ -95,19 +87,25 @@ def normalize(action, principal):
     return encoded, hashlib.sha256(encoded.encode()).hexdigest()
 
 
-PRINCIPALS = (*connectors.CONNECTORS, 'inference')
+PRINCIPALS = tuple(connectors.CONNECTORS)
 MODES = ('auto', 'ask')
 
 
 def mode(conn, principal):
     """'auto' (default): standing authorization issues grants without a human; 'ask': per-request approval."""
     row = conn.execute('SELECT mode FROM rules WHERE principal=?', (principal,)).fetchone()
-    return row['mode'] if row else 'auto'
+    if row:
+        return row['mode']
+    # An agent without its own rule follows its connector's.
+    return mode(conn, base(principal)) if ':' in principal else 'auto'
 
 
 def inspect_rules():
     with database() as conn:
-        return {'rules': {principal: mode(conn, principal) for principal in PRINCIPALS}}
+        rules = {principal: mode(conn, principal) for principal in PRINCIPALS}
+        for row in conn.execute("SELECT principal, mode FROM rules WHERE principal LIKE '%:%' ORDER BY principal"):
+            rules[row['principal']] = row['mode']
+        return {'rules': rules}
 
 
 def audit(conn, event, grant_id=None, digest=None):
@@ -134,7 +132,9 @@ def authorize(action, principal):
         if grant and grant['state'] in ('DENIED', 'REVOKED'):
             raise Denied('POLICY_DENIED')
         # Standing authorization covers reads and writes alike; 'ask' falls back to human approval.
-        auto = mode(conn, principal) == 'auto'
+        # An agent's own rule holds its writes only; its reads follow the connector's mode.
+        write = connectors.CONNECTORS[base(principal)].ops[action['operation']] == connectors.WRITE
+        auto = mode(conn, principal if write else base(principal)) == 'auto'
         if grant and grant['state'] == 'APPROVED':
             grant_id = grant['id']
         elif auto:
@@ -185,11 +185,18 @@ def consume(action, principal, grant_id, ticket):
 
 
 def handle(request, principal):
+    # A connector service names the agent it serves (from the egress bridge); the agent's own
+    # rule and grants apply. The kernel UID still decides the connector.
+    agent = request.get('agent')
+    if agent is not None:
+        if principal not in PRINCIPALS or not valid_principal(f'{principal}:{agent}'):
+            raise Denied('BAD_AGENT')
+        principal = f'{principal}:{agent}'
     if request.get('op') == 'authorize':
-        fields(request, ('op', 'action'), ('op', 'action'))
+        fields(request, ('op', 'action', 'agent'), ('op', 'action'))
         return authorize(request['action'], principal)
     if request.get('op') == 'consume':
-        fields(request, ('op', 'action', 'grant_id', 'ticket'), ('op', 'action', 'grant_id', 'ticket'))
+        fields(request, ('op', 'action', 'grant_id', 'ticket', 'agent'), ('op', 'action', 'grant_id', 'ticket'))
         return consume(request['action'], principal, request['grant_id'], request['ticket'])
     raise Denied('OPERATION_DENIED')
 
@@ -253,8 +260,20 @@ def decide(grant_id, decision, digest=None):
     return {'approval_id': grant_id, 'state': decision}
 
 
+def clear_mode(principal):
+    """Removes an agent's own rule, so it follows its connector's again."""
+    if ':' not in str(principal) or not valid_principal(principal):
+        raise Denied('UNKNOWN_PRINCIPAL')
+    with database() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if conn.execute('DELETE FROM rules WHERE principal=?', (principal,)).rowcount:
+            conn.execute('UPDATE config SET epoch=epoch+1 WHERE id=1')
+            conn.execute("UPDATE grants SET state='REVOKED' WHERE state IN ('PENDING','APPROVED','ISSUED')")
+    return inspect_rules()
+
+
 def set_mode(principal, value):
-    if principal not in PRINCIPALS:
+    if not valid_principal(principal):
         raise Denied('UNKNOWN_PRINCIPAL')
     if value not in MODES:
         raise Denied('BAD_MODE')

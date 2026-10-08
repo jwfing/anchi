@@ -58,7 +58,7 @@ check(
 )
 import connectors
 
-for user in ('secure-auth', 'secure-inference', 'secure-policy', *connectors.SERVICE_USERS):
+for user in ('secure-auth', 'secure-policy', *connectors.SERVICE_USERS):
     probe = '''import socket, json
 results=[]
 for host, port, family, kind in [('1.1.1.1',443,socket.AF_INET,socket.SOCK_STREAM), ('192.168.5.2',443,socket.AF_INET,socket.SOCK_STREAM), ('1.1.1.1',53,socket.AF_INET,socket.SOCK_DGRAM), ('2606:4700:4700::1111',443,socket.AF_INET6,socket.SOCK_STREAM)]:
@@ -75,8 +75,6 @@ print(json.dumps(results))'''
 # A TLS handshake proves the allow rule works without transmitting any credential.
 for user, host in [
     ('secure-auth', 'oauth2.googleapis.com'),
-    ('secure-inference', 'api.openai.com'),
-    ('secure-inference', 'chatgpt.com'),
     *((c.user, c.hosts[0]) for c in connectors.CONNECTORS.values()),
 ]:
     probe = (
@@ -101,32 +99,21 @@ check(
     == 'CREDENTIAL_SCOPE_DENIED',
 )
 check(
-    'gmail_cannot_get_model_key',
-    rpc_as('secure-gmail', '/run/secure-auth/token.sock', {'op': 'model_key'}).get('error')
-    == 'CREDENTIAL_SCOPE_DENIED',
-)
-check(
-    'inference_cannot_get_google_token',
-    rpc_as('secure-inference', '/run/secure-auth/token.sock', {'op': 'access_token'}).get('error')
+    'gmail_cannot_get_egress_credentials',
+    rpc_as('secure-gmail', '/run/secure-auth/token.sock', {'op': 'egress_credential', 'connector': 'github'}).get(
+        'error'
+    )
     == 'CREDENTIAL_SCOPE_DENIED',
 )
 check(
     'service_cannot_approve',
-    rpc_as('secure-inference', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
+    rpc_as('secure-slack', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
 )
-# Synthetic action only: no inference execution and no cloud request.
+# Synthetic action only: the policy service authorizes it, nothing is posted to Slack.
 action = {
-    'operation': 'inference.openai',
+    'operation': 'slack.post',
     'account': 'synthetic-security-test',
-    'params': {
-        'model': 'test-model',
-        'instructions': 'synthetic approval test',
-        'input': [],
-        'max_output_tokens': 1,
-        'store': False,
-        'tools': [],
-        'stream': False,
-    },
+    'params': {'channel': 'C0SYNTHETIC', 'text': 'synthetic approval test'},
 }
 sock = '/run/secure-policy/api.sock'
 
@@ -143,9 +130,9 @@ def admin(*arguments):
 
 
 # Standing authorization is the default; the approval path is exercised in ask mode and the rule restored.
-previous_mode = admin('rules')['rules']['inference']
-admin('mode', 'inference', 'ask')
-pending = rpc_as('secure-inference', sock, {'op': 'authorize', 'action': action})
+previous_mode = admin('rules')['rules']['slack']
+admin('mode', 'slack', 'ask')
+pending = rpc_as('secure-slack', sock, {'op': 'authorize', 'action': action})
 check('ask_mode_requires_independent_approval', pending.get('decision') == 'ask')
 # Use the actual external admin CLI, preserving database ownership.
 subprocess.run(
@@ -160,13 +147,13 @@ subprocess.run(
     check=True,
     capture_output=True,
 )
-grant = rpc_as('secure-inference', sock, {'op': 'authorize', 'action': action})
+grant = rpc_as('secure-slack', sock, {'op': 'authorize', 'action': action})
 consume = {'op': 'consume', 'action': action, 'grant_id': grant['grant_id'], 'ticket': grant['ticket']}
-check('approved_grant_consumed', rpc_as('secure-inference', sock, consume).get('allowed') is True)
-check('grant_replay_denied', rpc_as('secure-inference', sock, consume).get('error') == 'INVALID_OR_CONSUMED_GRANT')
-admin('mode', 'inference', previous_mode)
-check('rule_restored', admin('rules')['rules']['inference'] == previous_mode)
-auto_grant = rpc_as('secure-inference', sock, {'op': 'authorize', 'action': action})
+check('approved_grant_consumed', rpc_as('secure-slack', sock, consume).get('allowed') is True)
+check('grant_replay_denied', rpc_as('secure-slack', sock, consume).get('error') == 'INVALID_OR_CONSUMED_GRANT')
+admin('mode', 'slack', previous_mode)
+check('rule_restored', admin('rules')['rules']['slack'] == previous_mode)
+auto_grant = rpc_as('secure-slack', sock, {'op': 'authorize', 'action': action})
 check('auto_mode_issues_grant_without_human', (auto_grant.get('decision') == 'allow') == (previous_mode == 'auto'))
 print(json.dumps({'checks': checks, 'passed': all(c['passed'] for c in checks)}, indent=2))
 raise SystemExit(0 if all(c['passed'] for c in checks) else 1)

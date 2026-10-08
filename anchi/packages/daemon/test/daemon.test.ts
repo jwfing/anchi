@@ -25,7 +25,21 @@ class FakeTransport implements GuestTransport {
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
 
+  /** Lines the fake `anchi-cell approvals watch` prints, then it stays open. */
+  approvalLines: string[] = [];
+
   spawn(args: string[]) {
+    if (args[1] === 'approvals') {
+      return spawn(
+        process.execPath,
+        [
+          '-e',
+          'for (const l of JSON.parse(process.argv[1])) console.log(l); setInterval(() => {}, 1e6);',
+          JSON.stringify(this.approvalLines),
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+    }
     this.starts.push(args);
     return spawn(process.execPath, [RUNNER], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -44,10 +58,49 @@ class FakeTransport implements GuestTransport {
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'scan') {
+      this.scans.push(args[2]!);
+      return this.scanResult
+        ? ok(this.scanResult)
+        : { code: 1, stdout: '{"error":"CELL_NOT_RUNNING"}', stderr: '' };
+    }
+    if (args[0] === 'anchi-cell' && args[1] === 'skills') {
+      this.skillSets.push({ agent: args[3]!, files: Object.keys(JSON.parse(stdin).files) });
+      return ok({});
+    }
+    if (args[0] === 'anchi-cell' && args[1] === 'poll') return ok({ items: this.pollItems });
+    if (args[0] === 'anchi-cell' && args[1] === 'approvals')
+      return ok({ id: args[3], allowed: args[4] === 'allow' });
     if (args[0] === 'anchi-cell' && args[1] === 'verify') {
       if (this.rejectCredential)
         return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
       return ok({ connector: args[2], account: 'octo' });
+    }
+    if (args[1]?.endsWith('codex_admin.py')) {
+      if (args[2] === 'status') {
+        return ok({ configured: this.codex !== null, account_id: 'acct', expires_at: this.codex });
+      }
+      this.codexImports.push(JSON.parse(stdin));
+      this.codex = JSON.parse(
+        Buffer.from(JSON.parse(stdin).access_token.split('.')[1], 'base64url').toString(),
+      ).exp;
+      return ok({ configured: true, expires_at: this.codex });
+    }
+    if (args[1]?.endsWith('policy_admin.py')) {
+      if (args[2] === 'show') {
+        return args[3] === 'c'.repeat(32)
+          ? ok({
+              id: args[3],
+              digest: 'd'.repeat(64),
+              state: 'PENDING',
+              principal: 'notion:writer',
+              created: Date.now() / 1000,
+              expires: Date.now() / 1000 + 600,
+              action: { operation: 'notion.create_page', params: { title: 'Notes' } },
+            })
+          : { code: 1, stdout: '{"error":"APPROVAL_NOT_FOUND"}', stderr: '' };
+      }
+      return ok({ approval_id: args[3], state: args[2] === 'approve' ? 'APPROVED' : 'DENIED' });
     }
     if (args[1]?.endsWith('admin.py')) {
       const [action, id] = args.slice(2) as [string, string];
@@ -64,6 +117,17 @@ class FakeTransport implements GuestTransport {
   }
 
   rejectCredential = false;
+  pollItems: { id: string; title: string; url: string }[] = [];
+  skillSets: { agent: string; files: string[] }[] = [];
+  scans: string[] = [];
+  /** Vault Codex expiry (seconds) or null when not configured. */
+  codex: number | null = null;
+  codexImports: Record<string, string>[] = [];
+  scanResult: { clean: boolean; findings: unknown[]; files: number } | null = {
+    clean: true,
+    findings: [],
+    files: 3,
+  };
   vault: Record<string, { connected: boolean; account: string | null }> = {};
   imported: { id: string; value: Record<string, string> }[] = [];
   get connected() {
@@ -98,13 +162,18 @@ const SETUP_STEPS = {
     [process.execPath, '-e', 'console.error("broken"); process.exit(3)'],
   ],
   'vault-init': [],
+  workspaces: [],
   'vault-unlock': [[process.execPath, '-e', 'console.log("{\\"unlocked\\": true}")']],
 };
 
-async function start(idleMs = 60_000, turnTimeoutMs?: number) {
+async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: string) {
   const layout = homeLayout(root);
   const d = new Daemon({
+    workspaceRoot: workspaceRoot ?? join(root, 'no-workspaces'),
     turnTimeoutMs,
+    // Tests drive triggers with their own clock through daemon.triggers.tick().
+    triggers: false,
+    codexSync: false,
     hostRun,
     setupSteps: SETUP_STEPS,
     layout,
@@ -155,6 +224,10 @@ describe('daemon tasks', () => {
       'base',
       'github',
       'cell',
+      'codex',
+      '-',
+      '-',
+      '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([
@@ -283,7 +356,7 @@ describe('daemon tasks', () => {
     const soon = new Date(Date.now() + 5 * 60_000).toISOString();
     hostAnswers['aws configure export-credentials'] = JSON.stringify({
       Version: 1,
-      AccessKeyId: 'ASIAFAKE0000000000001',
+      AccessKeyId: 'ASIAIOSFODNN7EXAMPLE',
       SecretAccessKey: 'fake/secret',
       SessionToken: 'fake-session',
       Expiration: soon,
@@ -295,7 +368,7 @@ describe('daemon tasks', () => {
     const status = await client.call('connectors.awsProfile', { profile: 'dev-sso' });
     expect(status).toMatchObject({ id: 'aws', connected: true, profile: 'dev-sso' });
     expect(transport.imported.at(-1)!.value).toEqual({
-      access_key_id: 'ASIAFAKE0000000000001',
+      access_key_id: 'ASIAIOSFODNN7EXAMPLE',
       secret_access_key: 'fake/secret',
       session_token: 'fake-session',
       region: 'us-west-2',
@@ -306,7 +379,7 @@ describe('daemon tasks', () => {
     // Keys entered by hand end the profile refresh.
     await client.call('connectors.set', {
       id: 'aws',
-      accessKeyId: 'AKIAFAKE000000000000',
+      accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
       secretAccessKey: 's',
       region: 'us-east-1',
     });
@@ -326,6 +399,372 @@ describe('daemon tasks', () => {
     await expect(client.call('setup.run', { action: 'nope' as never })).rejects.toThrow(
       /unknown setup step/,
     );
+  });
+
+  it('answers Anchi tool calls as the task and agent of the cell', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    const { client } = await start();
+    const reply = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      const done = await client.call('tasks.wait', { taskId: task.id });
+      return { task, answer: JSON.parse(done.result!) as Record<string, unknown> };
+    };
+    const who = await reply('lead', 'call anchi_whoami');
+    expect(who.answer).toMatchObject({ ok: true, result: { agent: 'lead', task: who.task.id } });
+    const list = await reply('lead', 'call anchi.tools');
+    const names = (list.answer.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['anchi_whoami', 'anchi_list_agents']));
+    const agents = await reply('lead', 'call anchi_list_agents');
+    expect(agents.answer).toMatchObject({ ok: true, result: { agents: [{ id: 'dev' }] } });
+    // dev may not delegate: its list is empty.
+    expect((await reply('dev', 'call anchi_list_agents')).answer).toMatchObject({
+      result: { agents: [] },
+    });
+    expect((await reply('dev', 'call no_such_tool')).answer).toMatchObject({
+      ok: false,
+      error: 'unknown tool no_such_tool',
+    });
+    expect((await reply('dev', 'call anchi_whoami {"extra":1}')).answer).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('delegates to allowed agents, links the tree and enforces the limits', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev, qa]\n');
+    write('agents/qa.yaml', 'runtime: codex\ndelegates: [lead]\n');
+    const { client } = await start();
+    const turn = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      const done = await client.call('tasks.wait', { taskId: task.id });
+      return {
+        task: done,
+        answer: JSON.parse(done.result!) as { ok: boolean; result?: any; error?: string },
+      };
+    };
+    const lead = await turn('lead', 'call anchi_delegate_task {"agent":"dev","task":"fix it"}');
+    expect(lead.answer.ok).toBe(true);
+    const child = lead.answer.result;
+    expect(child).toMatchObject({
+      agent: 'dev',
+      status: 'done',
+      links: ['https://github.com/o/r/pull/1'],
+    });
+    const row = await client.call('tasks.get', { taskId: child.task });
+    expect(row).toMatchObject({
+      parentId: lead.task.id,
+      rootId: lead.task.id,
+      depth: 1,
+      trigger: 'delegation',
+    });
+    const notices = (await client.call('tasks.events', { taskId: lead.task.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices[0]).toBe(`↳ delegated to @dev as ${child.task}`);
+    expect(notices[1]).toContain(`↳ ${child.task} (@dev) done: https://github.com/o/r/pull/1`);
+    // Not in delegates, and dev may not delegate at all (the tool is not offered).
+    expect(
+      (await turn('lead', 'call anchi_delegate_task {"agent":"lead","task":"x"}')).answer.error,
+    ).toMatch(/may not delegate/);
+    expect(
+      (await turn('dev', 'call anchi_delegate_task {"agent":"lead","task":"x"}')).answer.error,
+    ).toMatch(/unknown tool/);
+    // Status only for the task's own children.
+    expect(
+      (await turn('lead', `call anchi_task_status {"task":"${child.task}"}`)).answer.error,
+    ).toMatch(/not delegated by this task/);
+    // qa -> lead -> qa would wait for itself.
+    const inner = JSON.stringify({ agent: 'qa', task: 'x' });
+    const qa = await turn(
+      'qa',
+      `call anchi_delegate_task ${JSON.stringify({ agent: 'lead', task: `call anchi_delegate_task ${inner}` })}`,
+    );
+    expect(qa.answer.ok).toBe(true);
+    expect(qa.answer.result.result).toContain('already working on a task above this one');
+  });
+
+  it('mirrors held writes, notes them in the task and sends the decision back', async () => {
+    const { client: first } = await start();
+    const task = await first.call('tasks.create', { agentId: 'dev', text: 'push it' });
+    await first.call('tasks.wait', { taskId: task.id });
+    await daemon!.stop();
+    daemon = undefined;
+    first.close();
+    transport.approvalLines = [
+      JSON.stringify({
+        type: 'pending',
+        approval: {
+          id: 'a'.repeat(16),
+          task: task.id,
+          agent: 'dev',
+          connector: 'github',
+          operation: 'POST /o/r.git/git-receive-pack',
+          host: 'github.com',
+          summary: 'git push: refs/heads/fix',
+          created_at: 1,
+          timeout: 300,
+          reason: 'high-risk: push to main or master',
+        },
+      }),
+      'not json',
+      JSON.stringify({ type: 'pending', approval: { id: '../bad' } }),
+    ];
+    const { client } = await start();
+    await new Promise((r) => setTimeout(r, 300));
+    const pending = await client.call('approvals.list');
+    expect(pending).toEqual([
+      expect.objectContaining({
+        id: 'a'.repeat(16),
+        summary: 'git push: refs/heads/fix',
+        createdAt: 1000,
+        reason: 'high-risk: push to main or master',
+        origin: `you → @dev (${task.id})`,
+      }),
+    ]);
+    const notices = (await client.call('tasks.events', { taskId: task.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toContain(
+      '⏸ waiting for your approval: POST /o/r.git/git-receive-pack (high-risk: push to main or master)',
+    );
+    await client.call('approvals.decide', { id: 'a'.repeat(16), allow: true });
+    expect(transport.execs.at(-1)!.args).toEqual([
+      'anchi-cell',
+      'approvals',
+      'decide',
+      'a'.repeat(16),
+      'allow',
+    ]);
+    await expect(
+      client.call('approvals.decide', { id: 'b'.repeat(16), allow: true }),
+    ).rejects.toThrow(/unknown/);
+  });
+
+  it('shows connector-service writes held by the policy service, verified there', async () => {
+    write('agents/writer.yaml', 'runtime: codex\nconnectors: [notion]\n');
+    const { client } = await start();
+    const turn = async (agentId: string, text: string) => {
+      const task = await client.call('tasks.create', { agentId, text });
+      const done = await client.call('tasks.wait', { taskId: task.id });
+      return JSON.parse(done.result!) as { ok: boolean; error?: string };
+    };
+    const pending = (id: string, connector = 'notion') =>
+      `call anchi.approval_pending ${JSON.stringify({ connector, approval_id: id })}`;
+    expect((await turn('writer', pending('c'.repeat(32)))).ok).toBe(true);
+    const [a] = await client.call('approvals.list');
+    expect(a).toMatchObject({
+      kind: 'policy',
+      connector: 'notion',
+      operation: 'notion.create_page',
+      agent: 'writer',
+    });
+    expect(a!.summary).toContain('"title": "Notes"');
+    // An id the policy service does not know, or a connector the agent lacks, is refused.
+    expect((await turn('writer', pending('e'.repeat(32)))).ok).toBe(false);
+    expect((await turn('writer', pending('c'.repeat(32), 'gmail'))).error).toMatch(
+      /not a connector/,
+    );
+    await client.call('approvals.decide', { id: 'c'.repeat(32), allow: true });
+    expect(transport.execs.at(-1)!.args.slice(2)).toEqual([
+      'approve',
+      'c'.repeat(32),
+      '--digest',
+      'd'.repeat(64),
+    ]);
+    expect(await client.call('approvals.list')).toEqual([]);
+  });
+
+  it('fires schedules once per due minute and once after a missed run', async () => {
+    write(
+      'agents/cron.yaml',
+      "runtime: codex\ntriggers: [{ schedule: '0 9 * * *', text: 'daily summary' }]\n",
+    );
+    const { daemon } = await start();
+    const at = (h: number, m = 0, d = 7) => new Date(2026, 9, d, h, m).getTime();
+    await daemon.triggers.tick(at(8));
+    expect(daemon.store.listTasks('cron')).toHaveLength(0);
+    await daemon.triggers.tick(at(9, 0));
+    await daemon.triggers.tick(at(9, 0, 7) + 20_000);
+    expect(daemon.store.listTasks('cron').map((t) => t.trigger)).toEqual(['schedule']);
+    // Asleep for two days: one catch-up run, not two.
+    await daemon.triggers.tick(at(10, 0, 9));
+    expect(daemon.store.listTasks('cron')).toHaveLength(2);
+    const [info] = daemon.triggers.list();
+    expect(info).toMatchObject({ kind: 'schedule', spec: '0 9 * * *', nextRun: at(9, 0, 10) });
+  });
+
+  it('starts one task per new polled item, after a silent first poll', async () => {
+    write(
+      'agents/triage.yaml',
+      "runtime: codex\nconnectors: [linear]\ntriggers: [{ poll: { type: linear-issues, label: agent }, text: 'Handle {title} {url}', every: 1 }]\n",
+    );
+    const { daemon } = await start();
+    const issue = (n: number) => ({
+      id: `u${n}`,
+      title: `ENG-${n} Bug`,
+      url: `https://linear.app/x/issue/ENG-${n}`,
+    });
+    transport.pollItems = [issue(1)];
+    await daemon.triggers.tick(1_000_000);
+    expect(daemon.store.listTasks('triage')).toHaveLength(0);
+    transport.pollItems = [issue(3), issue(2), issue(1)];
+    await daemon.triggers.tick(1_000_000 + 30_000); // not due yet
+    await daemon.triggers.tick(1_000_000 + 61_000);
+    const titles = daemon.store.listTasks('triage').map((t) => t.title);
+    expect(titles.sort()).toEqual([
+      'Handle ENG-2 Bug https://linear.app/x/issue/ENG-2',
+      'Handle ENG-3 Bug https://linear.app/x/issue/ENG-3',
+    ]);
+    await daemon.triggers.tick(1_000_000 + 130_000);
+    expect(daemon.store.listTasks('triage')).toHaveLength(2);
+    expect(daemon.triggers.list()[0]).toMatchObject({ kind: 'poll', lastResult: 'nothing new' });
+  });
+
+  it('searches, walks trees, counts usage and deletes tasks with their children', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    const { client, daemon } = await start();
+    const run = async (agentId: string, text: string) => {
+      const t = await client.call('tasks.create', { agentId, text });
+      return client.call('tasks.wait', { taskId: t.id });
+    };
+    const plain = await run('dev', 'fix the 100% bug');
+    const parent = await run(
+      'lead',
+      'call anchi_delegate_task {"agent":"dev","task":"child work"}',
+    );
+    const tree = await client.call('tasks.tree', { taskId: parent.id });
+    expect(tree.map((t) => [t.agentId, t.depth])).toEqual([
+      ['lead', 0],
+      ['dev', 1],
+    ]);
+    expect((await client.call('tasks.search', { text: '100%' })).map((t) => t.id)).toEqual([
+      plain.id,
+    ]);
+    expect((await client.call('tasks.search', { text: '%' })).map((t) => t.id)).toEqual([plain.id]);
+    expect(await client.call('tasks.search', { agentId: 'lead', status: 'done' })).toHaveLength(1);
+    expect(await client.call('tasks.search', { since: Date.now() + 1000 })).toEqual([]);
+    expect(plain.turns).toBe(1);
+    daemon.store.addUsage(plain.id, 1200, 30);
+    expect(daemon.store.getTask(plain.id)).toMatchObject({ inputTokens: 1200, outputTokens: 30 });
+    // Deleting the parent takes the delegated task; a running task cannot be deleted.
+    transport.mode = 'slow';
+    const busy = await client.call('tasks.create', { agentId: 'dev', text: 'busy' });
+    await new Promise((r) => setTimeout(r, 50));
+    await expect(client.call('tasks.delete', { taskId: busy.id })).rejects.toThrow(/still/);
+    expect(await client.call('tasks.delete', { taskId: parent.id })).toEqual({ deleted: 2 });
+    expect(daemon.store.tree(parent.id)).toEqual([]);
+    // Retention removes finished tasks older than the limit.
+    expect(daemon.hub.purge(30, Date.now() + 31 * 86_400_000)).toBe(1);
+    expect(daemon.store.getTask(plain.id)).toBeUndefined();
+  });
+
+  it('sends an agent its skills before a cell starts, only when they change', async () => {
+    write('skills/triage/SKILL.md', '---\nname: Triage\ndescription: d\n---\n');
+    write('agents/sk.yaml', 'runtime: codex\nskills: [triage]\n');
+    write('agents/nosk.yaml', 'runtime: codex\nskills: [missing]\n');
+    const { client } = await start();
+    const run = async (agentId: string) => {
+      const t = await client.call('tasks.create', { agentId, text: 'go' });
+      return client.call('tasks.wait', { taskId: t.id });
+    };
+    await run('sk');
+    await run('sk');
+    expect(transport.skillSets).toEqual([
+      { agent: 'sk', files: ['.claude-plugin/plugin.json', 'skills/triage/SKILL.md'] },
+    ]);
+    const failed = await run('nosk');
+    expect(failed).toMatchObject({
+      status: 'failed',
+      result: expect.stringMatching(/skill "missing" is not installed/),
+    });
+  });
+
+  it('binds workspaces and reports code-running paths a turn adds to writable ones', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
+    mkdirSync(join(ws, 'app', '.git', 'hooks'), { recursive: true });
+    mkdirSync(join(ws, 'docs'));
+    write(
+      'agents/coder.yaml',
+      'runtime: codex\nworkspaces: [{ path: app, mode: rw }, { path: docs }]\n',
+    );
+    const { client } = await start(60_000, undefined, ws);
+    const t = await client.call('tasks.create', {
+      agentId: 'coder',
+      text: `write ${join(ws, 'app', '.git', 'hooks', 'post-checkout')}`,
+    });
+    await client.call('tasks.wait', { taskId: t.id });
+    const arg = transport.starts.at(-1)!.at(-2)!;
+    expect(JSON.parse(Buffer.from(arg, 'base64url').toString())).toEqual([
+      { name: 'app', path: 'app', mode: 'rw' },
+      { name: 'docs', path: 'docs', mode: 'ro' },
+    ]);
+    const notices = (await client.call('tasks.events', { taskId: t.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toEqual([
+      `⚠ workspace app: ${join('.git', 'hooks', 'post-checkout')}: git hook added or changed`,
+    ]);
+  });
+
+  it('scans every cell before closing it and reports findings', async () => {
+    const { client, daemon } = await start(100);
+    const found: unknown[] = [];
+    daemon.hub.on('scanFinding', (f) => found.push(f));
+    const run = async () => {
+      const t = await client.call('tasks.create', { agentId: 'dev', text: 'go' });
+      await client.call('tasks.wait', { taskId: t.id });
+      await new Promise((r) => setTimeout(r, 400)); // idle timeout closes the cell
+      return (await client.call('tasks.events', { taskId: t.id })).map((e) => e.event);
+    };
+    const clean = await run();
+    expect(clean.at(-1)).toEqual({
+      type: 'notice',
+      text: 'credential scan before closing the cell: clean (3 files)',
+    });
+    transport.scanResult = {
+      clean: false,
+      findings: [{ credential: 'github.token', where: 'process 12 environ' }],
+      files: 3,
+    };
+    const dirty = await run();
+    expect(dirty.at(-1)).toMatchObject({
+      type: 'error',
+      message: expect.stringContaining('github.token in process 12 environ'),
+    });
+    expect(found).toHaveLength(1);
+    transport.scanResult = null;
+    const failed = await run();
+    expect(failed.at(-1)).toMatchObject({
+      type: 'notice',
+      text: expect.stringContaining('did not complete'),
+    });
+    expect(transport.scans).toHaveLength(3);
+  });
+
+  it('imports a newer Codex login from the Mac, and only a newer one', async () => {
+    const { daemon } = await start();
+    const login = join(root, 'codex-auth.json');
+    const jwt = (exp: number) =>
+      `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
+    const writeLogin = (exp: number) =>
+      writeFileSync(
+        login,
+        JSON.stringify({
+          tokens: { access_token: jwt(exp), account_id: 'acct', refresh_token: 'r' },
+        }),
+      );
+    const now = Math.floor(Date.now() / 1000);
+    writeLogin(now + 3600);
+    expect(await daemon.syncCodex(login)).toBe(true);
+    expect(transport.codexImports).toEqual([{ access_token: jwt(now + 3600), account_id: 'acct' }]);
+    expect(await daemon.syncCodex(login)).toBe(false); // same token
+    writeLogin(now + 30); // about to expire: not imported
+    expect(await daemon.syncCodex(login)).toBe(false);
+    writeLogin(now + 7200);
+    write('settings.yaml', 'codexAutoImport: false\n');
+    expect(await daemon.syncCodex(login)).toBe(false);
+    write('settings.yaml', 'codexAutoImport: true\n');
+    expect(await daemon.syncCodex(login)).toBe(true);
+    expect(transport.codexImports).toHaveLength(2);
   });
 
   it('accepts a task for an agent file written just before it', async () => {
@@ -379,7 +818,7 @@ describe('builder', () => {
     const { client, daemon } = await start();
     for (const bad of [
       '```anchi-agent id=builder\nruntime: codex\n```',
-      '```anchi-agent id=x\nruntime: codex\nconnectors: [gmail]\n```',
+      '```anchi-agent id=x\nruntime: codex\nconnectors: [jira]\n```',
       '```anchi-agent id=x\nruntime: codex\nimage: missing\n```',
       '```anchi-agent id=x\nruntime: codex\nextends: base\n```',
       '```anchi-agent id=x\nruntime: codex\nprompt: { file: /etc/passwd }\n```',

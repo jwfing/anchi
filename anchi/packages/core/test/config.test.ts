@@ -66,7 +66,7 @@ describe('resolveAgent', () => {
   it('rejects unknown fields, connectors, images and circular extends', () => {
     write('agents/typo.yaml', 'runtime: codex\nmodle: x\n');
     expect(() => resolveAgent('typo', layout())).toThrow(ConfigError);
-    write('agents/c.yaml', 'runtime: codex\nconnectors: [gmail]\n');
+    write('agents/c.yaml', 'runtime: codex\nconnectors: [jira]\n');
     expect(() => resolveAgent('c', layout())).toThrow(ConfigError);
     write('agents/r.yaml', 'runtime: codex\nconnectors: [aws, aws]\n');
     expect(() => resolveAgent('r', layout())).toThrow(/must not repeat/);
@@ -108,5 +108,39 @@ describe('loadImage', () => {
     expect(() => loadImage('bad', layout())).toThrow(ConfigError);
     write('images/from.yaml', 'from: ubuntu\n');
     expect(() => loadImage('from', layout())).toThrow(ConfigError);
+  });
+
+  it('reads phase 2 fields: runtime, delegates, triggers, skills and approvals', () => {
+    write(
+      'agents/lead.yaml',
+      [
+        'runtime: claude-code',
+        'connectors: [linear, slack]',
+        'delegates: [dev]',
+        'skills: [triage]',
+        'approvals: { linear: ask }',
+        'triggers:',
+        "  - schedule: '0 9 * * 1-5'",
+        '    text: Post the daily summary',
+        '  - poll: { type: linear-issues, label: agent }',
+        '    text: Handle {title} ({url})',
+      ].join('\n'),
+    );
+    const lead = resolveAgent('lead', layout());
+    expect(lead).toMatchObject({
+      runtime: 'claude-code',
+      delegates: ['dev'],
+      skills: ['triage'],
+      approvals: { linear: 'ask' },
+    });
+    expect(lead.triggers).toHaveLength(2);
+    write('agents/ap.yaml', 'runtime: codex\nconnectors: [notion]\napprovals: { notion: ask }\n');
+    expect(resolveAgent('ap', layout()).approvals).toEqual({ notion: 'ask' });
+    write('agents/self.yaml', 'runtime: codex\ndelegates: [self]\n');
+    expect(() => resolveAgent('self', layout())).toThrow(/delegate to itself/);
+    write('agents/sb.yaml', 'runtime: claude-code\nsandbox: codex-workspace-write\n');
+    expect(() => resolveAgent('sb', layout())).toThrow(/needs runtime codex/);
+    write('agents/cron.yaml', "runtime: codex\ntriggers: [{ schedule: 'daily', text: x }]\n");
+    expect(() => resolveAgent('cron', layout())).toThrow();
   });
 });
