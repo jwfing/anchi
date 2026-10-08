@@ -98,7 +98,7 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
   return done;
 }
 
-const program = new Command('anchi').description('安栖 Anchi: a secure, controllable agent team');
+const program = new Command('anchi').description('Anchi (安栖): a secured agent team');
 
 program
   .command('tui', { isDefault: true })
