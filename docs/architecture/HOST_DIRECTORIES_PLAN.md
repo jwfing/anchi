@@ -1,6 +1,6 @@
 # Host directories for agents
 
-**Status: implemented on macOS (H0–H3, 2026-10-07).** Live: `make verify-anchi` 31/31 with eight workspace checks; a Codex agent edited and committed in an `rw` workspace, and the post-turn audit reported the symlink to `/` it was asked to create. It refines [Work directories](AGENT_TEAM_DESIGN.md#work-directories) of the design. Today the VM has no host mounts (`lima/secure-vm.yaml`: `mounts: []`), and the desktop app's directory grants were removed with the app.
+**Status: implemented on macOS (H0–H3, 2026-10-07).** Live: `make verify-anchi` 31/31 with eight workspace checks; a Codex agent edited and committed in an `rw` workspace, and the post-turn audit reported the symlink to `/` it was asked to create. It refines [Work directories](AGENT_TEAM_DESIGN.md#work-directories) of the design. The VM is created without host mounts (`lima/secure-vm.yaml`: `mounts: []`); `scripts/anchi setup workspaces` adds the one mount below. Since then, agents get workspaces in their settings panel, and deleting an agent leaves workspace files untouched. Linux hosts follow in phase 3 P7.
 
 ## Goal
 

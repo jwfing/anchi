@@ -1,13 +1,13 @@
 # Documentation
 
-Start with the [project overview](../README.md), [Getting started](GETTING_STARTED.md) and the [agent team guide](AGENT_TEAM.md). Documentation is maintained in English. This index covers the current implementation, operating instructions and known limitations. Historical proposals and acceptance reports are not maintained; use Git history when needed.
+Anchi is a secured agent team: Codex and Claude Code agents in disposable cells that never hold upstream credentials, each limited to what it is configured with. Start with the [project overview](../README.md), [Getting started](GETTING_STARTED.md) and the [agent team guide](AGENT_TEAM.md). Documentation is maintained in English. This index covers the current implementation, operating instructions and known limitations. Historical proposals and acceptance reports are not maintained; use Git history when needed.
 
 ## Using Anchi
 
 | Document | Purpose |
 |---|---|
 | [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault and connect a runtime |
-| [Agent team](AGENT_TEAM.md) | Connect accounts, create agents, delegation, approvals, triggers, skills and tasks |
+| [Agent team](AGENT_TEAM.md) | Connect accounts; create, configure and delete agents; delegation, approvals, egress, triggers, skills, workspaces and tasks |
 | [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, and Slack operations, scopes, and authorization |
 | [Gmail setup](GMAIL_SETUP.md) | Create the Google OAuth client for Gmail and Drive |
@@ -16,14 +16,15 @@ Start with the [project overview](../README.md), [Getting started](GETTING_START
 
 | Document | Purpose |
 |---|---|
-| [Security](../SECURITY.md) | Trust boundaries, current authorization modes, limitations, and reporting |
+| [Security](../SECURITY.md) | Trust boundaries of the agent team, authorization modes, limitations, and reporting |
 | [Security foundation](SECURITY_FOUNDATION.md) | Vault, credential and policy services |
 | [Repository architecture](architecture/REPOSITORY.md) | Module responsibilities and dependency direction |
-| [Agent team design](architecture/AGENT_TEAM_DESIGN.md) | v2 design: daemon, per-task cells, credential-injecting proxy |
-| [Agent team phase 1 plan](architecture/AGENT_TEAM_PHASE1_PLAN.md) | Milestones, decisions, acceptance and status for phase 1 |
-| [Agent team phase 2 plan](architecture/AGENT_TEAM_PHASE2_PLAN.md) | Milestones, decisions, acceptance and status for phase 2 |
-| [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Proposal: containment, automatic checks and remaining acceptance |
+| [Agent team design](architecture/AGENT_TEAM_DESIGN.md) | Design of the secured agent team: daemon, per-task cells, credential-injecting proxy, connector bridge, known risks |
+| [Agent team phase 1 plan](architecture/AGENT_TEAM_PHASE1_PLAN.md) | Phase 1 (done): daemon, cells, proxy, Codex, GitHub/AWS/Linear, builder; decisions and status |
+| [Agent team phase 2 plan](architecture/AGENT_TEAM_PHASE2_PLAN.md) | Phase 2 (done): Claude Code, delegation, triggers, approvals, connector services; decisions and status |
+| [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Phase 3 (mostly done): containment, automatic checks, remaining acceptance; status |
 | [Host directories](architecture/HOST_DIRECTORIES_PLAN.md) | Workspaces of the Mac in agent cells |
+| [Backlog](architecture/BACKLOG.md) | Open requests and known gaps (file preview plugins, large git pushes, Linux workspaces), and what was delivered from it |
 | [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md) | Agent configuration, client protocol, guest commands and cell runner protocol |
 
 ## Development and releases
