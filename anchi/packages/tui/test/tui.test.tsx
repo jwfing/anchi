@@ -1,5 +1,6 @@
 /** @jsxRuntime automatic */
 import type {
+  AgentSettings,
   AgentSummary,
   Notifications,
   RuntimeEvent,
@@ -12,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
 import { App, filterTasks } from '../src/tui/App.tsx';
+import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
 import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
 
@@ -49,12 +51,16 @@ const task = (id: string, agentId: string, over: Partial<TaskRow> = {}): TaskRow
   ...over,
 });
 
-function fakeClient(events: Record<string, StoredEvent[]> = {}) {
+function fakeClient(
+  events: Record<string, StoredEvent[]> = {},
+  answers: Record<string, (params: unknown) => unknown> = {},
+) {
   const listeners: Record<string, ((p: unknown) => void)[]> = {};
   const calls: [string, unknown][] = [];
   const client = {
     call: vi.fn(async (method: string, params?: unknown) => {
       calls.push([method, params]);
+      if (answers[method]) return answers[method]!(params);
       if (method === 'tasks.events') return events[(params as { taskId: string }).taskId] ?? [];
       if (method === 'tasks.create')
         return task('t-new0000000', (params as { agentId: string }).agentId, { status: 'queued' });
@@ -228,7 +234,7 @@ describe('App', () => {
     ui.unmount();
   });
 
-  it('sends a follow-up to the shown task and starts a new task after ^X', async () => {
+  it('sends a follow-up to the shown task and starts a new task after ^X n', async () => {
     const { client, calls } = fakeClient();
     const ui = render(
       <App
@@ -246,7 +252,10 @@ describe('App', () => {
       taskId: 't-a000000001',
       text: 'more please',
     });
-    ui.stdin.write('\u0018');
+    ui.stdin.write('\u0018'); // leader…
+    await tick();
+    expect(ui.lastFrame()).toContain('New task (a new session) for this agent'); // which-key
+    ui.stdin.write('n'); // …n: new task
     await tick();
     ui.stdin.write('new job\r');
     await tick();
@@ -307,7 +316,7 @@ describe('App', () => {
     ui.unmount();
   });
 
-  it('expands tool calls on click and with ^T', async () => {
+  it('expands tool calls on click and with ^X t', async () => {
     const events = {
       't-a000000001': [
         {
@@ -340,7 +349,9 @@ describe('App', () => {
     await tick();
     expect(ui.lastFrame()).toContain('▾ 2 tool calls');
     expect(ui.lastFrame()).toContain('▸ shell ls');
-    ui.stdin.write('\u0014'); // ^T collapses all
+    ui.stdin.write('\u0018'); // ^X t collapses all
+    await tick();
+    ui.stdin.write('t');
     await tick();
     expect(ui.lastFrame()).not.toContain('▾');
     ui.unmount();
@@ -436,10 +447,10 @@ describe('App', () => {
     await tick();
     ui.stdin.write('?');
     await tick();
-    expect(ui.lastFrame()).toContain('switch between the sidebar and the main pane');
+    expect(ui.lastFrame()).toContain('Switch between the sidebar and the main pane');
     ui.stdin.write('\u001b');
     await tick();
-    expect(ui.lastFrame()).not.toContain('Esc or ? to close');
+    expect(ui.lastFrame()).not.toContain('Esc or ? close');
     ui.unmount();
   });
 
@@ -586,13 +597,17 @@ describe('App', () => {
     ui.stdin.write('\u001b'); // to the sidebar
     await tick();
     ui.stdin.write('?');
-    expect(await frameWith(ui, 'Tab / Shift+Tab')).toContain('Tab / Shift+Tab');
+    expect(await frameWith(ui, 'Switch between the sidebar')).toContain(
+      'Switch between the sidebar',
+    );
     emit('approvals', { approvals: [{ ...approval, id: 'b'.repeat(16) }] });
     await tick();
     expect(ui.lastFrame()).not.toContain('Approve a write by @dev?');
     ui.stdin.write('q');
     expect(await frameWith(ui, 'Approve a write by @dev?')).toContain('Approve a write by @dev?');
     ui.stdin.write('\u001b'); // later
+    // b's dialog is closed before a arrives, so the next wait sees a's dialog, not b's.
+    await frameWith(ui, 'waiting for approval');
     emit('approvals', { approvals: [approval] });
     const frame = await frameWith(ui, 'Approve a write by @dev?');
     expect(frame).toContain('Approve a write by @dev?');
@@ -601,10 +616,12 @@ describe('App', () => {
     expect(frame).toContain('git push: refs/heads/fix');
     expect(frame).not.toContain(']52;');
     ui.stdin.write('\u001b'); // later
-    expect(await frameWith(ui, '1 write waiting for approval (^A)')).toContain(
-      '1 write waiting for approval (^A)',
+    expect(await frameWith(ui, '1 write waiting for approval (^X a)')).toContain(
+      '1 write waiting for approval (^X a)',
     );
-    ui.stdin.write('\u0001'); // ^A
+    ui.stdin.write('\u0018'); // ^X a
+    await tick();
+    ui.stdin.write('a');
     await frameWith(ui, 'Approve a write by @dev?');
     ui.stdin.write('n');
     await tick();
@@ -628,6 +645,7 @@ describe('App', () => {
         agentDiff: `+ runtime: codex\n+ prompt: ${ESC}[2Jhidden`,
         imageDiff: '',
         errors: [],
+        warnings: [],
       },
     });
     await tick();
@@ -655,6 +673,7 @@ describe('App', () => {
         agentDiff: '',
         imageDiff: '',
         errors: ['bad'],
+        warnings: [],
       },
     });
     await tick();
@@ -698,5 +717,339 @@ describe('CLI renderer', () => {
     expect(s.text().replace(/\u001b\[[0-9;]*m/g, '')).toMatch(
       /2 tool calls · last: shell false\n$/,
     );
+  });
+});
+
+describe('key bindings in the TUI', () => {
+  const LEADER = '\u0018'; // ^X
+
+  it('edits the draft at the cursor with standard line-editing keys', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('helo world');
+    await tick();
+    ui.stdin.write('\u0001'); // ^A: start of the line
+    await tick();
+    for (const _ of [1, 2, 3]) ui.stdin.write(`${ESC}[C`); // →
+    await tick();
+    ui.stdin.write('l');
+    await tick();
+    ui.stdin.write('\u0005'); // ^E: end
+    await tick();
+    ui.stdin.write('\u0017'); // ^W: delete the word before
+    await tick();
+    ui.stdin.write('there\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: 'hello there',
+    });
+    ui.unmount();
+  });
+
+  it('runs commands from the palette, filtered by what you type', async () => {
+    const { client } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write(' ');
+    expect(await frameWith(ui, 'Commands · Agent chat')).toContain('Compose in $EDITOR');
+    ui.stdin.write('new task');
+    await tick();
+    const frame = ui.lastFrame() ?? '';
+    expect(frame).toContain('New task (a new session) for this agent');
+    expect(frame).toContain('^X n');
+    expect(frame).not.toContain('Compose in $EDITOR');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'the next message starts a new task')).toContain('· new task');
+    ui.unmount();
+  });
+
+  it('shows the keys of the focused view, with line editing in the chat', async () => {
+    const { client } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('?');
+    const frame = await frameWith(ui, 'Agent chat');
+    expect(frame).toContain('Compose in $EDITOR');
+    expect(frame).toContain('Everywhere (leader ^X');
+    ui.unmount();
+  });
+
+  it('handles a chord that arrives in one read', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(`${LEADER}nfre\u0001x\u0005sh\r`); // ^A x ^E within the same read
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: 'xfresh',
+    });
+    ui.unmount();
+  });
+
+  it('cancels a chord with Esc and names a chord that is not bound', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    expect(await frameWith(ui, '^X …')).toContain('Next key');
+    ui.stdin.write(ESC);
+    await tick();
+    expect(ui.lastFrame()).not.toContain('Next key');
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('z');
+    expect(await frameWith(ui, 'is not bound')).toContain('^X z is not bound here');
+    // Neither key reached the input.
+    ui.stdin.write('ok\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({ agentId: 'dev', text: 'ok' });
+    ui.unmount();
+  });
+
+  it('follows a configured leader and bindings', async () => {
+    const { client, calls } = fakeClient();
+    const { keymap } = buildKeyMap({
+      leader: 'ctrl+g',
+      bindings: [{ context: 'chat', bindings: { 'alt+n': 'task:new' } }],
+    });
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+        keymap={keymap}
+        keyWarnings={['one']}
+      />,
+    );
+    expect(await frameWith(ui, 'keybindings.json: 1 problem')).toContain('run `anchi keys`');
+    ui.stdin.write(`${ESC}n`); // Alt+N
+    await tick();
+    ui.stdin.write('fresh\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: 'fresh',
+    });
+    ui.stdin.write('\u0007'); // ^G: the leader now, no longer the editor key
+    expect(await frameWith(ui, 'Next key')).toContain('^G …');
+    ui.unmount();
+  });
+});
+
+describe('agent settings panel', () => {
+  const LEADER = '\u0018';
+  const settings = (over: Partial<AgentSettings['current']> = {}): AgentSettings => ({
+    agentId: 'dev',
+    editable: true,
+    current: { skills: [], connectors: ['github'], workspaces: [], ...over },
+    inventory: {
+      skills: [{ id: 'review', name: 'review', description: 'Reviews pull requests' }],
+      connectors: [
+        { id: 'github', connected: true },
+        { id: 'notion', connected: false },
+      ],
+      workspaces: { shared: true, dirs: ['projects/webapp'] },
+      agents: ['dev'],
+      images: [],
+    },
+  });
+  const update = {
+    diff: '  runtime: codex\n+ skills: [review]',
+    errors: [],
+    warnings: [],
+    base: 'b1',
+    applied: false,
+  };
+
+  it('selects skills, connectors and workspaces, shows the change and saves only after y', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'agents.settings': () => settings(),
+        'agents.update': (p) => ({ ...update, applied: Boolean((p as { apply?: boolean }).apply) }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('s');
+    let frame = await frameWith(ui, 'Reviews pull requests');
+    expect(frame).toContain('@dev: settings');
+    expect(frame).toMatch(/\[x\] +github +connected/);
+    expect(frame).toMatch(/\[ \] +notion +not connected/);
+    ui.stdin.write(' '); // the first row: skill review
+    await tick();
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) ui.stdin.write('j'); // down to the workspace
+    await tick();
+    ui.stdin.write(' ');
+    await tick();
+    ui.stdin.write(' '); // ro → rw
+    frame = await frameWith(ui, '[rw]');
+    expect(frame).toContain('writes go straight to your Mac');
+    ui.stdin.write('\r');
+    frame = await frameWith(ui, 'save these settings?');
+    expect(frame).toContain('+ skills: [review]');
+    expect(calls.filter(([m]) => m === 'agents.update')).toEqual([
+      [
+        'agents.update',
+        {
+          agentId: 'dev',
+          patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+        },
+      ],
+    ]);
+    ui.stdin.write('y');
+    expect(await frameWith(ui, 'settings saved')).toContain('@dev settings saved');
+    expect(calls.at(-1)).toEqual([
+      'agents.update',
+      {
+        agentId: 'dev',
+        patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+        apply: true,
+        base: 'b1',
+      },
+    ]);
+    ui.unmount();
+  });
+
+  it('cannot save a change with errors, and n goes back to the panel', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'agents.settings': () => settings({ skills: ['gone'] }),
+        'agents.update': () => ({ ...update, errors: ['skill "gone" is not installed'] }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('s');
+    expect(await frameWith(ui, 'not installed')).toMatch(/\[x\] +gone +not installed/);
+    ui.stdin.write('j');
+    await tick();
+    ui.stdin.write(' '); // select review as well
+    await tick();
+    ui.stdin.write('\r');
+    const frame = await frameWith(ui, 'save these settings?');
+    expect(frame).toContain('✗ skill "gone" is not installed');
+    expect(frame).not.toContain('[y] save');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m, p]) => m === 'agents.update' && (p as { apply?: boolean }).apply)).toBe(
+      false,
+    );
+    ui.stdin.write('n');
+    expect(await frameWith(ui, '@dev: settings')).toContain('Space select');
+    ui.unmount();
+  });
+
+  it('revises a builder proposal from its dialog', async () => {
+    const proposal = {
+      id: 'p-1',
+      agentId: 'rev',
+      agentYaml: 'runtime: codex\n',
+      imageYaml: null,
+      agentDiff: '+ runtime: codex',
+      imageDiff: '',
+      errors: [],
+      warnings: [],
+    };
+    const { client, calls, emit } = fakeClient(
+      {},
+      {
+        'agents.settings': () => ({ ...settings({ connectors: [] }), agentId: 'rev' }),
+        'builder.revise': () => ({
+          ...proposal,
+          agentYaml: 'runtime: codex\nskills: [review]\n',
+          agentDiff: '+ runtime: codex\n+ skills: [review]',
+          warnings: ['notion is not connected yet'],
+        }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('builder')]} initialTasks={[]} />);
+    await tick();
+    emit('proposal', { proposal });
+    expect(await frameWith(ui, '[s] settings')).toContain('Builder proposal');
+    ui.stdin.write('s');
+    expect(await frameWith(ui, 'Proposal for @rev: settings')).toContain('review');
+    ui.stdin.write(' ');
+    await tick();
+    ui.stdin.write('\r');
+    const frame = await frameWith(ui, '+ skills: [review]');
+    expect(frame).toContain('! notion is not connected yet');
+    expect(calls.find(([m]) => m === 'agents.settings')?.[1]).toEqual({ proposalId: 'p-1' });
+    expect(calls.find(([m]) => m === 'builder.revise')?.[1]).toEqual({
+      proposalId: 'p-1',
+      patch: { skills: ['review'] },
+    });
+    ui.unmount();
+  });
+
+  it('updates a GitHub skill after showing what changes', async () => {
+    const skill = {
+      id: 'review',
+      name: 'review',
+      description: 'Reviews',
+      source: 'https://github.com/acme/s/tree/main/review',
+      commit: '1'.repeat(40),
+    };
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'skills.list': () => [skill],
+        'skills.checkUpdate': () => ({
+          id: 'review',
+          url: skill.source,
+          current: '1'.repeat(40),
+          latest: '2'.repeat(40),
+          upToDate: false,
+          added: ['checklist.md'],
+          changed: ['SKILL.md'],
+          removed: [],
+        }),
+        'skills.update': () => skill,
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('1'); // Configure
+    await tick();
+    ui.stdin.write('\u000e'); // ^N: Runtimes → Skills
+    await frameWith(ui, 'acme/s');
+    ui.stdin.write('u');
+    const frame = await frameWith(ui, 'Update skill review');
+    expect(frame).toContain('1111111111 → 2222222222');
+    expect(frame).toContain('added: checklist.md');
+    expect(frame).toContain('changed: SKILL.md');
+    ui.stdin.write('y');
+    await frameWith(ui, 'done');
+    expect(calls.find(([m]) => m === 'skills.update')?.[1]).toEqual({
+      id: 'review',
+      commit: '2'.repeat(40),
+    });
+    ui.unmount();
   });
 });

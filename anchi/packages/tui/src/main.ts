@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --import tsx
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
@@ -15,8 +16,11 @@ import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeLine } from './sanitize.ts';
 import { runTui } from './tui/index.tsx';
+import { loadKeyMap } from './tui/keyconfig.ts';
+import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
 
 const layout = homeLayout();
+const keysFile = join(layout.root, 'keybindings.json');
 
 function fail(message: string): never {
   console.error(styleText('red', sanitizeLine(message)));
@@ -101,7 +105,33 @@ program
   .description('Open the full-screen client (starts the daemon if needed)')
   .action(async () => {
     const client = await connectOrStart(layout).catch((e: Error) => fail(e.message));
-    await runTui(client);
+    await runTui(client, keysFile);
+  });
+
+const keysCmd = program
+  .command('keys')
+  .description(`Key bindings of the TUI: the defaults merged with ${keysFile}`)
+  .action(() => {
+    const { keymap, warnings } = loadKeyMap(keysFile);
+    console.log(`${keysFile}${existsSync(keysFile) ? '' : ' (absent: defaults)'}`);
+    console.log(`leader ${keyLabel(keymap.leader)}`);
+    for (const ctx of CONTEXTS) {
+      console.log(`\n${ctx}`);
+      for (const [keys, action] of keymap.contexts[ctx]) {
+        console.log(`  ${keyLabel(keys).padEnd(14)} ${action.padEnd(24)} ${ACTIONS[action].title}`);
+      }
+    }
+    for (const w of warnings) console.log(styleText('yellow', `\nskipped: ${w}`));
+    if (warnings.length) process.exitCode = 1;
+  });
+keysCmd
+  .command('init')
+  .description('Write a starting keybindings.json (the leader and an example)')
+  .action(() => {
+    if (existsSync(keysFile)) fail(`${keysFile} exists; edit it, or remove it to start again`);
+    mkdirSync(dirname(keysFile), { recursive: true });
+    writeFileSync(keysFile, KEYS_TEMPLATE, { flag: 'wx' });
+    console.log(`wrote ${keysFile}; the TUI picks up changes while it runs`);
   });
 
 program
@@ -206,6 +236,39 @@ skillsCmd
     withClient(async (client) => {
       const s = await client.call('skills.add', { source, id: opts.id });
       console.log(`added ${s.id}${s.commit ? ` at ${s.commit.slice(0, 10)}` : ''}`);
+    }),
+  );
+skillsCmd
+  .command('update [id]')
+  .description('Update GitHub skills to the latest commit of their URL, after showing what changes')
+  .option('-y, --yes', 'update without asking')
+  .action((id: string | undefined, opts: { yes?: boolean }) =>
+    withClient(async (client) => {
+      const ids = id
+        ? [id]
+        : (await client.call('skills.list')).filter((s) => s.commit).map((s) => s.id);
+      if (!ids.length) return console.log('no skill was added from a URL');
+      for (const sid of ids) {
+        const u = await client.call('skills.checkUpdate', { id: sid });
+        if (u.upToDate) {
+          console.log(`${sid}: up to date (${u.latest.slice(0, 10)})`);
+          continue;
+        }
+        console.log(
+          `${sid}: ${u.current?.slice(0, 10) ?? '?'} → ${u.latest.slice(0, 10)}  ${sanitizeLine(u.url)}`,
+        );
+        for (const [label, files] of [
+          ['added', u.added],
+          ['changed', u.changed],
+          ['removed', u.removed],
+        ] as const) {
+          if (files.length) console.log(`  ${label}: ${files.map(sanitizeLine).join(', ')}`);
+        }
+        if (!opts.yes && (await ask(`update ${sid}? [y/N] `)).trim().toLowerCase() !== 'y')
+          continue;
+        await client.call('skills.update', { id: sid, commit: u.latest });
+        console.log(`  updated to ${u.latest.slice(0, 10)}`);
+      }
     }),
   );
 skillsCmd.command('rm <id>').action((id: string) =>

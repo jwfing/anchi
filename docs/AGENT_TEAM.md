@@ -73,12 +73,17 @@ The proxy denies credential minting (GitHub keys and installation tokens, AWS ST
 
 ## Create agents
 
-Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. The builder replies with a proposal. A full-screen dialog shows:
+Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, directories under `~/AnchiWorkspaces`, agents and images. It replies with a proposal. A full-screen dialog shows:
 
 - the agent file;
-- an image recipe, if the agent needs tools beyond the base image (git, gh, curl, jq and Codex on Debian 12).
+- an image recipe, if the agent needs tools beyond the base image (git, gh, curl, jq and Codex on Debian 12);
+- what blocks it (a skill that is not installed, a directory that does not exist, an unknown delegate) and what is worth knowing (a connector not connected yet).
 
-Press `y` to write the files, or `n` to discard the proposal.
+Press `y` to write the files, `n` to discard the proposal, or `s` to pick its skills, connectors and workspaces yourself in the settings panel; the proposal is checked again and shown with your changes.
+
+## Agent settings
+
+**^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel: every installed skill, every connector (marked connected or not) and every directory under `~/AnchiWorkspaces`. **Space** selects; a workspace goes off → `ro` → `rw`. **Enter** shows the change to the agent file as a diff, checked like a proposal; **y** saves it. Only those three fields change, and the rest of the file, comments included, stays as it is. The change applies to the agent's next cell.
 
 Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images/`. You can also edit them directly; the daemon reloads them on change. See [Agent configuration](architecture/AGENT_TEAM_CONTRACTS.md#agent-configuration).
 
@@ -114,7 +119,7 @@ triggers:
 - **High-risk operations always ask**, for every agent and every task origin, whatever its `approvals`: merging a pull request, deleting, transferring or reconfiguring a repository, branch protection, collaborators, webhooks and deploy keys, deleting a branch, pushing to `main` or `master`, AWS deletions, terminations and access changes, and Linear deletions. The dialog says why the write is held and how the task started (`poll → @lead (t-…) → @developer (t-…)`). Switch entries off by id in `~/.anchi/settings.yaml` (`highRisk: { disable: [github-merge] }`); the ids are in `services/egress_rules.py`. The proxy cannot tell a force-push from a fast-forward, so it holds pushes to the default branch names rather than force-pushes.
 - **Egress.** `egress: [registry.npmjs.org, '*.pypi.org']` limits the hosts an agent's cells reach; its runtime and connectors' hosts are always allowed. Other connections fail and are audited as `egress-denied`. Without `egress` the agent reaches any public host. An allowed host can still receive data (a gist on `github.com`), so a list narrows exfiltration; it does not end it.
 - **Triggers.** `schedule` takes a cron expression in local time; a run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `scripts/anchi triggers` lists them.
-- **Skills.** `scripts/anchi skills add <directory or GitHub URL>` stores a `SKILL.md` skill (a GitHub skill is pinned to the commit it was fetched at). Agents list skills by id; their cells get them read-only. Skill content is untrusted, like any other agent input.
+- **Skills.** `scripts/anchi skills add <directory or GitHub URL> [--id x]`, or **a** on the **Skills** screen, stores a `SKILL.md` skill; a GitHub skill is pinned to the commit it was fetched at. Give it to agents in their settings panel (**^X s**) or with `skills: [id]`; their cells get it read-only. `scripts/anchi skills update [id]`, or **u** on the Skills screen, shows what the latest commit of the URL changes (files added, changed, removed) and installs exactly that commit after you confirm. Skill content is untrusted, like any other agent input.
 
 ## Directories of your Mac (workspaces)
 
@@ -140,12 +145,13 @@ A writable directory lets an agent leave code that your own tools later run. Anc
 
 In the TUI, select an agent and type a task. **Enter** sends it.
 
-- Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft). **?** lists every key.
+- Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft).
+- Every action is also reachable through the leader key **Ctrl+X** and one more key; a panel shows what can follow. **^X Space** opens the command palette and **^X ?** lists the keys of the current view. Keys can be changed in `~/.anchi/keybindings.json`: see [Key bindings](KEYBINDINGS.md).
 - A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the Codex session in a new cell.
-- **Ctrl+X** starts a new task. **Esc** cancels the running turn.
-- **Ctrl+E** composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
+- **^X n** starts a new task, which is also a new Codex or Claude session; **Enter** otherwise sends a follow-up to the task shown. **Esc** cancels the running turn.
+- The input edits like a shell line (**Ctrl+A**, **Ctrl+E**, **Ctrl+W**, **Ctrl+U**, arrows). **Ctrl+G** (or **^X e**) composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
 - The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript; **Enter** continues it in its agent's chat, **c** cancels it, **[** and **]** turn the page. Clicking works too.
-- Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **Ctrl+T**) expands the list.
+- Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **^X t**) expands the list.
 
 The CLI does the same:
 

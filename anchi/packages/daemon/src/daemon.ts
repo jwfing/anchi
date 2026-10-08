@@ -11,10 +11,18 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createServer, type Server } from 'node:net';
-import type { HomeLayout } from '@anchi/core';
 import {
+  agentLayerSchema,
+  type HomeLayout,
+  listImageIds,
+  parseYamlAs,
+  resolveAgent,
+} from '@anchi/core';
+import {
+  type AgentSettings,
   type ConnectorSecret,
   type ConnectorStatus,
+  type Inventory,
   type MethodName,
   type Methods,
   SETUP_ACTIONS,
@@ -37,6 +45,7 @@ import {
   writeHostConnectors,
 } from './host.ts';
 import { Hub } from './hub.ts';
+import { builderInventoryText, listWorkspaceDirs } from './inventory.ts';
 import { tryConnect } from './launch.ts';
 import { desktopNotify } from './notify.ts';
 import { Peer } from './rpc.ts';
@@ -52,7 +61,8 @@ import {
 } from './setup.ts';
 import { Store } from './store.ts';
 import { SERVICE_IDS, ServiceSetup } from './services.ts';
-import { SkillStore } from './skills.ts';
+import { parsePatch, settingsOf, updateAgentFile } from './settings.ts';
+import { type SkillRemote, SkillStore } from './skills.ts';
 import { TriggerRunner } from './triggers.ts';
 import { parse as parseYaml } from 'yaml';
 
@@ -84,6 +94,8 @@ export interface DaemonOptions {
   codexLogin?: string;
   /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
   workspaceRoot?: string;
+  /** Where GitHub skills are fetched from; tests replace it. */
+  skillRemote?: SkillRemote;
   /** Opens a URL for the user (Google sign-in); tests replace it. */
   openUrl?: (url: string) => void;
   /** Run schedule and polling triggers (default true). */
@@ -138,6 +150,9 @@ export class Daemon {
   readonly approvals: ApprovalWatcher;
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
+  readonly workspaceRoot: string;
+  /** The last inventory, so proposals can be checked without asking the VM again. */
+  private lastInventory: Inventory | undefined;
   readonly services: ServiceSetup;
   private server?: Server;
   private watchers: FSWatcher[] = [];
@@ -227,8 +242,12 @@ export class Daemon {
     this.lima = opts.lima ?? new LimaTransport();
     this.guest = opts.guest ?? new Guest(this.lima);
     this.store = new Store(opts.layout.dbFile);
-    this.proposals = new Proposals(opts.layout);
-    this.skills = new SkillStore(join(opts.layout.root, 'skills'));
+    this.workspaceRoot = opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces');
+    this.skills = new SkillStore(join(opts.layout.root, 'skills'), opts.skillRemote);
+    this.proposals = new Proposals(opts.layout, () => ({
+      inventory: this.quickInventory(),
+      workspaceRoot: this.workspaceRoot,
+    }));
     this.services = new ServiceSetup(this.guest, (r) => this.broadcast('oauth', r), opts.openUrl);
     this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
@@ -258,7 +277,12 @@ export class Daemon {
       idleMs: opts.idleMs,
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
-      workspaceRoot: opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces'),
+      workspaceRoot: this.workspaceRoot,
+      // The builder starts each turn knowing what exists (skills, connectors, directories).
+      turnInput: async (agent, text) =>
+        agent.id === BUILDER_ID
+          ? `${builderInventoryText(await this.inventory())}\n\n${text}`
+          : text,
       onPolicyApproval: (task, connector, id) =>
         this.approvals.addPolicy(this.guest, task, connector, id),
       log: this.log,
@@ -300,6 +324,89 @@ export class Daemon {
     });
   }
 
+  /**
+   * What agents can be given: installed skills, connectors (asked from the VM; null when it
+   * cannot answer), directories under ~/AnchiWorkspaces, agents and images.
+   */
+  async inventory(): Promise<Inventory> {
+    const status = await setupStatus(this.guest, this.lima, this.services).catch(() => undefined);
+    const known = status?.vm === 'running' && status.vaultUnlocked;
+    const inventory: Inventory = {
+      skills: this.skills.list().map(({ id, name, description }) => ({ id, name, description })),
+      connectors: [
+        ...(status?.connectors ?? []).map((c) => ({
+          id: c.id,
+          connected: known ? c.connected : null,
+        })),
+        ...SERVICE_IDS.map((id) => {
+          const svc = status?.services?.find((x) => x.id === id);
+          return { id, connected: known && svc ? svc.connected : null };
+        }),
+      ],
+      workspaces: {
+        shared: status?.vm === 'running' ? status.workspaces : null,
+        dirs: listWorkspaceDirs(this.workspaceRoot),
+      },
+      agents: this.hub
+        .summaries()
+        .map((a) => a.id)
+        .filter((id) => id !== BUILDER_ID),
+      images: listImageIds(this.opts.layout),
+    };
+    if (!status) inventory.connectors = this.quickInventory().connectors;
+    this.lastInventory = inventory;
+    return inventory;
+  }
+
+  /** The inventory without asking the VM: connector states from the last full one. */
+  private quickInventory(): Pick<Inventory, 'skills' | 'connectors' | 'agents'> {
+    return {
+      skills: this.skills.list(),
+      connectors: this.lastInventory?.connectors ?? [],
+      agents: this.hub
+        .summaries()
+        .map((a) => a.id)
+        .filter((id) => id !== BUILDER_ID),
+    };
+  }
+
+  private async agentSettings(
+    params: { agentId: string } | { proposalId: string },
+  ): Promise<AgentSettings> {
+    const inventory = await this.inventory();
+    if ('proposalId' in params) {
+      const proposal = this.proposals.get(str(params.proposalId, 'proposal', 20));
+      const layer = parseYamlAs(proposal.agentYaml, agentLayerSchema);
+      return { agentId: proposal.agentId, editable: true, current: settingsOf(layer), inventory };
+    }
+    const id = str(params.agentId, 'agent', 40);
+    if (id === BUILDER_ID) {
+      return {
+        agentId: id,
+        editable: false,
+        reason: 'the builder is built in; its settings are fixed',
+        current: settingsOf({}),
+        inventory,
+      };
+    }
+    try {
+      return {
+        agentId: id,
+        editable: true,
+        current: settingsOf(resolveAgent(id, this.opts.layout)),
+        inventory,
+      };
+    } catch (err) {
+      return {
+        agentId: id,
+        editable: false,
+        reason: `fix the agent file first: ${(err as Error).message}`,
+        current: settingsOf({}),
+        inventory,
+      };
+    }
+  }
+
   private broadcast(method: string, params: unknown) {
     for (const peer of this.clients.values()) peer.notify(method, params);
   }
@@ -318,6 +425,22 @@ export class Daemon {
     },
     'agents.list': () => this.hub.summaries(),
     'agents.reload': () => this.hub.reload(),
+    'agents.settings': async (params) => this.agentSettings(params),
+    'agents.update': async ({ agentId, patch, apply, base }) => {
+      const id = str(agentId, 'agent', 40);
+      if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
+      const result = updateAgentFile(this.opts.layout, id, parsePatch(patch), {
+        apply: apply === true,
+        base: typeof base === 'string' ? base : undefined,
+        inventory: await this.inventory(),
+        workspaceRoot: this.workspaceRoot,
+      });
+      if (result.applied) {
+        this.log(`settings of ${id} changed from the TUI`);
+        this.hub.reload();
+      }
+      return result;
+    },
     'tasks.create': ({ agentId, text }) =>
       this.hub.createTask(str(agentId, 'agent', 40), str(text, 'text', 200_000)),
     'tasks.list': ({ agentId, limit }) =>
@@ -444,6 +567,16 @@ export class Daemon {
       if (a)
         this.hub.notice(a.task, `${allow === true ? '✓ approved' : '✗ denied'}: ${a.operation}`);
       return null;
+    },
+    'builder.revise': async ({ proposalId, patch }) => {
+      await this.inventory();
+      return this.proposals.revise(str(proposalId, 'proposal', 20), parsePatch(patch));
+    },
+    'skills.checkUpdate': ({ id }) => this.skills.checkUpdate(str(id, 'id', 40)),
+    'skills.update': async ({ id, commit }) => {
+      const skill = await this.skills.update(str(id, 'id', 40), str(commit, 'commit', 40));
+      this.hub.reload();
+      return skill;
     },
     'builder.discard': ({ proposalId }) => {
       this.proposals.discard(str(proposalId, 'proposal', 20));

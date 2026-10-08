@@ -72,6 +72,7 @@ export interface AgentSummary {
   /** Number of schedule and polling triggers. */
   triggers?: number;
   delegates?: string[];
+  skills?: string[];
   /** Configuration error; the agent cannot run until it is fixed. */
   error?: string;
   file: string;
@@ -212,6 +213,65 @@ export interface BuilderProposal {
   imageDiff: string;
   /** Problems that block applying; empty when the proposal is valid. */
   errors: string[];
+  /** Worth knowing but not blocking, such as a connector that is not connected yet. */
+  warnings: string[];
+}
+
+/** A directory of ~/AnchiWorkspaces bound into an agent's cells. */
+export interface WorkspaceSetting {
+  path: string;
+  mode: 'ro' | 'rw';
+  name?: string;
+}
+
+/** The settings the agent settings panel edits; omitted fields stay as they are. */
+export interface AgentPatch {
+  skills?: string[];
+  connectors?: string[];
+  workspaces?: WorkspaceSetting[];
+}
+
+/** What can be given to agents now. */
+export interface Inventory {
+  skills: { id: string; name: string; description: string }[];
+  /** `connected` is null when the VM could not be asked. */
+  connectors: { id: string; connected: boolean | null }[];
+  /** Directories under ~/AnchiWorkspaces (two levels); `shared` once the VM mounts it. */
+  workspaces: { shared: boolean | null; dirs: string[] };
+  agents: string[];
+  images: string[];
+}
+
+/** An agent's (or a builder proposal's) current settings and what is available. */
+export interface AgentSettings {
+  agentId: string;
+  /** False for the built-in builder, or an agent whose file cannot be edited. */
+  editable: boolean;
+  reason?: string;
+  current: { skills: string[]; connectors: string[]; workspaces: WorkspaceSetting[] };
+  inventory: Inventory;
+}
+
+/** The change `agents.update` makes (or made) to the agent file. */
+export interface AgentUpdate {
+  diff: string;
+  errors: string[];
+  warnings: string[];
+  /** Digest of the file the diff was made against; `apply` requires it unchanged. */
+  base: string;
+  applied: boolean;
+}
+
+/** What updating a GitHub skill to the latest commit of its ref would change. */
+export interface SkillUpdate {
+  id: string;
+  url: string;
+  current: string | null;
+  latest: string;
+  upToDate: boolean;
+  added: string[];
+  changed: string[];
+  removed: string[];
 }
 
 export interface DaemonStatus {
@@ -228,6 +288,16 @@ export interface Methods {
   'daemon.shutdown': [Record<string, never>, null];
   'agents.list': [Record<string, never>, AgentSummary[]];
   'agents.reload': [Record<string, never>, AgentSummary[]];
+  /** Current settings and what is available, for an agent or a pending builder proposal. */
+  'agents.settings': [{ agentId: string } | { proposalId: string }, AgentSettings];
+  /**
+   * Applies a settings patch to the agent file, keeping its comments. Without `apply` it only
+   * returns the diff; with it, `base` must match the diff the user reviewed.
+   */
+  'agents.update': [
+    { agentId: string; patch: AgentPatch; apply?: boolean; base?: string },
+    AgentUpdate,
+  ];
   /** Creates a task and queues its first turn. */
   'tasks.create': [{ agentId: string; text: string }, TaskRow];
   'tasks.list': [{ agentId?: string; limit?: number }, TaskRow[]];
@@ -269,6 +339,8 @@ export interface Methods {
   /** Writes a proposal after the user confirmed it in a modal. */
   'builder.apply': [{ proposalId: string }, AgentSummary[]];
   'builder.discard': [{ proposalId: string }, null];
+  /** The proposal with a settings patch applied (checked again); replaces the old one. */
+  'builder.revise': [{ proposalId: string; patch: AgentPatch }, BuilderProposal];
   'approvals.list': [Record<string, never>, Approval[]];
   'triggers.list': [Record<string, never>, TriggerInfo[]];
   'skills.list': [Record<string, never>, SkillInfo[]];
@@ -282,6 +354,10 @@ export interface Methods {
   /** Adds a skill from a local directory or a GitHub tree URL (pinned to its commit). */
   'skills.add': [{ source: string; id?: string }, SkillInfo];
   'skills.remove': [{ id: string }, null];
+  /** Compares a GitHub skill with the latest commit of its ref; changes nothing. */
+  'skills.checkUpdate': [{ id: string }, SkillUpdate];
+  /** Replaces a GitHub skill with its content at `commit`, the one the user reviewed. */
+  'skills.update': [{ id: string; commit: string }, SkillInfo];
   /** The caller showed the approval in a full-screen dialog and the user decided. */
   'approvals.decide': [{ id: string; allow: boolean }, null];
 }

@@ -1,6 +1,9 @@
 /** @jsxRuntime automatic */
 import type {
+  AgentPatch,
+  AgentSettings,
   AgentSummary,
+  AgentUpdate,
   Approval,
   BuilderProposal,
   ConnectorId,
@@ -17,6 +20,30 @@ import { readFile, stat } from 'node:fs/promises';
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from 'ink';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
+import {
+  ACTIONS,
+  type ActionId,
+  type Context,
+  continuations,
+  DEFAULT_KEYMAP,
+  type InkKey,
+  type KeyMap,
+  keyLabel,
+  keysFor,
+  LINE_EDIT_KEYS,
+  resolve,
+  splitChunk,
+  strokeOf,
+} from './keys.ts';
+import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
+import {
+  initialSettings,
+  type SettingsRow,
+  type SettingsState,
+  settingsPatch,
+  settingsRows,
+  toggleSetting,
+} from './settings.ts';
 import { type Line, type Tone, transcriptLines, truncate } from './lines.ts';
 import type { MouseEvent } from './mouse.ts';
 
@@ -106,8 +133,26 @@ type Modal =
       input: string;
     }
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
-  | { kind: 'help' }
+  | { kind: 'help'; context: Context; scroll: number }
+  | { kind: 'palette'; context: Context; query: string; cursor: number }
   | { kind: 'approval'; approval: Approval }
+  | {
+      kind: 'settings';
+      agentId: string;
+      /** Set when the panel edits a builder proposal instead of the agent's file. */
+      proposalId?: string;
+      data: AgentSettings | null;
+      state: SettingsState | null;
+      cursor: number;
+    }
+  | {
+      kind: 'settingsReview';
+      agentId: string;
+      patch: AgentPatch;
+      update: AgentUpdate;
+      /** The panel to return to on n or Esc. */
+      back: Extract<Modal, { kind: 'settings' }>;
+    }
   | {
       kind: 'text';
       title: string;
@@ -125,6 +170,10 @@ export interface AppProps {
   onMouse?(handler: (e: MouseEvent) => void): void;
   /** Opens $EDITOR on a draft and returns the edited text (CJK input fallback). */
   compose?(draft: string): string;
+  /** Effective key bindings (defaults merged with ~/.anchi/keybindings.json). */
+  keymap?: KeyMap;
+  /** Problems found in the key configuration; shown once. */
+  keyWarnings?: string[];
 }
 
 function duration(ms: number): string {
@@ -173,7 +222,15 @@ function useSpinner(active: boolean): number {
   return frame;
 }
 
-export function App({ client, initialAgents, initialTasks, onMouse, compose }: AppProps) {
+export function App({
+  client,
+  initialAgents,
+  initialTasks,
+  onMouse,
+  compose,
+  keymap = DEFAULT_KEYMAP,
+  keyWarnings = [],
+}: AppProps) {
   const { exit, suspendTerminal } = useApp() as ReturnType<typeof useApp> & {
     suspendTerminal?: (fn: () => void) => Promise<void>;
   };
@@ -188,7 +245,18 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const [taskFilter, setTaskFilter] = useState('');
   const [focusTask, setFocusTask] = useState<Record<string, string | null>>({});
   const [logs, setLogs] = useState<Record<string, StoredEvent[]>>({});
-  const [input, setInput] = useState('');
+  const [draft, setDraftState] = useState<Draft>(EMPTY_DRAFT);
+  // Mirrors the draft synchronously: keys and text from one input chunk build on each other.
+  const draftRef = useRef<Draft>(EMPTY_DRAFT);
+  const setDraft = (next: Draft | ((d: Draft) => Draft)) => {
+    draftRef.current = typeof next === 'function' ? next(draftRef.current) : next;
+    setDraftState(draftRef.current);
+  };
+  const input = draft.text;
+  // Keys of a chord typed so far (the leader, then more); a ref so one input chunk sees them all.
+  const [pending, setPendingState] = useState<string[]>([]);
+  const pendingRef = useRef<string[]>([]);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [scroll, setScroll] = useState(0);
   const [connectorCursor, setConnectorCursor] = useState(0);
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
@@ -243,7 +311,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       .catch((e: Error) => say(e.message));
   }, [client, say]);
 
-  // A new held write opens its dialog once no other dialog is up; ^A reopens it.
+  // A new held write opens its dialog once no other dialog is up; approvals:open reopens it.
   useEffect(() => {
     const fresh = approvals.find((a) => !seenApprovals.current.has(a.id));
     if (fresh && !modal) {
@@ -337,9 +405,16 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   }, [client, task?.id, logs]);
 
   // ── layout ──────────────────────────────────────────────
+  /** The context whose bindings apply, before the global ones. */
+  const context: Context =
+    focus === 'side' ? 'sidebar' : detail ? 'task' : isMenu ? (current as Context) : 'chat';
+  const active: Context[] = [context, 'global'];
+  // While a chord is pending, the keys that can follow it (which-key), above the status line.
+  const next = pending.length ? continuations(keymap, active, pending) : [];
+  const whichKeyRows = next.length ? Math.ceil(next.length / 2) + 1 : 0;
   const mainWidth = Math.max(30, columns - SIDEBAR_WIDTH);
   const textWidth = mainWidth - 4;
-  const bodyHeight = rows - 1;
+  const bodyHeight = rows - 1 - whichKeyRows;
   // The chat has an input box below the transcript; a task's detail has two meta lines above it.
   const transcriptHeight = Math.max(3, bodyHeight - (detail ? 7 : 8));
   const transcriptFirstRow = TRANSCRIPT_FIRST_ROW + (detail ? 2 : 0);
@@ -384,6 +459,8 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       }),
     [logs, task?.id, task?.status, textWidth, verbose, expanded],
   );
+  // Input box: border and padding take four columns, the prompt two.
+  const inputView = inputWindow(draft, textWidth - 6);
   const maxScroll = Math.max(0, lines.length - transcriptHeight);
   const offset = Math.min(scroll, maxScroll);
   const visible = lines.slice(
@@ -401,7 +478,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       if (!next.delete(id)) next.add(id);
       return next;
     });
-  /** ^T: expands every tool-call group of the shown task, or collapses them all. */
+  /** transcript:tools: expands every tool-call group of the shown task, or collapses them all. */
   const toggleAllGroups = () => {
     const ids = [...new Set(lines.flatMap((l) => (l.group ? [l.group] : [])))];
     setExpanded((all) => {
@@ -436,21 +513,31 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   const pageRef = useRef(page);
   pageRef.current = page;
 
-  const submit = (raw = input) => {
+  // The agent whose next message starts a new task: a ref, so text arriving in the same input
+  // chunk as ^X n already goes to a new task.
+  const newTaskFor = useRef<string | null>(null);
+  const startNewTask = (id: string) => {
+    newTaskFor.current = id;
+    setFocusTask((f) => ({ ...f, [id]: null }));
+  };
+
+  const submit = (raw = draftRef.current.text) => {
     const text = raw.trim();
     if (!text || !agent) return;
-    setInput('');
+    setDraft(EMPTY_DRAFT);
     setScroll(0);
     if (text === '/new') {
-      setFocusTask((f) => ({ ...f, [agent.id]: null }));
+      startNewTask(agent.id);
       return say('the next message starts a new task');
     }
     if (text === '/verbose') return setVerbose((v) => !v);
     if (text === '/quit') return exit();
-    const followUp = task && task.status !== 'running' && task.status !== 'queued';
-    if (task && !followUp) return say('wait for the current turn to finish, or Esc to cancel it');
+    const shown = newTaskFor.current === agent.id ? undefined : task;
+    newTaskFor.current = null;
+    const followUp = shown && shown.status !== 'running' && shown.status !== 'queued';
+    if (shown && !followUp) return say('wait for the current turn to finish, or Esc to cancel it');
     const call = followUp
-      ? client.call('tasks.send', { taskId: task.id, text })
+      ? client.call('tasks.send', { taskId: shown.id, text })
       : client.call('tasks.create', { agentId: agent.id, text });
     void call
       .then((t) => setFocusTask((f) => ({ ...f, [agent.id]: t.id })))
@@ -462,7 +549,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
     let result = input;
     void suspendTerminal(() => {
       result = compose(input);
-    }).then(() => setInput(result.replace(/\n+$/, '')));
+    }).then(() => setDraft(draftOf(result.replace(/\n+$/, ''))));
   };
 
   const openConnector = (id: ConnectorId) =>
@@ -483,12 +570,434 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       .catch((e: Error) => say(e.message));
   };
 
+  // ── key bindings ────────────────────────────────────────
+  const setPending = (seq: string[]) => {
+    pendingRef.current = seq;
+    setPendingState(seq);
+    clearTimeout(pendingTimer.current);
+    // An unfinished chord is dropped after three seconds, as in Claude Code.
+    if (seq.length) pendingTimer.current = setTimeout(() => setPending([]), 3000);
+  };
+  useEffect(() => () => clearTimeout(pendingTimer.current), []);
+  // A dialog that opens mid-chord (a held write arriving) ends the chord.
+  useEffect(() => {
+    if (modal && pendingRef.current.length) setPending([]);
+  }, [modal]);
+  useEffect(() => {
+    if (keyWarnings.length) {
+      say(
+        `keybindings.json: ${keyWarnings.length} problem${keyWarnings.length === 1 ? '' : 's'} (run \`anchi keys\`)`,
+      );
+    }
+  }, [keyWarnings, say]);
+
+  const back = () => setFocus('side');
+  const halfPage = Math.floor(transcriptHeight / 2);
+  const connectorIds: ConnectorId[] = ['github', 'aws', 'linear'];
+  const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
+
+  const setupStep = (step: 'vm-start' | 'install' | 'workspaces' | 'vault-unlock') => {
+    const [title, body] = (
+      {
+        'vm-start': ['Start the VM', 'Start the secure-vm VM.'],
+        install: [
+          'Install or update',
+          'Create or update the secure-vm VM, install the trusted services and the agent ' +
+            'team, and build the base image. This takes several minutes.',
+        ],
+        workspaces: [
+          'Share ~/AnchiWorkspaces',
+          'Mount ~/AnchiWorkspaces into the VM so agents can be given directories of this Mac ' +
+            '(workspaces: in an agent). The VM restarts: running tasks stop, and the vault is ' +
+            'unlocked again afterwards.',
+        ],
+        'vault-unlock': [
+          'Unlock the vault',
+          'Send the vault key from ~/.config/secure-vm/vault.key on this Mac to the VM, ' +
+            'where it is kept in memory only.',
+        ],
+      } as const
+    )[step];
+    setModal({
+      kind: 'confirm',
+      title,
+      body,
+      action: () => {
+        setSetupLog([]);
+        return client.call('setup.run', { action: step });
+      },
+    });
+  };
+
+  /** Opens the settings panel of an agent, or of a pending builder proposal. */
+  const openSettings = (target: { agentId: string } | { proposalId: string; agentId: string }) => {
+    const proposalId = 'proposalId' in target ? target.proposalId : undefined;
+    setModal({
+      kind: 'settings',
+      agentId: target.agentId,
+      proposalId,
+      data: null,
+      state: null,
+      cursor: 0,
+    });
+    void client
+      .call('agents.settings', proposalId ? { proposalId } : { agentId: target.agentId })
+      .then((data) => {
+        if (!data.editable) {
+          setModal(null);
+          return say(data.reason ?? `@${data.agentId} cannot be edited here`);
+        }
+        setModal((m) =>
+          m?.kind === 'settings' && m.agentId === target.agentId && !m.data
+            ? { ...m, data, state: initialSettings(data) }
+            : m,
+        );
+      })
+      .catch((e: Error) => {
+        setModal(null);
+        say(e.message);
+      });
+  };
+
+  /** Shows what the panel's changes do to the agent file, or revises the proposal. */
+  const reviewSettings = (m: Extract<Modal, { kind: 'settings' }>) => {
+    if (!m.data || !m.state) return;
+    const patch = settingsPatch(m.data, m.state);
+    if (!Object.keys(patch).length) {
+      setModal(m.proposalId ? (proposalModal(m.proposalId) ?? null) : null);
+      return say('nothing changed');
+    }
+    if (m.proposalId) {
+      return void client
+        .call('builder.revise', { proposalId: m.proposalId, patch })
+        .then((proposal) => {
+          setProposals((p) => p.map((x) => (x.id === proposal.id ? proposal : x)));
+          setModal({ kind: 'proposal', proposal, scroll: 0 });
+        })
+        .catch((e: Error) => say(e.message));
+    }
+    void client
+      .call('agents.update', { agentId: m.agentId, patch })
+      .then((update) =>
+        setModal({ kind: 'settingsReview', agentId: m.agentId, patch, update, back: m }),
+      )
+      .catch((e: Error) => say(e.message));
+  };
+  const proposalModal = (id: string): Modal | undefined => {
+    const proposal = proposals.find((p) => p.id === id);
+    return proposal ? { kind: 'proposal', proposal, scroll: 0 } : undefined;
+  };
+
+  /** Runs a bound action in the current view. */
+  const run = (action: ActionId): void => {
+    const running = (t?: TaskRow) => t && (t.status === 'running' || t.status === 'queued');
+    switch (action) {
+      case 'app:quit':
+        return exit();
+      case 'app:help':
+        return setModal({ kind: 'help', context, scroll: 0 });
+      case 'app:palette':
+        return setModal({ kind: 'palette', context, query: '', cursor: 0 });
+      case 'focus:toggle':
+        return setFocus((f) => (f === 'side' ? 'main' : 'side'));
+      case 'focus:main':
+        return setFocus('main');
+      case 'focus:sidebar':
+        return back();
+      case 'nav:next':
+        return move(1);
+      case 'nav:prev':
+        return move(-1);
+      case 'nav:first':
+        return setSelected(items[0]);
+      case 'nav:last':
+        return setSelected(items.at(-1));
+      case 'nav:configure':
+        return setSelected(CONFIG[0]);
+      case 'nav:agents':
+        return setSelected(userAgents[0]?.id ?? BUILDER);
+      case 'nav:tasks':
+        return turnPage(page, true);
+      case 'nav:builder':
+        setSelected(BUILDER);
+        return setFocus('main');
+      case 'tasks:pagePrev':
+        return turnPage(page - 1, context === 'sidebar');
+      case 'tasks:pageNext':
+        return turnPage(page + 1, context === 'sidebar');
+      case 'tasks:filter':
+        return setModal({
+          kind: 'text',
+          title: 'Filter tasks',
+          label:
+            '@agent, status:done|failed|running|cancelled|queued and words; Enter on empty shows all',
+          input: taskFilter,
+          allowEmpty: true,
+          submit: async (value) => {
+            setTaskFilter(value.trim());
+            setTaskPage(0);
+          },
+        });
+      case 'task:new': {
+        const id = agent?.id ?? detail?.agentId;
+        if (!id) return say('select an agent first');
+        setSelected(id);
+        setFocus('main');
+        startNewTask(id);
+        return say(`the next message starts a new task (a new session) for @${id}`);
+      }
+      case 'task:cancel': {
+        const t = detail ?? task;
+        if (!running(t)) return say('no running task here');
+        return void client
+          .call('tasks.cancel', { taskId: t!.id })
+          .catch((e: Error) => say(e.message));
+      }
+      case 'task:continue':
+        if (!detail) return;
+        setFocusTask((f) => ({ ...f, [detail.agentId]: detail.id }));
+        return setSelected(detail.agentId);
+      case 'task:delete':
+        if (!detail || running(detail))
+          return say('a running task cannot be deleted; cancel it first');
+        return setModal({
+          kind: 'confirm',
+          title: `Delete ${detail.id}`,
+          body: `Delete this task, the tasks it delegated and their transcripts from ~/.anchi. This cannot be undone.`,
+          action: async () => {
+            await client.call('tasks.delete', { taskId: detail.id });
+            setSelected(detail.agentId);
+          },
+        });
+      case 'agent:settings': {
+        const id = agent?.id ?? detail?.agentId;
+        if (!id) return say('select an agent first');
+        return openSettings({ agentId: id });
+      }
+      case 'approvals:open':
+        if (!approvals.length) return say('no write is waiting for approval');
+        return setModal({ kind: 'approval', approval: approvals[0]! });
+      case 'builder:proposal':
+        if (!proposals.length) return say('no builder proposal is waiting');
+        return setModal({ kind: 'proposal', proposal: proposals.at(-1)!, scroll: 0 });
+      case 'transcript:tools':
+        return toggleAllGroups();
+      case 'transcript:verbose':
+        return setVerbose((v) => !v);
+      case 'scroll:up':
+        return setScroll((s) => Math.min(maxScroll, s + 1));
+      case 'scroll:down':
+        return setScroll((s) => Math.max(0, s - 1));
+      case 'scroll:pageUp':
+        return setScroll((s) => Math.min(maxScroll, s + halfPage));
+      case 'scroll:pageDown':
+        return setScroll((s) => Math.max(0, s - halfPage));
+      case 'chat:submit':
+        return submit();
+      case 'chat:escape':
+        // Esc first cancels a running turn, then clears the draft, then leaves the chat.
+        if (running(task)) {
+          void client.call('tasks.cancel', { taskId: task!.id });
+          return say(`cancelling ${task!.id}`);
+        }
+        if (draftRef.current.text) return setDraft(EMPTY_DRAFT);
+        return back();
+      case 'chat:editor':
+        return editDraft();
+      case 'list:up':
+        if (current === 'skills') return setSkillCursor((c) => Math.max(0, c - 1));
+        return setConnectorCursor((c) => Math.max(0, c - 1));
+      case 'list:down':
+        if (current === 'skills')
+          return setSkillCursor((c) => Math.min((skills ?? []).length - 1, c + 1));
+        return setConnectorCursor((c) =>
+          Math.min(connectorIds.length + serviceIds.length - 1, c + 1),
+        );
+      case 'setup:vmStart':
+        return setupStep('vm-start');
+      case 'setup:install':
+        return setupStep('install');
+      case 'setup:unlock':
+        return setupStep('vault-unlock');
+      case 'setup:workspaces':
+        return setupStep('workspaces');
+      case 'setup:codex':
+        return setModal({
+          kind: 'confirm',
+          title: 'Import Codex login',
+          body:
+            'Read the access token and account id from ~/.codex/auth.json on this Mac and store them in the ' +
+            'VM vault. The refresh token stays on this Mac. Cells never receive the token.',
+          action: () => client.call('setup.importCodex'),
+        });
+      case 'setup:claude':
+        return setModal({ kind: 'secret', connector: 'claude', index: 0, values: {}, input: '' });
+      case 'setup:refresh':
+        return refreshSetup();
+      case 'skills:add':
+        return setModal({
+          kind: 'text',
+          title: 'Add a skill',
+          label:
+            'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit)',
+          input: '',
+          submit: async (raw) => {
+            const source = raw.trim();
+            const guess = source.replace(/\/+$/, '').split('/').at(-1)?.toLowerCase() ?? '';
+            setModal({
+              kind: 'text',
+              title: 'Skill id',
+              label: `The id agents list it by (1–40 lowercase letters, digits or "-"). Enter keeps "${guess}".`,
+              input: '',
+              allowEmpty: true,
+              submit: async (id) => {
+                const skill = await client.call('skills.add', {
+                  source,
+                  id: id.trim() || undefined,
+                });
+                refreshSkills();
+                say(
+                  `skill ${skill.id} added; give it to agents with ${keyLabel(keysFor(keymap, ['global'], 'agent:settings')[0] ?? '')} in their chat`,
+                );
+              },
+            });
+          },
+        });
+      case 'skills:update': {
+        const skill = (skills ?? [])[skillCursor];
+        if (!skill) return;
+        if (!skill.commit)
+          return say(`${skill.id} was added from a local directory; add it again to refresh it`);
+        say(`checking ${skill.id}…`);
+        return void client
+          .call('skills.checkUpdate', { id: skill.id })
+          .then((u) => {
+            if (u.upToDate) return say(`${u.id} is up to date (${u.latest.slice(0, 10)})`);
+            const list = (label: string, files: string[]) =>
+              files.length
+                ? `\n${label}: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` and ${files.length - 8} more` : ''}`
+                : '';
+            setModal({
+              kind: 'confirm',
+              title: `Update skill ${u.id}`,
+              body:
+                `${u.url}\n${u.current?.slice(0, 10) ?? '?'} → ${u.latest.slice(0, 10)}` +
+                list('added', u.added) +
+                list('changed', u.changed) +
+                list('removed', u.removed) +
+                '\n\nSkill content is untrusted, like any agent input. Agents get the new version on their next cell.',
+              action: async () => {
+                await client.call('skills.update', { id: u.id, commit: u.latest });
+                refreshSkills();
+              },
+            });
+          })
+          .catch((e: Error) => say(e.message));
+      }
+      case 'skills:remove': {
+        const skill = (skills ?? [])[skillCursor];
+        if (!skill) return;
+        return setModal({
+          kind: 'confirm',
+          title: `Remove skill ${skill.id}`,
+          body: 'Agents that list this skill fail to start until it is added again or removed from them.',
+          action: async () => {
+            await client.call('skills.remove', { id: skill.id });
+            refreshSkills();
+          },
+        });
+      }
+    }
+    // Connectors: the cursor is on a proxy connector or, below them, on a service.
+    const sid =
+      connectorCursor >= connectorIds.length
+        ? serviceIds[connectorCursor - connectorIds.length]!
+        : undefined;
+    const id = sid ? undefined : connectorIds[connectorCursor]!;
+    const status = sid ? setup?.services?.find((x) => x.id === sid) : undefined;
+    switch (action) {
+      case 'connectors:connect':
+        if (id) return openConnector(id);
+        if (sid === 'notion' || sid === 'slack') {
+          return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
+        }
+        if (!setup?.googleClient) {
+          return setModal({
+            kind: 'text',
+            title: 'Google OAuth client',
+            label:
+              'Path of the Desktop app OAuth client JSON from Google Cloud (needed once for Gmail and Drive)',
+            input: '',
+            submit: async (path) => {
+              const text = await readClientFile(path.trim());
+              await client.call('services.googleClient', { json: text });
+              refreshSetup();
+              say('Google client stored; press Enter again to sign in');
+            },
+          });
+        }
+        return runAction(async () => {
+          const { url } = await client.call('services.googleLogin', { id: sid! });
+          say(`sign in to Google in your browser (${url.slice(0, 60)}…)`);
+        }, `opened Google sign-in for ${sid}`);
+      case 'connectors:ghImport':
+        if (id !== 'github') return say('select github first');
+        return setModal({
+          kind: 'confirm',
+          title: 'Import the gh CLI token',
+          body:
+            'Read the token the GitHub CLI on this Mac is logged in with (`gh auth token`) and store ' +
+            'it in the VM vault. It carries every scope of your gh login, usually broader than a ' +
+            'fine-grained token limited to the repositories the agents need.',
+          action: () => client.call('connectors.importGh'),
+        });
+      case 'connectors:awsProfile':
+        if (id !== 'aws') return say('select aws first');
+        return setModal({
+          kind: 'text',
+          title: 'Connect AWS through a profile',
+          label:
+            'AWS profile on this Mac (for SSO, run `aws sso login --profile …` first). Anchi ' +
+            'exports its temporary credentials and refreshes them before they expire.',
+          input: '',
+          submit: (profile) => client.call('connectors.awsProfile', { profile }),
+        });
+      case 'connectors:mode': {
+        if (!sid || !status) return say('select a service (gmail, drive, notion, slack) first');
+        const mode = status.mode === 'ask' ? 'auto' : 'ask';
+        return runAction(
+          () => client.call('services.setMode', { id: sid, mode }),
+          `${sid} writes: ${mode === 'ask' ? 'ask for approval' : 'automatic'}`,
+        );
+      }
+      case 'connectors:disconnect':
+        if (sid) {
+          if (!status?.connected) return;
+          return setModal({
+            kind: 'confirm',
+            title: `Disconnect ${sid}`,
+            body: `Remove the ${sid} credential from the vault${sid === 'gmail' || sid === 'drive' ? ' and revoke it at Google' : ''}.`,
+            action: () => client.call('services.disconnect', { id: sid }),
+          });
+        }
+        return setModal({
+          kind: 'confirm',
+          title: `Disconnect ${id}`,
+          body: `Remove the ${id} credential from the vault. Agents with this connector lose access.`,
+          action: () => client.call('connectors.remove', { id: id! }),
+        });
+    }
+  };
+
   usePaste((text) => {
     if (modal?.kind === 'secret' || modal?.kind === 'text') editModalInput((v) => v + text.trim());
-    else if (!modal && agent) setInput((v) => v + text);
+    else if (modal?.kind === 'palette')
+      setModal({ ...modal, query: modal.query + text.trim(), cursor: 0 });
+    else if (!modal && agent) setDraft((d) => insert(d, text));
   });
 
-  useInput((ch, key) => {
+  /** One keystroke or a run of text; `useInput` splits mixed chunks into these. */
+  const handleInput = (ch: string, key: InkKey) => {
     // ── modals take every key ──
     if (modal?.kind === 'approval') {
       const { approval } = modal;
@@ -506,6 +1015,9 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
       if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
       if (key.escape) return setModal(null);
+      if (ch === 's') {
+        return openSettings({ proposalId: modal.proposal.id, agentId: modal.proposal.agentId });
+      }
       if (ch === 'n') {
         void client.call('builder.discard', { proposalId: modal.proposal.id });
         setProposals((p) => p.filter((x) => x.id !== modal.proposal.id));
@@ -569,7 +1081,73 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       return;
     }
     if (modal?.kind === 'help') {
+      if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
+      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
       if (key.escape || key.return || ch === 'q' || ch === '?') setModal(null);
+      return;
+    }
+    if (modal?.kind === 'palette') {
+      const entries = paletteEntries(keymap, modal.context, modal.query);
+      if (key.escape) return setModal(null);
+      if (key.return) {
+        const entry = entries[modal.cursor];
+        setModal(null);
+        return entry ? run(entry.action) : undefined;
+      }
+      if (key.upArrow || (key.ctrl && ch === 'p'))
+        return setModal({ ...modal, cursor: Math.max(0, modal.cursor - 1) });
+      if (key.downArrow || (key.ctrl && ch === 'n'))
+        return setModal({ ...modal, cursor: Math.min(entries.length - 1, modal.cursor + 1) });
+      if (key.backspace || key.delete)
+        return setModal({ ...modal, query: [...modal.query].slice(0, -1).join(''), cursor: 0 });
+      if (key.ctrl && ch === 'u') return setModal({ ...modal, query: '', cursor: 0 });
+      if (ch && !key.ctrl && !key.meta)
+        setModal((m) =>
+          m?.kind === 'palette'
+            ? { ...m, query: m.query + ch.replace(/[\r\n]/g, ''), cursor: 0 }
+            : m,
+        );
+      return;
+    }
+    if (modal?.kind === 'settings') {
+      if (key.escape)
+        return setModal(modal.proposalId ? (proposalModal(modal.proposalId) ?? null) : null);
+      if (!modal.data || !modal.state) return;
+      // From the latest panel state: keys repeated faster than a render all count.
+      type Panel = Extract<Modal, { kind: 'settings' }>;
+      const edit = (f: (m: Panel, items: SettingsRow[]) => Partial<Panel>) =>
+        setModal((m) => {
+          if (m?.kind !== 'settings' || !m.data || !m.state) return m;
+          const items = settingsRows(m.data, m.state).filter((r) => r.kind !== 'header');
+          return { ...m, ...f(m, items) };
+        });
+      if (key.upArrow || ch === 'k') return edit((m) => ({ cursor: Math.max(0, m.cursor - 1) }));
+      if (key.downArrow || ch === 'j') {
+        return edit((m, items) => ({ cursor: Math.min(items.length - 1, m.cursor + 1) }));
+      }
+      if (ch === ' ') {
+        return edit((m, items) =>
+          items[m.cursor] ? { state: toggleSetting(m.state!, items[m.cursor]!) } : {},
+        );
+      }
+      if (key.return) {
+        return setModal((m) => {
+          if (m?.kind === 'settings') queueMicrotask(() => reviewSettings(m));
+          return m;
+        });
+      }
+      return;
+    }
+    if (modal?.kind === 'settingsReview') {
+      if (ch === 'y' && !modal.update.errors.length) {
+        const { agentId, patch, update } = modal;
+        setModal(null);
+        return void client
+          .call('agents.update', { agentId, patch, apply: true, base: update.base })
+          .then(() => say(`@${agentId} settings saved; its next cell uses them`))
+          .catch((e: Error) => say(e.message));
+      }
+      if (ch === 'n' || key.escape) setModal(modal.back);
       return;
     }
     if (modal?.kind === 'confirm') {
@@ -582,291 +1160,46 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
       return;
     }
 
-    // ── global ──
-    if (key.ctrl && ch === 'n') return move(1);
-    if (key.ctrl && ch === 'p') return move(-1);
-    if (key.ctrl && ch === 'c') return exit();
-    if (key.ctrl && ch === 'o' && proposals.length) {
-      return setModal({ kind: 'proposal', proposal: proposals.at(-1)!, scroll: 0 });
+    // ── bindings ──
+    const stroke = strokeOf(ch, key);
+    if (stroke === 'ctrl+c') return exit();
+    if (pendingRef.current.length && !stroke && [...ch].length > 1) {
+      // Text after the leader in one read: its first character finishes the chord.
+      const [first, ...rest] = [...ch];
+      handleInput(first!, {});
+      return handleInput(rest.join(''), {});
     }
-    if (key.ctrl && ch === 't') return toggleAllGroups();
-    if (key.ctrl && ch === 'v') return setVerbose((v) => !v);
-    if (key.ctrl && ch === 'a' && approvals.length) {
-      return setModal({ kind: 'approval', approval: approvals[0]! });
+    if (pendingRef.current.length) {
+      const seq = [...pendingRef.current, stroke ?? ch];
+      setPending([]);
+      if (stroke === 'esc' || !stroke) return;
+      const found = resolve(keymap, active, seq);
+      if (found.kind === 'pending') return setPending(seq);
+      if (found.kind === 'action') return run(found.action);
+      return say(
+        `${keyLabel(seq.join(' '))} is not bound here (${keyLabel(keymap.leader)} ? lists the keys)`,
+      );
     }
-    if (key.tab) return setFocus((f) => (f === 'side' ? 'main' : 'side'));
-
-    // ── sidebar ──
-    if (focus === 'side') {
-      if (key.upArrow || ch === 'k') return move(-1);
-      if (key.downArrow || ch === 'j') return move(1);
-      if (key.home || ch === 'g') return setSelected(items[0]);
-      if (key.end || ch === 'G') return setSelected(items.at(-1));
-      if (key.pageUp || ch === '[') return turnPage(page - 1, true);
-      if (key.pageDown || ch === ']') return turnPage(page + 1, true);
-      if (ch === '1') return setSelected(CONFIG[0]);
-      if (ch === '2') return setSelected(BUILDER);
-      if (ch === '3') return turnPage(page, true);
-      if (key.return || key.rightArrow || ch === 'l') return setFocus('main');
-      if (ch === '?') return setModal({ kind: 'help' });
-      if (ch === '/') {
-        return setModal({
-          kind: 'text',
-          title: 'Filter tasks',
-          label:
-            '@agent, status:done|failed|running|cancelled|queued and words; Enter on empty shows all',
-          input: taskFilter,
-          allowEmpty: true,
-          submit: async (value) => {
-            setTaskFilter(value.trim());
-            setTaskPage(0);
-          },
-        });
+    if (context === 'chat') {
+      // The input keeps standard line editing, and printable keys are always text.
+      if (stroke && LINE_EDIT_KEYS.has(stroke)) {
+        return setDraft((d) => edit(d, stroke) ?? d);
       }
-      if (ch === 'q') return exit();
-      return;
+      // Named and modified keys are longer than one character (`ctrl+a`, `enter`).
+      if (ch && (!stroke || stroke === 'space' || [...stroke].length === 1)) {
+        // Fast typing or a non-bracketed paste can deliver text and Enter in one chunk.
+        const nl = ch.search(/[\r\n]/);
+        if (nl >= 0) return submit(insert(draftRef.current, ch.slice(0, nl)).text);
+        return setDraft((d) => insert(d, ch));
+      }
     }
-    // In the main pane, Esc (and ← outside the chat) goes back to the sidebar.
-    const back = () => setFocus('side');
-
-    // ── task detail ──
-    if (detail) {
-      if (ch === 'q') return exit();
-      if (ch === '?') return setModal({ kind: 'help' });
-      if (key.escape || key.leftArrow || ch === 'h') return back();
-      if (key.return) {
-        // Continue the task in its agent's chat.
-        setFocusTask((f) => ({ ...f, [detail.agentId]: detail.id }));
-        return setSelected(detail.agentId);
-      }
-      if (ch === 'c' && (detail.status === 'running' || detail.status === 'queued')) {
-        return void client
-          .call('tasks.cancel', { taskId: detail.id })
-          .catch((e: Error) => say(e.message));
-      }
-      if (ch === '[') return turnPage(page - 1);
-      if (ch === ']') return turnPage(page + 1);
-      if (ch === 'D' && detail.status !== 'running' && detail.status !== 'queued') {
-        return setModal({
-          kind: 'confirm',
-          title: `Delete ${detail.id}`,
-          body: `Delete this task, the tasks it delegated and their transcripts from ~/.anchi. This cannot be undone.`,
-          action: async () => {
-            await client.call('tasks.delete', { taskId: detail.id });
-            setSelected(detail.agentId);
-          },
-        });
-      }
-      if (key.pageUp)
-        return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
-      if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
-      if (key.upArrow || ch === 'k') return setScroll((s) => Math.min(maxScroll, s + 1));
-      if (key.downArrow || ch === 'j') return setScroll((s) => Math.max(0, s - 1));
-      return;
-    }
-
-    // ── menu views ──
-    if (isMenu) {
-      if (ch === 'q') return exit();
-      if (ch === '?') return setModal({ kind: 'help' });
-      if (key.escape || key.leftArrow || ch === 'h') return back();
-      if (current === 'skills') {
-        const list = skills ?? [];
-        if (key.upArrow || ch === 'k') return setSkillCursor((c) => Math.max(0, c - 1));
-        if (key.downArrow || ch === 'j')
-          return setSkillCursor((c) => Math.min(list.length - 1, c + 1));
-        if (ch === 'a') {
-          return setModal({
-            kind: 'text',
-            title: 'Add a skill',
-            label:
-              'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit)',
-            input: '',
-            submit: async (source) => {
-              const skill = await client.call('skills.add', { source: source.trim() });
-              refreshSkills();
-              say(`skill ${skill.id} added; assign it with skills: [${skill.id}] in an agent`);
-            },
-          });
-        }
-        const skill = list[skillCursor];
-        if (ch === 'd' && skill) {
-          return setModal({
-            kind: 'confirm',
-            title: `Remove skill ${skill.id}`,
-            body: 'Agents that list this skill fail to start until it is added again or removed from them.',
-            action: async () => {
-              await client.call('skills.remove', { id: skill.id });
-              refreshSkills();
-            },
-          });
-        }
-      }
-      if (current === 'connectors') {
-        const ids: ConnectorId[] = ['github', 'aws', 'linear'];
-        const services: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
-        if (key.upArrow || ch === 'k') return setConnectorCursor((c) => Math.max(0, c - 1));
-        if (key.downArrow || ch === 'j')
-          return setConnectorCursor((c) => Math.min(ids.length + services.length - 1, c + 1));
-        if (connectorCursor >= ids.length) {
-          const sid = services[connectorCursor - ids.length]!;
-          const status = setup?.services?.find((x) => x.id === sid);
-          if (key.return || ch === 'c') {
-            if (sid === 'notion' || sid === 'slack') {
-              return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
-            }
-            if (!setup?.googleClient) {
-              return setModal({
-                kind: 'text',
-                title: 'Google OAuth client',
-                label:
-                  'Path of the Desktop app OAuth client JSON from Google Cloud (needed once for Gmail and Drive)',
-                input: '',
-                submit: async (path) => {
-                  const text = await readClientFile(path.trim());
-                  await client.call('services.googleClient', { json: text });
-                  refreshSetup();
-                  say('Google client stored; press Enter again to sign in');
-                },
-              });
-            }
-            return runAction(async () => {
-              const { url } = await client.call('services.googleLogin', { id: sid });
-              say(`sign in to Google in your browser (${url.slice(0, 60)}…)`);
-            }, `opened Google sign-in for ${sid}`);
-          }
-          if (ch === 'm' && status) {
-            const mode = status.mode === 'ask' ? 'auto' : 'ask';
-            return runAction(
-              () => client.call('services.setMode', { id: sid, mode }),
-              `${sid} writes: ${mode === 'ask' ? 'ask for approval' : 'automatic'}`,
-            );
-          }
-          if (ch === 'd' && status?.connected) {
-            return setModal({
-              kind: 'confirm',
-              title: `Disconnect ${sid}`,
-              body: `Remove the ${sid} credential from the vault${sid === 'gmail' || sid === 'drive' ? ' and revoke it at Google' : ''}.`,
-              action: () => client.call('services.disconnect', { id: sid }),
-            });
-          }
-          return;
-        }
-        const id = ids[connectorCursor]!;
-        if (key.return || ch === 'c') return openConnector(id);
-        if (ch === 'g' && id === 'github') {
-          return setModal({
-            kind: 'confirm',
-            title: 'Import the gh CLI token',
-            body:
-              'Read the token the GitHub CLI on this Mac is logged in with (`gh auth token`) and store ' +
-              'it in the VM vault. It carries every scope of your gh login, usually broader than a ' +
-              'fine-grained token limited to the repositories the agents need.',
-            action: () => client.call('connectors.importGh'),
-          });
-        }
-        if (ch === 'p' && id === 'aws') {
-          return setModal({
-            kind: 'text',
-            title: 'Connect AWS through a profile',
-            label:
-              'AWS profile on this Mac (for SSO, run `aws sso login --profile …` first). Anchi ' +
-              'exports its temporary credentials and refreshes them before they expire.',
-            input: '',
-            submit: (profile) => client.call('connectors.awsProfile', { profile }),
-          });
-        }
-        if (ch === 'd') {
-          return setModal({
-            kind: 'confirm',
-            title: `Disconnect ${id}`,
-            body: `Remove the ${id} credential from the vault. Agents with this connector lose access.`,
-            action: () => client.call('connectors.remove', { id }),
-          });
-        }
-      }
-      if (current === 'runtimes' && (ch === 's' || ch === 'I' || ch === 'u' || ch === 'W')) {
-        const step = (
-          {
-            s: ['vm-start', 'Start the VM', 'Start the secure-vm VM.'],
-            I: [
-              'install',
-              'Install or update',
-              'Create or update the secure-vm VM, install the trusted services and the agent ' +
-                'team, and build the base image. This takes several minutes.',
-            ],
-            W: [
-              'workspaces',
-              'Share ~/AnchiWorkspaces',
-              'Mount ~/AnchiWorkspaces into the VM so agents can be given directories of this Mac ' +
-                '(workspaces: in an agent). The VM restarts: running tasks stop, and the vault is ' +
-                'unlocked again afterwards.',
-            ],
-            u: [
-              'vault-unlock',
-              'Unlock the vault',
-              'Send the vault key from ~/.config/secure-vm/vault.key on this Mac to the VM, ' +
-                'where it is kept in memory only.',
-            ],
-          } as const
-        )[ch];
-        const [action, title, body] = step;
-        return setModal({
-          kind: 'confirm',
-          title,
-          body,
-          action: () => {
-            setSetupLog([]);
-            return client.call('setup.run', { action });
-          },
-        });
-      }
-      if (current === 'runtimes' && ch === 'c') {
-        return setModal({ kind: 'secret', connector: 'claude', index: 0, values: {}, input: '' });
-      }
-      if (current === 'runtimes' && ch === 'i') {
-        return setModal({
-          kind: 'confirm',
-          title: 'Import Codex login',
-          body:
-            'Read the access token and account id from ~/.codex/auth.json on this Mac and store them in the ' +
-            'VM vault. The refresh token stays on this Mac. Cells never receive the token.',
-          action: () => client.call('setup.importCodex'),
-        });
-      }
-      if (ch === 'r') return refreshSetup();
-      return;
-    }
-
-    // ── agent chat ──
-    if (key.ctrl && ch === 'x') {
-      setFocusTask((f) => ({ ...f, [current]: null }));
-      return say('the next message starts a new task');
-    }
-    if (key.ctrl && ch === 'e') return editDraft();
-    if (key.ctrl && ch === 'u') return setInput('');
-    if (key.pageUp)
-      return setScroll((s) => Math.min(maxScroll, s + Math.floor(transcriptHeight / 2)));
-    if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.floor(transcriptHeight / 2)));
-    if (key.upArrow) return setScroll((s) => Math.min(maxScroll, s + 1));
-    if (key.downArrow) return setScroll((s) => Math.max(0, s - 1));
-    if (key.escape) {
-      // Esc first cancels a running turn, then clears the draft, then leaves the chat.
-      if (task && (task.status === 'running' || task.status === 'queued')) {
-        void client.call('tasks.cancel', { taskId: task.id });
-        return say(`cancelling ${task.id}`);
-      }
-      if (input) return setInput('');
-      return back();
-    }
-    if (key.return) return submit();
-    if (key.backspace || key.delete) return setInput((v) => [...v].slice(0, -1).join(''));
-    if (ch && !key.ctrl && !key.meta) {
-      // Fast typing or a non-bracketed paste can deliver text and Enter in one chunk.
-      const nl = ch.search(/[\r\n]/);
-      if (nl >= 0) return submit(input + ch.slice(0, nl));
-      setInput((v) => v + ch);
-    }
+    if (!stroke) return;
+    const found = resolve(keymap, active, [stroke]);
+    if (found.kind === 'pending') return setPending([stroke]);
+    if (found.kind === 'action') return run(found.action);
+  };
+  useInput((ch, key) => {
+    for (const [c, k] of splitChunk(ch, key)) handleInput(c, k);
   });
 
   useEffect(() => {
@@ -897,7 +1230,7 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
   if (modal) {
     return (
       <Box flexDirection="column" width={columns} height={rows}>
-        <ModalView modal={modal} width={columns} height={rows} />
+        <ModalView modal={modal} width={columns} height={rows} keymap={keymap} />
       </Box>
     );
   }
@@ -909,28 +1242,78 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
         }${
           agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
-        }${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
+        }${agent.skills?.length ? ` · 🧩 ${agent.skills.join(', ')}` : ''}${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
-  const status =
-    flash ||
-    (focus === 'side'
-      ? '↑↓ select · Enter/→ open · [ ] task page · / filter tasks · 1 2 3 sections · Tab pane · ? help'
-      : detail
-        ? `Enter continue in @${detail.agentId}${busy ? ' · c cancel' : ' · D delete'} · ↑↓ PgUp/PgDn scroll · [ ] page · ^T tools · Esc sidebar · ? help`
-        : agent
-          ? 'Enter send · ^X new task · Esc cancel/sidebar · ^E editor · ^T tools · ^V verbose · PgUp/PgDn · Tab sidebar'
-          : current === 'connectors'
-            ? '↑↓ choose · Enter connect · g github from gh · p aws profile · m service writes auto/ask · d disconnect · Esc'
-            : current === 'skills'
-              ? '↑↓ choose · a add · d remove · Esc sidebar'
-              : current === 'runtimes'
-                ? 's start VM · I install · u unlock · W workspaces · i Codex · c Claude · r refresh · Esc'
-                : 'Esc sidebar · ? help · q quit') + (proposals.length ? ' · ^O proposal' : '');
-  const statusLine = approvals.length
-    ? `⏸ ${approvals.length} write${approvals.length === 1 ? '' : 's'} waiting for approval (^A) · ${status}`
-    : status;
-
+  /** `key label` for an action in this view, from the effective bindings (shortest first). */
+  const hint = (action: ActionId, label: string) => {
+    const keys = keysFor(keymap, active, action).sort(
+      (a, b) => a.split(' ').length - b.split(' ').length,
+    );
+    return keys[0] ? `${keyLabel(keys[0])} ${label}` : '';
+  };
+  const hints: [ActionId, string][] =
+    context === 'sidebar'
+      ? [
+          ['focus:main', 'open'],
+          ['tasks:pageNext', 'task page'],
+          ['tasks:filter', 'filter'],
+          ['focus:toggle', 'pane'],
+        ]
+      : context === 'task'
+        ? [
+            ['task:continue', `continue in @${detail?.agentId}`],
+            busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
+            ['scroll:pageUp', 'scroll'],
+            ['focus:sidebar', 'sidebar'],
+          ]
+        : context === 'chat'
+          ? [
+              ['chat:submit', 'send'],
+              ['task:new', 'new task'],
+              ['chat:escape', 'cancel/sidebar'],
+              ['agent:settings', 'settings'],
+              ['chat:editor', 'editor'],
+              ['transcript:tools', 'tools'],
+            ]
+          : context === 'connectors'
+            ? [
+                ['connectors:connect', 'connect'],
+                ['connectors:ghImport', 'github from gh'],
+                ['connectors:awsProfile', 'aws profile'],
+                ['connectors:mode', 'service writes'],
+                ['connectors:disconnect', 'disconnect'],
+              ]
+            : context === 'skills'
+              ? [
+                  ['skills:add', 'add'],
+                  ['skills:update', 'update'],
+                  ['skills:remove', 'remove'],
+                  ['focus:sidebar', 'sidebar'],
+                ]
+              : [
+                  ['setup:vmStart', 'start VM'],
+                  ['setup:install', 'install'],
+                  ['setup:unlock', 'unlock'],
+                  ['setup:workspaces', 'workspaces'],
+                  ['setup:codex', 'Codex'],
+                  ['setup:claude', 'Claude'],
+                ];
+  const status = pending.length
+    ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
+    : flash ||
+      [
+        ...hints.map(([a, l]) => hint(a, l)),
+        proposals.length ? hint('builder:proposal', 'proposal') : '',
+        hint('app:palette', 'commands'),
+        hint('app:help', 'keys'),
+      ]
+        .filter(Boolean)
+        .join(' · ');
+  const statusLine =
+    approvals.length && !pending.length
+      ? `⏸ ${approvals.length} write${approvals.length === 1 ? '' : 's'} waiting for approval (${keyLabel(keysFor(keymap, active, 'approvals:open')[0] ?? '')}) · ${status}`
+      : status;
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       <Box flexDirection="row" height={bodyHeight}>
@@ -976,10 +1359,11 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
               </Box>
               <Text dimColor>{offset > 0 ? `↓ ${offset} more lines (PgDn)` : ' '}</Text>
               <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-                <Text wrap="truncate-start">
+                <Text wrap="truncate">
                   <Text color="cyan">› </Text>
-                  {input}
-                  <Text inverse> </Text>
+                  {inputView.before}
+                  <Text inverse>{inputView.at}</Text>
+                  {inputView.after}
                 </Text>
               </Box>
             </>
@@ -1028,11 +1412,66 @@ export function App({ client, initialAgents, initialTasks, onMouse, compose }: A
           )}
         </Box>
       </Box>
+      {whichKeyRows ? <WhichKey next={next} width={columns} /> : null}
       <Text dimColor wrap="truncate">
         {statusLine}
       </Text>
     </Box>
   );
+}
+
+/** The keys that can follow the pending chord, in two columns. */
+function WhichKey({ next, width }: { next: [string, ActionId][]; width: number }) {
+  const half = Math.ceil(next.length / 2);
+  const col = Math.floor((width - 4) / 2);
+  const cell = ([k, a]: [string, ActionId]) =>
+    truncate(`${keyLabel(k).padEnd(6)} ${ACTIONS[a].title}`, col - 1).padEnd(col);
+  return (
+    <Box flexDirection="column" paddingX={1} height={half + 1}>
+      <Text bold color="cyan">
+        Next key
+      </Text>
+      {Array.from({ length: half }, (_, i) => (
+        <Text key={i} wrap="truncate">
+          {cell(next[i]!)}
+          {next[i + half] ? cell(next[i + half]!) : ''}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+/** Actions for the command palette in a context, filtered by the query (subsequence match). */
+export function paletteEntries(
+  keymap: KeyMap,
+  context: Context,
+  query: string,
+): { action: ActionId; title: string; keys: string }[] {
+  const active: Context[] = [context, 'global'];
+  const q = query.toLowerCase().replace(/\s+/g, '');
+  const matches = (text: string) => {
+    let i = 0;
+    for (const c of text.toLowerCase()) if (c === q[i]) i++;
+    return i === q.length;
+  };
+  return (Object.keys(ACTIONS) as ActionId[])
+    .filter((a) => {
+      const ctx: readonly Context[] = ACTIONS[a].contexts;
+      return (ctx.includes(context) || ctx.includes('global')) && a !== 'app:palette';
+    })
+    .map((a) => ({
+      action: a,
+      title: ACTIONS[a].title,
+      keys: keysFor(keymap, active, a).map(keyLabel).join(', '),
+    }))
+    .filter((e) => matches(`${e.title} ${e.action}`))
+    .sort((x, y) => {
+      // Titles containing the query as typed first, then this view's own commands.
+      const rank = (e: { action: ActionId; title: string }) =>
+        (e.title.toLowerCase().includes(query.toLowerCase()) ? 0 : 2) +
+        ((ACTIONS[e.action].contexts as readonly Context[]).includes(context) ? 0 : 1);
+      return rank(x) - rank(y);
+    });
 }
 
 function Sidebar(props: {
@@ -1278,8 +1717,69 @@ function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[]
   );
 }
 
-function ModalView({ modal, width, height }: { modal: Modal; width: number; height: number }) {
+const CONTEXT_LABEL: Record<Context, string> = {
+  global: 'Everywhere',
+  sidebar: 'Sidebar',
+  chat: 'Agent chat',
+  task: 'Task',
+  runtimes: 'Runtimes',
+  skills: 'Skills',
+  connectors: 'Connectors',
+};
+
+/** Rows of the help: the view's bindings, then the global ones, then fixed keys. */
+export function helpRows(keymap: KeyMap, context: Context): [string, string][] {
+  const group = (ctx: Context, skip: Set<ActionId>): [string, string][] => {
+    const byAction = new Map<ActionId, string[]>();
+    for (const [keys, action] of keymap.contexts[ctx]) {
+      if (skip.has(action)) continue;
+      byAction.set(action, [...(byAction.get(action) ?? []), keyLabel(keys)]);
+    }
+    return [...byAction].map(([a, keys]) => [keys.join('  '), ACTIONS[a].title]);
+  };
+  const own = context === 'global' ? [] : group(context, new Set());
+  const ownActions = new Set([...keymap.contexts[context].values()]);
+  const rows: [string, string][] = [];
+  if (own.length) rows.push([CONTEXT_LABEL[context], ''], ...own, ['', '']);
+  rows.push(
+    [`Everywhere (leader ${keyLabel(keymap.leader)}, then a key)`, ''],
+    ...group('global', context === 'global' ? new Set() : ownActions),
+  );
+  if (context === 'chat') {
+    rows.push(
+      ['', ''],
+      ['Text input (fixed)', ''],
+      ['← →  ^B ^F', 'move by character'],
+      ['Alt+B Alt+F', 'move by word'],
+      ['Home End  ^A ^E', 'start / end of the line'],
+      ['Backspace ^D', 'delete before / at the cursor'],
+      ['^W Alt+D', 'delete the word before / after'],
+      ['^U ^K', 'delete to the start / end of the line'],
+    );
+  }
+  rows.push(
+    ['', ''],
+    ['Fixed', ''],
+    ['Ctrl+C', 'quit'],
+    ['y n Esc', 'approval, confirmation and proposal dialogs'],
+    ['Space Enter', 'agent settings: select, then review the change (s in a proposal)'],
+  );
+  return rows;
+}
+
+function ModalView({
+  modal,
+  width,
+  height,
+  keymap,
+}: {
+  modal: Modal;
+  width: number;
+  height: number;
+  keymap: KeyMap;
+}) {
   const inner = width - 6;
+  const label = (action: ActionId) => keyLabel(keysFor(keymap, ['global'], action)[0] ?? '');
   if (modal.kind === 'secret') {
     const fields = SECRET_FIELDS[modal.connector];
     const field = fields[modal.index]!;
@@ -1341,35 +1841,14 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
         </Box>
         <Box flexGrow={1} />
         <Text dimColor>The content above comes from the agent. This dialog is drawn by Anchi.</Text>
-        <Text bold>[y] approve · [n] deny · Esc decide later (^A)</Text>
+        <Text bold>{`[y] approve · [n] deny · Esc decide later (${label('approvals:open')})`}</Text>
       </Box>
     );
   }
   if (modal.kind === 'help') {
-    const keys: [string, string][] = [
-      ['Tab / Shift+Tab', 'switch between the sidebar and the main pane (or click either)'],
-      ['Ctrl+N / Ctrl+P', 'next / previous sidebar item, from anywhere'],
-      ['', ''],
-      ['Sidebar', ''],
-      ['↑ ↓  k j', 'move'],
-      ['Home End  g G', 'first / last item'],
-      ['1 2 3', 'Configure / Agents / Tasks'],
-      ['PgUp PgDn  [ ]', 'previous / next page of tasks (or the wheel, or ‹ prev / next ›)'],
-      ['/', 'filter tasks: @agent, status:failed, words'],
-      ['Enter → l', 'open the item in the main pane'],
-      ['', ''],
-      ['Main pane', ''],
-      ['Esc', 'chat: cancel the running turn, then clear the draft, then back to the sidebar'],
-      ['Esc ← h', 'other views: back to the sidebar'],
-      ['↑ ↓  PgUp PgDn', 'scroll the transcript (or the wheel)'],
-      ['Enter', 'chat: send · task: continue it in the chat · connectors: connect'],
-      ['c  D', 'task: cancel it · delete it with its delegated tasks'],
-      ['Ctrl+X  Ctrl+E', 'chat: new task · compose in $EDITOR'],
-      ['Ctrl+T  Ctrl+V', 'expand tool calls (or click one) · verbose tool output'],
-      ['Ctrl+O', 'reopen the pending builder proposal'],
-      ['Ctrl+A', 'review a write waiting for your approval'],
-      ['q  Ctrl+C', 'quit (the daemon and running tasks keep going)'],
-    ];
+    const rows = helpRows(keymap, modal.context);
+    const room = Math.max(3, height - 4);
+    const start = Math.min(modal.scroll, Math.max(0, rows.length - room));
     return (
       <Box
         flexDirection="column"
@@ -1382,13 +1861,53 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
         <Text bold color="cyan">
           Keys
         </Text>
-        {keys.map(([k, v], i) => (
-          <Text key={i} wrap="truncate" bold={!v && Boolean(k)}>
-            {v ? `${k.padEnd(18)}${v}` : k || ' '}
+        <Box flexDirection="column" height={room}>
+          {rows.slice(start, start + room).map(([k, v], i) => (
+            <Text key={i} wrap="truncate" bold={!v && Boolean(k)}>
+              {v ? `${k.padEnd(20)}${v}` : k || ' '}
+            </Text>
+          ))}
+        </Box>
+        <Text dimColor wrap="truncate">
+          ↑↓ scroll · Esc or ? close · change keys in ~/.anchi/keybindings.json (`anchi keys`)
+        </Text>
+      </Box>
+    );
+  }
+  if (modal.kind === 'palette') {
+    const entries = paletteEntries(keymap, modal.context, modal.query);
+    const room = Math.max(3, height - 6);
+    const first = Math.max(0, modal.cursor - room + 1);
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          Commands · {CONTEXT_LABEL[modal.context]}
+        </Text>
+        <Box borderStyle="single" paddingX={1}>
+          <Text>
+            {sanitizeLine(modal.query)}
+            <Text inverse> </Text>
           </Text>
-        ))}
-        <Box flexGrow={1} />
-        <Text dimColor>Esc or ? to close</Text>
+        </Box>
+        <Box flexDirection="column" height={room}>
+          {entries.length ? (
+            entries.slice(first, first + room).map((e, i) => (
+              <Text key={e.action} inverse={first + i === modal.cursor} wrap="truncate">
+                {`${truncate(e.title, inner - 22).padEnd(inner - 20)}${e.keys}`}
+              </Text>
+            ))
+          ) : (
+            <Text dimColor>No command matches.</Text>
+          )}
+        </Box>
+        <Text dimColor>Type to filter · ↑↓ choose · Enter run · Esc close</Text>
       </Box>
     );
   }
@@ -1435,6 +1954,98 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
       </Box>
     );
   }
+  if (modal.kind === 'settings') {
+    const frame = (children: React.ReactNode, foot: string) => (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          {modal.proposalId
+            ? `Proposal for @${modal.agentId}: settings`
+            : `@${modal.agentId}: settings`}
+        </Text>
+        {children}
+        <Box flexGrow={1} />
+        <Text dimColor wrap="truncate">
+          {foot}
+        </Text>
+      </Box>
+    );
+    if (!modal.data || !modal.state) return frame(<Text dimColor>Loading…</Text>, 'Esc close');
+    const rows = settingsRows(modal.data, modal.state);
+    const items = rows.filter((r) => r.kind !== 'header');
+    const at = rows.indexOf(items[modal.cursor]!);
+    const room = Math.max(3, height - 5);
+    const first = Math.max(0, Math.min(at - Math.floor(room / 2), rows.length - room));
+    return frame(
+      <Box flexDirection="column" height={room}>
+        {rows.slice(first, first + room).map((r, i) =>
+          r.kind === 'header' ? (
+            <Text key={i} dimColor bold={!r.text.startsWith(' ')} wrap="truncate">
+              {r.text}
+            </Text>
+          ) : (
+            <Text key={i} inverse={first + i === at} wrap="truncate">
+              {`${r.mark.padEnd(5)}${truncate(sanitizeLine(r.label), 30).padEnd(31)}`}
+              <Text dimColor={first + i !== at}>
+                {truncate(sanitizeLine(r.note), Math.max(10, inner - 38))}
+              </Text>
+            </Text>
+          ),
+        )}
+      </Box>,
+      `↑↓ choose · Space ${'select (workspaces: off → ro → rw)'} · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'} · Esc cancel`,
+    );
+  }
+  if (modal.kind === 'settingsReview') {
+    const u = modal.update;
+    const lines = sanitize(u.diff || '(no change)').split('\n');
+    const room = Math.max(3, height - 7 - u.errors.length - u.warnings.length);
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="magenta"
+        paddingX={2}
+      >
+        <Text bold color="magenta">
+          @{modal.agentId}: save these settings?
+        </Text>
+        <Box flexDirection="column" height={room}>
+          {lines.slice(0, room).map((l, i) => (
+            <Text
+              key={i}
+              wrap="truncate"
+              color={l.startsWith('+') ? 'green' : l.startsWith('-') ? 'red' : undefined}
+            >
+              {truncate(l, inner) || ' '}
+            </Text>
+          ))}
+        </Box>
+        {u.errors.map((e, i) => (
+          <Text key={`e${i}`} color="red" wrap="truncate">
+            {`✗ ${sanitizeLine(e)}`}
+          </Text>
+        ))}
+        {u.warnings.map((w, i) => (
+          <Text key={`w${i}`} color="yellow" wrap="truncate">
+            {`! ${sanitizeLine(w)}`}
+          </Text>
+        ))}
+        <Box flexGrow={1} />
+        <Text
+          bold
+        >{`${u.errors.length ? '' : '[y] save · '}[n] back to the settings · Esc back`}</Text>
+      </Box>
+    );
+  }
   const p = modal.proposal;
   const body: { text: string; color?: string }[] = [];
   const add = (text: string, color?: string) => {
@@ -1450,7 +2061,7 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
     for (const l of (p.imageDiff || '(unchanged)').split('\n'))
       add(l, l.startsWith('+') ? 'green' : l.startsWith('-') ? 'red' : undefined);
   }
-  const room = height - 6 - (p.errors.length ? p.errors.length + 1 : 0);
+  const room = height - 6 - (p.errors.length ? p.errors.length + 1 : 0) - (p.warnings?.length ?? 0);
   const start = Math.min(modal.scroll, Math.max(0, body.length - room));
   return (
     <Box
@@ -1483,9 +2094,13 @@ function ModalView({ modal, width, height }: { modal: Modal; width: number; heig
           ))}
         </Box>
       ) : null}
+      {(p.warnings ?? []).map((w, i) => (
+        <Text key={`w${i}`} color="yellow" wrap="truncate">
+          {`! ${truncate(sanitizeLine(w), inner - 2)}`}
+        </Text>
+      ))}
       <Text bold>
-        {p.errors.length ? '' : '[y] write these files · '}[n] discard · Esc decide later (^O) · ↑↓
-        scroll
+        {`${p.errors.length ? '' : '[y] write these files · '}[s] settings · [n] discard · Esc decide later (${label('builder:proposal')}) · ↑↓ scroll`}
       </Text>
     </Box>
   );

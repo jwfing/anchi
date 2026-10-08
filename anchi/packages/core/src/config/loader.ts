@@ -73,9 +73,13 @@ export function imageFile(layout: HomeLayout, id: string): string {
   return findYaml(layout.imagesDir, id) ?? join(layout.imagesDir, `${id}.yaml`);
 }
 
-/** Loads one layer and inlines its prompt file, resolved relative to the declaring file. */
-function loadLayer(file: string): AgentLayer {
-  const layer = readYaml(file, agentLayerSchema);
+/**
+ * Loads one layer and inlines its prompt file, resolved relative to the declaring file. `raw`
+ * replaces the file's text (validating a change before it is written).
+ */
+function loadLayer(file: string, raw?: string): AgentLayer {
+  const layer =
+    raw === undefined ? readYaml(file, agentLayerSchema) : parseYamlAs(raw, agentLayerSchema, file);
   if (layer.prompt?.file) {
     const promptFile = resolvePath(layer.prompt.file, dirname(file));
     if (!existsSync(promptFile))
@@ -101,7 +105,12 @@ export function mergeLayers<T>(base: T, over: T): T {
   return out as T;
 }
 
-export function resolveAgent(id: string, layout: HomeLayout = homeLayout()): ResolvedAgent {
+/** The agent `id` as configured, or as it would be if its file held `override`. */
+export function resolveAgent(
+  id: string,
+  layout: HomeLayout = homeLayout(),
+  override?: string,
+): ResolvedAgent {
   const file0 = findYaml(layout.agentsDir, id);
   if (!file0) throw new ConfigError(`agent "${id}" not found in ${layout.agentsDir}`);
 
@@ -109,7 +118,7 @@ export function resolveAgent(id: string, layout: HomeLayout = homeLayout()): Res
   let file: string | undefined = file0;
   while (file) {
     if (chain.some((c) => c.file === file)) throw new ConfigError('circular "extends"', file);
-    const layer = loadLayer(file);
+    const layer = loadLayer(file, file === file0 ? override : undefined);
     chain.unshift({ file, layer });
     if (!layer.extends) break;
     const parent = layer.extends;

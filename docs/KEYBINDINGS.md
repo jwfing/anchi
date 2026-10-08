@@ -1,0 +1,85 @@
+# Key bindings
+
+The TUI binds named actions to keys per view. Three rules keep it usable inside other terminal programs:
+
+1. **Every action has a leader binding.** Press the leader, **Ctrl+X** by default, then one key: **^X n** starts a new task. Tmux (Ctrl+B), screen (Ctrl+A), zellij and herdr leave Ctrl+X alone. After the leader, a panel lists the keys that can follow it; **Esc** cancels, and so does a three-second pause.
+2. **Views without a text input use plain keys.** The sidebar, task details and the Configure screens bind letters such as **j k / [ ] c D**. In the agent chat, printable keys always type text.
+3. **The chat input keeps standard line editing.** Ctrl+A, Ctrl+E, Ctrl+U and the other editing keys do what they do in a shell. They cannot be rebound in the chat.
+
+**^X Space** (or **^X p**) opens the command palette: type to filter every command of the current view, **Enter** runs it. **?** in views without a text input, or **^X ?** anywhere, lists the keys of the current view.
+
+## Defaults
+
+### Everywhere
+
+| Keys | Action |
+|---|---|
+| Tab, Shift+Tab | Switch between the sidebar and the main pane |
+| ^N, ^P (or ^X j, ^X k) | Next / previous sidebar item |
+| ^X 1, ^X 2, ^X 3 | Configure, Agents, Tasks |
+| ^X b | Agent builder |
+| ^X n | New task (a new session) for the agent shown |
+| ^X c | Cancel the running task |
+| ^X a | Review a write waiting for approval |
+| ^X s | Agent settings: skills, connectors, workspaces |
+| ^X o | Reopen the pending builder proposal |
+| ^X t, ^X v | Expand tool calls, verbose tool output |
+| ^X / | Filter tasks |
+| ^X Space, ^X p | Command palette |
+| ^X ? | Keys of this view |
+| ^X q, Ctrl+C | Quit (the daemon and running tasks keep going) |
+
+### Agent chat
+
+| Keys | Action |
+|---|---|
+| Enter | Send (a follow-up to the task shown, or a new task after ^X n) |
+| Esc | Cancel the running turn, then clear the draft, then back to the sidebar |
+| ↑ ↓ PgUp PgDn | Scroll the transcript |
+| Ctrl+G, ^X e | Compose in `$EDITOR` (also a fallback when an IME misbehaves) |
+| ← → ^B ^F, Alt+B Alt+F | Move by character, by word |
+| Home End, ^A ^E | Start, end of the line |
+| Backspace, ^D | Delete before, at the cursor |
+| ^W, Alt+D | Delete the word before, after |
+| ^U, ^K | Delete to the start, end of the line |
+
+### Sidebar
+
+↑ ↓ (j k) move, Home End (g G) first and last, PgUp PgDn ([ ]) task pages, 1 2 3 sections, Enter → (l) open, s agent settings, / filter, ? keys, q quit.
+
+### Task
+
+Enter continues the task in its agent's chat, c cancels it, D deletes it, [ ] turn task pages, ↑ ↓ (k j) PgUp PgDn scroll, Esc ← (h) back to the sidebar.
+
+### Configure
+
+- **Runtimes:** s start the VM, I install, u unlock the vault, W share workspaces, i import Codex, c connect Claude Code, r refresh.
+- **Skills:** ↑ ↓ (k j) choose, a add, u update to the latest commit of its URL, d remove.
+- **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
+
+The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Approval, confirmation and proposal dialogs always use **y**, **n** and **Esc** (and **s** in a proposal for its settings); they are not rebindable, so a held write is never approved by a key you configured for something else.
+
+## Changing keys
+
+`scripts/anchi keys init` writes `~/.anchi/keybindings.json`; `scripts/anchi keys` prints the effective bindings and anything it skipped. The TUI applies changes while it runs.
+
+```json
+{
+  "leader": "ctrl+x",
+  "bindings": [
+    { "context": "global", "bindings": { "ctrl+n": null, "ctrl+p": null, "alt+n": "task:new" } },
+    { "context": "chat", "bindings": { "ctrl+y": "chat:editor" } },
+    { "context": "sidebar", "bindings": { "x": "task:cancel" } }
+  ]
+}
+```
+
+- **Contexts:** `global`, `sidebar`, `chat`, `task`, `runtimes`, `skills`, `connectors`. A view's bindings come before the global ones.
+- **Actions** are named `namespace:action`; `scripts/anchi keys` lists them with their titles. `null` removes a binding.
+- **Keys:** `ctrl+`, `alt+` (also `meta`, `option`) and `shift+` with a key; `shift+g` is `G`. Named keys: `enter`, `esc`, `tab`, `space`, `up`, `down`, `left`, `right`, `pageup`, `pagedown`, `home`, `end`, `backspace`. A chord is keys separated by spaces (`ctrl+k ctrl+s`, up to three); `<leader>` stands for the leader.
+- **Leader:** Ctrl or Alt with a key that does not edit text. Changing it moves every `<leader>` binding.
+- **Reserved:** Ctrl+C (quit), and Ctrl+M, Ctrl+I and Ctrl+[, which terminals deliver as Enter, Tab and Esc. In `chat`, the line-editing keys.
+
+Problems are reported, not fatal: the TUI shows how many entries it skipped and keeps the rest.
+
+Terminals deliver no ⌘ keys to terminal programs, so Anchi binds none. Some multiplexers take keys first: zellij uses Ctrl+P, Ctrl+N and Ctrl+G by default, so inside zellij use the leader bindings or rebind.
