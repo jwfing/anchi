@@ -8,6 +8,7 @@ import {
   imageHash,
   loadImage,
   mergeLayers,
+  patchAgentYaml,
   resolveAgent,
 } from '../src/index.ts';
 
@@ -142,5 +143,55 @@ describe('loadImage', () => {
     expect(() => resolveAgent('sb', layout())).toThrow(/needs runtime codex/);
     write('agents/cron.yaml', "runtime: codex\ntriggers: [{ schedule: 'daily', text: x }]\n");
     expect(() => resolveAgent('cron', layout())).toThrow();
+  });
+});
+
+describe('patchAgentYaml', () => {
+  it('changes only the patched fields and keeps comments and order', () => {
+    const text = [
+      '# the developer agent',
+      'runtime: codex',
+      'connectors: [github] # what it may use',
+      'prompt:',
+      '  text: |',
+      '    Work carefully.',
+      'skills: [old]',
+      '',
+    ].join('\n');
+    const out = patchAgentYaml(text, {
+      skills: ['review', 'test'],
+      connectors: ['github', 'linear'],
+      workspaces: [
+        { path: 'projects/webapp', mode: 'rw' },
+        { path: 'docs', mode: 'ro', name: 'notes' },
+      ],
+    });
+    expect(out).toContain('# the developer agent');
+    expect(out).toContain('connectors: [github, linear] # what it may use');
+    expect(out).toContain('skills: [review, test]');
+    expect(out).toContain('    Work carefully.');
+    expect(out.indexOf('connectors')).toBeLessThan(out.indexOf('prompt'));
+    expect(out).toMatch(
+      /workspaces:\n  - path: projects\/webapp\n    mode: rw\n  - path: docs\n    name: notes/,
+    );
+  });
+
+  it('removes emptied lists, unless a template must be overridden', () => {
+    expect(patchAgentYaml('runtime: codex\nskills: [a]\n', { skills: [] })).toBe(
+      'runtime: codex\n',
+    );
+    expect(patchAgentYaml('extends: base\nskills: [a]\n', { skills: [] })).toContain('skills: []');
+    expect(patchAgentYaml('', { skills: ['a'] })).toBe('skills: [a]\n');
+    expect(() => patchAgentYaml('- a list\n', { skills: [] })).toThrow(/mapping/);
+  });
+
+  it('lets resolveAgent validate a change before it is written', () => {
+    write('agents/dev.yaml', 'runtime: codex\n');
+    const next = patchAgentYaml('runtime: codex\n', { connectors: ['notion'] });
+    expect(resolveAgent('dev', layout(), next).connectors).toEqual(['notion']);
+    expect(resolveAgent('dev', layout()).connectors).toEqual([]);
+    expect(() => resolveAgent('dev', layout(), 'runtime: codex\nconnectors: [jira]\n')).toThrow(
+      ConfigError,
+    );
   });
 });

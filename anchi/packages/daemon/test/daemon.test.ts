@@ -178,7 +178,8 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     setupSteps: SETUP_STEPS,
     layout,
     guest: new Guest(transport),
-    lima: new LimaTransport(),
+    // No limactl: the tests never depend on a VM of the machine they run on.
+    lima: new LimaTransport('secure-vm', join(root, 'no-limactl')),
     log: () => {},
     quiet: true,
     idleMs,
@@ -841,6 +842,121 @@ describe('builder', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen).toEqual(['devops']);
     expect(transport.starts[0]![6]).toBe('-');
+  });
+});
+
+describe('agent settings', () => {
+  function workspaceTree() {
+    const ws = join(root, 'ws');
+    for (const d of ['projects/webapp/src', 'docs', '.hidden'])
+      mkdirSync(join(ws, d), { recursive: true });
+    write('skills/review/SKILL.md', '---\nname: review\ndescription: Reviews pull requests\n---\n');
+    return ws;
+  }
+
+  it('shows settings and what exists, previews a patch and applies only the reviewed one', async () => {
+    write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
+    const { client } = await start(60_000, undefined, workspaceTree());
+    const settings = await client.call('agents.settings', { agentId: 'dev' });
+    expect(settings.current).toEqual({ skills: [], connectors: ['github'], workspaces: [] });
+    expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
+    expect(settings.inventory.workspaces.dirs).toEqual(['docs', 'projects', 'projects/webapp']);
+    expect(settings.inventory.agents).toEqual(['dev']);
+
+    const patch = {
+      skills: ['review'],
+      workspaces: [{ path: 'projects/webapp', mode: 'rw' as const }],
+    };
+    const preview = await client.call('agents.update', { agentId: 'dev', patch });
+    expect(preview).toMatchObject({ applied: false, errors: [] });
+    expect(preview.diff).toMatch(/^\+ skills: \[review\]$/m);
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).not.toMatch(/skills/);
+
+    const done = await client.call('agents.update', {
+      agentId: 'dev',
+      patch,
+      apply: true,
+      base: preview.base,
+    });
+    expect(done.applied).toBe(true);
+    const text = readFileSync(join(root, 'agents/dev.yaml'), 'utf8');
+    expect(text).toMatch(/^# my developer/);
+    expect(text).toMatch(/connectors: \[github\] # pushes/);
+    const agents = await client.call('agents.list');
+    expect(agents.find((a) => a.id === 'dev')?.workspaces).toEqual(['webapp (rw)']);
+    // The diff was made against the old file: applying it again is refused.
+    await expect(
+      client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base }),
+    ).rejects.toThrow(/changed since you reviewed it/);
+  });
+
+  it('blocks references to what does not exist and refuses invalid patches', async () => {
+    const { client } = await start(60_000, undefined, workspaceTree());
+    const bad = await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { skills: ['missing'], workspaces: [{ path: 'nowhere', mode: 'ro' }] },
+    });
+    expect(bad.errors).toEqual([
+      'skill "missing" is not installed',
+      'workspace "nowhere" is not a directory under ~/AnchiWorkspaces',
+    ]);
+    await expect(
+      client.call('agents.update', {
+        agentId: 'dev',
+        patch: { skills: ['missing'] },
+        apply: true,
+        base: bad.base,
+      }),
+    ).rejects.toThrow(/cannot save/);
+    await expect(
+      client.call('agents.update', { agentId: 'dev', patch: { connectors: ['jira'] } }),
+    ).rejects.toThrow(/invalid settings/);
+    await expect(
+      client.call('agents.update', { agentId: 'dev', patch: { skills: ['a', 'a'] } }),
+    ).rejects.toThrow(/twice/);
+    await expect(
+      client.call('agents.update', { agentId: 'builder', patch: { skills: [] } }),
+    ).rejects.toThrow(/built in/);
+    expect(await client.call('agents.settings', { agentId: 'builder' })).toMatchObject({
+      editable: false,
+    });
+  });
+
+  it('gives the builder the inventory each turn and checks and revises its proposals', async () => {
+    const { client, daemon } = await start(60_000, undefined, workspaceTree());
+    const task = await client.call('tasks.create', { agentId: 'builder', text: 'hello' });
+    await client.call('tasks.wait', { taskId: task.id });
+    const events = await client.call('tasks.events', { taskId: task.id });
+    // The runtime got the inventory; the transcript shows only what the user typed.
+    expect(events.find((e) => e.event.type === 'input')?.event).toMatchObject({ text: 'hello' });
+    const said = events.find((e) => e.event.type === 'message')?.event as { text: string };
+    expect(said.text).toContain('<anchi-inventory>');
+    expect(said.text).toContain('- review: Reviews pull requests');
+    expect(said.text).toContain('projects/webapp');
+
+    const missing = daemon.proposals.add(
+      parseBlocks('```anchi-agent id=rev\nruntime: codex\nskills: [nope]\ndelegates: [ghost]\n```'),
+    )!;
+    expect(missing.errors).toEqual([
+      'skill "nope" is not installed',
+      'delegate "ghost" is not an agent',
+    ]);
+
+    const proposal = daemon.proposals.add(
+      parseBlocks('```anchi-agent id=rev\nruntime: codex # ok\n```'),
+    )!;
+    const revised = await client.call('builder.revise', {
+      proposalId: proposal.id,
+      patch: { skills: ['review'], connectors: ['github'] },
+    });
+    expect(revised.id).toBe(proposal.id);
+    expect(revised.errors).toEqual([]);
+    expect(revised.agentYaml).toBe('runtime: codex # ok\nskills: [review]\nconnectors: [github]\n');
+    expect(
+      (await client.call('agents.settings', { proposalId: proposal.id })).current.skills,
+    ).toEqual(['review']);
+    await client.call('builder.apply', { proposalId: proposal.id });
+    expect(readFileSync(join(root, 'agents/rev.yaml'), 'utf8')).toMatch(/skills: \[review\]/);
   });
 });
 

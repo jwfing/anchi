@@ -50,6 +50,10 @@ export const ACTIONS = {
   'task:continue': { title: "Continue the task in its agent's chat", contexts: ['task'] },
   'task:delete': { title: 'Delete the task and the tasks it delegated', contexts: ['task'] },
   'approvals:open': { title: 'Review a write waiting for approval', contexts: ['global'] },
+  'agent:settings': {
+    title: 'Agent settings: skills, connectors, workspaces',
+    contexts: ['global'],
+  },
   'builder:proposal': { title: 'Reopen the pending builder proposal', contexts: ['global'] },
   'transcript:tools': { title: 'Expand or collapse tool calls', contexts: ['global'] },
   'transcript:verbose': { title: 'Verbose tool output', contexts: ['global'] },
@@ -74,6 +78,10 @@ export const ACTIONS = {
   'setup:refresh': { title: 'Refresh', contexts: ['runtimes', 'connectors'] },
   'skills:add': { title: 'Add a skill (local directory or GitHub URL)', contexts: ['skills'] },
   'skills:remove': { title: 'Remove the skill', contexts: ['skills'] },
+  'skills:update': {
+    title: 'Update the skill to the latest commit of its URL',
+    contexts: ['skills'],
+  },
   'connectors:connect': { title: 'Connect', contexts: ['connectors'] },
   'connectors:ghImport': { title: 'GitHub: import the gh CLI token', contexts: ['connectors'] },
   'connectors:awsProfile': { title: 'AWS: connect through a profile', contexts: ['connectors'] },
@@ -120,6 +128,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     '<leader> n': 'task:new',
     '<leader> c': 'task:cancel',
     '<leader> a': 'approvals:open',
+    '<leader> s': 'agent:settings',
     '<leader> o': 'builder:proposal',
     '<leader> t': 'transcript:tools',
     '<leader> v': 'transcript:verbose',
@@ -145,6 +154,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     right: 'focus:main',
     l: 'focus:main',
     '/': 'tasks:filter',
+    s: 'agent:settings',
   },
   chat: {
     enter: 'chat:submit',
@@ -182,7 +192,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     c: 'setup:claude',
     r: 'setup:refresh',
   },
-  skills: { ...VIEW, ...BACK, ...LIST, a: 'skills:add', d: 'skills:remove' },
+  skills: { ...VIEW, ...BACK, ...LIST, a: 'skills:add', d: 'skills:remove', u: 'skills:update' },
   connectors: {
     ...VIEW,
     ...BACK,

@@ -30,9 +30,11 @@ describe('keybindings.json', () => {
   it('reloads when the file changes', async () => {
     const seen: string[] = [];
     const stop = watchKeyMap(file, (r) => seen.push(r.keymap.leader));
-    writeFileSync(file, JSON.stringify({ leader: 'ctrl+g' }));
-    for (let i = 0; i < 50 && !seen.includes('ctrl+g'); i++)
-      await new Promise((r) => setTimeout(r, 20));
+    // macOS starts watching a moment after watch() returns: write again until it reports.
+    for (let i = 0; i < 20 && !seen.includes('ctrl+g'); i++) {
+      writeFileSync(file, JSON.stringify({ leader: 'ctrl+g' }));
+      await new Promise((r) => setTimeout(r, 250));
+    }
     stop();
     expect(seen).toContain('ctrl+g');
   });

@@ -72,6 +72,8 @@ export interface HubOptions {
   log?(msg: string): void;
   /** Agents defined by Anchi itself (the builder); their ids are reserved. */
   builtins?: ResolvedAgent[];
+  /** Rewrites a turn's input before the runtime sees it (the builder's inventory). */
+  turnInput?: (agent: ResolvedAgent, text: string) => string | Promise<string>;
 }
 
 export interface HubEvents {
@@ -181,6 +183,7 @@ export class Hub extends EventEmitter<HubEvents> {
           triggers: s.agent?.triggers.length ?? 0,
           workspaces: s.agent?.workspaces.map((w) => `${workspaceName(w)} (${w.mode})`) ?? [],
           delegates: s.agent?.delegates ?? [],
+          skills: s.agent?.skills ?? [],
           error: s.error,
           file: s.agent?.sourceFiles.at(-1) ?? agentFile(this.opts.layout, s.id),
         };
@@ -452,10 +455,16 @@ export class Hub extends EventEmitter<HubEvents> {
         setTimeout(() => this.closeCell(task.id, 'turn timed out'), 10_000).unref();
       }, limit);
       const prompt = instructions(agent);
+      // Without the extra context the turn still runs, on the user's text alone.
+      const input = this.opts.turnInput
+        ? await Promise.resolve()
+            .then(() => this.opts.turnInput!(agent, job.text))
+            .catch(() => job.text)
+        : job.text;
       try {
         for await (const event of cell.session.run({
           turn: turnId,
-          input: job.text,
+          input,
           resumeId: task.resumeId ?? undefined,
           options: {
             model: agent.model,

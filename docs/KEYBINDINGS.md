@@ -21,6 +21,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X n | New task (a new session) for the agent shown |
 | ^X c | Cancel the running task |
 | ^X a | Review a write waiting for approval |
+| ^X s | Agent settings: skills, connectors, workspaces |
 | ^X o | Reopen the pending builder proposal |
 | ^X t, ^X v | Expand tool calls, verbose tool output |
 | ^X / | Filter tasks |
@@ -44,7 +45,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 
 ### Sidebar
 
-↑ ↓ (j k) move, Home End (g G) first and last, PgUp PgDn ([ ]) task pages, 1 2 3 sections, Enter → (l) open, / filter, ? keys, q quit.
+↑ ↓ (j k) move, Home End (g G) first and last, PgUp PgDn ([ ]) task pages, 1 2 3 sections, Enter → (l) open, s agent settings, / filter, ? keys, q quit.
 
 ### Task
 
@@ -53,10 +54,10 @@ Enter continues the task in its agent's chat, c cancels it, D deletes it, [ ] tu
 ### Configure
 
 - **Runtimes:** s start the VM, I install, u unlock the vault, W share workspaces, i import Codex, c connect Claude Code, r refresh.
-- **Skills:** ↑ ↓ (k j) choose, a add, d remove.
+- **Skills:** ↑ ↓ (k j) choose, a add, u update to the latest commit of its URL, d remove.
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
 
-Approval, confirmation and proposal dialogs always use **y**, **n** and **Esc**; they are not rebindable, so a held write is never approved by a key you configured for something else.
+The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Approval, confirmation and proposal dialogs always use **y**, **n** and **Esc** (and **s** in a proposal for its settings); they are not rebindable, so a held write is never approved by a key you configured for something else.
 
 ## Changing keys
 

@@ -1,6 +1,9 @@
 /** @jsxRuntime automatic */
 import type {
+  AgentPatch,
+  AgentSettings,
   AgentSummary,
+  AgentUpdate,
   Approval,
   BuilderProposal,
   ConnectorId,
@@ -33,6 +36,14 @@ import {
   strokeOf,
 } from './keys.ts';
 import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
+import {
+  initialSettings,
+  type SettingsRow,
+  type SettingsState,
+  settingsPatch,
+  settingsRows,
+  toggleSetting,
+} from './settings.ts';
 import { type Line, type Tone, transcriptLines, truncate } from './lines.ts';
 import type { MouseEvent } from './mouse.ts';
 
@@ -125,6 +136,23 @@ type Modal =
   | { kind: 'help'; context: Context; scroll: number }
   | { kind: 'palette'; context: Context; query: string; cursor: number }
   | { kind: 'approval'; approval: Approval }
+  | {
+      kind: 'settings';
+      agentId: string;
+      /** Set when the panel edits a builder proposal instead of the agent's file. */
+      proposalId?: string;
+      data: AgentSettings | null;
+      state: SettingsState | null;
+      cursor: number;
+    }
+  | {
+      kind: 'settingsReview';
+      agentId: string;
+      patch: AgentPatch;
+      update: AgentUpdate;
+      /** The panel to return to on n or Esc. */
+      back: Extract<Modal, { kind: 'settings' }>;
+    }
   | {
       kind: 'text';
       title: string;
@@ -601,6 +629,65 @@ export function App({
     });
   };
 
+  /** Opens the settings panel of an agent, or of a pending builder proposal. */
+  const openSettings = (target: { agentId: string } | { proposalId: string; agentId: string }) => {
+    const proposalId = 'proposalId' in target ? target.proposalId : undefined;
+    setModal({
+      kind: 'settings',
+      agentId: target.agentId,
+      proposalId,
+      data: null,
+      state: null,
+      cursor: 0,
+    });
+    void client
+      .call('agents.settings', proposalId ? { proposalId } : { agentId: target.agentId })
+      .then((data) => {
+        if (!data.editable) {
+          setModal(null);
+          return say(data.reason ?? `@${data.agentId} cannot be edited here`);
+        }
+        setModal((m) =>
+          m?.kind === 'settings' && m.agentId === target.agentId && !m.data
+            ? { ...m, data, state: initialSettings(data) }
+            : m,
+        );
+      })
+      .catch((e: Error) => {
+        setModal(null);
+        say(e.message);
+      });
+  };
+
+  /** Shows what the panel's changes do to the agent file, or revises the proposal. */
+  const reviewSettings = (m: Extract<Modal, { kind: 'settings' }>) => {
+    if (!m.data || !m.state) return;
+    const patch = settingsPatch(m.data, m.state);
+    if (!Object.keys(patch).length) {
+      setModal(m.proposalId ? (proposalModal(m.proposalId) ?? null) : null);
+      return say('nothing changed');
+    }
+    if (m.proposalId) {
+      return void client
+        .call('builder.revise', { proposalId: m.proposalId, patch })
+        .then((proposal) => {
+          setProposals((p) => p.map((x) => (x.id === proposal.id ? proposal : x)));
+          setModal({ kind: 'proposal', proposal, scroll: 0 });
+        })
+        .catch((e: Error) => say(e.message));
+    }
+    void client
+      .call('agents.update', { agentId: m.agentId, patch })
+      .then((update) =>
+        setModal({ kind: 'settingsReview', agentId: m.agentId, patch, update, back: m }),
+      )
+      .catch((e: Error) => say(e.message));
+  };
+  const proposalModal = (id: string): Modal | undefined => {
+    const proposal = proposals.find((p) => p.id === id);
+    return proposal ? { kind: 'proposal', proposal, scroll: 0 } : undefined;
+  };
+
   /** Runs a bound action in the current view. */
   const run = (action: ActionId): void => {
     const running = (t?: TaskRow) => t && (t.status === 'running' || t.status === 'queued');
@@ -682,6 +769,11 @@ export function App({
             setSelected(detail.agentId);
           },
         });
+      case 'agent:settings': {
+        const id = agent?.id ?? detail?.agentId;
+        if (!id) return say('select an agent first');
+        return openSettings({ agentId: id });
+      }
       case 'approvals:open':
         if (!approvals.length) return say('no write is waiting for approval');
         return setModal({ kind: 'approval', approval: approvals[0]! });
@@ -749,12 +841,59 @@ export function App({
           label:
             'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit)',
           input: '',
-          submit: async (source) => {
-            const skill = await client.call('skills.add', { source: source.trim() });
-            refreshSkills();
-            say(`skill ${skill.id} added; assign it with skills: [${skill.id}] in an agent`);
+          submit: async (raw) => {
+            const source = raw.trim();
+            const guess = source.replace(/\/+$/, '').split('/').at(-1)?.toLowerCase() ?? '';
+            setModal({
+              kind: 'text',
+              title: 'Skill id',
+              label: `The id agents list it by (1–40 lowercase letters, digits or "-"). Enter keeps "${guess}".`,
+              input: '',
+              allowEmpty: true,
+              submit: async (id) => {
+                const skill = await client.call('skills.add', {
+                  source,
+                  id: id.trim() || undefined,
+                });
+                refreshSkills();
+                say(
+                  `skill ${skill.id} added; give it to agents with ${keyLabel(keysFor(keymap, ['global'], 'agent:settings')[0] ?? '')} in their chat`,
+                );
+              },
+            });
           },
         });
+      case 'skills:update': {
+        const skill = (skills ?? [])[skillCursor];
+        if (!skill) return;
+        if (!skill.commit)
+          return say(`${skill.id} was added from a local directory; add it again to refresh it`);
+        say(`checking ${skill.id}…`);
+        return void client
+          .call('skills.checkUpdate', { id: skill.id })
+          .then((u) => {
+            if (u.upToDate) return say(`${u.id} is up to date (${u.latest.slice(0, 10)})`);
+            const list = (label: string, files: string[]) =>
+              files.length
+                ? `\n${label}: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` and ${files.length - 8} more` : ''}`
+                : '';
+            setModal({
+              kind: 'confirm',
+              title: `Update skill ${u.id}`,
+              body:
+                `${u.url}\n${u.current?.slice(0, 10) ?? '?'} → ${u.latest.slice(0, 10)}` +
+                list('added', u.added) +
+                list('changed', u.changed) +
+                list('removed', u.removed) +
+                '\n\nSkill content is untrusted, like any agent input. Agents get the new version on their next cell.',
+              action: async () => {
+                await client.call('skills.update', { id: u.id, commit: u.latest });
+                refreshSkills();
+              },
+            });
+          })
+          .catch((e: Error) => say(e.message));
+      }
       case 'skills:remove': {
         const skill = (skills ?? [])[skillCursor];
         if (!skill) return;
@@ -876,6 +1015,9 @@ export function App({
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
       if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
       if (key.escape) return setModal(null);
+      if (ch === 's') {
+        return openSettings({ proposalId: modal.proposal.id, agentId: modal.proposal.agentId });
+      }
       if (ch === 'n') {
         void client.call('builder.discard', { proposalId: modal.proposal.id });
         setProposals((p) => p.filter((x) => x.id !== modal.proposal.id));
@@ -965,6 +1107,47 @@ export function App({
             ? { ...m, query: m.query + ch.replace(/[\r\n]/g, ''), cursor: 0 }
             : m,
         );
+      return;
+    }
+    if (modal?.kind === 'settings') {
+      if (key.escape)
+        return setModal(modal.proposalId ? (proposalModal(modal.proposalId) ?? null) : null);
+      if (!modal.data || !modal.state) return;
+      // From the latest panel state: keys repeated faster than a render all count.
+      type Panel = Extract<Modal, { kind: 'settings' }>;
+      const edit = (f: (m: Panel, items: SettingsRow[]) => Partial<Panel>) =>
+        setModal((m) => {
+          if (m?.kind !== 'settings' || !m.data || !m.state) return m;
+          const items = settingsRows(m.data, m.state).filter((r) => r.kind !== 'header');
+          return { ...m, ...f(m, items) };
+        });
+      if (key.upArrow || ch === 'k') return edit((m) => ({ cursor: Math.max(0, m.cursor - 1) }));
+      if (key.downArrow || ch === 'j') {
+        return edit((m, items) => ({ cursor: Math.min(items.length - 1, m.cursor + 1) }));
+      }
+      if (ch === ' ') {
+        return edit((m, items) =>
+          items[m.cursor] ? { state: toggleSetting(m.state!, items[m.cursor]!) } : {},
+        );
+      }
+      if (key.return) {
+        return setModal((m) => {
+          if (m?.kind === 'settings') queueMicrotask(() => reviewSettings(m));
+          return m;
+        });
+      }
+      return;
+    }
+    if (modal?.kind === 'settingsReview') {
+      if (ch === 'y' && !modal.update.errors.length) {
+        const { agentId, patch, update } = modal;
+        setModal(null);
+        return void client
+          .call('agents.update', { agentId, patch, apply: true, base: update.base })
+          .then(() => say(`@${agentId} settings saved; its next cell uses them`))
+          .catch((e: Error) => say(e.message));
+      }
+      if (ch === 'n' || key.escape) setModal(modal.back);
       return;
     }
     if (modal?.kind === 'confirm') {
@@ -1059,7 +1242,7 @@ export function App({
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
         }${
           agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
-        }${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
+        }${agent.skills?.length ? ` · 🧩 ${agent.skills.join(', ')}` : ''}${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
   /** `key label` for an action in this view, from the effective bindings (shortest first). */
@@ -1089,6 +1272,7 @@ export function App({
               ['chat:submit', 'send'],
               ['task:new', 'new task'],
               ['chat:escape', 'cancel/sidebar'],
+              ['agent:settings', 'settings'],
               ['chat:editor', 'editor'],
               ['transcript:tools', 'tools'],
             ]
@@ -1103,6 +1287,7 @@ export function App({
             : context === 'skills'
               ? [
                   ['skills:add', 'add'],
+                  ['skills:update', 'update'],
                   ['skills:remove', 'remove'],
                   ['focus:sidebar', 'sidebar'],
                 ]
@@ -1577,6 +1762,7 @@ export function helpRows(keymap: KeyMap, context: Context): [string, string][] {
     ['Fixed', ''],
     ['Ctrl+C', 'quit'],
     ['y n Esc', 'approval, confirmation and proposal dialogs'],
+    ['Space Enter', 'agent settings: select, then review the change (s in a proposal)'],
   );
   return rows;
 }
@@ -1768,6 +1954,98 @@ function ModalView({
       </Box>
     );
   }
+  if (modal.kind === 'settings') {
+    const frame = (children: React.ReactNode, foot: string) => (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          {modal.proposalId
+            ? `Proposal for @${modal.agentId}: settings`
+            : `@${modal.agentId}: settings`}
+        </Text>
+        {children}
+        <Box flexGrow={1} />
+        <Text dimColor wrap="truncate">
+          {foot}
+        </Text>
+      </Box>
+    );
+    if (!modal.data || !modal.state) return frame(<Text dimColor>Loading…</Text>, 'Esc close');
+    const rows = settingsRows(modal.data, modal.state);
+    const items = rows.filter((r) => r.kind !== 'header');
+    const at = rows.indexOf(items[modal.cursor]!);
+    const room = Math.max(3, height - 5);
+    const first = Math.max(0, Math.min(at - Math.floor(room / 2), rows.length - room));
+    return frame(
+      <Box flexDirection="column" height={room}>
+        {rows.slice(first, first + room).map((r, i) =>
+          r.kind === 'header' ? (
+            <Text key={i} dimColor bold={!r.text.startsWith(' ')} wrap="truncate">
+              {r.text}
+            </Text>
+          ) : (
+            <Text key={i} inverse={first + i === at} wrap="truncate">
+              {`${r.mark.padEnd(5)}${truncate(sanitizeLine(r.label), 30).padEnd(31)}`}
+              <Text dimColor={first + i !== at}>
+                {truncate(sanitizeLine(r.note), Math.max(10, inner - 38))}
+              </Text>
+            </Text>
+          ),
+        )}
+      </Box>,
+      `↑↓ choose · Space ${'select (workspaces: off → ro → rw)'} · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'} · Esc cancel`,
+    );
+  }
+  if (modal.kind === 'settingsReview') {
+    const u = modal.update;
+    const lines = sanitize(u.diff || '(no change)').split('\n');
+    const room = Math.max(3, height - 7 - u.errors.length - u.warnings.length);
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="magenta"
+        paddingX={2}
+      >
+        <Text bold color="magenta">
+          @{modal.agentId}: save these settings?
+        </Text>
+        <Box flexDirection="column" height={room}>
+          {lines.slice(0, room).map((l, i) => (
+            <Text
+              key={i}
+              wrap="truncate"
+              color={l.startsWith('+') ? 'green' : l.startsWith('-') ? 'red' : undefined}
+            >
+              {truncate(l, inner) || ' '}
+            </Text>
+          ))}
+        </Box>
+        {u.errors.map((e, i) => (
+          <Text key={`e${i}`} color="red" wrap="truncate">
+            {`✗ ${sanitizeLine(e)}`}
+          </Text>
+        ))}
+        {u.warnings.map((w, i) => (
+          <Text key={`w${i}`} color="yellow" wrap="truncate">
+            {`! ${sanitizeLine(w)}`}
+          </Text>
+        ))}
+        <Box flexGrow={1} />
+        <Text
+          bold
+        >{`${u.errors.length ? '' : '[y] save · '}[n] back to the settings · Esc back`}</Text>
+      </Box>
+    );
+  }
   const p = modal.proposal;
   const body: { text: string; color?: string }[] = [];
   const add = (text: string, color?: string) => {
@@ -1783,7 +2061,7 @@ function ModalView({
     for (const l of (p.imageDiff || '(unchanged)').split('\n'))
       add(l, l.startsWith('+') ? 'green' : l.startsWith('-') ? 'red' : undefined);
   }
-  const room = height - 6 - (p.errors.length ? p.errors.length + 1 : 0);
+  const room = height - 6 - (p.errors.length ? p.errors.length + 1 : 0) - (p.warnings?.length ?? 0);
   const start = Math.min(modal.scroll, Math.max(0, body.length - room));
   return (
     <Box
@@ -1816,8 +2094,13 @@ function ModalView({
           ))}
         </Box>
       ) : null}
+      {(p.warnings ?? []).map((w, i) => (
+        <Text key={`w${i}`} color="yellow" wrap="truncate">
+          {`! ${truncate(sanitizeLine(w), inner - 2)}`}
+        </Text>
+      ))}
       <Text bold>
-        {`${p.errors.length ? '' : '[y] write these files · '}[n] discard · Esc decide later (${label('builder:proposal')}) · ↑↓ scroll`}
+        {`${p.errors.length ? '' : '[y] write these files · '}[s] settings · [n] discard · Esc decide later (${label('builder:proposal')}) · ↑↓ scroll`}
       </Text>
     </Box>
   );
