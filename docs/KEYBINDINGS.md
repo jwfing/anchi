@@ -20,6 +20,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X b | Agent builder |
 | ^X n | New task (a new session) for the agent shown |
 | ^X c | Cancel the running task |
+| ^X r | Run a failed or cancelled task again (continue its session, or start over) |
 | ^X a | Review a write waiting for approval |
 | ^X s | Agent settings: skills, connectors, workspaces |
 | ^X D | Delete the agent with its tasks (type its id to confirm) |
@@ -50,7 +51,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 
 ### Task
 
-Enter continues the task in its agent's chat, c cancels it, D deletes it, [ ] turn task pages, ↑ ↓ (k j) PgUp PgDn scroll, Esc ← (h) back to the sidebar.
+Enter continues the task in its agent's chat, R runs a failed or cancelled one again, c cancels it, D deletes it, [ ] turn task pages, ↑ ↓ (k j) PgUp PgDn scroll, Esc ← (h) back to the sidebar.
 
 ### Configure
 

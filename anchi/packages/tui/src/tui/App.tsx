@@ -146,6 +146,7 @@ type Modal =
       state: SettingsState | null;
       cursor: number;
     }
+  | { kind: 'retry'; taskId: string; agentId: string; status: TaskStatus }
   | {
       kind: 'deleteAgent';
       agentId: string;
@@ -797,6 +798,13 @@ export function App({
           .call('tasks.cancel', { taskId: t!.id })
           .catch((e: Error) => say(e.message));
       }
+      case 'task:retry': {
+        const t = detail ?? task;
+        if (!t || (t.status !== 'failed' && t.status !== 'cancelled')) {
+          return say('only a failed or cancelled task can run again');
+        }
+        return setModal({ kind: 'retry', taskId: t.id, agentId: t.agentId, status: t.status });
+      }
       case 'task:continue':
         if (!detail) return;
         setFocusTask((f) => ({ ...f, [detail.agentId]: detail.id }));
@@ -1211,6 +1219,22 @@ export function App({
       }
       return;
     }
+    if (modal?.kind === 'retry') {
+      if (key.escape) return setModal(null);
+      if (ch !== 'c' && ch !== 'n') return;
+      const { taskId: id, agentId } = modal;
+      setModal(null);
+      return void client
+        .call('tasks.retry', { taskId: id, fresh: ch === 'n' })
+        .then((t) => {
+          // Watch it run in the agent's chat.
+          setFocusTask((f) => ({ ...f, [agentId]: t.id }));
+          setSelected(agentId);
+          setFocus('main');
+          say(t.id === id ? `${id} continues` : `${id} started again as ${t.id}`);
+        })
+        .catch((e: Error) => say(e.message));
+    }
     if (modal?.kind === 'settingsReview') {
       if (ch === 'y' && !modal.update.errors.length) {
         const { agentId, patch, update } = modal;
@@ -1336,6 +1360,9 @@ export function App({
       : context === 'task'
         ? [
             ['task:continue', `continue in @${detail?.agentId}`],
+            ...((detail?.status === 'failed' || detail?.status === 'cancelled'
+              ? [['task:retry', 'retry']]
+              : []) as [ActionId, string][]),
             busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
             ['scroll:pageUp', 'scroll'],
             ['focus:sidebar', 'sidebar'],
@@ -2139,6 +2166,31 @@ function ModalView({
         <Text bold>
           {modal.input === modal.agentId && p ? 'Enter delete · Esc cancel' : 'Esc cancel'}
         </Text>
+      </Box>
+    );
+  }
+  if (modal.kind === 'retry') {
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="yellow"
+        paddingX={2}
+      >
+        <Text bold color="yellow">
+          Run {modal.taskId} (@{modal.agentId}) again?
+        </Text>
+        <Text>{`It ${modal.status === 'failed' ? 'failed' : 'was cancelled'}.`}</Text>
+        <Text> </Text>
+        <Text>
+          [c] continue in the same session: the agent is told why it stopped and keeps the work it
+          had done
+        </Text>
+        <Text>[n] start over: a new task with the same request, in a new session</Text>
+        <Box flexGrow={1} />
+        <Text bold>[c] continue · [n] new task · Esc cancel</Text>
       </Box>
     );
   }

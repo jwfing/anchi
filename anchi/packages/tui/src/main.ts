@@ -161,6 +161,21 @@ program
   );
 
 program
+  .command('retry <task>')
+  .description('Run a failed or cancelled task again: continue its session, or start over')
+  .option('--fresh', 'start over: a new task with the same request')
+  .option('-v, --verbose', 'show tool output')
+  .action((taskId: string, opts: { fresh?: boolean; verbose?: boolean }) =>
+    withClient(async (client) => {
+      const task = await client.call('tasks.retry', { taskId, fresh: opts.fresh === true });
+      if (task.id !== taskId) console.log(`started again as ${task.id}`);
+      const done = await follow(client, task, Boolean(opts.verbose));
+      console.log(taskLine(done));
+      if (done.status !== 'done') process.exitCode = 1;
+    }),
+  );
+
+program
   .command('tasks')
   .description('List tasks, newest first')
   .option('-a, --agent <id>')

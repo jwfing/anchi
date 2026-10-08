@@ -18,6 +18,9 @@ StateDirectoryMode=0700
 LogsDirectory=anchi-egress
 LogsDirectoryMode=0750
 UMask=0077
+# Each proxied connection holds a client and an upstream socket; package managers open hundreds
+# at once (npm install), more than the default soft limit of 1024 allows.
+LimitNOFILE=65536
 NoNewPrivileges=true
 CapabilityBoundingSet=
 ProtectSystem=strict

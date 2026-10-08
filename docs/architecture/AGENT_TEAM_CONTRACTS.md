@@ -45,7 +45,7 @@ The recipe's content hash names the built layer. A changed recipe is a new image
 
 JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON frames of at most 8 MiB. Request `{id, method, params}`, response `{id, result}` or `{id, error: {message}}`, notification `{method, params}`. The method table is `Methods` in `protocol/src/rpc.ts`.
 
-- **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, and `tasks.scan` (credential-invariant scan of the task's live cell).
+- **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.retry` (a failed or cancelled task: continue its session, or `fresh` for a new task with the same request), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, and `tasks.scan` (credential-invariant scan of the task's live cell).
 - **Agents and builder:** `agents.list`, `agents.reload`, `agents.settings`, `agents.update`, `agents.deletePreview`, `agents.delete` (the id typed by the user confirms it), `builder.proposal`, `builder.revise`, `builder.apply`, `builder.discard`. Only `builder.apply` and `agents.update` with `apply` write agent or image files, and the TUI calls them only after a dialog showing the change. `agents.update` changes `skills`, `connectors` and `workspaces` of an agent file, keeping the rest; with `apply` it requires the digest (`base`) of the file the reviewed diff was made from. Proposals and settings changes are checked against what exists: missing skills, delegates or directories block, connectors not yet connected warn.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;

@@ -17,10 +17,13 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 - Deleting agents (D, ^X D, `anchi agents rm`): the agent file, its tasks with what they delegated (cancelled first), trigger state, its place in other agents' `delegates`, and its home, skills and policy rules in the VM, after typing its id. Workspaces on the Mac are never touched.
 - Agent settings panel (^X s): skills, connectors and workspaces of an agent, saved after a diff, keeping the rest of the file. The builder gets an inventory of what exists each turn; proposals and settings changes are checked against it, and a proposal's settings can be picked in its dialog (s). `anchi skills update` and **u** on the Skills screen update a GitHub skill to the commit you reviewed; skills can be given an id when added.
 - TUI key bindings: every action through the leader key Ctrl+X with a panel of the keys that follow, plain keys in views without text input, a command palette (^X Space), shell line editing in the chat input, and `~/.anchi/keybindings.json` (`anchi keys`). Ctrl+X alone, Ctrl+A, Ctrl+E, Ctrl+T and Ctrl+O no longer act as before: new task is ^X n, approvals ^X a, the editor Ctrl+G or ^X e, tool calls ^X t, the builder proposal ^X o.
+- Running a failed or cancelled task again (R, ^X r, `anchi retry`): continue its session with a note of why it stopped, or start over as a new task.
 - Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
 
 ### Fixed
 
+- Installing (`setup install`, `scripts/install-anchi.sh`) and `make verify-anchi` ended running tasks: installing restarts the egress proxy, and the live checks reaped every cell. Both now refuse while tasks run, and the checks only ever reap their own cells.
+- The egress proxy hit its 1024 open-file limit under package installs with hundreds of connections (`Too many open files`); the limit is now 65536.
 - Request bodies over 8 MiB were audited as injected although their headers had already left; they are now audited as `pass:streamed`.
 
 ### Removed

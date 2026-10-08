@@ -406,6 +406,37 @@ export class Hub extends EventEmitter<HubEvents> {
     return this.opts.store.deleteTasks([...ids]);
   }
 
+  /**
+   * Runs a failed or cancelled task again. By default its session continues with a note of why
+   * the last turn ended, keeping the work it had done; `fresh` starts a new task with the
+   * original request instead, and notes it in the old one.
+   */
+  retryTask(taskId: string, fresh = false): TaskRow {
+    const task = this.getTask(taskId);
+    if (task.status !== 'failed' && task.status !== 'cancelled') {
+      throw new Error(`${task.id} is ${task.status}; only failed or cancelled tasks are run again`);
+    }
+    const events = this.opts.store.events(taskId);
+    if (fresh) {
+      const first = events.find((e) => e.event.type === 'input')?.event as
+        { text?: string } | undefined;
+      const retry = this.createTask(task.agentId, first?.text || task.title, task.trigger);
+      this.notice(taskId, `↻ started again as ${retry.id}`);
+      return retry;
+    }
+    const error = [...events].reverse().find((e) => e.event.type === 'error')?.event as
+      { message?: string } | undefined;
+    const why =
+      task.status === 'cancelled'
+        ? 'it was cancelled'
+        : (error?.message ?? 'it failed').slice(0, 300);
+    return this.sendTask(
+      taskId,
+      `Your previous turn ended before it finished (${why}). Continue where you stopped: check the ` +
+        'state of your work first, since some of it may already be done.',
+    );
+  }
+
   /** Resolves when the task's current turn ends. */
   wait(taskId: string): Promise<TaskRow> {
     const task = this.getTask(taskId);

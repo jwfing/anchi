@@ -1155,3 +1155,52 @@ describe('deleting agents', () => {
     ui.unmount();
   });
 });
+
+describe('running a failed task again', () => {
+  it('offers to continue the session or start over, from the task and from the chat', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'tasks.retry': (p) => {
+          const { taskId, fresh } = p as { taskId: string; fresh: boolean };
+          return task(fresh ? 't-new0000001' : taskId, 'dev', { status: 'queued' });
+        },
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { status: 'failed' })]}
+      />,
+    );
+    await tick();
+    ui.stdin.write('\u001b'); // the chat shows the failed task; to the sidebar
+    await tick();
+    ui.stdin.write('3'); // the task
+    await tick();
+    ui.stdin.write('\t'); // its detail
+    expect(await frameWith(ui, 'R retry')).toContain('R retry');
+    ui.stdin.write('R');
+    expect(await frameWith(ui, 'Run t-a000000001 (@dev) again?')).toContain('It failed.');
+    ui.stdin.write('c');
+    expect(await frameWith(ui, 't-a000000001 continues')).toContain('@dev');
+    expect(calls.find(([m]) => m === 'tasks.retry')?.[1]).toEqual({
+      taskId: 't-a000000001',
+      fresh: false,
+    });
+    ui.stdin.write('\u0018'); // ^X r in the chat
+    await tick();
+    ui.stdin.write('r');
+    await frameWith(ui, 'again?');
+    ui.stdin.write('n');
+    expect(await frameWith(ui, 'started again as')).toContain(
+      't-a000000001 started again as t-new0000001',
+    );
+    expect(calls.filter(([m]) => m === 'tasks.retry').at(-1)?.[1]).toEqual({
+      taskId: 't-a000000001',
+      fresh: true,
+    });
+    ui.unmount();
+  });
+});
