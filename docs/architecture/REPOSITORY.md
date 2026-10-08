@@ -8,11 +8,11 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 |---|---|
 | `anchi/packages/protocol` | Client, cell runner and event schemas; bounded JSON-lines codec |
 | `anchi/packages/core` | Agent, image and trigger configuration (trusted, host) |
-| `anchi/packages/daemon` | Daemon: task store, hub and queues, cell sessions, Anchi tool dispatcher, delegation, approvals, triggers, skills, setup steps, fixed guest commands (trusted, host) |
-| `anchi/packages/tui` | Ink TUI and CLI; sanitizes all agent text (trusted, host) |
+| `anchi/packages/daemon` | Daemon: task store, hub and queues, cell sessions, Anchi tool dispatcher, delegation, approvals, triggers, skills, builder inventory and proposals, agent settings and deletion, task retry, scan before close, setup steps, fixed guest commands (trusted, host) |
+| `anchi/packages/tui` | Ink TUI and CLI: key map and command palette, settings panel, security dialogs; sanitizes all agent text (trusted, host) |
 | `anchi/packages/cell-runner` | Inside task cells (untrusted): runner hosting the Codex and Claude Agent SDKs, the in-cell MCP server and its connector tools, the proxy forwarder |
-| `guest/anchi_cell.py` | `anchi-cell` / `anchi-image`: task cells, image layers, reaper, approvals stream, polls, skills, live exec and credential scan (guest root) |
-| `services/egress_rules.py`, `egress_proxy.py` | Egress proxy: injection, deny, write and poll rules independent of mitmproxy, and the mitmproxy addon with per-cell sockets, the approval queue and connector verification |
+| `guest/anchi_cell.py` | `anchi-cell` / `anchi-image`: task cells with workspaces and bridge sockets, image layers, reaper, approvals stream, polls, skills, agent purge, live exec and credential scan (guest root) |
+| `services/egress_rules.py`, `egress_proxy.py` | Egress proxy: injection, deny, write, high-risk, egress and poll rules independent of mitmproxy (with `aws-chunked` re-signing), and the mitmproxy addon with per-cell sockets, the connector bridge, the approval queue and connector verification |
 | `services/connectors.py` | Connector service registry |
 | `services/ledger.py`, `connector_base.py` | Shared execution ledger and connector read/write flow |
 | `services/drive.py`, `notion.py`, `slack.py`, `gmail.py` | Provider handlers |

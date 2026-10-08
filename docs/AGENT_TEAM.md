@@ -1,6 +1,6 @@
 # Agent team
 
-Anchi runs a team of Codex and Claude Code agents. Each task runs in a disposable cell inside the `secure-vm` VM. GitHub, AWS and Linear credentials stay in the VM vault: an egress proxy adds them to the agent's requests on the way out. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
+Anchi runs a secured team of Codex and Claude Code agents. Each task runs in a disposable cell inside the `secure-vm` VM, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the VM vault: an egress proxy adds GitHub, AWS, Linear and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion and Slack. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
 
 ## Install
 
@@ -14,7 +14,7 @@ scripts/anchi setup vault unlock   # after each VM start
 make verify-anchi                  # live isolation checks, no credentials used
 ```
 
-`setup install` runs `scripts/up.sh`, `scripts/install-anchi.sh` and the base image build, and is safe to run again to update. `scripts/anchi setup vm` starts a stopped VM. In the TUI, **Runtimes** has the same steps: `I` install, `s` start the VM, `u` unlock the vault. Keep a backup of the vault key: without it, the stored credentials cannot be recovered.
+`setup install` runs `scripts/up.sh`, `scripts/install-anchi.sh` and the base image build, and is safe to run again to update. It refuses while task cells are live (a cell stays up 10 minutes after its task's last turn), since installing restarts the egress proxy; `make verify-anchi` refuses for the same reason. `scripts/anchi setup vm` starts a stopped VM. In the TUI, **Runtimes** has the same steps: `I` install, `s` start the VM, `u` unlock the vault. Keep a backup of the vault key: without it, the stored credentials cannot be recovered.
 
 `scripts/anchi` runs the CLI from the checkout. With no arguments it opens the TUI and starts the daemon if needed. `scripts/anchi daemon install` starts the daemon at login.
 
@@ -81,6 +81,18 @@ Open the TUI, select **Agent builder**, and describe the agent: its job, the ser
 
 Press `y` to write the files, `n` to discard the proposal, or `s` to pick its skills, connectors and workspaces yourself in the settings panel; the proposal is checked again and shown with your changes.
 
+Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images/`. You can also edit them directly; the daemon reloads them on change. See [Agent configuration](architecture/AGENT_TEAM_CONTRACTS.md#agent-configuration).
+
+```yaml
+# ~/.anchi/agents/dev.yaml
+name: Developer
+runtime: codex
+connectors: [github]
+image: node
+prompt:
+  text: Fix the GitHub issue you are given, push a branch and open a pull request.
+```
+
 ## Agent settings
 
 **^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel: every installed skill, every connector (marked connected or not) and every directory under `~/AnchiWorkspaces`. **Space** selects; a workspace goes off → `ro` → `rw`. **Enter** shows the change to the agent file as a diff, checked like a proposal; **y** saves it. Only those three fields change, and the rest of the file, comments included, stays as it is. The change applies to the agent's next cell.
@@ -96,18 +108,6 @@ Press `y` to write the files, `n` to discard the proposal, or `s` to pick its sk
 - in the VM, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
 
 Directories of your Mac in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.
-
-Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images/`. You can also edit them directly; the daemon reloads them on change. See [Agent configuration](architecture/AGENT_TEAM_CONTRACTS.md#agent-configuration).
-
-```yaml
-# ~/.anchi/agents/dev.yaml
-name: Developer
-runtime: codex
-connectors: [github]
-image: node
-prompt:
-  text: Fix the GitHub issue you are given, push a branch and open a pull request.
-```
 
 ## Teams, approvals, triggers and skills
 
@@ -159,11 +159,12 @@ In the TUI, select an agent and type a task. **Enter** sends it.
 
 - Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft).
 - Every action is also reachable through the leader key **Ctrl+X** and one more key; a panel shows what can follow. **^X Space** opens the command palette and **^X ?** lists the keys of the current view. Keys can be changed in `~/.anchi/keybindings.json`: see [Key bindings](KEYBINDINGS.md).
-- A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the Codex session in a new cell.
+- A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the agent's Codex or Claude Code session in a new cell.
+- Before a cell is destroyed (idle timeout, cancellation, daemon shutdown), it is scanned for real credential values; the task notes `scan: clean`, and a finding raises a notification.
 - A failed or cancelled task can run again: **R** on the task (or **^X r** in its chat, or `scripts/anchi retry <task>`) either continues its session, telling the agent why the last turn stopped so it keeps the work it had done, or starts over as a new task with the same request (`--fresh`).
 - **^X n** starts a new task, which is also a new Codex or Claude session; **Enter** otherwise sends a follow-up to the task shown. **Esc** cancels the running turn.
 - The input edits like a shell line (**Ctrl+A**, **Ctrl+E**, **Ctrl+W**, **Ctrl+U**, arrows). **Ctrl+G** (or **^X e**) composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
-- The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript; **Enter** continues it in its agent's chat, **c** cancels it, **[** and **]** turn the page. Clicking works too.
+- The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript; **Enter** continues it in its agent's chat, **R** runs a failed one again, **c** cancels it, **D** deletes it, **[** and **]** turn the page. Clicking works too.
 - Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **^X t**) expands the list.
 
 The CLI does the same:
@@ -183,6 +184,6 @@ Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. I
 - One turn at a time per agent and at most four live cells. The longest-idle cell is closed to make room.
 - A turn that runs longer than 60 minutes is cancelled and the task fails.
 - Finished tasks are deleted after 90 days; set `retentionDays` in `~/.anchi/settings.yaml` to change it.
-- Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content; use `approvals` for its writes.
-- Credential isolation is not data isolation: agents can send what they read to any public host.
+- Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content. High-risk operations wait for you whatever the origin; use `approvals` for its other writes, and `egress` to limit where it can send data.
+- Credential isolation is not data isolation: agents can send what they read to any public host they may reach.
 - Request bodies over 8 MiB stream through the proxy. S3 calls are re-signed on that path, including `aws-chunked` uploads with signed or unsigned chunks; other large requests, such as a git push of more than 8 MiB, leave without credentials and fail upstream. The audit log records them as `pass:streamed`.

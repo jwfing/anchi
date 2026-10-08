@@ -1,24 +1,34 @@
 # Anchi / 安栖
 
-Anchi runs a team of Codex and Claude Code agents on your Mac. Each task runs in a disposable cell inside a Linux VM, and upstream credentials stay outside the cells: a trusted egress proxy and trusted connector services use them on the agents' behalf. This is an **MVP development build**, not a publicly distributable release.
+**A secured agent team.** Anchi runs a team of Codex and Claude Code agents on your own machine and gives each agent only what its job needs. A misled or compromised agent can still misuse what it was given and leak what it reads, but it never holds a credential, it reaches only the services and directories it was configured with, and with an `egress` list only those hosts:
 
-You drive the team from a terminal UI or a CLI (`scripts/anchi`). Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md).
+- **Upstream credentials never enter an agent's sandbox.** Each task runs in a disposable cell inside a Linux VM. A trusted egress proxy injects or re-signs GitHub, AWS, Linear and model credentials on the way out; trusted services in the VM act for agents on Gmail, Drive, Notion and Slack.
+- **Each agent gets only what it is configured with:** its connectors, the hosts it may reach (any public host unless you list them), the directories of your Mac it may see, its skills and the agents it may delegate to.
+- **You decide on writes.** High-risk operations of every agent (merges, deletions, pushes to `main`, access changes) always wait for your approval, as do all writes of agents whose `approvals` say `ask`; the dialog shows how the task started.
+- **Checks run by themselves.** Every cell is scanned for real credential values before it is destroyed, and `make verify-anchi` checks the isolation live.
+
+You drive the team from a terminal UI or a CLI (`scripts/anchi`): build agents by describing them, give them tasks, let them delegate to each other, start them on a schedule or for new issues. Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md).
+
+This is a **development build**: it has not had a security audit and is not distributed as a release.
 
 ## Current capabilities
 
 | Capability | Status |
 |---|---|
-| Lima VM with long-running trusted services and per-task systemd-nspawn cells | Implemented; `make verify-vm` and `make verify-anchi` run the live isolation checks |
-| Codex and Claude Code runtimes in cells, holding placeholders only | Implemented; the egress proxy substitutes subscription tokens replace-only |
-| GitHub, AWS (re-signing, SSO profiles) and Linear through the egress proxy | Implemented; credential minting denied; credentials verified at import |
-| Gmail, Drive, Notion and Slack through trusted services bound per agent | Implemented; Gmail is read-only; writes follow each service's policy (`auto` or `ask`) |
-| Delegation between agents, schedule and polling triggers, skills | Implemented |
-| Approval of writes in a full-screen dialog (`approvals: {github: ask}`) | Implemented for git push, API writes, AWS writes and GraphQL mutations |
-| Agent builder, task history with search and delegation trees | Implemented |
-| Live acceptance with real accounts | Partly done; see the [phase 1](docs/architecture/AGENT_TEAM_PHASE1_PLAN.md#status) and [phase 2](docs/architecture/AGENT_TEAM_PHASE2_PLAN.md#status) status |
+| Lima VM with trusted services; each task in a disposable systemd-nspawn cell with loopback-only networking | Implemented; `make verify-vm` and `make verify-anchi` run the live isolation checks |
+| Codex and Claude Code in cells, holding placeholders only | Implemented; the proxy substitutes subscription tokens replace-only; the Codex login is re-imported from your machine as it refreshes |
+| GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads) and Linear through the egress proxy | Implemented; credential minting denied; credentials verified at import |
+| Gmail, Drive, Notion and Slack through trusted services, reached through a per-cell bridge that names the agent | Implemented; Gmail is read-only; per-service and per-agent write approval |
+| Per-agent egress allowlists, high-risk operations always held, held writes with the task's origin chain | Implemented |
+| Credential scan of every cell before it is destroyed | Implemented; a finding raises a notification |
+| Directories of your Mac in agent cells (`~/AnchiWorkspaces`), read-only or writable, with code-running paths masked and audited | Implemented on macOS; Linux hosts not yet |
+| Delegation, schedule and polling triggers, skills (local or pinned GitHub commits, updatable) | Implemented |
+| Agent builder that knows what exists, agent settings panel, deleting agents with their tasks and VM files | Implemented |
+| Task history with search, delegation trees, retry of failed tasks; TUI with leader-key bindings and a command palette | Implemented |
+| Live acceptance with real accounts | Partly done; see the [phase 3 status](docs/architecture/AGENT_TEAM_PHASE3_PLAN.md#status) |
 | Remote machines, public distribution, signed packages | Not planned or not complete |
 
-Content an agent reads may reach a cloud model or any public host. Credential isolation does **not** mean data isolation. See the [security model](SECURITY.md) for the boundaries and their limits.
+Content an agent reads may reach a cloud model or any public host it is allowed to reach. Credential isolation does **not** mean data isolation. See the [security model](SECURITY.md) for the boundaries and their limits.
 
 ## Supported hosts
 

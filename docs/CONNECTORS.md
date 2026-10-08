@@ -15,7 +15,7 @@ The TUI's **Connectors → Services** does the same with masked input in a full-
 
 ## Authorization modes
 
-New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation in Anchi's approval dialog. Any mode change revokes all unconsumed grants. The mode is per connector, not per agent: the services identify every agent cell by the same UID.
+New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation in Anchi's approval dialog. Any mode change revokes all unconsumed grants. The mode is per connector service and applies to every agent. An agent can additionally have its writes held with `approvals: {notion: ask}` in its file (the policy principal `notion:<agent>`): agents reach the services through a bridge that names them, so policy can tell them apart.
 
 ```bash
 scripts/anchi setup service-mode drive ask   # Require approval for Drive

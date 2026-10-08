@@ -1,6 +1,6 @@
 # Agent team phase 3 plan
 
-**Status: decisions confirmed on 2026-10-07; in progress.** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status), [host directories](HOST_DIRECTORIES_PLAN.md)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
+**Status: implemented except P7 (Linux workspaces) and P9 (live acceptance with real accounts); see [Status](#status).** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status), [host directories](HOST_DIRECTORIES_PLAN.md)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
 
 ## Goal and scope
 
@@ -122,17 +122,17 @@ Confirmed on 2026-10-07:
 | P1 | Done. Live: scan before close, `scan: clean (1935 files)` |
 | P2 | Done. Live: a merge held for an agent without `approvals` |
 | P3 | Done. Live: listed host 200, other host refused and audited |
-| P4 | Done. Live: `reader` and `writer` read Notion through the bridge; a `writer` write is held as `notion:writer`; `make verify-anchi` 32/32 |
-| P5 | Done |
-| P6 | Done offline and in `make verify-anchi` (streamed path, without an AWS account); a live upload to a dedicated bucket is part of P9 |
-| Linux hosts | Implemented; offline tests pass on macOS; waiting for confirmation on your Linux machine |
+| P4 | Done. Live: `reader` and `writer` read Notion through the bridge; a `writer` write is held as `notion:writer` |
+| P5 | Done. Live: the daemon re-imports the Codex access token when the host's login refreshes |
+| P6 | Done; chunk signatures tested against the S3 reference's worked examples, the streamed path in `make verify-anchi`. A live upload to a dedicated bucket is part of P9; the trailer signature is checked only then |
+| Linux hosts | Implemented (notifications, sign-in, autostart, install checks); the Linux CI runs the VM and `make verify-anchi`; waiting for confirmation on a Linux machine |
 | P7 | Not started; after the Linux host confirmation |
-| P8 | Done. CI workflow added; not yet run on the Linux runner |
+| P8 | Done. The Linux live workflow runs `make verify-anchi` with a synthetic Codex account (28/28; the macOS run adds the workspace checks) |
 | P9 | Waiting for accounts: Claude token, Drive sign-in, a valid GitHub token |
 
 ## Risks
 
 - **Approval fatigue** (P2): too many held operations train the user to press `y`. The default list stays short and specific.
-- **Egress lists** (P3) break agents whose tools reach unexpected hosts (telemetry, mirrors). The audit log names the refused host, and the TUI offers to add it.
+- **Egress lists** (P3) break agents whose tools reach unexpected hosts (telemetry, mirrors). The audit log names the refused host (`egress-denied`); adding it is a manual edit for now.
 - **The bridge** (P4) adds a trusted component on every connector call; it must stay small and is covered by the same isolation checks as the proxy.
-- **Chunked re-signing** (P6) is security-sensitive streaming code; it gets recorded-traffic tests before any live use.
+- **Chunked re-signing** (P6) is security-sensitive streaming code; it is tested against the S3 reference's examples, and streamed requests other than S3 are never injected. A git push over 8 MiB therefore fails (see the [backlog](BACKLOG.md)).

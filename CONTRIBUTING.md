@@ -1,6 +1,6 @@
 # Contributing to Anchi
 
-Anchi is an MVP development build, not ready for public distribution. Read the [repository architecture](docs/architecture/REPOSITORY.md) and [security boundaries](SECURITY.md) before making changes.
+Anchi is a secured agent team in development: not audited and not ready for public distribution. Changes to a boundary (credentials, cells, egress, approvals, policy) need tests that would fail if the boundary broke. Read the [repository architecture](docs/architecture/REPOSITORY.md) and [security boundaries](SECURITY.md) before making changes.
 
 ## Contributions and pull requests
 

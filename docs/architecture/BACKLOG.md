@@ -1,15 +1,17 @@
 # Backlog
 
-Requirements recorded but not yet planned into a phase. Each entry has the request, what exists today (checked against the code on 2026-10-08) and the open questions to settle before planning.
+Open requests and known gaps of the secured agent team that are not planned into a phase yet, and what was delivered from this list. Checked against the code on 2026-10-08.
 
-| # | Requirement | State |
+## Open
+
+| # | Item | State |
 |---|---|---|
-| R1 | Preview the files an agent changed, through a plugin | Not started; plugin design needed |
-| R2 | Delete an agent | Not started |
-| R3 | Start a new session for an agent ("new chat") | Exists as `^X` and `/new`; not discoverable |
-| R4 | Add skills from a URL or a local directory | Exists in the CLI and the TUI; assigning skills to agents is missing |
-| R5 | Skills, connectors and workspaces in the agent builder | Partly: the builder ignores skills and does not know what exists |
-| R6 | A keyboard binding scheme | Bindings exist but are fixed and ad hoc; design needed |
+| R1 | Preview the files an agent changed, through a plugin | Not started; design questions below |
+| R3 | A clean start for a new task | Partly: **^X n** starts a new session; all of an agent's tasks share its work directory |
+| G1 | git pushes over 8 MiB | Fail: the body streams before the push can be decided, and streamed requests other than S3 get no credential |
+| G2 | Linux workspaces (phase 3 P7) | After Linux hosts are confirmed on a Linux machine |
+| G3 | Live acceptance with real accounts (phase 3 P9) | Needs a Claude token, Drive sign-in again, and an AWS bucket for `aws-chunked` uploads |
+| G4 | Allow a refused egress host from the TUI | The audit log names it (`egress-denied`); adding it to `egress` is a manual edit |
 
 ## R1 — File preview through a plugin
 
@@ -25,76 +27,33 @@ Requirements recorded but not yet planned into a phase. Each entry has the reque
 
 **Open questions.**
 
-1. **Where the viewer runs.** The files are in the VM (agent home `/var/lib/anchi/agents/<id>/home`, live cells) or under `~/AnchiWorkspaces`. Options: run a viewer inside the VM as an unprivileged user over `limactl shell` and hand it the terminal (like `^E` for the editor); copy a snapshot to the host; or an Anchi-native view fed by an RPC (`files.list`, `files.read`) with bounded, sanitized output.
+1. **Where the viewer runs.** The files are in the VM (agent home `/var/lib/anchi/agents/<id>/home`, live cells) or under `~/AnchiWorkspaces`. Options: run a viewer inside the VM as an unprivileged user over `limactl shell` and hand it the terminal (like Ctrl+G for the editor); copy a snapshot to the host; or an Anchi-native view fed by an RPC (`files.list`, `files.read`) with bounded, sanitized output.
 2. **Reuse herdr-file-viewer?** The Anchi TUI is an Ink app, not a terminal multiplexer, so herdr panes cannot be embedded. It could run full-screen in place of the TUI, inside the VM against the agent's directory. herdr-specific actions and its CLI callbacks would not work.
 3. **Trust.** Plugins are trusted code. The content they render is untrusted (agent-written): a viewer must not run anything from it, and anything on the host must not follow links out of the agent's directory. Never run a plugin with access to the vault or credentials.
 4. **Plugin manifest for Anchi.** Which entry points (a key action on a task, a full-screen view, a transcript link handler), what context (agent, task, paths from the turn), and how it is installed (`anchi plugin install owner/repo`, pinned by commit like skills).
 5. **A file-change event** in the runner protocol (path, kind, diff stats), so the transcript lists changed files and a viewer can open them directly.
+6. **Keys:** plugin actions become named actions in the key map (`plugin:<id>.<action>`), so they can be bound and appear in the command palette.
 
-## R2 — Delete an agent
+## R3 — A clean start for a new task
 
-**Request.** Allow deleting agents.
+**Request.** An explicit "new chat": a new task that starts from scratch rather than continuing the shown task.
 
-**Today.** No RPC, CLI command or TUI key. Removing the YAML by hand makes the agent unknown, but its tasks and events stay in the store, its VM home and skills copy stay, and a running or queued agent is kept in memory until idle.
+**Today.** **^X n** (or `/new`) makes the next message a new task with a new Codex or Claude Code session; the footer, the help and the command palette show it. Not separate: the agent's home, including `/home/agent/work` and the runtimes' session files, is shared by all its tasks, so a new task sees the files earlier tasks left.
 
-**Open questions.** Refuse while tasks run, or cancel them; delete or keep its tasks and transcripts (as `anchi rm` does for tasks); delete its VM home (work directory, Codex and Claude sessions); clear its policy rules (`notion:<agent>`) and its trigger state; what happens to agents that list it in `delegates`, and to an agent that `extends` it as a template.
+**Open question.** Per-task work directories (or an option to start in an empty one), and what happens to a repository an earlier task is still working in.
 
-## R3 — New session for an agent
+## G1 — git pushes over 8 MiB
 
-**Request.** Not always appending messages to one task: an explicit "create a task from scratch", like ChatGPT's new chat. A follow-up continues the task's session; a new task starts a new session.
+**Today.** mitmproxy streams bodies over 8 MiB and sends their headers before the body is read. The proxy decides streamed requests when their headers arrive and injects only S3 calls there (their operation and risk come from method and path). A git push needs its ref updates, which are at the start of the body, to decide whether it is high-risk, so it leaves without a credential and fails upstream; the audit log records `pass:streamed`.
 
-**Today.** `^X` and `/new` in an agent's chat make the next message create a new task, which starts a fresh Codex thread or Claude session (sessions are per task: `resume_id` on the task). Follow-ups go to the task shown. The CLI has `anchi run` (new task) and `anchi send` (follow-up). Not separate: the agent's home is shared by all its tasks, including `/home/agent/work` and the runtimes' session files.
+**Options.** Read the push's ref commands from the first bytes of the stream before forwarding (the pkt-lines precede the pack), then inject; or raise the streaming threshold for `git-receive-pack` at the cost of buffering large packs in memory.
 
-**Open questions.** Make "new task" visible (a button or line in the chat header, the footer hint, the help); show which task a message will go to; whether a new task should also start from a clean work directory (per-task directories, or an option).
+## Delivered
 
-## R4 — Add skills from a URL or a local path
-
-**Request.** Adding skills is not supported yet; it should accept a URL or a local directory.
-
-**Today.** Supported: `anchi skills add <source> [--id]` and the TUI **Skills** screen (`a`) accept a GitHub tree URL (pinned to the commit) or a local directory; `anchi skills rm` and `d` remove one. Limits: 200 files, 4 MB, no symlinks. Missing: assigning a skill to an agent from the TUI (only `skills: [id]` in the agent YAML); URLs other than GitHub (other git hosts, archives); updating a URL skill to a newer commit; choosing the id in the TUI.
-
-**Open questions.** Which URL forms to accept; whether adding a skill should offer to assign it to agents at once.
-
-## R5 — Skills, connectors and workspaces in the agent builder
-
-**Request.** When the builder creates an agent, there seems to be no way to give it skills, connectors or a local work directory.
-
-**Today.** The builder's instructions describe connectors, workspaces, egress, approvals, delegates, image and sandbox, but not `skills` or `triggers`. The schema accepts them all, so a proposal that included them would apply. The builder is told nothing about what exists: installed skills, connected connectors, other agents, images, or directories under `~/AnchiWorkspaces`. Proposals are not checked for skills, delegates or workspaces that do not exist.
-
-**Open questions.** Give the builder an inventory (skills, connected connectors, agents, images, workspace directories) at the start of each turn; check references in proposals and show missing ones in the proposal dialog; whether the proposal dialog should let you toggle skills, connectors and workspaces directly instead of asking the builder again.
-
-## R6 — Keyboard binding scheme
-
-**Request.** Design Anchi's keyboard bindings, after the approaches of [herdr](https://herdr.dev/docs/configuration/#keybindings) and [cmux](https://cmux.com/docs/keyboard-shortcuts).
-
-**Today.** The help (`?`, sidebar only) lists the bindings, which are hard-coded in `App.tsx`:
-
-- **Global:** Tab/Shift+Tab switch the sidebar and the main pane; Ctrl+N/P move between sidebar items; `q` or Ctrl+C quit.
-- **Sidebar:** plain keys (`j k`, `g G`, `1 2 3`, `[ ]`, `/`, `Enter`).
-- **Chat:** Ctrl chords (Ctrl+X new task, Ctrl+E `$EDITOR`, Ctrl+T/V tool calls, Ctrl+O builder proposal, Ctrl+A approvals, Ctrl+U).
-- **Views:** single letters (`c`, `D`, `a`, `d`, `i`, `m`, …).
-
-They are not configurable. Mouse parity exists for most actions. Problems seen:
-
-- Ctrl+A, Ctrl+E and Ctrl+U shadow the line-editing keys users expect in an input (start of line, end of line, delete line).
-- Inside tmux, zellij or herdr, Ctrl+B and other prefixes belong to the multiplexer.
-- What a key does depends on the focused pane, and the help shows every context at once.
-
-**References.**
-
-- **herdr:**
-  - **Prefix first** (Ctrl+B by default; several prefixes allowed) so it never steals typing from the program in a pane, and modes: terminal, prefix, navigate (plain `j k` in the sidebar), copy/resize.
-  - **Config:** a `[keys]` table in TOML (`new_tab = "prefix+c"`, arrays for several bindings, `prefix+1..9` for indexed jumps), and custom `[[keys.command]]` bindings that run a popup, a pane, a shell command or a plugin action.
-  - **Help:** `prefix+?` lists the active bindings; the prefix is shown in the status bar; `herdr config reset-keys` restores the defaults.
-- **cmux:** A native macOS app, so it binds ⌘ chords directly (⌘N new workspace, ⌘1–8 jump, ⌘D split, ⌘I notifications), with no prefix and no modes. Every shortcut is editable in settings or `~/.config/cmux/cmux.json`; the terminal's own bindings come from the Ghostty config.
-
-**Constraints for Anchi.** A TUI in someone else's terminal receives no ⌘ keys, and Ctrl chords are limited and overloaded (Ctrl+I is Tab, Ctrl+M is Enter, Ctrl+C, Ctrl+Z and Ctrl+S may be taken by the terminal). The kitty keyboard protocol would add modifiers but is not supported everywhere. CJK input methods compose with plain keys and Enter. Anchi may itself run inside tmux, zellij or herdr.
-
-**Open questions.**
-
-1. Prefix-based (herdr), direct chords (cmux), or both: plain keys in navigation contexts, a prefix for global actions, the input keeping standard line editing.
-2. Which prefix, given that Ctrl+B belongs to tmux and herdr.
-3. Configuration: `~/.anchi/keys.toml` (or a `keys:` section in `settings.yaml`) with named actions, validation and a reset command.
-4. Discoverability: context-aware help, a footer that shows the keys of the focused pane, and a command palette.
-5. Plugin actions (R1) bound to keys, as `plugin_action` in herdr.
-
+| # | Requirement | Where |
+|---|---|---|
+| R2 | Delete an agent with its tasks and VM files; workspaces untouched | #33; [Delete an agent](../AGENT_TEAM.md#delete-an-agent) |
+| R4 | Skills from a URL or a local directory, given to agents in a settings panel, updated to a reviewed commit | #32; [Agent settings](../AGENT_TEAM.md#agent-settings) |
+| R5 | The builder knows what exists; proposals are checked and their settings adjustable | #32; [Create agents](../AGENT_TEAM.md#create-agents) |
+| R6 | Key bindings: leader key, plain keys in views, command palette, line editing, `keybindings.json` | #31; [Key bindings](../KEYBINDINGS.md) |
+| R7 | Run a failed or cancelled task again, continuing its session or from scratch | #34; [Run tasks](../AGENT_TEAM.md#run-tasks) |
