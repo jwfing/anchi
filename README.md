@@ -73,7 +73,7 @@ make verify-anchi  # Live agent-team cell and egress proxy checks
 | `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.py`) and live checks |
 | `tests/` | Offline tests of the Python services |
 | `poc/` | Phase 0 spikes and their results |
-| `prototype/`, `landing/` | UX reference and the static landing page |
+| `landing/` | The static landing page |
 | `docs/` | Guides, architecture and engineering notes |
 
 See [module responsibilities](docs/architecture/REPOSITORY.md).

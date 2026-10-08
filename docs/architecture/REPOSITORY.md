@@ -23,7 +23,7 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.py`) and explicit live checks |
 | `tests/` | Offline tests of the trusted services |
 | `poc/` | Phase 0 spikes and their recorded results |
-| `prototype/`, `landing/` | UX reference and landing page, not part of the product |
+| `landing/` | Static landing page, not part of the product |
 | `docs/` | Usage, architecture, security and engineering guides |
 
 ## Call direction
