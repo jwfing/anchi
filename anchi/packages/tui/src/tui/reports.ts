@@ -1,4 +1,11 @@
-import type { QuotaInfo, QuotaWindow, TaskAudit, UsageGroup, UsageRow } from '@anchi/protocol';
+import type {
+  AccessSummary,
+  QuotaInfo,
+  QuotaWindow,
+  TaskAudit,
+  UsageGroup,
+  UsageRow,
+} from '@anchi/protocol';
 import { auditHeadline } from '@anchi/daemon';
 import { sanitizeLine } from '../sanitize.ts';
 import { truncate } from './lines.ts';
@@ -118,6 +125,97 @@ export function refusedHosts(a: TaskAudit): string[] {
   return [...new Set(a.refused.filter((r) => r.decision === 'egress-denied').map((r) => r.host))];
 }
 
+/** The access screen: what every agent reached over a period, and anything that needs a look. */
+export function accessSummaryLines(
+  s: AccessSummary | null,
+  period: number,
+  width: number,
+): ReportLine[] {
+  const fit = (t: string) => truncate(t, width);
+  const lines: ReportLine[] = [head(`External access, ${PERIODS[period]!.label}`)];
+  if (!s) return [...lines, { text: '  Loading…', dim: true }];
+  if (s.partial) {
+    lines.push({
+      text: fit('  The VM could not be read: running tasks may be missing their latest requests.'),
+      color: 'yellow',
+    });
+  }
+  if (!s.agents.length) {
+    return [...lines, { text: '  No external access recorded in this period.', dim: true }];
+  }
+  const other = s.agents.reduce((n, a) => n + a.credentialsOther, 0);
+  lines.push(
+    {
+      text: fit(
+        other
+          ? `  Cells sent a credential of their own ${other} time${other === 1 ? '' : 's'}: see below.`
+          : `  ${s.tasks} task${s.tasks === 1 ? '' : 's'}; the cells sent only placeholders or no credential.`,
+      ),
+      color: other ? 'red' : 'green',
+    },
+    gap,
+    head('By agent'),
+    {
+      text: fit(
+        `  ${'agent'.padEnd(16)}${'tasks'.padStart(6)}${'requests'.padStart(10)}${'hosts'.padStart(7)}${'refused'.padStart(9)}${'held'.padStart(6)}  injected by the proxy`,
+      ),
+      dim: true,
+    },
+  );
+  for (const a of s.agents) {
+    const injected = Object.entries(a.injected)
+      .sort((x, y) => y[1] - x[1])
+      .map(([rule, n]) => `${clean(rule)} ${n}`)
+      .join(', ');
+    lines.push({
+      text: fit(
+        `  ${truncate(clean(a.agent), 15).padEnd(16)}${String(a.tasks).padStart(6)}${String(a.requests).padStart(10)}${String(a.hosts).padStart(7)}${String(a.refused).padStart(9)}${String(a.held).padStart(6)}  ${injected || '-'}`,
+      ),
+      color: a.credentialsOther ? 'red' : undefined,
+    });
+  }
+  if (s.credentials.length) {
+    lines.push(gap, head('A credential of the cell’s own'));
+    for (const r of s.credentials) {
+      lines.push({
+        text: fit(
+          `  ${new Date(r.ts).toLocaleString()}  @${clean(r.agent)} ${r.task}  ${clean(r.method)} ${clean(r.host)}${clean(r.path)}`,
+        ),
+        color: 'red',
+      });
+    }
+  }
+  lines.push(gap, head('Hosts requested'));
+  for (const h of s.hosts) {
+    const decisions = Object.entries(h.decisions)
+      .map(([d, c]) => `${d} ${c}`)
+      .join(', ');
+    lines.push({
+      text: fit(
+        `  ${truncate(clean(h.host), 31).padEnd(32)}${String(h.requests).padStart(6)}  ${decisions}  (${h.agents.map((a) => `@${clean(a)}`).join(' ')})`,
+      ),
+    });
+  }
+  if (s.refused.length) {
+    lines.push(gap, head('Refused or held, latest first'));
+    for (const r of s.refused) {
+      lines.push({
+        text: fit(
+          `  ${new Date(r.ts).toLocaleString()}  @${clean(r.agent)}  ${r.decision}  ${clean(r.host)}  ${clean(r.operation || r.path)}`,
+        ),
+        color: 'yellow',
+      });
+    }
+  }
+  lines.push(gap, {
+    text: fit(
+      'From the egress proxy’s audit rows the daemon keeps with each task; hosts and paths come from the agents. Press a on a task for its detail.',
+    ),
+    dim: true,
+  });
+  return lines;
+}
+
 export const PERIODS = [
   { label: 'last 24 hours', ms: 86_400_000 },
   { label: 'last 7 days', ms: 7 * 86_400_000 },
@@ -195,7 +293,11 @@ export function usageLines(
       ),
       color: q.status === 429 || q.limited ? 'red' : undefined,
     });
-    for (const t of quotaText(q)) lines.push({ text: fit(t) });
+    for (const t of quotaText(q)) {
+      const used = /(\d+)% used/.exec(t);
+      const pct = used ? Number(used[1]) : 0;
+      lines.push({ text: fit(t), color: pct >= 95 ? 'red' : pct >= 80 ? 'yellow' : undefined });
+    }
   }
   lines.push(gap, head(`Tokens, ${PERIODS[period]!.label}, by ${group}`));
   if (!rows) return [...lines, { text: '  Loading…', dim: true }];

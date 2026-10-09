@@ -18,7 +18,13 @@ import { sanitizeLine } from './sanitize.ts';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
-import { accessLines, GROUPS, type ReportLine, usageLines } from './tui/reports.ts';
+import {
+  accessLines,
+  GROUPS,
+  type ReportLine,
+  accessSummaryLines,
+  usageLines,
+} from './tui/reports.ts';
 import type { UsageGroup } from '@anchi/protocol';
 
 /** Prints report lines, coloured on a terminal. */
@@ -202,6 +208,25 @@ program
       const a = await client.call('tasks.audit', { taskId });
       if (opts.json) return console.log(JSON.stringify(a, null, 2));
       printReport(accessLines(a, process.stdout.columns || 120));
+    }),
+  );
+
+program
+  .command('access')
+  .description('External access of every agent over a period: hosts, injections, refusals')
+  .option('--since <age>', 'period, e.g. 24h or 7d', '7d')
+  .option('--json', 'the summary as JSON')
+  .action((opts: { since: string; json?: boolean }) =>
+    withClient(async (client) => {
+      const age = /^(\d+)([hd])$/.exec(opts.since);
+      if (!age) fail('--since takes a number of hours or days, such as 24h or 7d');
+      const ms = Number(age![1]) * (age![2] === 'h' ? 3_600_000 : 86_400_000);
+      const summary = await client.call('access.summary', { since: Date.now() - ms });
+      if (opts.json) return console.log(JSON.stringify(summary, null, 2));
+      const lines = accessSummaryLines(summary, 0, process.stdout.columns || 120);
+      printReport(
+        lines.map((l, i) => (i === 0 ? { ...l, text: `External access, last ${opts.since}` } : l)),
+      );
     }),
   );
 

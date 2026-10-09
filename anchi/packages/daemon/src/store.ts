@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS audit_rows (
   row TEXT NOT NULL,
   PRIMARY KEY (task_id, row)
 );
+CREATE INDEX IF NOT EXISTS audit_rows_ts ON audit_rows(ts);
 `;
 
 /** Saved audit rows kept per task; the oldest go first. */
@@ -457,6 +458,15 @@ export class Store {
       this.db.exec('ROLLBACK');
       throw err;
     }
+  }
+
+  /** Saved audit rows of every task since a time (ms), oldest first. */
+  auditRowsSince(since: number): Record<string, unknown>[] {
+    return (
+      this.db
+        .prepare('SELECT row FROM audit_rows WHERE ts >= ? ORDER BY ts, rowid')
+        .all(since / 1000) as { row: string }[]
+    ).map((r) => JSON.parse(r.row) as Record<string, unknown>);
   }
 
   /** A task's saved audit rows, oldest first. */

@@ -60,6 +60,7 @@ Enter continues the task in its agent's chat, a shows its external access, R run
 - **Skills:** ↑ ↓ (k j) choose, a add, u update to the latest commit of its URL, d remove.
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.
+- **Access:** p period (24 hours, 7 days, 30 days), r refresh, ↑ ↓ scroll.
 
 The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc; **e** chooses a host the task was refused, to add to the agent's egress list after a confirmation (y).
 

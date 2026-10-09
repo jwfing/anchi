@@ -1,5 +1,6 @@
 /** @jsxRuntime automatic */
 import type {
+  AccessSummary,
   QuotaInfo,
   TaskAudit,
   UsageRow,
@@ -42,6 +43,7 @@ import {
 import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
 import {
   accessLines,
+  accessSummaryLines,
   GROUPS,
   PERIODS,
   refusedHosts,
@@ -61,13 +63,14 @@ import type { MouseEvent } from './mouse.ts';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
-const CONFIG = ['runtimes', 'skills', 'connectors', 'usage'] as const;
+const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
 type ConfigItem = (typeof CONFIG)[number];
 const CONFIG_LABEL: Record<ConfigItem, string> = {
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
   usage: 'Usage',
+  access: 'Access',
 };
 /** Sidebar item of a task (agent ids cannot contain ':'). */
 const TASK_ITEM = 'task:';
@@ -312,6 +315,18 @@ export function App({
     },
     [client],
   );
+  const [access, setAccess] = useState<AccessSummary | null>(null);
+  const [accessPeriod, setAccessPeriod] = useState(1);
+  const refreshAccess = useCallback(
+    (period: number) => {
+      setAccess(null);
+      void client
+        .call('access.summary', { since: Date.now() - PERIODS[period]!.ms })
+        .then(setAccess)
+        .catch((e: Error) => say(e.message));
+    },
+    [client],
+  );
   const refreshSkills = useCallback(() => {
     void client
       .call('skills.list')
@@ -430,6 +445,7 @@ export function App({
     if (current === 'runtimes' || current === 'connectors') refreshSetup();
     if (current === 'skills') refreshSkills();
     if (current === 'usage') refreshUsage(usagePeriod, usageGroup);
+    if (current === 'access') refreshAccess(accessPeriod);
     setScroll(0);
   }, [current, refreshSetup]);
 
@@ -868,6 +884,13 @@ export function App({
       }
       case 'usage:refresh':
         return refreshUsage(usagePeriod, usageGroup);
+      case 'access:period': {
+        const next = (accessPeriod + 1) % PERIODS.length;
+        setAccessPeriod(next);
+        return refreshAccess(next);
+      }
+      case 'access:refresh':
+        return refreshAccess(accessPeriod);
       case 'task:retry': {
         const t = detail ?? task;
         if (!t || (t.status !== 'failed' && t.status !== 'cancelled')) {
@@ -916,10 +939,11 @@ export function App({
         return setVerbose((v) => !v);
       case 'scroll:up':
         // Report views clamp their own scroll.
-        if (context === 'usage') return setScroll((s) => Math.max(0, s - 1));
+        if (context === 'usage' || context === 'access')
+          return setScroll((s) => Math.max(0, s - 1));
         return setScroll((s) => Math.min(maxScroll, s + 1));
       case 'scroll:down':
-        if (context === 'usage') return setScroll((s) => s + 1);
+        if (context === 'usage' || context === 'access') return setScroll((s) => s + 1);
         return setScroll((s) => Math.max(0, s - 1));
       case 'scroll:pageUp':
         return setScroll((s) => Math.min(maxScroll, s + halfPage));
@@ -1503,21 +1527,26 @@ export function App({
                   ['usage:group', `by ${GROUPS[usageGroup]}`],
                   ['usage:refresh', 'refresh'],
                 ]
-              : context === 'skills'
+              : context === 'access'
                 ? [
-                    ['skills:add', 'add'],
-                    ['skills:update', 'update'],
-                    ['skills:remove', 'remove'],
-                    ['focus:sidebar', 'sidebar'],
+                    ['access:period', PERIODS[accessPeriod]!.label],
+                    ['access:refresh', 'refresh'],
                   ]
-                : [
-                    ['setup:vmStart', 'start VM'],
-                    ['setup:install', 'install'],
-                    ['setup:unlock', 'unlock'],
-                    ['setup:workspaces', 'workspaces'],
-                    ['setup:codex', 'Codex'],
-                    ['setup:claude', 'Claude'],
-                  ];
+                : context === 'skills'
+                  ? [
+                      ['skills:add', 'add'],
+                      ['skills:update', 'update'],
+                      ['skills:remove', 'remove'],
+                      ['focus:sidebar', 'sidebar'],
+                    ]
+                  : [
+                      ['setup:vmStart', 'start VM'],
+                      ['setup:install', 'install'],
+                      ['setup:unlock', 'unlock'],
+                      ['setup:workspaces', 'workspaces'],
+                      ['setup:codex', 'Codex'],
+                      ['setup:claude', 'Claude'],
+                    ];
   const status = pending.length
     ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
     : flash ||
@@ -1626,6 +1655,12 @@ export function App({
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
             <RuntimesView setup={setup} log={setupLog} />
+          ) : current === 'access' ? (
+            <Report
+              lines={accessSummaryLines(access, accessPeriod, textWidth)}
+              height={bodyHeight - 4}
+              scroll={scroll}
+            />
           ) : current === 'usage' ? (
             <Report
               lines={usageLines(
@@ -1957,6 +1992,7 @@ const CONTEXT_LABEL: Record<Context, string> = {
   skills: 'Skills',
   connectors: 'Connectors',
   usage: 'Usage',
+  access: 'Access',
 };
 
 /** Rows of the help: the view's bindings, then the global ones, then fixed keys. */

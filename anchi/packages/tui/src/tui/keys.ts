@@ -16,6 +16,7 @@ export const CONTEXTS = [
   'skills',
   'connectors',
   'usage',
+  'access',
 ] as const;
 export type Context = (typeof CONTEXTS)[number];
 
@@ -33,7 +34,7 @@ export const ACTIONS = {
   'focus:main': { title: 'Open the selected item', contexts: ['sidebar'] },
   'focus:sidebar': {
     title: 'Back to the sidebar',
-    contexts: ['task', 'runtimes', 'skills', 'connectors', 'usage'],
+    contexts: ['task', 'runtimes', 'skills', 'connectors', 'usage', 'access'],
   },
   'nav:next': { title: 'Next sidebar item', contexts: ['global'] },
   'nav:prev': { title: 'Previous sidebar item', contexts: ['global'] },
@@ -57,6 +58,11 @@ export const ACTIONS = {
   'usage:period': { title: 'Usage: next period (24 hours, 7 days, 30 days)', contexts: ['usage'] },
   'usage:group': { title: 'Usage: group by agent, model, runtime or day', contexts: ['usage'] },
   'usage:refresh': { title: 'Usage: refresh', contexts: ['usage'] },
+  'access:period': {
+    title: 'Access: next period (24 hours, 7 days, 30 days)',
+    contexts: ['access'],
+  },
+  'access:refresh': { title: 'Access: refresh', contexts: ['access'] },
   'task:delete': { title: 'Delete the task and the tasks it delegated', contexts: ['task'] },
   'approvals:open': { title: 'Review a write waiting for approval', contexts: ['global'] },
   'agent:delete': {
@@ -71,8 +77,8 @@ export const ACTIONS = {
   'builder:proposal': { title: 'Reopen the pending builder proposal', contexts: ['global'] },
   'transcript:tools': { title: 'Expand or collapse tool calls', contexts: ['global'] },
   'transcript:verbose': { title: 'Verbose tool output', contexts: ['global'] },
-  'scroll:up': { title: 'Scroll up', contexts: ['chat', 'task', 'usage'] },
-  'scroll:down': { title: 'Scroll down', contexts: ['chat', 'task', 'usage'] },
+  'scroll:up': { title: 'Scroll up', contexts: ['chat', 'task', 'usage', 'access'] },
+  'scroll:down': { title: 'Scroll down', contexts: ['chat', 'task', 'usage', 'access'] },
   'scroll:pageUp': { title: 'Scroll up a page', contexts: ['chat', 'task'] },
   'scroll:pageDown': { title: 'Scroll down a page', contexts: ['chat', 'task'] },
   'chat:submit': { title: 'Send', contexts: ['chat'] },
@@ -218,6 +224,16 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     p: 'usage:period',
     b: 'usage:group',
     r: 'usage:refresh',
+    up: 'scroll:up',
+    k: 'scroll:up',
+    down: 'scroll:down',
+    j: 'scroll:down',
+  },
+  access: {
+    ...VIEW,
+    ...BACK,
+    p: 'access:period',
+    r: 'access:refresh',
     up: 'scroll:up',
     k: 'scroll:up',
     down: 'scroll:down',

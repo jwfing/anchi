@@ -312,6 +312,35 @@ export interface TaskAudit {
 }
 
 /** The latest quota information a runtime's responses carried, read by the egress proxy. */
+/** One agent's external access over a period, across its tasks. */
+export interface AgentAccess {
+  agent: string;
+  tasks: number;
+  requests: number;
+  /** Requests whose credentials the proxy injected, by rule. */
+  injected: Record<string, number>;
+  /** Requests where the cell sent a credential of its own (not a placeholder). */
+  credentialsOther: number;
+  refused: number;
+  held: number;
+  hosts: number;
+}
+
+/** External access of all tasks over a period, from the audit rows the daemon has. */
+export interface AccessSummary {
+  since: number;
+  tasks: number;
+  agents: AgentAccess[];
+  /** The hosts most requested, with the agents that requested them (agent-originated). */
+  hosts: { host: string; requests: number; agents: string[]; decisions: Record<string, number> }[];
+  /** Requests where a cell sent a credential of its own, latest first. */
+  credentials: (AuditRow & { task: string; agent: string })[];
+  /** Refusals and held writes, latest first. */
+  refused: (AuditRow & { task: string; agent: string })[];
+  /** Some running tasks' rows could not be read from the VM. */
+  partial: boolean;
+}
+
 /** A usage window of a subscription plan, as the provider reported it. */
 export interface QuotaWindow {
   /** `primary` (Codex: 5 hours) or `secondary` (Codex: a week). */
@@ -479,6 +508,7 @@ export interface Methods {
   'usage.summary': [{ since?: number; by?: UsageGroup }, UsageRow[]];
   /** What the runtimes' responses last said about subscription limits (empty until seen). */
   'usage.quota': [Record<string, never>, QuotaInfo[]];
+  'access.summary': [{ since?: number }, AccessSummary];
   'services.setToken': [{ id: ServiceConnectorId; token: string }, null];
   'services.disconnect': [{ id: ServiceConnectorId }, null];
   'services.setMode': [{ id: ServiceConnectorId; mode: 'auto' | 'ask' }, null];

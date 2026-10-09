@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { homeLayout } from '@anchi/core';
-import type { TaskRow } from '@anchi/protocol';
+import type { QuotaInfo, TaskRow } from '@anchi/protocol';
 import {
   Daemon,
+  QuotaAlerts,
   DaemonClient,
   type ExecResult,
   Guest,
@@ -1121,6 +1122,42 @@ describe('task audit', () => {
     expect(notices).toContain('⛔ git push refused: update refs/heads/main');
   });
 
+  it('sums up the access of every task over a period', async () => {
+    const { client } = await start();
+    const one = await client.call('tasks.create', { agentId: 'dev', text: 'one' });
+    await client.call('tasks.wait', { taskId: one.id });
+    const two = await client.call('tasks.create', { agentId: 'dev', text: 'two' });
+    await client.call('tasks.wait', { taskId: two.id });
+    const now = Date.now() / 1000;
+    const own = {
+      task: two.id,
+      agent: 'dev',
+      method: 'GET',
+      host: 'api.example.com',
+      path: '/me',
+      decision: 'pass',
+      client_cred: 'other',
+      ts: now,
+    };
+    const old = { ...own, task: one.id, ts: now - 30 * 86_400 }; // outside the period
+    transport.auditRows = [...rows(one.id).map((r) => ({ ...r, ts: now })), own, old];
+    const s = await client.call('access.summary', { since: Date.now() - 86_400_000 });
+    expect(s).toMatchObject({ tasks: 2, partial: false });
+    expect(s.agents).toEqual([
+      expect.objectContaining({
+        agent: 'dev',
+        tasks: 2,
+        requests: 5,
+        credentialsOther: 1,
+        injected: { codex: 1, 'github-api': 1 },
+      }),
+    ]);
+    expect(s.credentials.map((r) => [r.task, r.host])).toEqual([[two.id, 'api.example.com']]);
+    expect(s.hosts[0]).toMatchObject({ host: 'api.github.com', agents: ['dev'] });
+    transport.auditFails = true;
+    expect(await client.call('access.summary', {})).toMatchObject({ partial: true, tasks: 2 });
+  });
+
   it('serves a task audit and the latest quota over RPC', async () => {
     const { client } = await start();
     const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
@@ -1487,5 +1524,47 @@ describe('helpers', () => {
       'https://github.com/o/r/pull/2',
       'https://x.dev/i/1',
     ]);
+  });
+});
+
+describe('quota alerts', () => {
+  it('notifies once per threshold and window period, and once when a limit is reached', async () => {
+    let clock = 0;
+    let quota: QuotaInfo[] = [];
+    const sent: string[] = [];
+    const alerts = new QuotaAlerts(
+      async () => quota,
+      (title) => sent.push(title),
+      () => clock,
+    );
+    const codex = (used: number, resetAt = 1_000_000, limited = false): QuotaInfo => ({
+      runtime: 'codex',
+      ts: 0,
+      status: 200,
+      headers: {},
+      plan: 'team',
+      limited,
+      windows: [{ name: 'primary', usedPercent: used, windowMinutes: 300, resetAt }],
+    });
+    const step = async (q: QuotaInfo[]) => {
+      quota = q;
+      clock += 61_000;
+      return alerts.check();
+    };
+    expect(await step([codex(40)])).toEqual([]);
+    expect(await step([codex(81)])).toEqual(['Anchi: Codex 5-hour window 81% used']);
+    expect(await step([codex(90)])).toEqual([]);
+    // Within a minute of the last check, nothing is read.
+    quota = [codex(97)];
+    expect(await alerts.check()).toEqual([]);
+    expect(await step([codex(97)])).toEqual(['Anchi: Codex 5-hour window 97% used']);
+    expect(await step([codex(100, 1_000_000, true)])).toEqual(['Anchi: Codex limit reached']);
+    expect(await step([codex(100, 1_000_000, true)])).toEqual([]);
+    // A new window period starts over.
+    expect(await step([codex(85, 2_000_000)])).toEqual(['Anchi: Codex 5-hour window 85% used']);
+    expect(
+      await step([{ runtime: 'claude-code', ts: 3_600_000, status: 429, headers: {} }]),
+    ).toEqual(['Anchi: Claude Code limit reached']);
+    expect(sent).toHaveLength(5);
   });
 });
