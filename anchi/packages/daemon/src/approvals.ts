@@ -4,6 +4,15 @@ import type { Approval } from '@anchi/protocol';
 import type { Guest, GuestTransport } from './guest.ts';
 
 const ID = /^[0-9a-f]{16}$/;
+
+/** From the proxy; host and path come from the agent's request. */
+export interface CredentialAlert {
+  task: string;
+  agent: string;
+  method: string;
+  host: string;
+  path: string;
+}
 const RETRY_MIN_MS = 2_000;
 const RETRY_MAX_MS = 60_000;
 
@@ -11,12 +20,15 @@ const RETRY_MAX_MS = 60_000;
  * The egress proxy's queue of writes waiting for the user, mirrored on the host. A
  * long-running `anchi-cell approvals watch` streams the queue; decisions go back through
  * `anchi-cell approvals decide`. The stream is restarted when it ends (VM restart, proxy
- * restart), and the proxy refuses a write nobody answers.
+ * restart), and the proxy refuses a write nobody answers. The same stream carries the proxy's
+ * alerts that a cell sent a credential of its own.
  */
 export class ApprovalWatcher extends EventEmitter<{
   changed: [Approval[]];
   added: [Approval];
   resolved: [{ approval: Approval; decided: boolean }];
+  /** A cell sent a credential of its own (not a placeholder) to a host. */
+  credential: [CredentialAlert];
 }> {
   private pending = new Map<string, Approval>();
   /** Connector-service writes: decided through the policy service, with its digest. */
@@ -157,6 +169,16 @@ export class ApprovalWatcher extends EventEmitter<{
       this.pending.set(a.id, a);
       this.emit('added', a);
       this.emit('changed', this.list());
+    } else if (event.type === 'credential') {
+      const v = event as Record<string, unknown>;
+      const str = (x: unknown, max: number) => (typeof x === 'string' ? x.slice(0, max) : '');
+      this.emit('credential', {
+        task: str(v.task, 40),
+        agent: str(v.agent, 40),
+        method: str(v.method, 10),
+        host: str(v.host, 200),
+        path: str(v.path, 200),
+      });
     } else if (event.type === 'resolved' && typeof event.id === 'string') {
       const a = this.pending.get(event.id);
       if (!a) return;

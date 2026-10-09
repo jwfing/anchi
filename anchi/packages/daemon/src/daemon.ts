@@ -36,7 +36,7 @@ import {
   type TaskStatus,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
-import { summarizeAudit } from './audit.ts';
+import { mergeAuditRows, summarizeAudit } from './audit.ts';
 import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
 import {
@@ -275,6 +275,21 @@ export class Daemon {
         void desktopNotify(
           `Anchi: @${a.agent} asks for approval`,
           `${a.connector}: ${a.operation}`,
+        );
+      }
+    });
+    this.approvals.on('credential', (c) => {
+      const task = this.store.getTask(c.task);
+      if (!task) return;
+      this.hub.notice(
+        task.id,
+        `⚠ the cell sent a credential of its own (not an Anchi placeholder) to ${c.host}: ${c.method} ${c.path}`,
+      );
+      this.log(`${task.id} sent a credential of its own to ${c.host}`);
+      if (!this.opts.quiet) {
+        void desktopNotify(
+          `Anchi: @${task.agentId} sent a credential of its own`,
+          `${task.id}: to ${c.host}. Anchi's credentials never enter a cell; see the task's access (a).`,
         );
       }
     });
@@ -558,7 +573,18 @@ export class Daemon {
         .filter((e) => e.type === 'notice' && e.text.startsWith('credential scan'))
         .map((e) => (e as { text: string }).text)
         .at(-1);
-      return summarizeAudit(task.id, await this.guest.audit(task.id), scan ?? null);
+      let live: Awaited<ReturnType<Guest['audit']>> | null = null;
+      try {
+        live = await this.guest.audit(task.id);
+        if (this.store.getTask(task.id)) this.store.saveAuditRows(task.id, live.rows);
+      } catch (err) {
+        if (!this.store.auditRows(task.id).length) throw err;
+      }
+      return summarizeAudit(
+        task.id,
+        mergeAuditRows(live, this.store.auditRows(task.id)),
+        scan ?? null,
+      );
     },
     'tasks.retry': ({ taskId: id, fresh }) => this.hub.retryTask(taskId(id), fresh === true),
     'tasks.cancel': ({ taskId: id }) => {

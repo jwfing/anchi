@@ -18,11 +18,33 @@ const REFUSED = new Set([
 const DETAIL_ROWS = 500;
 
 type Row = Record<string, unknown>;
+
+/**
+ * A task's rows as the VM has them now, joined with the rows the daemon saved earlier (which
+ * the log may have rotated away since). `live` is null when the VM could not be read.
+ */
+export function mergeAuditRows(
+  live: { rows: Row[]; total: number; truncated: boolean } | null,
+  saved: Row[],
+): { rows: Row[]; total: number; truncated: boolean; savedOnly: boolean } {
+  const seen = new Set(saved.map((r) => JSON.stringify(r)));
+  const rows = [...saved];
+  for (const r of live?.rows ?? []) {
+    const key = JSON.stringify(r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(r);
+  }
+  const ts = (r: Row) => (typeof r.ts === 'number' ? r.ts : 0);
+  rows.sort((a, b) => ts(a) - ts(b));
+  const total = Math.max(live?.total ?? 0, rows.length);
+  return { rows, total, truncated: rows.length < total, savedOnly: live === null };
+}
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 export function summarizeAudit(
   taskId: string,
-  raw: { rows: Row[]; total: number; truncated: boolean },
+  raw: { rows: Row[]; total: number; truncated: boolean; savedOnly?: boolean },
   scan: string | null,
 ): TaskAudit {
   const requests = raw.rows.filter((r) => str(r.method) && str(r.host));
@@ -77,6 +99,7 @@ export function summarizeAudit(
     taskId,
     total: raw.total,
     truncated: raw.truncated,
+    ...(raw.savedOnly ? { savedOnly: true } : {}),
     cells: registers.length,
     registration: last
       ? {

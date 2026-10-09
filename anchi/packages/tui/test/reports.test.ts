@@ -54,6 +54,9 @@ describe('reports', () => {
     expect(text).toContain('! sent its own credential');
     // Agent-originated hosts are rendered without escape sequences.
     expect(text).not.toContain('\u001b');
+    expect(accessLines({ ...audit, savedOnly: true }, 200).map((l) => l.text)).toContain(
+      'The VM could not be read: these are the rows saved when the task’s cells closed.',
+    );
     expect(accessLines({ ...audit, credentialsSent: { placeholder: 2 } }, 200)[0]).toMatchObject({
       color: 'green',
     });

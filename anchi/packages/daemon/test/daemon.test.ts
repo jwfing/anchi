@@ -17,7 +17,7 @@ import {
   summarizeAudit,
   auditHeadline,
 } from '../src/index.ts';
-import { extractLinks, Store } from '../src/store.ts';
+import { AUDIT_SAVED_MAX, extractLinks, Store } from '../src/store.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
@@ -27,6 +27,8 @@ class FakeTransport implements GuestTransport {
   purgeFails = false;
   /** Rows the fake egress audit log holds. */
   auditRows: Record<string, unknown>[] = [];
+  /** The fake VM cannot be read for audit rows. */
+  auditFails = false;
   starts: string[][] = [];
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
@@ -58,6 +60,7 @@ class FakeTransport implements GuestTransport {
     const ok = (v: unknown) => ({ code: 0, stdout: JSON.stringify(v), stderr: '' });
     if (args[0] === 'anchi-cell' && args[1] === 'reap') return ok({ reaped: ['t-old'] });
     if (args[0] === 'anchi-cell' && args[1] === 'audit') {
+      if (this.auditFails) return { code: 1, stdout: '{"error": "VM_STOPPED"}', stderr: '' };
       return ok({
         rows: this.auditRows.filter((r) => r.task === args[2]),
         total: 3,
@@ -1031,13 +1034,84 @@ describe('task audit', () => {
     );
   });
 
+  it("saves a task's rows when its cell closes, so they outlive the log", async () => {
+    const { client } = await start(100);
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    transport.auditRows = rows(t.id);
+    await client.call('tasks.wait', { taskId: t.id });
+    await new Promise((r) => setTimeout(r, 400)); // idle timeout closes the cell
+    transport.auditRows = [rows(t.id)[1]!]; // the rest rotated away
+    const a = await client.call('tasks.audit', { taskId: t.id });
+    expect(a).toMatchObject({ requests: 4, total: 8, truncated: false });
+    expect(a.savedOnly).toBeUndefined();
+    transport.auditFails = true;
+    expect(await client.call('tasks.audit', { taskId: t.id })).toMatchObject({
+      requests: 4,
+      savedOnly: true,
+    });
+    await client.call('tasks.delete', { taskId: t.id });
+    expect(daemon!.store.auditRows(t.id)).toEqual([]);
+  });
+
+  it('keeps saved rows once each, and only the latest per task', () => {
+    const store = new Store(join(root, 'audit.db'));
+    const row = (ts: number) => ({ task: 't-1', method: 'GET', host: 'h', ts });
+    store.saveAuditRows('t-1', [row(1), row(2)]);
+    store.saveAuditRows('t-1', [row(2), row(3)]);
+    expect(store.auditRows('t-1').map((r) => r.ts)).toEqual([1, 2, 3]);
+    store.saveAuditRows(
+      't-1',
+      Array.from({ length: AUDIT_SAVED_MAX }, (_, i) => row(10 + i)),
+    );
+    const kept = store.auditRows('t-1');
+    expect(kept).toHaveLength(AUDIT_SAVED_MAX);
+    expect(kept[0]!.ts).toBe(10);
+    store.close();
+  });
+
+  it('fails to read the access of a task with nothing saved while the VM is unreachable', async () => {
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await client.call('tasks.wait', { taskId: t.id });
+    transport.auditFails = true;
+    await expect(client.call('tasks.audit', { taskId: t.id })).rejects.toThrow();
+  });
+
+  it('notes and reports at once a credential a cell sent of its own', async () => {
+    const { client: first } = await start();
+    const t = await first.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await first.call('tasks.wait', { taskId: t.id });
+    await daemon!.stop();
+    daemon = undefined;
+    first.close();
+    transport.approvalLines = [
+      JSON.stringify({
+        type: 'credential',
+        task: t.id,
+        agent: 'dev',
+        method: 'GET',
+        host: 'api.example.com',
+        path: '/v1/me',
+      }),
+      JSON.stringify({ type: 'credential', task: 't-unknown', host: 'x' }),
+    ];
+    const { client } = await start();
+    await new Promise((r) => setTimeout(r, 300));
+    const notices = (await client.call('tasks.events', { taskId: t.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toContain(
+      '⚠ the cell sent a credential of its own (not an Anchi placeholder) to api.example.com: GET /v1/me',
+    );
+  });
+
   it('serves a task audit and the latest quota over RPC', async () => {
     const { client } = await start();
     const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
     await client.call('tasks.wait', { taskId: t.id });
     transport.auditRows = [...rows(t.id), ...rows('t-other')];
     const a = await client.call('tasks.audit', { taskId: t.id });
-    expect(a).toMatchObject({ taskId: t.id, requests: 4, total: 3 });
+    expect(a).toMatchObject({ taskId: t.id, requests: 4, total: 8 });
     expect(transport.execs.some((e) => e.args.join(' ') === `anchi-cell audit ${t.id}`)).toBe(true);
     await expect(client.call('tasks.audit', { taskId: '../x' })).rejects.toThrow();
     expect(await client.call('usage.quota')).toEqual([

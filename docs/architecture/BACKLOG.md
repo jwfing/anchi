@@ -14,7 +14,7 @@ Open requests and known gaps of the secured agent team that are not planned into
 | G4 | Allow a refused egress host from the TUI | The audit log names it (`egress-denied`); adding it to `egress` is a manual edit |
 | G5 | Cell count disagrees between the daemon and the VM | The daemon counts its own live cells; the VM counts cell directories, including cells still closing. A task started as an idle cell closes can fail with `TOO_MANY_CELLS` |
 | G6 | Claude subscription limits | The proxy keeps `anthropic-ratelimit-*` headers, but which ones a Claude subscription returns is not verified against live traffic (no Claude token yet; with G3) |
-| G7 | Follow-ups of R8 and R9 | Audit rows stay in the VM log until rotation when a task is deleted; no global access view across tasks; no warning when a quota window passes a threshold |
+| G7 | Follow-ups of R8 and R9 | Done: a task's audit rows saved by the daemon, alerts when a cell sends a credential of its own. Open: a global access view across tasks; a warning when a quota window passes a threshold |
 
 ## R1 — File preview through a plugin
 

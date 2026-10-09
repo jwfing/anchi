@@ -193,7 +193,9 @@ Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. I
 - Gmail, Drive, Notion and Slack calls through the bridge.
 - The latest requests (method, host, path, decision). Query strings and header values are never recorded.
 
-Hosts and paths come from the agent's requests, so they are shown as agent text. The VM keeps the log up to 50 MB and one rotated file; older rows of long-lived tasks are gone, and the view says when it shows only the latest of a task's rows.
+Hosts and paths come from the agent's requests, so they are shown as agent text. The VM keeps the log up to 50 MB and one rotated file. The daemon saves a task's rows when each of its cells closes and whenever they are read (up to 5,000 per task), so a task's record outlives the rotation and goes when the task is deleted. If the VM cannot be read, the view shows the saved rows and says so.
+
+**A credential of the cell's own.** Anchi's credentials never enter a cell; the cell sends placeholders, and the proxy replaces them. When a cell sends something else in `Authorization` or `x-api-key` (a key from the task text or a file, for example), the proxy tells the daemon at once: the task gets a ⚠ note naming the host, and a desktop notification goes out, once per host and cell. Every such request is in the access view, and its headline turns red.
 
 **Token usage.** Every turn's tokens are recorded with the agent, runtime and model: input, cached input, output and reasoning tokens, and Claude Code's cost estimate (notional on a subscription). **Configure → Usage** (`scripts/anchi usage [--since 24h|7d|30d] [--by agent|model|runtime|day] [--json]`) shows the totals; on the screen **p** changes the period, **b** the grouping and **r** refreshes. Deleting a task keeps its usage rows.
 

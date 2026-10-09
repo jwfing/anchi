@@ -31,6 +31,17 @@ export function accessLines(a: TaskAudit, width: number): ReportLine[] {
     { text: fit(clean(auditHeadline(a))), color: other ? 'red' : 'green' },
     gap,
   ];
+  if (a.savedOnly) {
+    lines.push(
+      {
+        text: fit(
+          'The VM could not be read: these are the rows saved when the task’s cells closed.',
+        ),
+        color: 'yellow',
+      },
+      gap,
+    );
+  }
   if (a.registration) {
     const r = a.registration;
     lines.push(

@@ -19,6 +19,7 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 - TUI key bindings: every action through the leader key Ctrl+X with a panel of the keys that follow, plain keys in views without text input, a command palette (^X Space), shell line editing in the chat input, and `~/.anchi/keybindings.json` (`anchi keys`). Ctrl+X alone, Ctrl+A, Ctrl+E, Ctrl+T and Ctrl+O no longer act as before: new task is ^X n, approvals ^X a, the editor Ctrl+G or ^X e, tool calls ^X t, the builder proposal ^X o.
 - Running a failed or cancelled task again (R, ^X r, `anchi retry`): continue its session with a note of why it stopped, or start over as a new task.
 - A task's external access (a, ^X l, `anchi audit`): hosts reached and decisions, credentials injected by the proxy, what the cell sent as credential, refusals, held writes, bridge calls and the scan, read from the egress proxy's audit log.
+- A task's audit rows are saved by the daemon when its cells close, so its access record outlives the log's rotation; a cell sending a credential that is not a placeholder is noted in the task and notified at once.
 - Token usage per turn (input, cached, output, reasoning, model, Claude Code's cost estimate) with totals by agent, model, runtime or day (Configure → Usage, `anchi usage`), and the subscription limits the egress proxy last saw: Codex's plan and 5-hour and weekly windows, Claude Code's rate-limit headers.
 - Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
 

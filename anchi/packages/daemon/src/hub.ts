@@ -59,7 +59,7 @@ export interface HubOptions {
   store: Store;
   guest: Guest;
   idleMs?: number;
-  /** Scan each cell for real credential values before closing it (default true). */
+  /** Scan each cell for real credential values before closing it, and save its audit rows after (default true). */
   scanOnClose?: boolean;
   /** Skills copied into an agent's cells. */
   skills?: SkillStore;
@@ -750,10 +750,10 @@ export class Hub extends EventEmitter<HubEvents> {
     if (!cell) return Promise.resolve();
     clearTimeout(cell.idle);
     this.cells.delete(taskId);
-    const closing = this.scanBeforeClose(taskId, cell).finally(() => {
-      cell.session.close(reason);
-      this.closing.delete(closing);
-    });
+    const closing = this.scanBeforeClose(taskId, cell)
+      .finally(() => cell.session.close(reason))
+      .then(() => this.saveAudit(taskId))
+      .finally(() => this.closing.delete(closing));
     this.closing.add(closing);
     return closing;
   }
@@ -803,6 +803,20 @@ export class Hub extends EventEmitter<HubEvents> {
       });
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Saves the task's rows of the egress audit log in the store once its cell is closed, so its
+   * access record outlives the log's rotation. Best effort: a later read saves them too.
+   */
+  private async saveAudit(taskId: string): Promise<void> {
+    if (this.opts.scanOnClose === false) return;
+    try {
+      const r = await this.opts.guest.audit(taskId);
+      if (this.opts.store.getTask(taskId)) this.opts.store.saveAuditRows(taskId, r.rows);
+    } catch (err) {
+      this.log(`audit rows of ${taskId} not saved: ${(err as Error).message}`);
     }
   }
 

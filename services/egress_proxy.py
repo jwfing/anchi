@@ -53,6 +53,7 @@ def load_settings():
         return {'high_risk_disabled': []}
 
 
+CREDENTIAL_ALERTS_MAX = 20
 APPROVALS_PENDING_MAX = 32
 # Rate-limit and usage information that subscription responses carry, by injection rule. Only
 # headers with these prefixes are kept; their values are numbers and times, never credentials.
@@ -245,6 +246,8 @@ class Cell:
         # Connector services this cell reaches through the bridge, and their sockets.
         self.services = frozenset()
         self.service_servers = []
+        # Hosts the cell sent a credential of its own to, already reported to the daemon.
+        self.credential_alerts = set()
 
     @property
     def directory(self):
@@ -721,6 +724,24 @@ class EgressProxy:
                 **windows,
             }
 
+    def alert_credential(self, cell, entry):
+        """Tells the daemon at once that a cell sent a credential that is not a placeholder: Anchi's
+        own never enter a cell, so it came from elsewhere. Once per host and cell; the audit log
+        has every request."""
+        if entry['host'] in cell.credential_alerts or len(cell.credential_alerts) >= CREDENTIAL_ALERTS_MAX:
+            return
+        cell.credential_alerts.add(entry['host'])
+        self.approvals.broadcast(
+            {
+                'type': 'credential',
+                'task': cell.task,
+                'agent': cell.agent,
+                'method': entry['method'],
+                'host': entry['host'][:200],
+                'path': entry['path'][:200],
+            }
+        )
+
     async def handle(self, flow, cell, body, streamed, late=False):
         """Decide, hold for approval and inject. Returns None, or (status, content, headers) to refuse."""
         req = flow.request
@@ -740,6 +761,8 @@ class EgressProxy:
             'op': decision.op,
             'decision': decision.action if decision.reason is None else f'{decision.action}:{decision.reason}',
         }
+        if entry['client_cred'] == 'other':
+            self.alert_credential(cell, entry)
         if late and decision.action != 'pass':
             entry['decision'] = 'pass:streamed'
             audit(entry)

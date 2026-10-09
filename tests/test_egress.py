@@ -838,6 +838,35 @@ class RegistryTests(unittest.TestCase):
             },
         )
 
+    def test_a_credential_of_the_cells_own_is_reported_once_per_host(self):
+        proxy = self.proxy_with_cell()
+        lines = []
+        proxy.approvals.watchers.add(type('W', (), {'write': lambda self, b: lines.append(json.loads(b))})())
+        for host, auth in [
+            ('api.example.com', 'Bearer sk-live-123'),
+            ('api.example.com', 'Bearer sk-live-456'),
+            ('example.org', 'Bearer anchi-placeholder'),
+            ('example.org', None),
+            ('other.example', 'token abc'),
+        ]:
+            flow, _ = self.proxy_flow('GET', host, '/v1/me?key=secret', {'authorization': auth} if auth else {}, False)
+            asyncio.run(proxy.request(flow))
+        self.assertEqual(
+            lines,
+            [
+                {
+                    'type': 'credential',
+                    'task': 't1',
+                    'agent': 'dev',
+                    'method': 'GET',
+                    'host': host,
+                    'path': '/v1/me',
+                }
+                for host in ('api.example.com', 'other.example')
+            ],
+        )
+        self.assertNotIn('sk-live', json.dumps(lines))
+
     def test_codex_rate_limit_messages_are_kept(self):
         from types import SimpleNamespace as NS
 

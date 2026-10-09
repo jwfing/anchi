@@ -280,9 +280,11 @@ export interface AuditRow {
 /** A task's external access, from the egress proxy's audit log. */
 export interface TaskAudit {
   taskId: string;
-  /** Rows of the task in the log, and whether only the latest were read. */
+  /** Rows of the task known (in the VM's log or saved by the daemon), and whether only the latest are here. */
   total: number;
   truncated: boolean;
+  /** The VM could not be read: only the rows the daemon saved earlier are here. */
+  savedOnly?: boolean;
   /** Cells the task ran in, and the last one's registration. */
   cells: number;
   registration: {
