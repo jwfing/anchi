@@ -40,6 +40,28 @@ Model calls consume your subscription quota. Anything an agent reads can reach t
 - **Google requires sign-in again:** `scripts/anchi setup service gmail` (or `drive`). Testing-mode OAuth refresh tokens commonly expire after seven days.
 - **Approval refused or timed out:** the agent sees the refusal; send the task a follow-up once the cause is fixed.
 
+## Inside the VM
+
+`limactl shell secure-vm` opens a shell in the VM over Lima's SSH, which listens on `127.0.0.1` only, with a key in `~/.lima/_config`. You get your own user with passwordless sudo: this is the trusted side, at the level of the host administrator. Useful places:
+
+- `sudo anchi-cell list`: the running cells.
+- `sudo ls /var/lib/anchi/agents/<agent>/home`: an agent's persistent home, with its work directory and Codex and Claude sessions.
+- `/var/log/anchi-egress/audit.jsonl`: the egress audit log (`scripts/anchi audit <task>` reads it for you).
+
+Agent cells have no SSH and no interactive shell: nothing runs an SSH server in them, and they reach the network only through the egress proxy. For a look inside a running cell, `anchi-cell exec` runs one command as the agent user, without input:
+
+```bash
+limactl shell secure-vm -- sudo anchi-cell exec <task> -- /bin/sh -c 'ls -la; env | sort'
+```
+
+A cell lives until 10 minutes after its task's last turn; after that, look in the agent's home instead.
+
+As root in the VM:
+
+- Treat an agent's files as untrusted: do not run its scripts or source its configuration as root.
+- Do not restart `anchi-egress` or other services, or run `anchi-cell reap`, while tasks run: like installing, it cuts their cells off.
+- Do not paste credentials into the VM's shell; they go to the vault through `scripts/anchi setup` or the TUI (Runtimes, Connectors).
+
 ## Linux
 
 The target is x86_64 Ubuntu 22.04+ or Debian 12+ with CPU virtualization and `/dev/kvm`. Arch and Fedora are not covered by CI; the KVM CI environment uses Ubuntu 24.04.
