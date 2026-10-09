@@ -293,6 +293,9 @@ export class Daemon {
         );
       }
     });
+    this.approvals.on('notice', ({ task, text }) => {
+      if (this.store.getTask(task)) this.hub.notice(task, text);
+    });
     this.approvals.on('resolved', ({ approval, decided }) => {
       if (!decided) this.hub.notice(approval.task, `⏹ approval for ${approval.operation} expired`);
     });

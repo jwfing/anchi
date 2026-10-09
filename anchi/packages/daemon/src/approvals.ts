@@ -21,7 +21,7 @@ const RETRY_MAX_MS = 60_000;
  * long-running `anchi-cell approvals watch` streams the queue; decisions go back through
  * `anchi-cell approvals decide`. The stream is restarted when it ends (VM restart, proxy
  * restart), and the proxy refuses a write nobody answers. The same stream carries the proxy's
- * alerts that a cell sent a credential of its own.
+ * alerts that a cell sent a credential of its own, and notes for tasks.
  */
 export class ApprovalWatcher extends EventEmitter<{
   changed: [Approval[]];
@@ -29,6 +29,8 @@ export class ApprovalWatcher extends EventEmitter<{
   resolved: [{ approval: Approval; decided: boolean }];
   /** A cell sent a credential of its own (not a placeholder) to a host. */
   credential: [CredentialAlert];
+  /** A note for a task's transcript (a refused streamed push); its text names agent refs. */
+  notice: [{ task: string; text: string }];
 }> {
   private pending = new Map<string, Approval>();
   /** Connector-service writes: decided through the policy service, with its digest. */
@@ -179,6 +181,11 @@ export class ApprovalWatcher extends EventEmitter<{
         host: str(v.host, 200),
         path: str(v.path, 200),
       });
+    } else if (event.type === 'notice') {
+      const v = event as Record<string, unknown>;
+      if (typeof v.task === 'string' && typeof v.text === 'string') {
+        this.emit('notice', { task: v.task.slice(0, 40), text: v.text.slice(0, 500) });
+      }
     } else if (event.type === 'resolved' && typeof event.id === 'string') {
       const a = this.pending.get(event.id);
       if (!a) return;

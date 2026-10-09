@@ -58,6 +58,17 @@ def example_resigner(seed, trailer):
     return rules.ChunkResigner(key, '20130524T000000Z', '20130524/us-east-1/s3/aws4_request', seed, trailer)
 
 
+def pkt(line):
+    return b'%04x' % (len(line) + 4) + line
+
+
+def git_push(*updates, caps=b'report-status side-band-64k', pack=b'PACK\x00\x00\x00\x02'):
+    """A git-receive-pack body: ref updates (old, new, ref), a flush, then the pack."""
+    lines = [b'%s %s %s' % u for u in updates]
+    lines[0] += b'\x00' + caps
+    return b''.join(pkt(line + b'\n') for line in lines) + b'0000' + pack
+
+
 class DecisionTests(unittest.TestCase):
     def test_unmatched_hosts_pass_through(self):
         self.assertEqual(decide('GET', 'example.com', '/').action, 'pass')
@@ -353,7 +364,7 @@ class DecisionTests(unittest.TestCase):
             found = rules.high_risk(d, method, path, body, disabled)
             return found and found[0]
 
-        push = lambda ref, new=b'1' * 40: b'00a8' + b'2' * 40 + b' ' + new + b' ' + ref + b'\x00 report-status\n0000'  # noqa: E731
+        push = lambda ref, new=b'1' * 40: git_push((b'2' * 40, new, ref))  # noqa: E731
         self.assertEqual(risk('PUT', 'api.github.com', '/repos/o/r/pulls/7/merge'), 'github-merge')
         self.assertEqual(risk('DELETE', 'api.github.com', '/repos/o/r'), 'github-repo-delete')
         self.assertEqual(
@@ -364,6 +375,24 @@ class DecisionTests(unittest.TestCase):
             'git-ref-delete',
         )
         self.assertIsNone(risk('POST', 'github.com', '/o/r.git/git-receive-pack', push(b'refs/heads/fix')))
+        # Every update is read, however many come first; a list too long to read, or not a list
+        # of updates, is high-risk.
+        many = [(b'2' * 40, b'1' * 40, b'refs/heads/f%d' % i) for i in range(500)]
+        self.assertEqual(
+            risk(
+                'POST',
+                'github.com',
+                '/o/r.git/git-receive-pack',
+                git_push(*many[:300], (b'2' * 40, b'1' * 40, b'refs/heads/main')),
+            ),
+            'git-default-branch',
+        )
+        for body in (
+            git_push(*many, *many, *many),
+            b'refs/heads/fix',
+            git_push((b'2' * 40, b'1' * 40, b'refs/heads/fix'))[:60],
+        ):
+            self.assertEqual(risk('POST', 'github.com', '/o/r.git/git-receive-pack', body), 'github-push-unreadable')
         self.assertEqual(
             risk('POST', 'api.github.com', '/graphql', b'{"query":"mutation { mergePullRequest(input: {}) { x } }"}'),
             'github-graphql',
@@ -779,6 +808,83 @@ class RegistryTests(unittest.TestCase):
             asyncio.run(proxy.request(flow))
         self.assertEqual(responses, [403])
 
+    def test_chunked_pushes_stream_once_their_ref_updates_pass(self):
+        proxy = self.proxy_with_cell()
+        notes = []
+        proxy.approvals.watchers.add(type('W', (), {'write': lambda self, b: notes.append(json.loads(b))})())
+        headers = {'transfer-encoding': 'chunked', 'authorization': 'Basic eDphbmNoaS1wbGFjZWhvbGRlcg=='}
+
+        def push(body, path='/o/r.git/git-receive-pack', hdrs=headers, cell=None, size=7):
+            if cell is not None:
+                proxy.registry.client_cell = lambda client: cell
+            flow, killed = self.proxy_flow('POST', 'github.com', path, hdrs, stream=False)
+            asyncio.run(proxy.requestheaders(flow))
+            if not callable(flow.request.stream):
+                return flow, None
+            sent = [flow.request.stream(body[i : i + size]) for i in range(0, len(body), size)]
+            sent.append(flow.request.stream(b''))
+            from types import SimpleNamespace as NS
+
+            def respond(f, status, content, headers=None):
+                f.response = NS(status_code=status, content=content, headers=headers)
+
+            with patch.object(self.module.EgressProxy, 'respond', staticmethod(respond)):
+                proxy.response(flow)
+            return flow, sent
+
+        # Over HTTP/2 there is no transfer-encoding: the length is just missing.
+        flow, sent = push(
+            git_push((b'2' * 40, b'1' * 40, b'refs/heads/fix')), hdrs={'authorization': headers['authorization']}
+        )
+        self.assertIsNotNone(sent)
+        pack = b'PACK' + bytes(range(256)) * 64
+        body = git_push((b'2' * 40, b'1' * 40, b'refs/heads/fix'), pack=pack)
+        flow, sent = push(body)
+        self.assertNotEqual(flow.request.headers['authorization'], headers['authorization'])
+        out = b''.join(b if isinstance(b, bytes) else b''.join(b) for b in sent)
+        self.assertEqual(out, body)
+        # Nothing leaves before the flush that ends the updates.
+        flush = body.index(b'0000PACK') + 4
+        self.assertEqual(sent[: (flush - 1) // 7], [[]] * ((flush - 1) // 7))
+        self.assertEqual(sent[(flush - 1) // 7], [body[: ((flush - 1) // 7 + 1) * 7]])
+        self.assertIsNone(flow.response)
+
+        main = git_push(
+            (b'2' * 40, b'1' * 40, b'refs/heads/fix'), (b'2' * 40, b'1' * 40, b'refs/heads/main'), pack=pack
+        )
+        flow, sent = push(main)
+        self.assertTrue(all(b in ([], b'') for b in sent))
+        self.assertEqual(flow.response.status_code, 200)
+        report = flow.response.content
+        self.assertIn(b'\x01000eunpack ok\n', report)
+        self.assertIn(b'ng refs/heads/main anchi: push to main or master', report)
+        self.assertIn(b'ng refs/heads/fix anchi:', report)
+        self.assertEqual(notes[-1]['type'], 'notice')
+        self.assertIn('update refs/heads/main', notes[-1]['text'])
+
+        many = [(b'2' * 40, b'1' * 40, b'refs/heads/f%d' % i) for i in range(1000)]
+        for body in (git_push(*many, pack=pack), body[:50], b'not a push at all'):
+            flow, sent = push(body, size=4096)
+            self.assertTrue(all(b in ([], b'') for b in sent))
+            self.assertEqual(flow.response.status_code, 403)
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        pushes = [(r['decision'], r.get('risk')) for r in rows if r.get('event') == 'push']
+        self.assertEqual(
+            pushes,
+            [('inject', None)] * 2 + [('deny', 'git-default-branch')] + [('deny', 'github-push-unreadable')] * 3,
+        )
+        self.assertEqual([r['decision'] for r in rows if r.get('push') == 'streamed'], ['inject'] * 6)
+
+        # Buffered as before: with a length, when GitHub writes ask, or without GitHub.
+        for hdrs, cell in (
+            ({**headers, 'content-length': '10'}, None),
+            ({**headers, 'content-encoding': 'gzip'}, None),
+            (headers, self.module.Cell('t1', 'dev', {'github'}, ask={'github'})),
+            (headers, self.module.Cell('t1', 'dev', {'aws'})),
+        ):
+            flow, sent = push(body, hdrs=hdrs, cell=cell)
+            self.assertEqual((sent, flow.metadata), (None, {}))
+
     def test_other_streamed_requests_leave_uninjected_and_say_so(self):
         proxy = self.proxy_with_cell()
         flow, killed = self.proxy_flow('POST', 'api.github.com', '/repos/o/r/releases', {'authorization': 'x'}, True)
@@ -793,12 +899,14 @@ class RegistryTests(unittest.TestCase):
         with patch.object(proxy.approvals, 'ask', denied):
             asyncio.run(proxy.requestheaders(flow))
         self.assertEqual(killed, [1])
-        # Streaming that starts after the headers hook (a chunked body past 8 MiB): too late to inject.
-        flow, killed = self.proxy_flow('POST', 'github.com', '/o/r.git/git-receive-pack', {'authorization': 'x'}, False)
+        # Streaming that starts after the headers hook (a body without a length past 8 MiB that
+        # does not stream from the start, such as a compressed push): too late to inject.
+        late = {'authorization': 'x', 'content-encoding': 'gzip'}
+        flow, killed = self.proxy_flow('POST', 'github.com', '/o/r.git/git-receive-pack', late, False)
         asyncio.run(proxy.requestheaders(flow))
         flow.request.stream = True
         asyncio.run(proxy.request(flow))
-        self.assertEqual((flow.request.headers, flow.response), ({'authorization': 'x'}, None))
+        self.assertEqual((flow.request.headers, flow.response), (late, None))
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertEqual([r['decision'] for r in rows], ['pass:streamed', 'held-denied', 'pass:streamed'])
 

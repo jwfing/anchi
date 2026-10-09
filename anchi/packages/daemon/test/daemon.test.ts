@@ -1094,6 +1094,12 @@ describe('task audit', () => {
         path: '/v1/me',
       }),
       JSON.stringify({ type: 'credential', task: 't-unknown', host: 'x' }),
+      JSON.stringify({
+        type: 'notice',
+        task: t.id,
+        text: '⛔ git push refused: update refs/heads/main',
+      }),
+      JSON.stringify({ type: 'notice', task: t.id, text: 7 }),
     ];
     const { client } = await start();
     await new Promise((r) => setTimeout(r, 300));
@@ -1103,6 +1109,7 @@ describe('task audit', () => {
     expect(notices).toContain(
       '⚠ the cell sent a credential of its own (not an Anchi placeholder) to api.example.com: GET /v1/me',
     );
+    expect(notices).toContain('⛔ git push refused: update refs/heads/main');
   });
 
   it('serves a task audit and the latest quota over RPC', async () => {
