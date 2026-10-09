@@ -32,6 +32,7 @@
     />
     <script src="/language.js" defer></script>
     <script src="/terminal.js" defer></script>
+    <script src="/install.js" defer></script>
   </head>
   <body id="top">
     <a class="skip" href="#main">跳转到主要内容</a>
@@ -81,13 +82,15 @@
           <p class="intro intro-security">
             为每个 agent 设定边界。真实凭据不进沙箱，重要操作由你授权。
           </p>
-          <div class="hero-actions">
-            <a class="button primary" href="#setup">开始使用 ↗</a
-            ><a class="button secondary" href="https://github.com/jwfing/anchi"
-              >查看源码 ↗</a
-            >
+          <div class="hero-install" aria-label="安装 Anchi">
+            <span class="install-prompt" aria-hidden="true">$</span>
+            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code>
+            <button class="install-copy" type="button" aria-label="复制安装命令" aria-live="polite" hidden>复制</button>
           </div>
-          <p class="availability">开发者预览版 · 开源</p>
+          <p class="availability install-meta">开发者预览版 · macOS / Linux<br />
+            <a href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md">安装指南 ↗</a>
+            <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi">源码 ↗</a>
+          </p>
         </div>
         <figure class="fleet-figure">
           <div
@@ -342,11 +345,6 @@
             href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
             >安装指南 ↗</a
           >
-        </div>
-        <div class="install-command">
-          <p>安装开发预览版，然后运行 <code>anchi</code>。无需 Git、Node 或 pnpm。首次运行任务前需要 Lima 和 Python。</p>
-          <pre><code>curl -fsSL https://anchi.elseward.xyz/install.sh | sh
-anchi</code></pre>
         </div>
         <section class="demo" id="terminal" aria-label="交互式 TUI 预览">
           <div class="terminal">

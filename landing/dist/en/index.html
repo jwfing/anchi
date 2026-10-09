@@ -32,6 +32,7 @@
     />
     <script src="/language.js" defer></script>
     <script src="/terminal.js" defer></script>
+    <script src="/install.js" defer></script>
   </head>
   <body id="top">
     <a class="skip" href="#main">Skip to main content</a>
@@ -83,13 +84,15 @@
             Set boundaries for each agent. Real credentials stay out of
             sandboxes. You authorize the writes that matter.
           </p>
-          <div class="hero-actions">
-            <a class="button primary" href="#setup">Get started ↗</a
-            ><a class="button secondary" href="https://github.com/jwfing/anchi"
-              >View source ↗</a
-            >
+          <div class="hero-install" aria-label="Install Anchi">
+            <span class="install-prompt" aria-hidden="true">$</span>
+            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code>
+            <button class="install-copy" type="button" aria-label="Copy install command" aria-live="polite" hidden>Copy</button>
           </div>
-          <p class="availability">Developer preview · Open source</p>
+          <p class="availability install-meta">Developer preview · macOS / Linux<br />
+            <a href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md">Setup guide ↗</a>
+            <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi">Source ↗</a>
+          </p>
         </div>
         <figure class="fleet-figure">
           <div
@@ -353,11 +356,6 @@
             href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
             >Setup guide ↗</a
           >
-        </div>
-        <div class="install-command">
-          <p>Install the development preview, then run <code>anchi</code>. No Git, Node or pnpm required. Lima and Python are needed to run your first agent.</p>
-          <pre><code>curl -fsSL https://anchi.elseward.xyz/install.sh | sh
-anchi</code></pre>
         </div>
         <section
           class="demo"

@@ -1556,6 +1556,46 @@ html[lang="zh-CN"] .fleet-hero h1 {
   }
 }
 
-.install-command { margin: 0 0 2rem; }
-.install-command pre { overflow-x: auto; padding: 1.25rem; border: 1px solid var(--line, #303833); border-radius: 8px; background: #101713; line-height: 1.8; }
-.install-command code { font-family: monospace; }
+/* Single-command installation at the foot of the hero copy. */
+.hero-copy { min-width: 0; }
+.hero-install {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 30px;
+  padding-left: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.install-prompt { color: var(--lime); }
+.hero-install code {
+  min-width: 0;
+  padding-block: 15px;
+  overflow-x: auto;
+  white-space: nowrap;
+  font: 11px/1.7 var(--mono);
+}
+.install-copy {
+  align-self: stretch;
+  flex-shrink: 0;
+  min-width: 60px;
+  padding: 12px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+  font: 10px var(--mono);
+  cursor: pointer;
+}
+.install-copy:hover { color: var(--lime); background: var(--panel); }
+.install-copy:focus-visible { outline: 2px solid var(--lime); outline-offset: -3px; }
+.hero-install:has(.install-copy[hidden]) { padding-right: 16px; }
+.install-meta { line-height: 2; }
+.install-meta a { color: var(--lime); }
+.install-meta a:hover { text-decoration: underline; }
+@media (max-width: 560px) {
+  .hero-install { gap: 10px; padding-left: 12px; }
+  .hero-install code { white-space: normal; overflow-wrap: anywhere; }
+}

@@ -74,6 +74,10 @@ and runtimes, not an endorsement.
 
 ## Installer
 
+The hero contains a single install command with a clipboard button (`dist/install.js`);
+keep it in sync across both languages and the root page. The installer ends by prompting
+the user to run `anchi`.
+
 `dist/install.sh` is the public POSIX installer. It downloads platform archives and SHA-256
 files from GitHub Releases. Publish both platform assets before deploying the install call
 to action. See `docs/engineering/RELEASE.md`; validate the installer with
