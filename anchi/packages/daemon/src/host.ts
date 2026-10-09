@@ -6,8 +6,11 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import type { SetupAction } from '@anchi/protocol';
 
-/** The checkout the daemon runs from; setup steps use its scripts. */
-export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+/** Both release bundles live in <root>/lib; source modules live in the workspace. */
+export const REPO_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  import.meta.url.endsWith('.mjs') ? '..' : '../../../..',
+);
 
 export const WORKSPACE_MOUNT = '/mnt/anchi-host';
 

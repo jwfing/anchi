@@ -59,10 +59,16 @@ jobs:
           mkdir -p "$HOME/.local/lima" && tar -xzf lima.tgz -C "$HOME/.local/lima"
           echo "$HOME/.local/lima/bin" >> "$GITHUB_PATH"
       - run: limactl --version
-      - name: Create the guest and install the trusted services and the agent team
+      - name: Build and check the Linux distribution
         run: |
-          bash scripts/up.sh
-          bash scripts/install-anchi.sh
+          bash scripts/package-release.sh
+          python3 scripts/check-release.py artifacts/releases/anchi-linux-x64.tar.gz
+          mkdir -p /tmp/anchi-release-live
+          tar -xzf artifacts/releases/anchi-linux-x64.tar.gz -C /tmp/anchi-release-live
+      - name: Create the guest using the packaged setup resources
+        run: |
+          bash /tmp/anchi-release-live/anchi/scripts/up.sh
+          bash /tmp/anchi-release-live/anchi/scripts/install-anchi.sh
       - name: Isolation and service checks
         run: bash scripts/verify.sh
       - name: Vault, base image and a synthetic Codex account

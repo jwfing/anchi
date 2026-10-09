@@ -3,6 +3,7 @@ export * from './builder.ts';
 export * from './cell.ts';
 export * from './daemon.ts';
 export * from './guest.ts';
+export { REPO_ROOT } from './host.ts';
 export * from './hub.ts';
 export * from './launch.ts';
 export * from './prompt.ts';

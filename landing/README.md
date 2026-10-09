@@ -71,3 +71,10 @@ The earlier official-source assets (`apple.svg`, `linux.png`, `openai.svg`, and
 
 Brand marks belong to their respective owners. They identify supported platforms
 and runtimes, not an endorsement.
+
+## Installer
+
+`dist/install.sh` is the public POSIX installer. It downloads platform archives and SHA-256
+files from GitHub Releases. Publish both platform assets before deploying the install call
+to action. See `docs/engineering/RELEASE.md`; validate the installer with
+`python3 scripts/check-release.py <archive>` before deployment.

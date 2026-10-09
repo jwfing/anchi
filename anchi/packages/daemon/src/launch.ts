@@ -11,6 +11,9 @@ export const LAUNCHD_LABEL = 'dev.anchi.daemon';
 
 /** node + args that start the daemon from source (tsx loader). */
 export function daemonCommand(): string[] {
+  if (import.meta.url.endsWith('.mjs')) {
+    return [process.execPath, join(dirname(fileURLToPath(import.meta.url)), 'daemon.mjs')];
+  }
   const tsx = createRequire(import.meta.url).resolve('tsx');
   const main = join(dirname(fileURLToPath(import.meta.url)), 'main.ts');
   return [process.execPath, '--import', tsx, main];

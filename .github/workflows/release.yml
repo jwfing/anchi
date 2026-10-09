@@ -1,0 +1,67 @@
+name: Release packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: ["release/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: darwin-arm64
+          - os: ubuntu-22.04
+            target: linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: anchi/package.json
+      - run: pnpm --dir anchi install --frozen-lockfile
+      - run: python -m pip install -r requirements-test.txt
+      - run: make check PYTHON=python
+      - name: Check release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./anchi/package.json').version")"
+      - run: bash scripts/package-release.sh
+      - run: python scripts/check-release.py artifacts/releases/anchi-${{ matrix.target }}.tar.gz
+      - uses: actions/upload-artifact@v6
+        with:
+          name: anchi-${{ matrix.target }}
+          path: artifacts/releases/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: anchi-*
+          path: release
+          merge-multiple: true
+      - name: Publish development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --verify-tag --title "Anchi $GITHUB_REF_NAME (development preview)" \
+            --notes 'Development preview. Install: curl -fsSL https://anchi.elseward.xyz/install.sh | sh. Includes Node and all app dependencies. VM prerequisites: Lima and Python; Linux also requires QEMU/KVM. This build has not had a security audit.'

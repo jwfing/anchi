@@ -10,6 +10,7 @@ import {
   installAutostart,
   tryConnect,
   uninstallAutostart,
+  REPO_ROOT,
 } from '@anchi/daemon';
 import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow } from '@anchi/protocol';
 import { Command } from 'commander';
@@ -121,6 +122,10 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
 }
 
 const program = new Command('anchi').description('Anchi (安栖): a secured agent team');
+const versionFile = existsSync(join(REPO_ROOT, 'manifest.json'))
+  ? join(REPO_ROOT, 'manifest.json')
+  : join(REPO_ROOT, 'anchi/package.json');
+program.version((JSON.parse(readFileSync(versionFile, 'utf8')) as { version: string }).version);
 
 program
   .command('tui', { isDefault: true })
