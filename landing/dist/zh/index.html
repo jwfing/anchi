@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f9f8f5" />
+    <meta name="theme-color" content="#10120f" />
     <title>安栖 — 安全的智能体团队</title>
     <meta
       name="description"
-      content="在你自己的电脑上运行一支 Codex 与 Claude Code 智能体团队：每个任务在一次性的隔离单元中运行，凭据从不进入其中，每个智能体只拿到你给它的权限，重要的写操作由你决定。"
+      content="创建 agent fleet，让他们安全地工作。Anchi 让 Codex 与 Claude Code 协作，隔离任务、保护凭据，并由你授权重要操作。"
     />
     <link rel="canonical" href="https://anchi.elseward.xyz/zh/" />
     <meta property="og:title" content="安栖 — 安全的智能体团队" />
     <meta
       property="og:description"
-      content="在你自己的电脑上运行一支 Codex 与 Claude Code 智能体团队：每个任务在一次性的隔离单元中运行，凭据从不进入其中，每个智能体只拿到你给它的权限，重要的写操作由你决定。"
+      content="创建 agent fleet，让他们安全地工作。Anchi 让 Codex 与 Claude Code 协作，隔离任务、保护凭据，并由你授权重要操作。"
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://anchi.elseward.xyz/zh/" />
@@ -31,331 +31,561 @@
       href="https://anchi.elseward.xyz/"
     />
     <script src="/language.js" defer></script>
+    <script src="/terminal.js" defer></script>
   </head>
-  <body>
+  <body id="top">
     <a class="skip" href="#main">跳转到主要内容</a>
     <header class="header wrap">
-      <a class="brand" href="#" aria-label="安栖首页"
-        ><svg viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M5 26 16 5l11 21M10 20h12M16 13v15" /></svg
-        >anchi<span>安栖</span></a
+      <a class="brand" href="#top" aria-label="安栖首页"
+        ><img
+          class="brand-mark"
+          src="/logo.svg"
+          width="36"
+          height="36"
+          alt=""
+          aria-hidden="true"
+        />
+        <span class="brand-wordmark">anchi</span></a
       >
       <nav aria-label="主导航">
-        <a href="#environment">工作方式</a><a href="#questions">常见问题</a
-        ><a class="nav-link" href="https://github.com/jwfing/anchi"
-          >GitHub <span aria-hidden="true">↗</span></a
+        <a href="#workflow">工作方式</a><a href="#environment">安全边界</a
+        ><a href="#platforms">平台</a
+        ><a href="https://github.com/jwfing/anchi" class="github-link"
+          >GitHub ↗</a
         >
-        <div class="language-switch" role="group" aria-label="选择语言">
+        <div class="language-switch" role="group" aria-label="Language">
           <a
             href="/zh/"
             lang="zh-CN"
             hreflang="zh-CN"
             data-language="zh"
             aria-current="page"
-            >中文</a
-          ><a href="/en/" lang="en" hreflang="en" data-language="en">English</a>
+            >中</a
+          ><span>/</span
+          ><a href="/en/" lang="en" hreflang="en" data-language="en">EN</a>
         </div>
       </nav>
     </header>
     <main id="main">
-      <section class="hero wrap">
-        <p class="eyebrow">
-          <span class="status-dot"></span> 安栖 · 安心栖身之所
+      <section class="hero wrap fleet-hero">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="status-dot" aria-hidden="true"></span>ANCHI / A SECURED
+            AGENT FLEET
+          </p>
+          <h1>创建 agent fleet，<br /><span>让他们安全地工作。</span></h1>
+          <p class="intro">
+            Anchi 让 agent
+            像同事一样协作。创建不同角色，分配任务，组成你的团队。
+          </p>
+          <p class="intro intro-security">
+            为每个 agent 设定边界。真实凭据不进沙箱，重要操作由你授权。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#setup">开始使用 ↗</a
+            ><a class="button secondary" href="https://github.com/jwfing/anchi"
+              >查看源码 ↗</a
+            >
+          </div>
+          <p class="availability">开发者预览版 · 开源</p>
+        </div>
+        <figure class="fleet-figure">
+          <div
+            class="fleet-console"
+            role="img"
+            aria-label="你向 Anchi 分配任务并审批操作。Anchi 协调 developer 和 reviewer，它们的任务在本地虚拟机内分别隔离。请求经可信网关到达服务，真实凭据由保险库提供，不进入任务隔离单元。"
+          >
+            <div class="fleet-console-title" aria-hidden="true">
+              <span><span class="lime">❯</span> anchi / fleet</span
+              ><span class="fleet-local"
+                ><span class="status-dot"></span> local</span
+              >
+            </div>
+            <div class="fleet-flow" aria-hidden="true">
+              <div class="fleet-owner">
+                <span>[ 你 ]</span
+                ><span class="fleet-owner-action">分配任务 / 审批</span>
+              </div>
+              <div class="fleet-stem"></div>
+              <div class="fleet-coordinator">
+                <span>ANCHI</span><span>协调 · 委派</span>
+              </div>
+              <div class="fleet-stem fleet-stem-entry"></div>
+              <div class="fleet-vm">
+                <span class="fleet-vm-label">LOCAL VM</span>
+                <div class="fleet-fork"><i></i><i></i></div>
+                <div class="fleet-agents">
+                  <div class="fleet-cell">
+                    <div class="fleet-cell-label">隔离任务 / 01</div>
+                    <strong>@developer</strong><span>Codex</span>
+                  </div>
+                  <div class="fleet-cell fleet-cell-reviewer">
+                    <div class="fleet-cell-label">隔离任务 / 02</div>
+                    <strong>@reviewer</strong><span>Claude Code</span>
+                  </div>
+                </div>
+                <div class="fleet-merge"><i></i><i></i></div>
+                <p class="fleet-isolation">独立隔离 · 无真实凭据</p>
+                <div class="fleet-stem fleet-request-stem"></div>
+                <div class="fleet-trusted">
+                  <div class="fleet-vault">
+                    <span><b>[k]</b> 凭据库</span><small>真实凭据</small>
+                  </div>
+                  <span class="fleet-key-arrow">─▶</span>
+                  <div class="fleet-gateway">
+                    <strong>可信网关</strong><small>凭据在此使用</small>
+                  </div>
+                </div>
+              </div>
+              <div class="fleet-stem fleet-exit"></div>
+              <div class="fleet-services">
+                <span>你的服务</span><span>GitHub · AWS · …</span>
+              </div>
+            </div>
+          </div>
+          <figcaption>协作由 Anchi 协调，凭据留在沙箱之外。</figcaption>
+        </figure>
+      </section>
+      <section class="section wrap workflow" id="workflow">
+        <div class="section-heading">
+          <p class="eyebrow">01 / WORKFLOW</p>
+          <h2>像组建团队一样，开始协作。</h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/agent.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>创建 agent</h3>
+            <p>描述你需要的队友，定义他的角色。</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/team.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>组成团队</h3>
+            <p>选择队友，设置谁可以向谁委派。</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/task.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>分配任务</h3>
+            <p>交代目标，让团队协作完成。</p>
+          </article>
+        </div>
+      </section>
+      <section class="section wrap security-section" id="environment">
+        <div class="section-heading">
+          <p class="eyebrow">02 / BOUNDARY</p>
+          <h2>让 agent 做事，<span>把钥匙留在自己手里。</span></h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/isolation.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>任务隔离</h3>
+            <p>每个任务在本地虚拟机的独立隔离单元内运行。</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/credentials.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>凭据隔离</h3>
+            <p>可信服务代为使用凭据，真实凭据不进入沙箱。</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/authorization.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>权限与授权</h3>
+            <p>设置目录、连接器和网络访问范围；重要写操作需你批准。</p>
+          </article>
+        </div>
+        <div class="security-note">
+          <span aria-hidden="true">[i]</span>
+          <p>
+            凭据隔离不等于数据隔离，agent 读取的内容仍可能发送到云端模型。
+            <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
+              >安全模型 ↗</a
+            >
+          </p>
+        </div>
+      </section>
+      <section class="section wrap platforms-section" id="platforms">
+        <div class="section-heading">
+          <p class="eyebrow">03 / PLATFORMS &amp; RUNTIMES</p>
+          <h2>熟悉的平台，熟悉的 runtime。</h2>
+        </div>
+        <div class="support-grid">
+          <div class="support-group">
+            <p>运行平台</p>
+            <dl>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/macos-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>macOS</span>
+                </dt>
+                <dd>Apple Silicon</dd>
+              </div>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/linux-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>Linux</span>
+                </dt>
+                <dd>x86_64 · 实验性支持</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="support-group">
+            <p>AGENT RUNTIMES</p>
+            <dl>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/codex-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>Codex</span>
+                </dt>
+                <dd>OpenAI</dd>
+              </div>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/claude-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>Claude Code</span>
+                </dt>
+                <dd>Anthropic</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+        <p class="extension-note">
+          想接入更多平台或 runtime？
+          <a href="https://github.com/jwfing/anchi/blob/main/CONTRIBUTING.md"
+            >参与扩展 ↗</a
+          >
         </p>
-        <h1>安全的<br /><span>智能体团队。</span></h1>
-        <p class="hero-title">智能体替你操作账号，却从不握有钥匙。</p>
-        <p class="intro">
-          描述一下就能建好 Codex 与 Claude Code 智能体，给它们派任务，让它们互相分工。<br />每个智能体都在一次性的隔离单元中工作，只看得到你给它的东西，重要的写操作先等你点头。
-        </p>
-        <div class="hero-actions">
+      </section>
+      <section class="section wrap boot-section" id="setup">
+        <div class="boot-heading">
+          <div>
+            <p class="eyebrow">04 / BOOT YOUR TEAM</p>
+            <h2>打开 Anchi，<span>让团队在这里生长。</span></h2>
+          </div>
           <a
             class="button primary"
             href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
-            >开始使用 <span aria-hidden="true">↗</span></a
-          ><a class="button secondary" href="#environment"
-            >了解工作方式 <span aria-hidden="true">↓</span></a
+            >安装指南 ↗</a
           >
         </div>
-        <p class="availability">
-          开发者预览版 <span>·</span> macOS / Apple Silicon <span>·</span> Linux（实验性）
-          <span>·</span> 开源
-        </p>
-        <div
-          class="environment-visual"
-          role="img"
-          aria-label="示意：一支智能体团队在本地虚拟机内的一次性隔离单元中运行，经由安栖访问你的账号、AI 模型和你指定的文件夹。凭据始终留在隔离单元之外。"
-        >
-          <div class="visual-top">
-            <span><span class="status-dot"></span> 安栖智能体团队</span
-            ><span>示意 / 本地虚拟机</span>
-          </div>
-          <div class="visual-body">
-            <div class="resource resource-files">
-              <span class="resource-icon" aria-hidden="true">▤</span>
-              <div>
-                <strong>你的文件夹</strong
-                ><small>只限你列出的</small>
-              </div>
+        <section class="demo" id="terminal" aria-label="交互式 TUI 预览">
+          <div class="terminal">
+            <div class="terminal-title">
+              <span><span class="prompt">❯</span> scripts/anchi</span
+              ><span>anchi — ~/workspace</span
+              ><span class="window-mark" aria-hidden="true">─ □ ×</span>
             </div>
-            <div class="resource resource-accounts">
-              <span class="resource-icon" aria-hidden="true">◎</span>
-              <div>
-                <strong>你的账号</strong
-                ><small>GitHub、AWS、Google 等</small>
-              </div>
+            <div
+              class="view-tabs"
+              role="tablist"
+              aria-label="交互式 TUI 预览"
+              hidden
+            >
+              <button
+                type="button"
+                id="view-team"
+                role="tab"
+                aria-controls="panel-team"
+                aria-selected="true"
+                tabindex="0"
+                data-view="team"
+              >
+                01 团队协作</button
+              ><button
+                type="button"
+                id="view-builder"
+                role="tab"
+                aria-controls="panel-builder"
+                aria-selected="false"
+                tabindex="-1"
+                data-view="builder"
+              >
+                02 创建智能体</button
+              ><button
+                type="button"
+                id="view-approval"
+                role="tab"
+                aria-controls="panel-approval"
+                aria-selected="false"
+                tabindex="-1"
+                data-view="approval"
+              >
+                03 写入审批
+              </button>
             </div>
-            <div class="resource resource-models">
-              <span class="resource-icon" aria-hidden="true">✳</span>
-              <div>
-                <strong>AI 模型</strong><small>Codex、Claude Code</small>
-              </div>
-            </div>
-            <div class="boundary">
-              <span class="boundary-label">安栖 · 隔离单元边界</span>
-              <div class="agent-space">
-                <div class="agent-symbol" aria-hidden="true">
-                  <span></span><span></span><i></i>
+            <div class="terminal-body">
+              <aside class="terminal-sidebar" aria-label="示例侧栏">
+                <div class="sidebar-brand">anchi <span>安栖</span></div>
+                <p class="sidebar-heading">Configure</p>
+                <span>Runtimes</span><span>Skills</span><span>Connectors</span
+                ><span>Usage</span><span>Access</span>
+                <p class="sidebar-heading">Agents <span>3</span></p>
+                <span data-side="builder">+ Agent builder</span
+                ><span data-side="team" class="side-selected"
+                  >› @lead <i class="lime">●</i></span
+                ><span>@developer <i class="lime">●</i></span
+                ><span>@reviewer <i class="amber">●</i></span>
+                <p class="sidebar-heading">Tasks</p>
+                <span class="side-task">✓ review-release</span
+                ><span class="side-task">✓ check-diff</span>
+                <div class="sidebar-bottom">
+                  <span class="status-dot" aria-hidden="true"></span> local VM
                 </div>
-                <strong>你的智能体团队</strong
-                ><span>每个任务一个一次性隔离单元</span>
-                <div class="workspace-tags">
-                  <span>@lead</span><span>@developer</span
-                  ><span>@reviewer</span>
-                </div>
+              </aside>
+              <div class="terminal-main">
+                <section
+                  class="demo-panel"
+                  id="panel-team"
+                  role="tabpanel"
+                  aria-labelledby="view-team"
+                  tabindex="0"
+                >
+                  <div class="panel-heading">
+                    <span>@lead / 检查本次发布</span
+                    ><span class="amber">● waiting</span>
+                  </div>
+                  <div class="transcript">
+                    <div class="message">
+                      <span class="speaker cyan">you</span>
+                      <p>检查本次发布，让 @reviewer 审查代码变更。</p>
+                    </div>
+                    <div class="message">
+                      <span class="speaker lime"
+                        >@lead <span class="muted">/ codex</span></span
+                      >
+                      <p>我会检查分支，并将代码审查委派给 @reviewer。</p>
+                    </div>
+                    <div class="tool-call">
+                      <span class="amber">↳ delegate → @reviewer</span>
+                      <p>检查 diff 中的缺陷和遗漏的测试。</p>
+                      <span class="muted"
+                        >└
+                        <span class="lime">✓</span>
+                        审查已完成，补丁准备就绪。</span
+                      >
+                    </div>
+                    <div class="held-write">
+                      <span class="amber">! approval_required</span
+                      ><span>合并操作已暂停，等待你的审批。</span
+                      ><code>github.pull_request.merge</code>
+                    </div>
+                  </div>
+                  <div class="terminal-input">
+                    <span class="prompt">❯</span> 继续交代任务…<span
+                      class="block-cursor"
+                      aria-hidden="true"
+                    ></span>
+                  </div>
+                </section>
+                <section
+                  class="demo-panel"
+                  id="panel-builder"
+                  role="tabpanel"
+                  aria-labelledby="view-builder"
+                  tabindex="0"
+                  hidden
+                >
+                  <div class="panel-heading">
+                    <span>Agent builder</span
+                    ><span class="lime">+ new agent</span>
+                  </div>
+                  <div class="transcript">
+                    <div class="message">
+                      <span class="speaker cyan">you</span>
+                      <p>
+                        创建一个代码审查员。允许使用
+                        GitHub、只读访问项目文件，写入前先询问我。
+                      </p>
+                    </div>
+                    <div class="message">
+                      <span class="speaker lime">builder</span>
+                      <p>这是智能体的配置提案，请确认它的权限范围。</p>
+                    </div>
+                    <div class="config-preview">
+                      <p>
+                        <span class="muted">agent</span
+                        ><span class="lime">@reviewer</span>
+                      </p>
+                      <p>
+                        <span class="muted">runtime</span><span>claude</span>
+                      </p>
+                      <p>
+                        <span class="muted">connectors</span
+                        ><span>github <span class="amber">[ask]</span></span>
+                      </p>
+                      <p>
+                        <span class="muted">workspace</span
+                        ><span
+                          >project <span class="cyan">[read-only]</span></span
+                        >
+                      </p>
+                      <p><span class="muted">delegates</span><span>[]</span></p>
+                    </div>
+                  </div>
+                  <div class="terminal-input">
+                    <span class="lime">+</span> 配置提案 / 确认后才会写入
+                  </div>
+                </section>
+                <section
+                  class="demo-panel"
+                  id="panel-approval"
+                  role="tabpanel"
+                  aria-labelledby="view-approval"
+                  tabindex="0"
+                  hidden
+                >
+                  <div class="panel-heading">
+                    <span>Approvals / github</span
+                    ><span class="amber">1 pending</span>
+                  </div>
+                  <div class="transcript approval-transcript">
+                    <p class="approval-tag">等待你的决定</p>
+                    <h3>允许 @lead 执行写入？</h3>
+                    <p>
+                      高风险写入会暂停。操作内容和任务的来源，一起交给你判断。
+                    </p>
+                    <div class="approval-detail">
+                      <p>
+                        <span>operation</span><code>pull_request.merge</code>
+                      </p>
+                      <p><span>target</span><code>example/app #42</code></p>
+                      <p>
+                        <span>started by</span
+                        ><code>you → @lead → @reviewer → @lead</code>
+                      </p>
+                    </div>
+                    <div class="approval-actions">
+                      <button type="button" data-decision="approved">
+                        [y] 模拟批准</button
+                      ><button type="button" data-decision="denied">
+                        [n] 模拟拒绝</button
+                      ><button type="button" data-reset hidden>
+                        重新演示 ↺
+                      </button>
+                    </div>
+                    <p
+                      class="decision-result"
+                      role="status"
+                      aria-live="polite"
+                    ></p>
+                  </div>
+                  <div class="terminal-input muted">
+                    此处仅为演示，不会执行任何操作。
+                  </div>
+                </section>
               </div>
-              <span class="boundary-foot">只有占位凭据 · 销毁前自动扫描</span>
             </div>
-            <div class="permission-note">
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <rect x="4" y="8" width="12" height="9" rx="2" />
-                <path d="M7 8V6a3 3 0 0 1 6 0v2" /></svg
-              >凭据从不进入隔离单元
+            <div class="terminal-status">
+              <span
+                ><kbd>Tab</kbd> 切换面板 <kbd>Ctrl+X P</kbd> 命令面板
+                <kbd>Ctrl+X ?</kbd> 帮助</span
+              ><span><span class="lime">●</span> Codex + Claude Code</span>
             </div>
           </div>
-          <div class="visual-bottom">
-            <span>每个智能体只拿到你给它的。</span><span>POWERED BY ANCHI</span>
-          </div>
-        </div>
-      </section>
-      <section class="environment wrap section" id="environment">
-        <div class="section-heading">
-          <p class="eyebrow">有边界的团队</p>
-          <h2>放手让智能体干实事，<br />钥匙和决定权在你手里。</h2>
-          <p>凭据、权限范围与决策，各归其位。</p>
-        </div>
-        <div class="features">
-          <article>
-            <div class="feature-top">
-              <span>01</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="6" y="13" width="20" height="15" rx="3" />
-                <path d="M10 13V9a6 6 0 0 1 12 0v4M16 19v4" />
-              </svg>
-            </div>
-            <h3>能用，但拿不到钥匙</h3>
-            <p>
-              隔离单元里只有占位凭据。可信的出口代理在请求离开时注入或重新签名 GitHub、AWS、Linear 和模型的凭据；Gmail、Drive、Notion、Slack 由可信服务代为操作。
-            </p>
-            <span class="feature-label">凭据留在外面</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>02</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <path d="M5 9h22M5 23h22" />
-                <circle cx="12" cy="9" r="4" />
-                <circle cx="21" cy="23" r="4" />
-              </svg>
-            </div>
-            <h3>各有各的，互不越界</h3>
-            <p>
-              每个智能体都有自己的连接器、文件夹、技能和可以委派的对象，还可以限定它能访问的主机。在设置面板里就能调整，此外什么都碰不到。
-            </p>
-            <span class="feature-label">按智能体划定范围</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>03</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <circle cx="16" cy="16" r="11" />
-                <path d="M11 16.5l3.5 3.5L21 13" />
-              </svg>
-            </div>
-            <h3>要紧的写操作，等你确认</h3>
-            <p>
-              合并、删除、推送到 main 以及权限变更，无论谁发起都要你批准。把某个智能体的连接器设为
-              <code>ask</code>，它在那里的所有写操作也会等你，并显示任务是怎样一步步发起的。
-            </p>
-            <span class="feature-label">最终决定权在你</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>04</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="4" y="4" width="24" height="24" rx="5" />
-                <rect x="11" y="11" width="10" height="10" rx="2" />
-              </svg>
-            </div>
-            <h3>每个任务一个全新的隔离单元</h3>
-            <p>
-              每个任务都在本地虚拟机里一个用完即弃的隔离单元中运行，除了自己的代理之外没有网络。隔离单元销毁前，会扫描其中是否出现真实凭据。
-            </p>
-            <span class="feature-label">隔离，并且自检</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>05</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <circle cx="9" cy="10" r="4" />
-                <circle cx="23" cy="10" r="4" />
-                <circle cx="16" cy="23" r="4" />
-                <path d="M12 13l3 7M20 13l-3 7" />
-              </svg>
-            </div>
-            <h3>是一支团队，不只是一个机器人</h3>
-            <p>
-              描述你想要的智能体，构建器就会给出方案。智能体之间可以互相委派，可以定时或在出现新 issue 时自动开工，并共享你从本地或 GitHub 添加的技能。
-            </p>
-            <span class="feature-label">构建、委派、触发</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>06</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="4" y="7" width="24" height="18" rx="3" />
-                <path d="M9 13l4 3-4 3M16 19h7" />
-              </svg>
-            </div>
-            <h3>为终端而生</h3>
-            <p>
-              终端界面加命令行：和智能体对话、跟进任务、在全屏对话框里审批被拦下的写操作。每个操作都只差一个前导键，也可以在命令面板里找到。
-            </p>
-            <span class="feature-label">TUI 与 CLI</span>
-          </article>
-        </div>
-      </section>
-      <section class="setup wrap">
-        <div>
-          <p class="eyebrow">从零到一支能干活的团队</p>
-          <h2>一次配置好，<br />然后就可以派任务了。</h2>
-          <p>
-            在终端里安装，连接智能体需要的服务，<br
-              class="desktop-break"
-            />再描述你的第一个智能体。
-          </p>
-          <a
-            class="text-link"
-            href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
-            >阅读入门指南 <span aria-hidden="true">↗</span></a
-          >
-        </div>
-        <ol class="steps">
-          <li>
-            <span>01</span>
-            <div>
-              <h3>安装</h3>
-              <p>
-                <code>scripts/anchi setup install</code>
-                会创建虚拟机、可信服务和基础镜像。每次虚拟机启动后解锁一次凭据库。
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>02</span>
-            <div>
-              <h3>连接运行时与账号</h3>
-              <p>
-                导入你的 Codex 登录或 Claude Code 令牌，再连接智能体需要的服务。密钥直接存入虚拟机里的凭据库。
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>03</span>
-            <div>
-              <h3>组建你的团队</h3>
-              <p>
-                向构建器描述一个智能体，审阅它给出的方案，然后派给它一个任务。它拦下等你的写操作，由你来批准。
-              </p>
-            </div>
-          </li>
-        </ol>
-      </section>
-      <section class="faq wrap section" id="questions">
-        <div>
-          <p class="eyebrow">开始之前</p>
-          <h2>有几件事需要知道。</h2>
-          <a
-            class="text-link"
-            href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
-            >阅读安全模型 <span aria-hidden="true">↗</span></a
-          >
-        </div>
-        <div class="questions">
-          <details>
-            <summary>现在就能用吗？<span aria-hidden="true">+</span></summary>
-            <p>
-              安栖是开源的开发者预览版，从代码仓库直接运行。它还没有经过安全审计，也没有以签名发行包的形式分发。支持 Apple Silicon 的 macOS；Linux 为实验性支持。按照入门指南即可完成配置。
-            </p>
-          </details>
-          <details>
-            <summary>
-              凭据隔离能保护我的数据不外泄吗？<span aria-hidden="true">+</span>
-            </summary>
-            <p>
-              不能。智能体读到的内容会进入云端模型，也可能发往它能访问的任何公网主机；出口白名单可以缩小主机范围，但挡不住被允许的主机接收数据。安栖让凭据不落入智能体手中，但这不等于数据隔离，也不适合在无人看管的情况下处理敏感的真实账号。
-            </p>
-          </details>
-          <details>
-            <summary>
-              如果某个智能体被攻破，它还能做什么？<span aria-hidden="true">+</span>
-            </summary>
-            <p>
-              它能使用你给它的一切：连接器允许的操作、列给它的文件夹、它能访问的主机。但它带不走任何凭据，碰不到其他智能体的资源，也绕不过拦住它写操作的审批。
-            </p>
-          </details>
-          <details>
-            <summary>
-              每个操作都要我批准吗？<span aria-hidden="true">+</span>
-            </summary>
-            <p>
-              不用。隔离单元里的工具调用自由运行，隔离单元本身就是边界。高风险操作一律等你批准；其他写操作，在你把某个智能体的连接器设为
-              <code>ask</code>
-              时才会等你。Gmail、Drive、Notion、Slack 也可以设为对所有智能体的每一次请求都先询问。
-            </p>
-          </details>
-          <details>
-            <summary>
-              支持哪些智能体和服务？<span aria-hidden="true">+</span>
-            </summary>
-            <p>
-              Codex 和 Claude Code，使用你自己的订阅。GitHub、AWS 和 Linear 经由出口代理；Gmail（只读）、Google Drive、Notion 和 Slack 经由可信服务；macOS 上还可以使用
-              <code>~/AnchiWorkspaces</code>
-              下的文件夹。用所有真实账号完成的验证仍在进行中。
-            </p>
-          </details>
-        </div>
-      </section>
-      <section class="closing wrap">
-        <span class="closing-mark" aria-hidden="true">↗</span>
-        <p class="eyebrow">让智能体开始工作</p>
-        <h2><span>活交给团队，</span><span>钥匙留在你手里。</span></h2>
-        <a
-          class="button primary"
-          href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
-          >了解安栖 <span aria-hidden="true">↗</span></a
-        >
-        <p class="closing-note">开源 · Apache 2.0 · 开发者预览版</p>
+          <p class="demo-caption">交互演示 · 非实时任务</p>
+        </section>
       </section>
     </main>
     <footer class="footer wrap">
-      <a class="brand" href="#">anchi<span>安栖</span></a>
-      <p>安全的智能体团队。</p>
       <div>
+        <a class="brand" href="#top"
+          ><img
+            class="brand-mark"
+            src="/logo.svg"
+            width="36"
+            height="36"
+            alt=""
+            aria-hidden="true"
+          /><span class="brand-wordmark">anchi</span></a
+        >
+        <p>开发者预览版，尚未经过安全审计。</p>
+      </div>
+      <div class="footer-links">
         <a href="https://github.com/jwfing/anchi">GitHub ↗</a
         ><a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
-          >安全模型</a
-        ><span>© 2026 安栖</span>
+          >安全模型 ↗</a
+        ><a href="https://github.com/jwfing/anchi/blob/main/license.md"
+          >Apache-2.0</a
+        ><a href="#top">回到顶部 ↑</a>
       </div>
+      <p class="footer-bottom">
+        © 2026 Anchi<span>安栖 / a safe place to settle.</span>
+      </p>
     </footer>
   </body>
 </html>
