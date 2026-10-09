@@ -6,7 +6,7 @@ Anchi is a secured agent team: Codex and Claude Code agents in disposable cells 
 
 | Document | Purpose |
 |---|---|
-| [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault and connect a runtime |
+| [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault, connect a runtime, and get a shell in the VM |
 | [Agent team](AGENT_TEAM.md) | Connect accounts; create, configure and delete agents; delegation, approvals, egress, triggers, skills, workspaces and tasks |
 | [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, and Slack operations, scopes, and authorization |
