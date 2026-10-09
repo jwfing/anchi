@@ -2,11 +2,18 @@
 
 Follows the Keep a Changelog structure. The version comes from `anchi/package.json`.
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-10-09
 
 The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install` to update an existing VM; it disables the Pi inference gateway and removes Pi from the cell root filesystem. Credentials in the vault are kept.
 
 ### Added
+
+- Add standalone macOS Apple Silicon and Linux x86_64 packages, including Node, TUI,
+  daemon and prebuilt cell runners; no source checkout or pnpm needed by users.
+- Add the website's checksum-verifying `install.sh`, a global `anchi` command,
+  `anchi --version`, and a two-platform GitHub release workflow.
+- Updates retain existing daemon processes. After tasks finish, run `anchi daemon stop`
+  and reopen the TUI; rerun `anchi daemon install` if login startup is enabled.
 
 - Daemon, TUI and CLI (`scripts/anchi`) for a team of Codex and Claude Code agents, each task in a disposable nspawn cell on layered images, with an agent builder.
 - Egress proxy that keeps credentials out of cells: replace-only runtime tokens, GitHub, AWS (re-signing, SSO profiles) and Linear injection, credential-minting denials, destination filtering against SSRF and DNS rebinding, connector verification at import.

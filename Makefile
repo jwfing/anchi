@@ -1,7 +1,7 @@
 PYTHON ?= python3
 VM ?= secure-vm
 PY_SOURCES = services scripts guest tests
-SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run
+SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run landing/dist/install.sh
 
 .PHONY: help check lint test format verify-vm verify-anchi
 help:

@@ -9,9 +9,20 @@ Anchi runs a team of Codex and Claude Code agents on your own machine and gives 
 - **You decide on writes.** High-risk operations of every agent (merges, deletions, pushes to `main`, access changes) always wait for your approval, as do all writes of agents whose `approvals` say `ask`; the dialog shows how the task started.
 - **Checks run by themselves.** Every cell is scanned for real credential values before it is destroyed, and `make verify-anchi` checks the isolation live.
 
-You drive the team from a terminal UI or a CLI (`scripts/anchi`): build agents by describing them, give them tasks, let them delegate to each other, start them on a schedule or for new issues. Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md).
+You drive the team from a terminal UI or a CLI (`anchi`): build agents by describing them, give them tasks, let them delegate to each other, start them on a schedule or for new issues. Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md).
 
-This is a **development build**: it has not had a security audit and is not distributed as a release.
+This is a **development build**: it has not had a security audit and the packaged distribution is a development preview.
+
+Install the packaged app:
+
+```bash
+curl -fsSL https://anchi.elseward.xyz/install.sh | sh
+anchi
+```
+
+The app includes Node and its dependencies. The Runtimes screen guides VM setup;
+macOS needs Lima and Python (`brew install lima python`). See the getting started guide
+for Linux prerequisites and the source development workflow.
 
 ## Current capabilities
 

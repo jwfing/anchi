@@ -13,4 +13,5 @@ for directory in ("services", "scripts", "guest", "tests"):
         subprocess.run(["bash", "-n", str(source)], check=True)
 
 subprocess.run(["bash", "-n", str(ROOT / "guest/cell-run")], check=True)
+subprocess.run(["sh", "-n", str(ROOT / "landing/dist/install.sh")], check=True)
 print("Python and shell syntax checks passed.")

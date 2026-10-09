@@ -11,7 +11,11 @@ if limactl list --format '{{.Name}} {{.Status}}' 2>/dev/null | grep -Fqx "$vm_na
   refuse_if_tasks_running "$vm_name"
 fi
 runner=anchi/packages/cell-runner/dist
-if [[ ! -f $runner/mcp.mjs || ${ANCHI_REBUNDLE:-1} == 1 ]]; then
+if [[ -f manifest.json ]]; then
+  for file in runner.mjs forward.mjs mcp.mjs; do
+    [[ -f $runner/$file ]] || { echo "Incomplete Anchi release: missing $file" >&2; exit 1; }
+  done
+elif [[ ! -f $runner/mcp.mjs || ${ANCHI_REBUNDLE:-1} == 1 ]]; then
   command -v pnpm >/dev/null || { echo 'pnpm is required to bundle the cell runner' >&2; exit 1; }
   pnpm --dir anchi/packages/cell-runner run bundle >/dev/null
 fi
