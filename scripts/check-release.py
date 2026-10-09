@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 
 REPO = Path(__file__).resolve().parents[1]
@@ -66,6 +67,7 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
         "PATH": f"{fakebin}:{bindir}:/usr/bin:/bin:/usr/sbin:/sbin",
         "SHELL": "/bin/sh",
         "TERM": "xterm-256color",
+        "CI": "false",
     }
     installer = (REPO / "landing/dist/install.sh").read_text()
 
@@ -150,6 +152,7 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
         assert len((home / ".config/secure-vm/vault.key").read_bytes()) == 32
         # Render the real full-screen UI using a PTY, from outside the repository.
         master, slave = pty.openpty()
+        termios.tcsetwinsize(slave, (40, 120))
         child = subprocess.Popen([cli], env=env, cwd=root, stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
         output = b""
