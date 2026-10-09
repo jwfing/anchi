@@ -333,6 +333,8 @@ class Cell:
         self.service_servers = []
         # Hosts the cell sent a credential of its own to, already reported to the daemon.
         self.credential_alerts = set()
+        # Hosts refused by the egress list, already noted in the task.
+        self.egress_notices = set()
 
     @property
     def directory(self):
@@ -668,6 +670,20 @@ class EgressProxy:
     def client_disconnected(self, client):
         self.registry.clients.pop(client.id, None)
 
+    def note_egress_denied(self, cell, host):
+        """A note in the task once per refused host and cell, so the user sees it while it runs."""
+        if host in cell.egress_notices or len(cell.egress_notices) >= CREDENTIAL_ALERTS_MAX:
+            return
+        cell.egress_notices.add(host)
+        self.approvals.broadcast(
+            {
+                'type': 'notice',
+                'task': cell.task,
+                'text': f'⛔ {host} is not in the egress list; the connection was refused. To allow it, '
+                f'press a on the task, then e (or anchi agents allow-host {cell.agent} {host})',
+            }
+        )
+
     async def server_connect(self, data):
         """Resolve once, refuse non-public destinations and connect to the checked address."""
         host, port = data.server.address
@@ -675,6 +691,7 @@ class EgressProxy:
         if cell is not None and not rules.egress_allowed(cell.egress, str(host).lower().rstrip('.')):
             data.server.error = f'anchi: {host} is not in this agent\'s egress list'
             audit({'decision': 'egress-denied', 'host': str(host)[:200], 'task': cell.task, 'agent': cell.agent})
+            self.note_egress_denied(cell, str(host).lower().rstrip('.')[:200])
             return
         try:
             infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -881,6 +898,13 @@ class EgressProxy:
         }
         if entry['client_cred'] == 'other':
             self.alert_credential(cell, entry)
+        # Checked again when the connection opens; refusing here keeps the request off the
+        # upstream path, so it is never audited as reaching the host.
+        if not rules.egress_allowed(cell.egress, host.lower().rstrip('.')):
+            entry['decision'] = 'egress-denied'
+            audit(entry)
+            self.note_egress_denied(cell, host.lower().rstrip('.')[:200])
+            return 403, f"anchi: {host} is not in this agent's egress list\n".encode(), None
         if late and decision.action != 'pass':
             entry['decision'] = 'pass:streamed'
             audit(entry)

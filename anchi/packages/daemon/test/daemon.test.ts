@@ -33,6 +33,10 @@ class FakeTransport implements GuestTransport {
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
 
+  /** Runner processes, standing in for cells; a purge must find them all exited. */
+  children: { agent: string; child: ReturnType<typeof spawn> }[] = [];
+  purgedWhileRunning = false;
+
   /** Lines the fake `anchi-cell approvals watch` prints, then it stays open. */
   approvalLines: string[] = [];
 
@@ -49,10 +53,12 @@ class FakeTransport implements GuestTransport {
       );
     }
     this.starts.push(args);
-    return spawn(process.execPath, [RUNNER], {
+    const child = spawn(process.execPath, [RUNNER], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, FAKE_MODE: this.mode },
+      env: { ...process.env, FAKE_MODE: this.mode, FAKE_EXIT_FILE: join(root, 'exit-ms') },
     });
+    this.children.push({ agent: args[3] ?? '', child });
+    return child;
   }
 
   async exec(args: string[], stdin = ''): Promise<ExecResult> {
@@ -83,6 +89,9 @@ class FakeTransport implements GuestTransport {
       });
     }
     if (args[0] === 'anchi-cell' && args[1] === 'purge-agent') {
+      this.purgedWhileRunning ||= this.children.some(
+        (c) => c.agent === args[2] && c.child.exitCode === null && !c.child.signalCode,
+      );
       if (this.purgeFails) return { code: 1, stdout: '{"error": "VM_STOPPED"}', stderr: '' };
       return ok({ agent: args[2], home: true, skills: true, policy: [`notion:${args[2]}`] });
     }
@@ -1222,6 +1231,17 @@ describe('token usage', () => {
 });
 
 describe('deleting agents', () => {
+  it("purges the VM only once the agent's idle cells have exited", async () => {
+    write('agents/dev.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await client.call('tasks.wait', { taskId: t.id });
+    writeFileSync(join(root, 'exit-ms'), '500'); // a cell takes a moment to release its overlay
+    const done = await client.call('agents.delete', { agentId: 'dev', confirm: 'dev' });
+    expect(done.vm).not.toBeNull();
+    expect(transport.purgedWhileRunning).toBe(false);
+  });
+
   it('deletes an agent with its task trees, cancelling running work, and edits its delegators', async () => {
     write('agents/lead.yaml', '# the lead\nruntime: codex\ndelegates: [dev, qa] # team\n');
     write(
@@ -1259,6 +1279,7 @@ describe('deleting agents', () => {
       /type the agent id "dev"/,
     );
     const done = await client.call('agents.delete', { agentId: 'dev', confirm: 'dev' });
+    expect(transport.purgedWhileRunning).toBe(false);
     expect(done).toEqual({
       agentId: 'dev',
       deletedTasks: 4,
@@ -1322,6 +1343,32 @@ describe('agent settings', () => {
     write('skills/review/SKILL.md', '---\nname: review\ndescription: Reviews pull requests\n---\n');
     return ws;
   }
+
+  it("adds a refused host to an agent's egress list, and nothing else", async () => {
+    write(
+      'agents/dev.yaml',
+      '# dev\nruntime: codex\negress: [registry.npmjs.org, "*.pypi.org"] # hosts\n',
+    );
+    write('agents/open.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    expect(await client.call('agents.allowHost', { agentId: 'dev', host: 'Example.COM.' })).toEqual(
+      {
+        egress: ['registry.npmjs.org', '*.pypi.org', 'example.com'],
+      },
+    );
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(
+      '# dev\nruntime: codex\negress: [registry.npmjs.org, "*.pypi.org", example.com] # hosts\n',
+    );
+    for (const [agentId, host, message] of [
+      ['dev', 'files.pypi.org', 'already'],
+      ['dev', '*.evil.com', 'wildcards'],
+      ['dev', 'evil.com/x', 'one host name'],
+      ['open', 'example.com', 'any public host'],
+      ['builder', 'example.com', 'built in'],
+    ] as const) {
+      await expect(client.call('agents.allowHost', { agentId, host })).rejects.toThrow(message);
+    }
+  });
 
   it('shows settings and what exists, previews a patch and applies only the reviewed one', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');

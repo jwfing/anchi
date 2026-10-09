@@ -1208,6 +1208,72 @@ describe('running a failed task again', () => {
 });
 
 describe('access and usage views', () => {
+  it('allows a refused host from the access view after a confirmation', async () => {
+    const refused = (host: string) => ({
+      ts: 1000,
+      method: '',
+      host,
+      path: '',
+      operation: '',
+      decision: 'egress-denied',
+      rule: '',
+      credential: '',
+      reason: '',
+    });
+    const audit = {
+      taskId: 't-a000000001',
+      total: 2,
+      truncated: false,
+      cells: 1,
+      registration: null,
+      requests: 0,
+      injected: {},
+      credentialsSent: {},
+      hosts: [],
+      refused: [refused('pypi.org'), refused('evil.example'), refused('pypi.org')],
+      held: [],
+      streamed: 0,
+      bridge: [],
+      scan: null,
+      rows: [],
+    };
+    const { client, calls } = fakeClient(
+      {},
+      { 'tasks.audit': () => audit, 'agents.allowHost': () => ({ egress: ['evil.example'] }) },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(ESC);
+    await tick();
+    ui.stdin.write('3');
+    await tick();
+    ui.stdin.write('\t');
+    await tick();
+    ui.stdin.write('a');
+    expect(await frameWith(ui, 'e allow a refused host')).toContain('egress-denied');
+    ui.stdin.write('e');
+    expect(await frameWith(ui, 'Allow a host this task was refused')).toContain('› pypi.org');
+    ui.stdin.write('j');
+    expect(await frameWith(ui, '› evil.example')).toContain('  pypi.org');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Allow evil.example for @dev')).toContain(
+      'send it whatever they read',
+    );
+    ui.stdin.write('y');
+    await tick();
+    await tick();
+    expect(calls.filter(([m]) => m === 'agents.allowHost')).toEqual([
+      ['agents.allowHost', { agentId: 'dev', host: 'evil.example' }],
+    ]);
+    ui.unmount();
+  });
+
   it("opens a task's external access with a, and the usage screen with its periods and groupings", async () => {
     const audit = {
       taskId: 't-a000000001',

@@ -408,6 +408,8 @@ export interface Methods {
    * Applies a settings patch to the agent file, keeping its comments. Without `apply` it only
    * returns the diff; with it, `base` must match the diff the user reviewed.
    */
+  /** Adds one exact host to an agent's egress list (confirmed by the user in a dialog). */
+  'agents.allowHost': [{ agentId: string; host: string }, { egress: string[] }];
   'agents.update': [
     { agentId: string; patch: AgentPatch; apply?: boolean; base?: string },
     AgentUpdate,

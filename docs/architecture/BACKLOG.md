@@ -10,11 +10,11 @@ Open requests and known gaps of the secured agent team that are not planned into
 | R3 | A clean start for a new task | Partly: **^X n** starts a new session; all of an agent's tasks share its work directory |
 | G2 | Linux workspaces (phase 3 P7) | After Linux hosts are confirmed on a Linux machine |
 | G3 | Live acceptance with real accounts (phase 3 P9) | Needs a Claude token, Drive sign-in again, and an AWS bucket for `aws-chunked` uploads |
-| G4 | Allow a refused egress host from the TUI | The audit log names it (`egress-denied`); adding it to `egress` is a manual edit |
 | G5 | Cell count disagrees between the daemon and the VM | The daemon counts its own live cells; the VM counts cell directories, including cells still closing. A task started as an idle cell closes can fail with `TOO_MANY_CELLS` |
 | G6 | Claude subscription limits | The proxy keeps `anthropic-ratelimit-*` headers, but which ones a Claude subscription returns is not verified against live traffic (no Claude token yet; with G3) |
 | G7 | Follow-ups of R8 and R9 | Done: a task's audit rows saved by the daemon, alerts when a cell sends a credential of its own. Open: a global access view across tasks; a warning when a quota window passes a threshold |
 | G8 | Large high-risk pushes | A streamed push to `main`, or one deleting a branch, is refused rather than held: approving would need the push to be repeated after approval |
+| G9 | Codex runtime hosts outside its base egress | With an `egress` list, Codex's requests to `*.oaiusercontent.com` (OpenAI's content CDN; here the plugin list's files) are refused and noted in every task. Adding the CDN to Codex's base hosts widens every Codex agent's egress; undecided |
 
 ## R1 — File preview through a plugin
 
@@ -55,5 +55,6 @@ Open requests and known gaps of the secured agent team that are not planned into
 | R6 | Key bindings: leader key, plain keys in views, command palette, line editing, `keybindings.json` | #31; [Key bindings](../KEYBINDINGS.md) |
 | R7 | Run a failed or cancelled task again, continuing its session or from scratch | #34; [Run tasks](../AGENT_TEAM.md#run-tasks) |
 | G1 | git pushes of any size: streamed, their ref updates checked before the body leaves | [Limits](../AGENT_TEAM.md#limits) |
+| G4 | Allow a refused egress host from the task's access view (e) or `anchi agents allow-host`; refused hosts noted in the task | [Teams, approvals, triggers and skills](../AGENT_TEAM.md#teams-approvals-triggers-and-skills) |
 | R8 | Each task's external access, for the user to see: hosts, injections, credentials the cell sent, refusals, held writes, bridge calls | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
 | R9 | Token use per turn with totals by agent, model, runtime and day; subscription limits read by the proxy (Codex verified) | [Access and usage](../AGENT_TEAM.md#access-and-usage) |

@@ -61,7 +61,7 @@ Enter continues the task in its agent's chat, a shows its external access, R run
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.
 
-The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc.
+The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc; **e** chooses a host the task was refused, to add to the agent's egress list after a confirmation (y).
 
 The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Approval, confirmation and proposal dialogs always use **y**, **n** and **Esc** (and **s** in a proposal for its settings); they are not rebindable, so a held write is never approved by a key you configured for something else.
 

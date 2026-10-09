@@ -713,6 +713,40 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(server.address, ('deb.debian.org', 80))
         self.assertEqual(proxy.requested, {})
 
+    def test_refused_hosts_are_noted_in_the_task_once(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+        cell = self.module.Cell('t1', 'dev', frozenset({'codex'}), egress=['example.com'])
+        proxy.registry.client_cell = lambda client: cell
+        notes = []
+        proxy.approvals.watchers.add(type('W', (), {'write': lambda self, b: notes.append(json.loads(b))})())
+        for host in ('Evil.Example.', 'evil.example', 'other.example'):
+            server = NS(id='s1', address=(host, 443), sni=None, error=None)
+            asyncio.run(proxy.server_connect(NS(client=NS(id='c1'), server=server)))
+            self.assertIn('egress list', server.error)
+        self.assertEqual(
+            [n['text'] for n in notes],
+            [
+                f'⛔ {h} is not in the egress list; the connection was refused. To allow it, press a on the '
+                f'task, then e (or anchi agents allow-host dev {h})'
+                for h in ('evil.example', 'other.example')
+            ],
+        )
+
+    def test_requests_to_refused_hosts_are_answered_by_the_proxy(self):
+        proxy = self.proxy_with_cell()
+        cell = self.module.Cell('t1', 'dev', frozenset({'github'}), egress=['example.com'])
+        proxy.registry.client_cell = lambda client: cell
+        responses = []
+        with patch.object(self.module.EgressProxy, 'respond', staticmethod(lambda f, *a: responses.append(a[:2]))):
+            for host in ('example.org', 'example.com', 'api.github.com'):
+                flow, _ = self.proxy_flow('GET', host, '/', {}, False)
+                asyncio.run(proxy.request(flow))
+        self.assertEqual(responses, [(403, b"anchi: example.org is not in this agent's egress list\n")])
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertEqual([(r['host'], r['decision']) for r in rows][0], ('example.org', 'egress-denied'))
+
     def test_upstream_errors_are_audited_once(self):
         from types import SimpleNamespace as NS
 

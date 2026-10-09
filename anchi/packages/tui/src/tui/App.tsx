@@ -40,7 +40,14 @@ import {
   strokeOf,
 } from './keys.ts';
 import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
-import { accessLines, GROUPS, PERIODS, type ReportLine, usageLines } from './reports.ts';
+import {
+  accessLines,
+  GROUPS,
+  PERIODS,
+  refusedHosts,
+  type ReportLine,
+  usageLines,
+} from './reports.ts';
 import {
   initialSettings,
   type SettingsRow,
@@ -152,7 +159,16 @@ type Modal =
       cursor: number;
     }
   | { kind: 'retry'; taskId: string; agentId: string; status: TaskStatus }
-  | { kind: 'access'; taskId: string; data: TaskAudit | null; scroll: number; error?: string }
+  | {
+      kind: 'access';
+      taskId: string;
+      agentId: string;
+      data: TaskAudit | null;
+      scroll: number;
+      error?: string;
+      /** Choosing a refused host to allow: its index in refusedHosts. */
+      pick?: number;
+    }
   | {
       kind: 'deleteAgent';
       agentId: string;
@@ -828,7 +844,7 @@ export function App({
       case 'task:access': {
         const t = detail ?? task;
         if (!t) return say('select a task first');
-        setModal({ kind: 'access', taskId: t.id, data: null, scroll: 0 });
+        setModal({ kind: 'access', taskId: t.id, agentId: t.agentId, data: null, scroll: 0 });
         return void client
           .call('tasks.audit', { taskId: t.id })
           .then((data) =>
@@ -1276,8 +1292,34 @@ export function App({
       }
       return;
     }
+    if (modal?.kind === 'access' && modal.pick !== undefined) {
+      const hosts = modal.data ? refusedHosts(modal.data) : [];
+      if (key.escape) return setModal({ ...modal, pick: undefined });
+      if (key.upArrow || ch === 'k')
+        return setModal({ ...modal, pick: Math.max(0, modal.pick - 1) });
+      if (key.downArrow || ch === 'j') {
+        return setModal({ ...modal, pick: Math.min(hosts.length - 1, modal.pick + 1) });
+      }
+      const host = hosts[modal.pick];
+      if (key.return && host) {
+        const { agentId } = modal;
+        return setModal({
+          kind: 'confirm',
+          title: `Allow ${sanitizeLine(host)} for @${agentId}`,
+          body: `Adds exactly this host to the egress list in ~/.anchi/agents/${agentId}.yaml. Its cells can then reach it and send it whatever they read. It applies from the agent's next cell.`,
+          action: () => client.call('agents.allowHost', { agentId, host }),
+        });
+      }
+      return;
+    }
     if (modal?.kind === 'access') {
       if (key.escape || ch === 'q') return setModal(null);
+      if (ch === 'e') {
+        if (!modal.data || !refusedHosts(modal.data).length) {
+          return say('no host was refused by the egress list in this task');
+        }
+        return setModal({ ...modal, pick: 0 });
+      }
       const step = key.pageUp || key.pageDown ? 10 : 1;
       if (key.upArrow || key.pageUp || ch === 'k') {
         return setModal((m) =>
@@ -2300,10 +2342,27 @@ function ModalView({
         <Text bold color="cyan">
           External access of {modal.taskId}
         </Text>
-        <Report lines={lines} height={room} scroll={modal.scroll} />
+        {modal.pick !== undefined && modal.data ? (
+          <Box flexDirection="column" height={room}>
+            <Text>
+              Allow a host this task was refused (it comes from the agent&apos;s requests):
+            </Text>
+            {refusedHosts(modal.data)
+              .slice(0, room - 1)
+              .map((h, i) => (
+                <Text key={h} color={i === modal.pick ? 'cyan' : undefined} wrap="truncate">
+                  {i === modal.pick ? '› ' : '  '}
+                  {sanitizeLine(h)}
+                </Text>
+              ))}
+          </Box>
+        ) : (
+          <Report lines={lines} height={room} scroll={modal.scroll} />
+        )}
         <Text dimColor wrap="truncate">
-          ↑↓ PgUp PgDn scroll · Esc close · from the egress proxy&apos;s audit log; hosts and paths
-          come from the agent
+          {modal.pick !== undefined
+            ? '↑↓ choose · Enter review · Esc back'
+            : `↑↓ PgUp PgDn scroll${modal.data && refusedHosts(modal.data).length ? ' · e allow a refused host' : ''} · Esc close · from the egress proxy's audit log; hosts and paths come from the agent`}
         </Text>
       </Box>
     );

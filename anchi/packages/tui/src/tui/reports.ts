@@ -54,7 +54,7 @@ export function accessLines(a: TaskAudit, width: number): ReportLine[] {
     );
   }
   if (a.hosts.length) {
-    lines.push(head('Hosts reached'));
+    lines.push(head('Hosts requested, and what the proxy decided'));
     for (const h of a.hosts) {
       const decisions = Object.entries(h.decisions)
         .map(([d, c]) => `${d} ${c}`)
@@ -111,6 +111,11 @@ export function accessLines(a: TaskAudit, width: number): ReportLine[] {
     });
   }
   return lines;
+}
+
+/** Hosts the task's cells were refused by the agent's egress list, in the order first refused. */
+export function refusedHosts(a: TaskAudit): string[] {
+  return [...new Set(a.refused.filter((r) => r.decision === 'egress-denied').map((r) => r.host))];
 }
 
 export const PERIODS = [

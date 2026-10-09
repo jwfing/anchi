@@ -194,7 +194,7 @@ program
 program
   .command('audit <task>')
   .description(
-    "A task's external access: hosts reached, credentials injected, refusals (egress audit log)",
+    "A task's external access: hosts requested, credentials injected, refusals (egress audit log)",
   )
   .option('--json', 'the full report as JSON')
   .action((taskId: string, opts: { json?: boolean }) =>
@@ -414,6 +414,15 @@ agentsCmd
   .description('Delete an agent with its tasks and its files in the VM (workspaces are kept)')
   .option('-y, --yes', 'delete without typing the id')
   .action((id: string, opts: { yes?: boolean }) => deleteAgentCli(id, opts.yes === true));
+agentsCmd
+  .command('allow-host <id> <host>')
+  .description("Add one host to an agent's egress list (a host its cells were refused)")
+  .action((id: string, host: string) =>
+    withClient(async (client) => {
+      const r = await client.call('agents.allowHost', { agentId: id, host });
+      console.log(`@${id} may now reach: ${r.egress.join(', ')} (from its next cell)`);
+    }),
+  );
 agentsCmd.action(() =>
   withClient(async (client) => {
     for (const a of await client.call('agents.list')) {

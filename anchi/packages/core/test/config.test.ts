@@ -188,6 +188,15 @@ describe('patchAgentYaml', () => {
     );
   });
 
+  it('writes an egress list even when empty, never falling back to open egress', () => {
+    expect(patchAgentYaml('runtime: codex\negress: [a.com] # mine\n', { egress: [] })).toBe(
+      'runtime: codex\negress: [] # mine\n',
+    );
+    expect(
+      patchAgentYaml('runtime: codex\negress: [a.com]\n', { egress: ['a.com', 'b.org'] }),
+    ).toBe('runtime: codex\negress: [a.com, b.org]\n');
+  });
+
   it('lets resolveAgent validate a change before it is written', () => {
     write('agents/dev.yaml', 'runtime: codex\n');
     const next = patchAgentYaml('runtime: codex\n', { connectors: ['notion'] });

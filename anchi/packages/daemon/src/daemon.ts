@@ -68,6 +68,7 @@ import {
 import { Store } from './store.ts';
 import { SERVICE_IDS, ServiceSetup } from './services.ts';
 import {
+  allowEgressHost,
   delegatorsOf,
   parsePatch,
   removeDelegate,
@@ -530,6 +531,17 @@ export class Daemon {
     'agents.settings': async (params) => this.agentSettings(params),
     'agents.deletePreview': ({ agentId }) => this.deletionPreview(agentId),
     'agents.delete': ({ agentId, confirm }) => this.deleteAgent(agentId, confirm),
+    'agents.allowHost': async ({ agentId, host }) => {
+      const id = str(agentId, 'agent', 40);
+      if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
+      const result = allowEgressHost(this.opts.layout, id, str(host, 'host', 260), {
+        inventory: await this.inventory(),
+        workspaceRoot: this.workspaceRoot,
+      });
+      this.log(`${host} added to the egress list of ${id}`);
+      this.hub.reload();
+      return result;
+    },
     'agents.update': async ({ agentId, patch, apply, base }) => {
       const id = str(agentId, 'agent', 40);
       if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
