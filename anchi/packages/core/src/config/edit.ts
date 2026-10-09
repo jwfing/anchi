@@ -8,6 +8,8 @@ export interface AgentPatch {
   workspaces?: Workspace[];
   /** Set by the daemon only (removing a deleted agent); clients cannot send it. */
   delegates?: string[];
+  /** Set by the daemon only (allowing a refused host); never emptied into open egress. */
+  egress?: string[];
 }
 
 /**
@@ -39,6 +41,17 @@ export function patchAgentYaml(text: string, patch: AgentPatch): string {
   set('skills', patch.skills, true);
   set('connectors', patch.connectors, true);
   set('delegates', patch.delegates, true);
+  // An empty egress list is not the same as none (open egress): it is always written.
+  if (patch.egress !== undefined) {
+    const node = doc.createNode(patch.egress);
+    node.flow = true;
+    const old = doc.get('egress', true);
+    if (isNode(old)) {
+      node.comment = old.comment;
+      node.commentBefore = old.commentBefore;
+    }
+    doc.set('egress', node);
+  }
   // `ro` is the default mode; name only when it differs from the path's last segment.
   set(
     'workspaces',

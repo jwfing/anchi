@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { homeLayout } from '@anchi/core';
-import type { TaskRow } from '@anchi/protocol';
+import type { QuotaInfo, TaskRow } from '@anchi/protocol';
 import {
   Daemon,
+  QuotaAlerts,
   DaemonClient,
   type ExecResult,
   Guest,
@@ -17,7 +18,7 @@ import {
   summarizeAudit,
   auditHeadline,
 } from '../src/index.ts';
-import { extractLinks, Store } from '../src/store.ts';
+import { AUDIT_SAVED_MAX, extractLinks, Store } from '../src/store.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
@@ -27,9 +28,15 @@ class FakeTransport implements GuestTransport {
   purgeFails = false;
   /** Rows the fake egress audit log holds. */
   auditRows: Record<string, unknown>[] = [];
+  /** The fake VM cannot be read for audit rows. */
+  auditFails = false;
   starts: string[][] = [];
   execs: { args: string[]; stdin: string }[] = [];
   images = new Set(['codex@base']);
+
+  /** Runner processes, standing in for cells; a purge must find them all exited. */
+  children: { agent: string; child: ReturnType<typeof spawn> }[] = [];
+  purgedWhileRunning = false;
 
   /** Lines the fake `anchi-cell approvals watch` prints, then it stays open. */
   approvalLines: string[] = [];
@@ -47,10 +54,12 @@ class FakeTransport implements GuestTransport {
       );
     }
     this.starts.push(args);
-    return spawn(process.execPath, [RUNNER], {
+    const child = spawn(process.execPath, [RUNNER], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, FAKE_MODE: this.mode },
+      env: { ...process.env, FAKE_MODE: this.mode, FAKE_EXIT_FILE: join(root, 'exit-ms') },
     });
+    this.children.push({ agent: args[3] ?? '', child });
+    return child;
   }
 
   async exec(args: string[], stdin = ''): Promise<ExecResult> {
@@ -58,6 +67,7 @@ class FakeTransport implements GuestTransport {
     const ok = (v: unknown) => ({ code: 0, stdout: JSON.stringify(v), stderr: '' });
     if (args[0] === 'anchi-cell' && args[1] === 'reap') return ok({ reaped: ['t-old'] });
     if (args[0] === 'anchi-cell' && args[1] === 'audit') {
+      if (this.auditFails) return { code: 1, stdout: '{"error": "VM_STOPPED"}', stderr: '' };
       return ok({
         rows: this.auditRows.filter((r) => r.task === args[2]),
         total: 3,
@@ -80,6 +90,9 @@ class FakeTransport implements GuestTransport {
       });
     }
     if (args[0] === 'anchi-cell' && args[1] === 'purge-agent') {
+      this.purgedWhileRunning ||= this.children.some(
+        (c) => c.agent === args[2] && c.child.exitCode === null && !c.child.signalCode,
+      );
       if (this.purgeFails) return { code: 1, stdout: '{"error": "VM_STOPPED"}', stderr: '' };
       return ok({ agent: args[2], home: true, skills: true, policy: [`notion:${args[2]}`] });
     }
@@ -1031,13 +1044,127 @@ describe('task audit', () => {
     );
   });
 
+  it("saves a task's rows when its cell closes, so they outlive the log", async () => {
+    const { client } = await start(100);
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    transport.auditRows = rows(t.id);
+    await client.call('tasks.wait', { taskId: t.id });
+    await new Promise((r) => setTimeout(r, 400)); // idle timeout closes the cell
+    transport.auditRows = [rows(t.id)[1]!]; // the rest rotated away
+    const a = await client.call('tasks.audit', { taskId: t.id });
+    expect(a).toMatchObject({ requests: 4, total: 8, truncated: false });
+    expect(a.savedOnly).toBeUndefined();
+    transport.auditFails = true;
+    expect(await client.call('tasks.audit', { taskId: t.id })).toMatchObject({
+      requests: 4,
+      savedOnly: true,
+    });
+    await client.call('tasks.delete', { taskId: t.id });
+    expect(daemon!.store.auditRows(t.id)).toEqual([]);
+  });
+
+  it('keeps saved rows once each, and only the latest per task', () => {
+    const store = new Store(join(root, 'audit.db'));
+    const row = (ts: number) => ({ task: 't-1', method: 'GET', host: 'h', ts });
+    store.saveAuditRows('t-1', [row(1), row(2)]);
+    store.saveAuditRows('t-1', [row(2), row(3)]);
+    expect(store.auditRows('t-1').map((r) => r.ts)).toEqual([1, 2, 3]);
+    store.saveAuditRows(
+      't-1',
+      Array.from({ length: AUDIT_SAVED_MAX }, (_, i) => row(10 + i)),
+    );
+    const kept = store.auditRows('t-1');
+    expect(kept).toHaveLength(AUDIT_SAVED_MAX);
+    expect(kept[0]!.ts).toBe(10);
+    store.close();
+  });
+
+  it('fails to read the access of a task with nothing saved while the VM is unreachable', async () => {
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await client.call('tasks.wait', { taskId: t.id });
+    transport.auditFails = true;
+    await expect(client.call('tasks.audit', { taskId: t.id })).rejects.toThrow();
+  });
+
+  it('notes and reports at once a credential a cell sent of its own', async () => {
+    const { client: first } = await start();
+    const t = await first.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await first.call('tasks.wait', { taskId: t.id });
+    await daemon!.stop();
+    daemon = undefined;
+    first.close();
+    transport.approvalLines = [
+      JSON.stringify({
+        type: 'credential',
+        task: t.id,
+        agent: 'dev',
+        method: 'GET',
+        host: 'api.example.com',
+        path: '/v1/me',
+      }),
+      JSON.stringify({ type: 'credential', task: 't-unknown', host: 'x' }),
+      JSON.stringify({
+        type: 'notice',
+        task: t.id,
+        text: '⛔ git push refused: update refs/heads/main',
+      }),
+      JSON.stringify({ type: 'notice', task: t.id, text: 7 }),
+    ];
+    const { client } = await start();
+    await new Promise((r) => setTimeout(r, 300));
+    const notices = (await client.call('tasks.events', { taskId: t.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toContain(
+      '⚠ the cell sent a credential of its own (not an Anchi placeholder) to api.example.com: GET /v1/me',
+    );
+    expect(notices).toContain('⛔ git push refused: update refs/heads/main');
+  });
+
+  it('sums up the access of every task over a period', async () => {
+    const { client } = await start();
+    const one = await client.call('tasks.create', { agentId: 'dev', text: 'one' });
+    await client.call('tasks.wait', { taskId: one.id });
+    const two = await client.call('tasks.create', { agentId: 'dev', text: 'two' });
+    await client.call('tasks.wait', { taskId: two.id });
+    const now = Date.now() / 1000;
+    const own = {
+      task: two.id,
+      agent: 'dev',
+      method: 'GET',
+      host: 'api.example.com',
+      path: '/me',
+      decision: 'pass',
+      client_cred: 'other',
+      ts: now,
+    };
+    const old = { ...own, task: one.id, ts: now - 30 * 86_400 }; // outside the period
+    transport.auditRows = [...rows(one.id).map((r) => ({ ...r, ts: now })), own, old];
+    const s = await client.call('access.summary', { since: Date.now() - 86_400_000 });
+    expect(s).toMatchObject({ tasks: 2, partial: false });
+    expect(s.agents).toEqual([
+      expect.objectContaining({
+        agent: 'dev',
+        tasks: 2,
+        requests: 5,
+        credentialsOther: 1,
+        injected: { codex: 1, 'github-api': 1 },
+      }),
+    ]);
+    expect(s.credentials.map((r) => [r.task, r.host])).toEqual([[two.id, 'api.example.com']]);
+    expect(s.hosts[0]).toMatchObject({ host: 'api.github.com', agents: ['dev'] });
+    transport.auditFails = true;
+    expect(await client.call('access.summary', {})).toMatchObject({ partial: true, tasks: 2 });
+  });
+
   it('serves a task audit and the latest quota over RPC', async () => {
     const { client } = await start();
     const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
     await client.call('tasks.wait', { taskId: t.id });
     transport.auditRows = [...rows(t.id), ...rows('t-other')];
     const a = await client.call('tasks.audit', { taskId: t.id });
-    expect(a).toMatchObject({ taskId: t.id, requests: 4, total: 3 });
+    expect(a).toMatchObject({ taskId: t.id, requests: 4, total: 8 });
     expect(transport.execs.some((e) => e.args.join(' ') === `anchi-cell audit ${t.id}`)).toBe(true);
     await expect(client.call('tasks.audit', { taskId: '../x' })).rejects.toThrow();
     expect(await client.call('usage.quota')).toEqual([
@@ -1141,6 +1268,17 @@ describe('token usage', () => {
 });
 
 describe('deleting agents', () => {
+  it("purges the VM only once the agent's idle cells have exited", async () => {
+    write('agents/dev.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'hello' });
+    await client.call('tasks.wait', { taskId: t.id });
+    writeFileSync(join(root, 'exit-ms'), '500'); // a cell takes a moment to release its overlay
+    const done = await client.call('agents.delete', { agentId: 'dev', confirm: 'dev' });
+    expect(done.vm).not.toBeNull();
+    expect(transport.purgedWhileRunning).toBe(false);
+  });
+
   it('deletes an agent with its task trees, cancelling running work, and edits its delegators', async () => {
     write('agents/lead.yaml', '# the lead\nruntime: codex\ndelegates: [dev, qa] # team\n');
     write(
@@ -1178,6 +1316,7 @@ describe('deleting agents', () => {
       /type the agent id "dev"/,
     );
     const done = await client.call('agents.delete', { agentId: 'dev', confirm: 'dev' });
+    expect(transport.purgedWhileRunning).toBe(false);
     expect(done).toEqual({
       agentId: 'dev',
       deletedTasks: 4,
@@ -1241,6 +1380,32 @@ describe('agent settings', () => {
     write('skills/review/SKILL.md', '---\nname: review\ndescription: Reviews pull requests\n---\n');
     return ws;
   }
+
+  it("adds a refused host to an agent's egress list, and nothing else", async () => {
+    write(
+      'agents/dev.yaml',
+      '# dev\nruntime: codex\negress: [registry.npmjs.org, "*.pypi.org"] # hosts\n',
+    );
+    write('agents/open.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    expect(await client.call('agents.allowHost', { agentId: 'dev', host: 'Example.COM.' })).toEqual(
+      {
+        egress: ['registry.npmjs.org', '*.pypi.org', 'example.com'],
+      },
+    );
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(
+      '# dev\nruntime: codex\negress: [registry.npmjs.org, "*.pypi.org", example.com] # hosts\n',
+    );
+    for (const [agentId, host, message] of [
+      ['dev', 'files.pypi.org', 'already'],
+      ['dev', '*.evil.com', 'wildcards'],
+      ['dev', 'evil.com/x', 'one host name'],
+      ['open', 'example.com', 'any public host'],
+      ['builder', 'example.com', 'built in'],
+    ] as const) {
+      await expect(client.call('agents.allowHost', { agentId, host })).rejects.toThrow(message);
+    }
+  });
 
   it('shows settings and what exists, previews a patch and applies only the reviewed one', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
@@ -1359,5 +1524,47 @@ describe('helpers', () => {
       'https://github.com/o/r/pull/2',
       'https://x.dev/i/1',
     ]);
+  });
+});
+
+describe('quota alerts', () => {
+  it('notifies once per threshold and window period, and once when a limit is reached', async () => {
+    let clock = 0;
+    let quota: QuotaInfo[] = [];
+    const sent: string[] = [];
+    const alerts = new QuotaAlerts(
+      async () => quota,
+      (title) => sent.push(title),
+      () => clock,
+    );
+    const codex = (used: number, resetAt = 1_000_000, limited = false): QuotaInfo => ({
+      runtime: 'codex',
+      ts: 0,
+      status: 200,
+      headers: {},
+      plan: 'team',
+      limited,
+      windows: [{ name: 'primary', usedPercent: used, windowMinutes: 300, resetAt }],
+    });
+    const step = async (q: QuotaInfo[]) => {
+      quota = q;
+      clock += 61_000;
+      return alerts.check();
+    };
+    expect(await step([codex(40)])).toEqual([]);
+    expect(await step([codex(81)])).toEqual(['Anchi: Codex 5-hour window 81% used']);
+    expect(await step([codex(90)])).toEqual([]);
+    // Within a minute of the last check, nothing is read.
+    quota = [codex(97)];
+    expect(await alerts.check()).toEqual([]);
+    expect(await step([codex(97)])).toEqual(['Anchi: Codex 5-hour window 97% used']);
+    expect(await step([codex(100, 1_000_000, true)])).toEqual(['Anchi: Codex limit reached']);
+    expect(await step([codex(100, 1_000_000, true)])).toEqual([]);
+    // A new window period starts over.
+    expect(await step([codex(85, 2_000_000)])).toEqual(['Anchi: Codex 5-hour window 85% used']);
+    expect(
+      await step([{ runtime: 'claude-code', ts: 3_600_000, status: 429, headers: {} }]),
+    ).toEqual(['Anchi: Claude Code limit reached']);
+    expect(sent).toHaveLength(5);
   });
 });

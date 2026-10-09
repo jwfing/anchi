@@ -29,6 +29,7 @@ import {
   type ConnectorStatus,
   type Inventory,
   type MethodName,
+  type QuotaInfo,
   type Methods,
   SETUP_ACTIONS,
   type SetupAction,
@@ -36,7 +37,8 @@ import {
   type TaskStatus,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
-import { summarizeAudit } from './audit.ts';
+import { mergeAuditRows, summarizeAccess, summarizeAudit } from './audit.ts';
+import { QuotaAlerts } from './quota.ts';
 import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
 import {
@@ -68,6 +70,7 @@ import {
 import { Store } from './store.ts';
 import { SERVICE_IDS, ServiceSetup } from './services.ts';
 import {
+  allowEgressHost,
   delegatorsOf,
   parsePatch,
   removeDelegate,
@@ -160,6 +163,7 @@ export class Daemon {
   readonly lima: LimaTransport;
   readonly proposals: Proposals;
   readonly approvals: ApprovalWatcher;
+  private quotaAlerts: QuotaAlerts;
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
   readonly workspaceRoot: string;
@@ -278,6 +282,24 @@ export class Daemon {
         );
       }
     });
+    this.approvals.on('credential', (c) => {
+      const task = this.store.getTask(c.task);
+      if (!task) return;
+      this.hub.notice(
+        task.id,
+        `⚠ the cell sent a credential of its own (not an Anchi placeholder) to ${c.host}: ${c.method} ${c.path}`,
+      );
+      this.log(`${task.id} sent a credential of its own to ${c.host}`);
+      if (!this.opts.quiet) {
+        void desktopNotify(
+          `Anchi: @${task.agentId} sent a credential of its own`,
+          `${task.id}: to ${c.host}. Anchi's credentials never enter a cell; see the task's access (a).`,
+        );
+      }
+    });
+    this.approvals.on('notice', ({ task, text }) => {
+      if (this.store.getTask(task)) this.hub.notice(task, text);
+    });
     this.approvals.on('resolved', ({ approval, decided }) => {
       if (!decided) this.hub.notice(approval.task, `⏹ approval for ${approval.operation} expired`);
     });
@@ -329,6 +351,16 @@ export class Daemon {
         }
       }
     });
+    this.quotaAlerts = new QuotaAlerts(
+      () => this.quota(),
+      (title, message) => {
+        this.log(`${title}: ${message}`);
+        if (!this.opts.quiet) void desktopNotify(title, message);
+      },
+    );
+    this.hub.on('turnEnded', () => {
+      void this.quotaAlerts.check().catch(() => {});
+    });
     this.hub.on('turnEnded', ({ task, reply }) => {
       if (task.agentId !== BUILDER_ID) return;
       const proposal = this.proposals.add(parseBlocks(reply));
@@ -340,6 +372,29 @@ export class Daemon {
    * What agents can be given: installed skills, connectors (asked from the VM; null when it
    * cannot answer), directories under ~/AnchiWorkspaces, agents and images.
    */
+  /** The subscription limits the egress proxy last saw, by runtime. */
+  private async quota(): Promise<QuotaInfo[]> {
+    const runtimes: Record<string, string> = { codex: 'codex', anthropic: 'claude-code' };
+    return Object.entries(await this.guest.quota()).map(([rule, q]) => ({
+      runtime: runtimes[rule] ?? rule,
+      ts: Math.round(q.ts * 1000),
+      status: q.status,
+      headers: q.headers ?? {},
+      ...(q.windows
+        ? {
+            plan: q.plan ?? null,
+            limited: q.limited === true,
+            windows: q.windows.map((w) => ({
+              name: w.name,
+              usedPercent: w.used_percent,
+              windowMinutes: w.window_minutes,
+              resetAt: typeof w.reset_at === 'number' ? w.reset_at * 1000 : null,
+            })),
+          }
+        : {}),
+    }));
+  }
+
   async inventory(): Promise<Inventory> {
     const status = await setupStatus(this.guest, this.lima, this.services).catch(() => undefined);
     const known = status?.vm === 'running' && status.vaultUnlocked;
@@ -512,6 +567,17 @@ export class Daemon {
     'agents.settings': async (params) => this.agentSettings(params),
     'agents.deletePreview': ({ agentId }) => this.deletionPreview(agentId),
     'agents.delete': ({ agentId, confirm }) => this.deleteAgent(agentId, confirm),
+    'agents.allowHost': async ({ agentId, host }) => {
+      const id = str(agentId, 'agent', 40);
+      if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
+      const result = allowEgressHost(this.opts.layout, id, str(host, 'host', 260), {
+        inventory: await this.inventory(),
+        workspaceRoot: this.workspaceRoot,
+      });
+      this.log(`${host} added to the egress list of ${id}`);
+      this.hub.reload();
+      return result;
+    },
     'agents.update': async ({ agentId, patch, apply, base }) => {
       const id = str(agentId, 'agent', 40);
       if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
@@ -558,7 +624,18 @@ export class Daemon {
         .filter((e) => e.type === 'notice' && e.text.startsWith('credential scan'))
         .map((e) => (e as { text: string }).text)
         .at(-1);
-      return summarizeAudit(task.id, await this.guest.audit(task.id), scan ?? null);
+      let live: Awaited<ReturnType<Guest['audit']>> | null = null;
+      try {
+        live = await this.guest.audit(task.id);
+        if (this.store.getTask(task.id)) this.store.saveAuditRows(task.id, live.rows);
+      } catch (err) {
+        if (!this.store.auditRows(task.id).length) throw err;
+      }
+      return summarizeAudit(
+        task.id,
+        mergeAuditRows(live, this.store.auditRows(task.id)),
+        scan ?? null,
+      );
     },
     'tasks.retry': ({ taskId: id, fresh }) => this.hub.retryTask(taskId(id), fresh === true),
     'tasks.cancel': ({ taskId: id }) => {
@@ -625,26 +702,20 @@ export class Daemon {
     'approvals.list': () => this.approvals.list(),
     'triggers.list': () => this.triggers.list(),
     'skills.list': () => this.skills.list(),
-    'usage.quota': async () => {
-      const runtimes: Record<string, string> = { codex: 'codex', anthropic: 'claude-code' };
-      return Object.entries(await this.guest.quota()).map(([rule, q]) => ({
-        runtime: runtimes[rule] ?? rule,
-        ts: Math.round(q.ts * 1000),
-        status: q.status,
-        headers: q.headers ?? {},
-        ...(q.windows
-          ? {
-              plan: q.plan ?? null,
-              limited: q.limited === true,
-              windows: q.windows.map((w) => ({
-                name: w.name,
-                usedPercent: w.used_percent,
-                windowMinutes: w.window_minutes,
-                resetAt: typeof w.reset_at === 'number' ? w.reset_at * 1000 : null,
-              })),
-            }
-          : {}),
-      }));
+    'usage.quota': () => this.quota(),
+    'access.summary': async ({ since }) => {
+      const from = typeof since === 'number' && since >= 0 ? since : Date.now() - 7 * 86_400_000;
+      // Finished cells' rows are saved; running ones are read now (and saved).
+      let partial = false;
+      for (const id of this.hub.liveTasks()) {
+        try {
+          const live = await this.guest.audit(id);
+          if (this.store.getTask(id)) this.store.saveAuditRows(id, live.rows);
+        } catch {
+          partial = true;
+        }
+      }
+      return summarizeAccess(this.store.auditRowsSince(from), from, partial);
     },
     'usage.summary': ({ since, by }) => {
       const group = by ?? 'agent';

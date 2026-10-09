@@ -205,6 +205,15 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
     }
   }
 
+  /**
+   * Resolves once the runner has exited; `anchi-cell start` exits only after the cell's overlay,
+   * sockets and proxy registration are released.
+   */
+  exited(): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    return new Promise((resolve) => this.once('exit', () => resolve()));
+  }
+
   cancel(turn: string): void {
     this.send({ type: 'cancel', turn });
   }

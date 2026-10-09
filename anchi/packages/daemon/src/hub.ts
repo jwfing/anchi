@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   agentFile,
   BASE_IMAGE,
@@ -46,6 +47,8 @@ interface LiveCell {
 
 export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
 const SCAN_TIMEOUT_MS = 120_000;
+/** How long closing waits for the cell to exit (the runner is killed after 15 s). */
+const CLOSE_WAIT_MS = 20_000;
 const SHUTDOWN_SCAN_MS = 30_000;
 
 /**
@@ -59,7 +62,7 @@ export interface HubOptions {
   store: Store;
   guest: Guest;
   idleMs?: number;
-  /** Scan each cell for real credential values before closing it (default true). */
+  /** Scan each cell for real credential values before closing it, and save its audit rows after (default true). */
   scanOnClose?: boolean;
   /** Skills copied into an agent's cells. */
   skills?: SkillStore;
@@ -747,18 +750,31 @@ export class Hub extends EventEmitter<HubEvents> {
    */
   closeCell(taskId: string, reason: string): Promise<void> {
     const cell = this.cells.get(taskId);
-    if (!cell) return Promise.resolve();
+    // A cell already closing (a cancelled task's, say) is waited for, not taken as gone.
+    if (!cell) return this.closingTasks.get(taskId) ?? Promise.resolve();
     clearTimeout(cell.idle);
     this.cells.delete(taskId);
-    const closing = this.scanBeforeClose(taskId, cell).finally(() => {
-      cell.session.close(reason);
-      this.closing.delete(closing);
-    });
+    const closing = this.scanBeforeClose(taskId, cell)
+      .finally(() => {
+        cell.session.close(reason);
+        // The VM refuses to purge an agent while a cell of it is still closing.
+        return Promise.race([
+          cell.session.exited(),
+          sleep(CLOSE_WAIT_MS, undefined, { ref: false }),
+        ]);
+      })
+      .then(() => this.saveAudit(taskId))
+      .finally(() => {
+        this.closing.delete(closing);
+        if (this.closingTasks.get(taskId) === closing) this.closingTasks.delete(taskId);
+      });
+    this.closingTasks.set(taskId, closing);
     this.closing.add(closing);
     return closing;
   }
 
   private closing = new Set<Promise<void>>();
+  private closingTasks = new Map<string, Promise<void>>();
 
   private async scanBeforeClose(taskId: string, cell: LiveCell): Promise<void> {
     if (this.opts.scanOnClose === false || cell.session.closed) return;
@@ -803,6 +819,20 @@ export class Hub extends EventEmitter<HubEvents> {
       });
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Saves the task's rows of the egress audit log in the store once its cell is closed, so its
+   * access record outlives the log's rotation. Best effort: a later read saves them too.
+   */
+  private async saveAudit(taskId: string): Promise<void> {
+    if (this.opts.scanOnClose === false) return;
+    try {
+      const r = await this.opts.guest.audit(taskId);
+      if (this.opts.store.getTask(taskId)) this.opts.store.saveAuditRows(taskId, r.rows);
+    } catch (err) {
+      this.log(`audit rows of ${taskId} not saved: ${(err as Error).message}`);
     }
   }
 

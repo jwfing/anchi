@@ -8,13 +8,12 @@ Open requests and known gaps of the secured agent team that are not planned into
 |---|---|---|
 | R1 | Preview the files an agent changed, through a plugin | Not started; design questions below |
 | R3 | A clean start for a new task | Partly: **^X n** starts a new session; all of an agent's tasks share its work directory |
-| G1 | git pushes over 8 MiB | Fail: the body streams before the push can be decided, and streamed requests other than S3 get no credential |
 | G2 | Linux workspaces (phase 3 P7) | After Linux hosts are confirmed on a Linux machine |
 | G3 | Live acceptance with real accounts (phase 3 P9) | Needs a Claude token, Drive sign-in again, and an AWS bucket for `aws-chunked` uploads |
-| G4 | Allow a refused egress host from the TUI | The audit log names it (`egress-denied`); adding it to `egress` is a manual edit |
 | G5 | Cell count disagrees between the daemon and the VM | The daemon counts its own live cells; the VM counts cell directories, including cells still closing. A task started as an idle cell closes can fail with `TOO_MANY_CELLS` |
 | G6 | Claude subscription limits | The proxy keeps `anthropic-ratelimit-*` headers, but which ones a Claude subscription returns is not verified against live traffic (no Claude token yet; with G3) |
-| G7 | Follow-ups of R8 and R9 | Audit rows stay in the VM log until rotation when a task is deleted; no global access view across tasks; no warning when a quota window passes a threshold |
+| G8 | Large high-risk pushes | A streamed push to `main`, or one deleting a branch, is refused rather than held: approving would need the push to be repeated after approval |
+| G9 | Codex runtime hosts outside its base egress | With an `egress` list, Codex's requests to `*.oaiusercontent.com` (OpenAI's content CDN; here the plugin list's files) are refused and noted in every task. Adding the CDN to Codex's base hosts widens every Codex agent's egress; undecided |
 
 ## R1 — File preview through a plugin
 
@@ -45,12 +44,6 @@ Open requests and known gaps of the secured agent team that are not planned into
 
 **Open question.** Per-task work directories (or an option to start in an empty one), and what happens to a repository an earlier task is still working in.
 
-## G1 — git pushes over 8 MiB
-
-**Today.** mitmproxy streams bodies over 8 MiB and sends their headers before the body is read. The proxy decides streamed requests when their headers arrive and injects only S3 calls there (their operation and risk come from method and path). A git push needs its ref updates, which are at the start of the body, to decide whether it is high-risk, so it leaves without a credential and fails upstream; the audit log records `pass:streamed`.
-
-**Options.** Read the push's ref commands from the first bytes of the stream before forwarding (the pkt-lines precede the pack), then inject; or raise the streaming threshold for `git-receive-pack` at the cost of buffering large packs in memory.
-
 ## Delivered
 
 | # | Requirement | Where |
@@ -60,5 +53,8 @@ Open requests and known gaps of the secured agent team that are not planned into
 | R5 | The builder knows what exists; proposals are checked and their settings adjustable | #32; [Create agents](../AGENT_TEAM.md#create-agents) |
 | R6 | Key bindings: leader key, plain keys in views, command palette, line editing, `keybindings.json` | #31; [Key bindings](../KEYBINDINGS.md) |
 | R7 | Run a failed or cancelled task again, continuing its session or from scratch | #34; [Run tasks](../AGENT_TEAM.md#run-tasks) |
+| G1 | git pushes of any size: streamed, their ref updates checked before the body leaves | [Limits](../AGENT_TEAM.md#limits) |
+| G4 | Allow a refused egress host from the task's access view (e) or `anchi agents allow-host`; refused hosts noted in the task | [Teams, approvals, triggers and skills](../AGENT_TEAM.md#teams-approvals-triggers-and-skills) |
+| G7 | Follow-ups of R8 and R9: audit rows kept with each task, alerts for a cell's own credentials, an access view across tasks (Configure → Access), quota notifications at 80% and 95% | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
 | R8 | Each task's external access, for the user to see: hosts, injections, credentials the cell sent, refusals, held writes, bridge calls | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
 | R9 | Token use per turn with totals by agent, model, runtime and day; subscription limits read by the proxy (Codex verified) | [Access and usage](../AGENT_TEAM.md#access-and-usage) |

@@ -642,8 +642,48 @@ HIGH_RISK = (
     ),
     ('linear-delete', 'linear', r'graphql:.*\b\w+(Delete|Archive)\b', 'delete or archive in Linear'),
 )
-ZERO_SHA = b'0' * 40
-GIT_UPDATE = re.compile(rb'([0-9a-f]{40}) ([0-9a-f]{40}) (refs/[^\x00\s]{1,200})')
+GIT_OID = rb'(?:[0-9a-f]{40}|[0-9a-f]{64})'
+GIT_UPDATE = re.compile(rb'(' + GIT_OID + rb') (' + GIT_OID + rb') (refs/[^\x00\s]{1,200})')
+GIT_SHALLOW = re.compile(rb'shallow ' + GIT_OID + rb'\n?')
+GIT_PKT_LEN = re.compile(rb'[0-9a-fA-F]{4}')
+# The ref updates of a push precede its pack; longer lists are not read, and the push is high-risk.
+GIT_COMMANDS_MAX = 65536
+
+
+def git_push_commands(body):
+    """The ref updates at the start of a git-receive-pack body, as (updates, capabilities), or None
+    while the list has not ended. Updates are (old, new, ref) bytes. Raises ValueError if the
+    list is malformed or longer than GIT_COMMANDS_MAX bytes."""
+    pos, updates, caps = 0, [], frozenset()
+    while True:
+        if pos + 4 > len(body):
+            if pos + 4 > GIT_COMMANDS_MAX:
+                raise ValueError('the ref updates are too long to read')
+            return None
+        head = body[pos : pos + 4]
+        if not GIT_PKT_LEN.fullmatch(head):
+            raise ValueError('not a git push')
+        size = int(head, 16)
+        if size == 0:
+            return updates, caps
+        if size < 5 or pos + size > GIT_COMMANDS_MAX:
+            raise ValueError('the ref updates are too long to read')
+        if pos + size > len(body):
+            return None
+        line, pos = body[pos + 4 : pos + size], pos + size
+        if GIT_SHALLOW.fullmatch(line):
+            continue
+        command, _, capabilities = line.partition(b'\0')
+        match = GIT_UPDATE.fullmatch(command.rstrip(b'\n'))
+        if match is None:
+            raise ValueError('not a ref update')
+        if not updates:
+            caps = frozenset(capabilities.split())
+        updates.append(match.groups())
+
+
+def git_update_subject(old, new, ref):
+    return ('delete ' if set(new) == {ord('0')} else 'update ') + ref.decode()
 
 
 def graphql_mutation_names(body):
@@ -664,9 +704,14 @@ def high_risk(decision, method, path, body, disabled=()):
     if rule.name == 'github-git':
         if not path.split('?', 1)[0].endswith('/git-receive-pack'):
             return None
-        subjects = []
-        for old, new, ref in GIT_UPDATE.findall(body[:65536]):
-            subjects.append(('delete ' if new == ZERO_SHA else 'update ') + ref.decode())
+        try:
+            parsed = git_push_commands(body)
+        except ValueError:
+            parsed = None
+        if parsed is None:
+            # A push whose ref updates cannot be read could update anything.
+            return 'github-push-unreadable', 'a push whose ref updates cannot be read'
+        subjects = [git_update_subject(*u) for u in parsed[0]]
     elif rule.name == 'github-api' and path.split('?', 1)[0] == '/graphql':
         subjects = [f'graphql-mutation:{graphql_mutation_names(body)}']
     else:

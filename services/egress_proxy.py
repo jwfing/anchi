@@ -53,6 +53,7 @@ def load_settings():
         return {'high_risk_disabled': []}
 
 
+CREDENTIAL_ALERTS_MAX = 20
 APPROVALS_PENDING_MAX = 32
 # Rate-limit and usage information that subscription responses carry, by injection rule. Only
 # headers with these prefixes are kept; their values are numbers and times, never credentials.
@@ -106,6 +107,91 @@ def codex_windows(content):
         'limited': limits.get('limit_reached') is True or limits.get('allowed') is False,
         'windows': windows,
     }
+
+
+class PushInspector:
+    """The body filter of a streamed git push. Nothing of the body leaves until the ref updates at
+    its start have been read and checked; then all of it goes, or none of it. A refused push
+    reaches upstream with its headers (and credential) but an empty body, which changes nothing,
+    and git gets a report of the rejected refs. A high-risk push cannot wait for approval here:
+    holding would stall the upload, so it is refused."""
+
+    def __init__(self, proxy, flow, cell, decision, entry):
+        self.proxy, self.flow, self.cell, self.decision, self.entry = proxy, flow, cell, decision, entry
+        self.buffer = bytearray()
+        self.forwarding = None  # None while reading the updates, then True or False
+
+    def __call__(self, data):
+        if self.forwarding is True:
+            return data
+        if self.forwarding is False:
+            return []
+        self.buffer += data
+        head = bytes(self.buffer[: rules.GIT_COMMANDS_MAX])
+        try:
+            parsed = rules.git_push_commands(head)
+            if parsed is None and (not data or len(self.buffer) >= rules.GIT_COMMANDS_MAX):
+                raise ValueError('the push ended before its ref updates')
+        except ValueError as exc:
+            return self.refuse([], frozenset(), ('github-push-unreadable', str(exc)))
+        if parsed is None:
+            return []
+        risk = rules.high_risk(
+            self.decision, 'POST', self.entry['path'], head, self.proxy.settings['high_risk_disabled']
+        )
+        if risk:
+            return self.refuse(*parsed, risk)
+        self.forwarding = True
+        audit(self.row(parsed[0], 'inject'))
+        body, self.buffer = bytes(self.buffer), bytearray()
+        return [body] if body else []
+
+    def row(self, updates, decision, **extra):
+        refs = [rules.git_update_subject(*u) for u in updates[:50]]
+        return {
+            'event': 'push',
+            'task': self.cell.task,
+            'agent': self.cell.agent,
+            'host': self.entry['host'],
+            'path': self.entry['path'],
+            'op': ('git push: ' + ', '.join(refs))[:500],
+            'decision': decision,
+            **extra,
+        }
+
+    def refuse(self, updates, caps, risk):
+        self.forwarding, self.buffer = False, bytearray()
+        reason = (
+            f'{risk[1]}: a push this large cannot wait for approval; push to another branch and open a pull request'
+        )
+        audit(self.row(updates, 'deny', risk=risk[0], reason=reason[:200]))
+        self.flow.metadata['anchi-push-refused'] = ([u[2] for u in updates], caps, reason)
+        self.proxy.approvals.broadcast(
+            {
+                'type': 'notice',
+                'task': self.cell.task,
+                'text': f'⛔ git push refused: {self.row(updates, "deny")["op"][10:] or "unreadable ref updates"} ({reason})'[
+                    :500
+                ],
+            }
+        )
+        return []
+
+
+def git_rejection(refs, caps, reason):
+    """(status, body, headers) that git shows as `! [remote rejected] REF (anchi: reason)`."""
+    message = f'anchi: {reason}'.encode('ascii', 'replace')
+    if not refs or not caps & {b'report-status', b'report-status-v2'}:
+        return 403, message + b'\n', {'content-type': 'text/plain'}
+    report = git_pkt(b'unpack ok\n') + b''.join(git_pkt(b'ng %s %s\n' % (ref, message)) for ref in refs) + b'0000'
+    if caps & {b'side-band-64k', b'side-band'}:
+        size = 65515 if b'side-band-64k' in caps else 995
+        report = b''.join(git_pkt(b'\x01' + report[i : i + size]) for i in range(0, len(report), size)) + b'0000'
+    return 200, report, {'content-type': 'application/x-git-receive-pack-result', 'cache-control': 'no-cache'}
+
+
+def git_pkt(data):
+    return b'%04x' % (len(data) + 4) + data
 
 
 def auth_rpc(request):
@@ -245,6 +331,10 @@ class Cell:
         # Connector services this cell reaches through the bridge, and their sockets.
         self.services = frozenset()
         self.service_servers = []
+        # Hosts the cell sent a credential of its own to, already reported to the daemon.
+        self.credential_alerts = set()
+        # Hosts refused by the egress list, already noted in the task.
+        self.egress_notices = set()
 
     @property
     def directory(self):
@@ -580,6 +670,20 @@ class EgressProxy:
     def client_disconnected(self, client):
         self.registry.clients.pop(client.id, None)
 
+    def note_egress_denied(self, cell, host):
+        """A note in the task once per refused host and cell, so the user sees it while it runs."""
+        if host in cell.egress_notices or len(cell.egress_notices) >= CREDENTIAL_ALERTS_MAX:
+            return
+        cell.egress_notices.add(host)
+        self.approvals.broadcast(
+            {
+                'type': 'notice',
+                'task': cell.task,
+                'text': f'⛔ {host} is not in the egress list; the connection was refused. To allow it, '
+                f'press a on the task, then e (or anchi agents allow-host {cell.agent} {host})',
+            }
+        )
+
     async def server_connect(self, data):
         """Resolve once, refuse non-public destinations and connect to the checked address."""
         host, port = data.server.address
@@ -587,6 +691,7 @@ class EgressProxy:
         if cell is not None and not rules.egress_allowed(cell.egress, str(host).lower().rstrip('.')):
             data.server.error = f'anchi: {host} is not in this agent\'s egress list'
             audit({'decision': 'egress-denied', 'host': str(host)[:200], 'task': cell.task, 'agent': cell.agent})
+            self.note_egress_denied(cell, str(host).lower().rstrip('.')[:200])
             return
         try:
             infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -654,15 +759,48 @@ class EgressProxy:
         operation and risk come from the method and path. Other streamed requests leave without
         injection. A refusal here can only drop the connection."""
         req = flow.request
+        cell = None
         if not req.stream:
-            return
+            # A git push without a length (git sends one above http.postBuffer, 1 MiB) streams from
+            # here, so its ref updates can be checked before any of it leaves (PushInspector).
+            cell = self.registry.client_cell(flow.client_conn) if self.chunked_push(req) else None
+            if cell is None or not self.streams_push(req, cell):
+                return
+            flow.metadata['anchi-push'] = True
         flow.metadata['anchi-streamed'] = True
-        cell = self.registry.client_cell(flow.client_conn)
+        cell = cell or self.registry.client_cell(flow.client_conn)
         if cell is None:
             return flow.kill()
         refusal = await self.handle(flow, cell, b'', streamed=True)
         if refusal is not None:
             flow.kill()
+
+    @staticmethod
+    def chunked_push(req):
+        headers = req.headers
+        return (
+            req.method == 'POST'
+            and req.path.split('?', 1)[0].endswith('/git-receive-pack')
+            # Chunked over HTTP/1.1; over HTTP/2 a body of unknown length has no length header.
+            and 'content-length' not in headers
+            and 'content-encoding' not in headers
+        )
+
+    @staticmethod
+    def streams_push(req, cell):
+        """Whether a chunked push streams. Not when the agent's GitHub writes ask: those wait
+        for the user with the whole body, up to 8 MiB."""
+        if 'github' in cell.ask:
+            return False
+        headers = {k.lower(): v for k, v in req.headers.items()}
+        decision = rules.decide(req.method, req.pretty_host, req.path, headers, b'', cell.grants)
+        return decision.action == 'inject' and decision.rule.name == 'github-git'
+
+    def response(self, flow):
+        """A refused streamed push left upstream empty; git gets the rejection instead."""
+        refused = flow.metadata.get('anchi-push-refused')
+        if refused is not None:
+            self.respond(flow, *git_rejection(*refused))
 
     async def request(self, flow):
         if flow.metadata.get('anchi-streamed'):
@@ -721,6 +859,24 @@ class EgressProxy:
                 **windows,
             }
 
+    def alert_credential(self, cell, entry):
+        """Tells the daemon at once that a cell sent a credential that is not a placeholder: Anchi's
+        own never enter a cell, so it came from elsewhere. Once per host and cell; the audit log
+        has every request."""
+        if entry['host'] in cell.credential_alerts or len(cell.credential_alerts) >= CREDENTIAL_ALERTS_MAX:
+            return
+        cell.credential_alerts.add(entry['host'])
+        self.approvals.broadcast(
+            {
+                'type': 'credential',
+                'task': cell.task,
+                'agent': cell.agent,
+                'method': entry['method'],
+                'host': entry['host'][:200],
+                'path': entry['path'][:200],
+            }
+        )
+
     async def handle(self, flow, cell, body, streamed, late=False):
         """Decide, hold for approval and inject. Returns None, or (status, content, headers) to refuse."""
         req = flow.request
@@ -740,6 +896,15 @@ class EgressProxy:
             'op': decision.op,
             'decision': decision.action if decision.reason is None else f'{decision.action}:{decision.reason}',
         }
+        if entry['client_cred'] == 'other':
+            self.alert_credential(cell, entry)
+        # Checked again when the connection opens; refusing here keeps the request off the
+        # upstream path, so it is never audited as reaching the host.
+        if not rules.egress_allowed(cell.egress, host.lower().rstrip('.')):
+            entry['decision'] = 'egress-denied'
+            audit(entry)
+            self.note_egress_denied(cell, host.lower().rstrip('.')[:200])
+            return 403, f"anchi: {host} is not in this agent's egress list\n".encode(), None
         if late and decision.action != 'pass':
             entry['decision'] = 'pass:streamed'
             audit(entry)
@@ -750,14 +915,20 @@ class EgressProxy:
         if decision.action == 'pass':
             audit(entry)
             return None
-        if streamed and not (decision.rule.kind == 'aws_sigv4' and (decision.op or '').startswith('s3:')):
+        # A streamed git push is checked by its ref updates on the way (PushInspector).
+        push = streamed and not late and flow.metadata.get('anchi-push') is True
+        if streamed and not push and not (decision.rule.kind == 'aws_sigv4' and (decision.op or '').startswith('s3:')):
             entry['decision'] = 'pass:streamed'
             audit(entry)
             return None
         # High-risk operations wait for the user for every agent (phase 3, F1); other writes
         # wait when the agent's approvals ask for its connector.
-        risk = rules.high_risk(decision, req.method, req.path, body, self.settings['high_risk_disabled'])
-        if risk or (decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body)):
+        risk = (
+            None if push else rules.high_risk(decision, req.method, req.path, body, self.settings['high_risk_disabled'])
+        )
+        if not push and (
+            risk or (decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body))
+        ):
             entry['risk'] = risk[0] if risk else None
             outcome = await self.approvals.ask(
                 {
@@ -805,6 +976,9 @@ class EgressProxy:
                     raise
 
             req.stream = stream
+        if push:
+            entry['push'] = 'streamed'
+            req.stream = PushInspector(self, flow, cell, decision, entry)
         req.headers.clear()
         for key, value in new.items():
             req.headers[key] = value

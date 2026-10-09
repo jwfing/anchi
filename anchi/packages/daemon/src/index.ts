@@ -6,6 +6,7 @@ export * from './guest.ts';
 export * from './hub.ts';
 export * from './launch.ts';
 export * from './prompt.ts';
+export * from './quota.ts';
 export * from './rpc.ts';
 export * from './setup.ts';
 export * from './store.ts';

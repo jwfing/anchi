@@ -278,18 +278,43 @@ def main():
             sh(
                 'chk-f',
                 "curl -sS -m 60 -o /dev/null -X POST --data-binary @/tmp/big -H 'Transfer-Encoding: chunked' "
-                "-H 'Authorization: Basic eDphbmNoaS1wbGFjZWhvbGRlcg==' https://github.com/o/r.git/git-receive-pack",
+                "-H 'Authorization: Bearer anchi-placeholder-github' https://api.github.com/markdown/raw",
                 timeout=90,
             )
+        # A chunked git push streams, and its ref updates are read before any of it leaves: an
+        # update of main is refused with git's report, and upstream gets an empty push.
+        push = (
+            sh(
+                'chk-f',
+                "{ printf '00742222222222222222222222222222222222222222 1111111111111111111111111111111111111111 "
+                "refs/heads/main\\000report-status\\0120000'; head -c 9437184 /dev/zero; } > /tmp/push; "
+                "curl -sS -m 60 -X POST --data-binary @/tmp/push -H 'Transfer-Encoding: chunked' "
+                "-H 'Content-Type: application/x-git-receive-pack-request' "
+                "-H 'Authorization: Basic eDphbmNoaS1wbGFjZWhvbGRlcg==' "
+                'https://github.com/anchi-check/nonexistent.git/git-receive-pack',
+                timeout=90,
+            )[1]
+            if ready_f
+            else ''
+        )
         rows = audit_since(since, 'chk-f')
-        decisions = {r.get('rule'): r.get('decision') for r in rows}
+        decisions = {}
+        for r in rows:
+            decisions.setdefault(r.get('rule') or r.get('event'), set()).add(r.get('decision'))
+        pushes = [(r.get('decision'), r.get('risk')) for r in rows if r.get('event') == 'push']
         check(
             'streamed requests are decided before their headers leave',
-            decisions.get('github-api') == 'pass:streamed'
-            and decisions.get('github-git') == 'pass:streamed'
-            and decisions.get('aws') in ('missing-credential', 'rejected')
+            decisions.get('github-api') == {'pass:streamed'}
+            and decisions.get('aws', set()) <= {'missing-credential', 'rejected'}
             and s3.startswith('000'),
             f'{decisions} / github {github[:3]} / s3 {s3[:60]}',
+        )
+        # Without a GitHub credential in the vault the push is refused before it streams.
+        check(
+            'a large push to main is refused by its ref updates, before its body leaves',
+            (pushes == [('deny', 'git-default-branch')] and 'ng refs/heads/main anchi:' in push)
+            or decisions.get('github-git') == {'missing-credential'},
+            f'{pushes} / {decisions.get("github-git")} / {push[:120]!r}',
         )
     finally:
         stop(f)

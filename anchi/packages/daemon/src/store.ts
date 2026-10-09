@@ -73,7 +73,19 @@ CREATE TABLE IF NOT EXISTS usage_snapshot (
   totals TEXT NOT NULL,
   PRIMARY KEY (task_id, model)
 );
+-- A task's rows of the egress audit log, saved when its cell closes and when they are read, so
+-- they outlive the log's rotation. Deleted with the task.
+CREATE TABLE IF NOT EXISTS audit_rows (
+  task_id TEXT NOT NULL,
+  ts REAL NOT NULL,
+  row TEXT NOT NULL,
+  PRIMARY KEY (task_id, row)
+);
+CREATE INDEX IF NOT EXISTS audit_rows_ts ON audit_rows(ts);
 `;
+
+/** Saved audit rows kept per task; the oldest go first. */
+export const AUDIT_SAVED_MAX = 5000;
 
 /** Token counts of one turn and model. */
 export interface TurnUsage {
@@ -426,10 +438,51 @@ export class Store {
       }));
   }
 
+  /** Saves a task's audit rows (as read from the VM); rows already saved are kept once. */
+  saveAuditRows(taskId: string, rows: Record<string, unknown>[]): void {
+    const insert = this.db.prepare(
+      'INSERT OR IGNORE INTO audit_rows (task_id, ts, row) VALUES (?, ?, ?)',
+    );
+    this.db.exec('BEGIN');
+    try {
+      for (const r of rows)
+        insert.run(taskId, typeof r.ts === 'number' ? r.ts : 0, JSON.stringify(r));
+      this.db
+        .prepare(
+          `DELETE FROM audit_rows WHERE task_id = ? AND rowid NOT IN
+             (SELECT rowid FROM audit_rows WHERE task_id = ? ORDER BY ts DESC LIMIT ?)`,
+        )
+        .run(taskId, taskId, AUDIT_SAVED_MAX);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /** Saved audit rows of every task since a time (ms), oldest first. */
+  auditRowsSince(since: number): Record<string, unknown>[] {
+    return (
+      this.db
+        .prepare('SELECT row FROM audit_rows WHERE ts >= ? ORDER BY ts, rowid')
+        .all(since / 1000) as { row: string }[]
+    ).map((r) => JSON.parse(r.row) as Record<string, unknown>);
+  }
+
+  /** A task's saved audit rows, oldest first. */
+  auditRows(taskId: string): Record<string, unknown>[] {
+    return (
+      this.db
+        .prepare('SELECT row FROM audit_rows WHERE task_id = ? ORDER BY ts, rowid')
+        .all(taskId) as { row: string }[]
+    ).map((r) => JSON.parse(r.row) as Record<string, unknown>);
+  }
+
   /** Deletes tasks (and their events) by id; returns how many went. */
   deleteTasks(ids: string[]): number {
     let n = 0;
     for (const id of ids) {
+      this.db.prepare('DELETE FROM audit_rows WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM usage_snapshot WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM events WHERE task_id = ?').run(id);
       n += Number(this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes);

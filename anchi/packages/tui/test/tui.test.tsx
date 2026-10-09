@@ -297,7 +297,8 @@ describe('App', () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    // Sidebar: runtimes, skills, connectors, usage, builder, agents, tasks; no agents, so the builder.
+    // Sidebar: runtimes, skills, connectors, usage, access, builder, agents, tasks; no agents, so the builder.
+    ui.stdin.write('\u0010'); // ^P → access
     ui.stdin.write('\u0010'); // ^P → usage
     ui.stdin.write('\u0010'); // ^P → connectors
     await tick();
@@ -385,8 +386,8 @@ describe('App', () => {
     const frame = ui.lastFrame() ?? '';
     for (const header of ['CONFIGURE', 'AGENTS', 'TASKS']) expect(frame).toContain(header);
     expect(frame).toContain('@dev fix the bug');
-    // Rows: title, CONFIGURE, 4 settings, AGENTS, builder, dev, TASKS, then the tasks.
-    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 10 });
+    // Rows: title, CONFIGURE, 5 settings, AGENTS, builder, dev, TASKS, then the tasks.
+    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 11 });
     await tick();
     expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
     expect(ui.lastFrame()).toContain('https://github.com/o/r/pull/9');
@@ -516,7 +517,7 @@ describe('App', () => {
     expect(frame).toContain('task number 0');
     expect(frame).toContain('next ›');
     // Select the first task, then turn the page with ].
-    mouse!({ kind: 'press', button: 0, x: 5, y: 11 });
+    mouse!({ kind: 'press', button: 0, x: 5, y: 12 });
     await tick();
     ui.stdin.write(']');
     await tick();
@@ -530,6 +531,7 @@ describe('App', () => {
     const { client, calls } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
+    ui.stdin.write('\u0010'); // ^P → access
     ui.stdin.write('\u0010'); // ^P → usage
     ui.stdin.write('\u0010'); // ^P → connectors
     await tick();
@@ -561,7 +563,7 @@ describe('App', () => {
     const { client, calls, emit } = fakeClient();
     const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
     await tick();
-    for (const _ of [1, 2, 3, 4]) ui.stdin.write('\u0010'); // ^P ×4 → runtimes
+    for (const _ of [1, 2, 3, 4, 5]) ui.stdin.write('\u0010'); // ^P ×5 → runtimes
     await tick();
     expect(ui.lastFrame()).toContain('start VM');
     ui.stdin.write('u');
@@ -1208,6 +1210,72 @@ describe('running a failed task again', () => {
 });
 
 describe('access and usage views', () => {
+  it('allows a refused host from the access view after a confirmation', async () => {
+    const refused = (host: string) => ({
+      ts: 1000,
+      method: '',
+      host,
+      path: '',
+      operation: '',
+      decision: 'egress-denied',
+      rule: '',
+      credential: '',
+      reason: '',
+    });
+    const audit = {
+      taskId: 't-a000000001',
+      total: 2,
+      truncated: false,
+      cells: 1,
+      registration: null,
+      requests: 0,
+      injected: {},
+      credentialsSent: {},
+      hosts: [],
+      refused: [refused('pypi.org'), refused('evil.example'), refused('pypi.org')],
+      held: [],
+      streamed: 0,
+      bridge: [],
+      scan: null,
+      rows: [],
+    };
+    const { client, calls } = fakeClient(
+      {},
+      { 'tasks.audit': () => audit, 'agents.allowHost': () => ({ egress: ['evil.example'] }) },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    ui.stdin.write(ESC);
+    await tick();
+    ui.stdin.write('3');
+    await tick();
+    ui.stdin.write('\t');
+    await tick();
+    ui.stdin.write('a');
+    expect(await frameWith(ui, 'e allow a refused host')).toContain('egress-denied');
+    ui.stdin.write('e');
+    expect(await frameWith(ui, 'Allow a host this task was refused')).toContain('› pypi.org');
+    ui.stdin.write('j');
+    expect(await frameWith(ui, '› evil.example')).toContain('  pypi.org');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Allow evil.example for @dev')).toContain(
+      'send it whatever they read',
+    );
+    ui.stdin.write('y');
+    await tick();
+    await tick();
+    expect(calls.filter(([m]) => m === 'agents.allowHost')).toEqual([
+      ['agents.allowHost', { agentId: 'dev', host: 'evil.example' }],
+    ]);
+    ui.unmount();
+  });
+
   it("opens a task's external access with a, and the usage screen with its periods and groupings", async () => {
     const audit = {
       taskId: 't-a000000001',
@@ -1237,6 +1305,26 @@ describe('access and usage views', () => {
         'tasks.audit': () => audit,
         'usage.summary': () => [],
         'usage.quota': () => [],
+        'access.summary': () => ({
+          since: 0,
+          tasks: 1,
+          agents: [
+            {
+              agent: 'dev',
+              tasks: 1,
+              requests: 4,
+              injected: { 'github-api': 2 },
+              credentialsOther: 0,
+              refused: 1,
+              held: 0,
+              hosts: 2,
+            },
+          ],
+          hosts: [],
+          credentials: [],
+          refused: [],
+          partial: false,
+        }),
       },
     );
     const ui = render(
@@ -1275,6 +1363,15 @@ describe('access and usage views', () => {
       .filter(([m]) => m === 'usage.summary')
       .map(([, p]) => (p as { by: string }).by);
     expect(asked).toEqual(['agent', 'agent', 'model']);
+    ui.stdin.write('\t'); // the sidebar
+    await tick();
+    ui.stdin.write('j'); // → access
+    await tick();
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'By agent')).toContain('the cells sent only placeholders');
+    ui.stdin.write('p');
+    expect(await frameWith(ui, 'github-api 2')).toContain('External access, last 30 days');
+    expect(calls.filter(([m]) => m === 'access.summary')).toHaveLength(2);
     ui.unmount();
   });
 });

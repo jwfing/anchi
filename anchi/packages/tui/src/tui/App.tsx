@@ -1,5 +1,6 @@
 /** @jsxRuntime automatic */
 import type {
+  AccessSummary,
   QuotaInfo,
   TaskAudit,
   UsageRow,
@@ -40,7 +41,15 @@ import {
   strokeOf,
 } from './keys.ts';
 import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
-import { accessLines, GROUPS, PERIODS, type ReportLine, usageLines } from './reports.ts';
+import {
+  accessLines,
+  accessSummaryLines,
+  GROUPS,
+  PERIODS,
+  refusedHosts,
+  type ReportLine,
+  usageLines,
+} from './reports.ts';
 import {
   initialSettings,
   type SettingsRow,
@@ -54,13 +63,14 @@ import type { MouseEvent } from './mouse.ts';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
-const CONFIG = ['runtimes', 'skills', 'connectors', 'usage'] as const;
+const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
 type ConfigItem = (typeof CONFIG)[number];
 const CONFIG_LABEL: Record<ConfigItem, string> = {
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
   usage: 'Usage',
+  access: 'Access',
 };
 /** Sidebar item of a task (agent ids cannot contain ':'). */
 const TASK_ITEM = 'task:';
@@ -152,7 +162,16 @@ type Modal =
       cursor: number;
     }
   | { kind: 'retry'; taskId: string; agentId: string; status: TaskStatus }
-  | { kind: 'access'; taskId: string; data: TaskAudit | null; scroll: number; error?: string }
+  | {
+      kind: 'access';
+      taskId: string;
+      agentId: string;
+      data: TaskAudit | null;
+      scroll: number;
+      error?: string;
+      /** Choosing a refused host to allow: its index in refusedHosts. */
+      pick?: number;
+    }
   | {
       kind: 'deleteAgent';
       agentId: string;
@@ -296,6 +315,18 @@ export function App({
     },
     [client],
   );
+  const [access, setAccess] = useState<AccessSummary | null>(null);
+  const [accessPeriod, setAccessPeriod] = useState(1);
+  const refreshAccess = useCallback(
+    (period: number) => {
+      setAccess(null);
+      void client
+        .call('access.summary', { since: Date.now() - PERIODS[period]!.ms })
+        .then(setAccess)
+        .catch((e: Error) => say(e.message));
+    },
+    [client],
+  );
   const refreshSkills = useCallback(() => {
     void client
       .call('skills.list')
@@ -414,6 +445,7 @@ export function App({
     if (current === 'runtimes' || current === 'connectors') refreshSetup();
     if (current === 'skills') refreshSkills();
     if (current === 'usage') refreshUsage(usagePeriod, usageGroup);
+    if (current === 'access') refreshAccess(accessPeriod);
     setScroll(0);
   }, [current, refreshSetup]);
 
@@ -828,7 +860,7 @@ export function App({
       case 'task:access': {
         const t = detail ?? task;
         if (!t) return say('select a task first');
-        setModal({ kind: 'access', taskId: t.id, data: null, scroll: 0 });
+        setModal({ kind: 'access', taskId: t.id, agentId: t.agentId, data: null, scroll: 0 });
         return void client
           .call('tasks.audit', { taskId: t.id })
           .then((data) =>
@@ -852,6 +884,13 @@ export function App({
       }
       case 'usage:refresh':
         return refreshUsage(usagePeriod, usageGroup);
+      case 'access:period': {
+        const next = (accessPeriod + 1) % PERIODS.length;
+        setAccessPeriod(next);
+        return refreshAccess(next);
+      }
+      case 'access:refresh':
+        return refreshAccess(accessPeriod);
       case 'task:retry': {
         const t = detail ?? task;
         if (!t || (t.status !== 'failed' && t.status !== 'cancelled')) {
@@ -900,10 +939,11 @@ export function App({
         return setVerbose((v) => !v);
       case 'scroll:up':
         // Report views clamp their own scroll.
-        if (context === 'usage') return setScroll((s) => Math.max(0, s - 1));
+        if (context === 'usage' || context === 'access')
+          return setScroll((s) => Math.max(0, s - 1));
         return setScroll((s) => Math.min(maxScroll, s + 1));
       case 'scroll:down':
-        if (context === 'usage') return setScroll((s) => s + 1);
+        if (context === 'usage' || context === 'access') return setScroll((s) => s + 1);
         return setScroll((s) => Math.max(0, s - 1));
       case 'scroll:pageUp':
         return setScroll((s) => Math.min(maxScroll, s + halfPage));
@@ -1276,8 +1316,34 @@ export function App({
       }
       return;
     }
+    if (modal?.kind === 'access' && modal.pick !== undefined) {
+      const hosts = modal.data ? refusedHosts(modal.data) : [];
+      if (key.escape) return setModal({ ...modal, pick: undefined });
+      if (key.upArrow || ch === 'k')
+        return setModal({ ...modal, pick: Math.max(0, modal.pick - 1) });
+      if (key.downArrow || ch === 'j') {
+        return setModal({ ...modal, pick: Math.min(hosts.length - 1, modal.pick + 1) });
+      }
+      const host = hosts[modal.pick];
+      if (key.return && host) {
+        const { agentId } = modal;
+        return setModal({
+          kind: 'confirm',
+          title: `Allow ${sanitizeLine(host)} for @${agentId}`,
+          body: `Adds exactly this host to the egress list in ~/.anchi/agents/${agentId}.yaml. Its cells can then reach it and send it whatever they read. It applies from the agent's next cell.`,
+          action: () => client.call('agents.allowHost', { agentId, host }),
+        });
+      }
+      return;
+    }
     if (modal?.kind === 'access') {
       if (key.escape || ch === 'q') return setModal(null);
+      if (ch === 'e') {
+        if (!modal.data || !refusedHosts(modal.data).length) {
+          return say('no host was refused by the egress list in this task');
+        }
+        return setModal({ ...modal, pick: 0 });
+      }
       const step = key.pageUp || key.pageDown ? 10 : 1;
       if (key.upArrow || key.pageUp || ch === 'k') {
         return setModal((m) =>
@@ -1461,21 +1527,26 @@ export function App({
                   ['usage:group', `by ${GROUPS[usageGroup]}`],
                   ['usage:refresh', 'refresh'],
                 ]
-              : context === 'skills'
+              : context === 'access'
                 ? [
-                    ['skills:add', 'add'],
-                    ['skills:update', 'update'],
-                    ['skills:remove', 'remove'],
-                    ['focus:sidebar', 'sidebar'],
+                    ['access:period', PERIODS[accessPeriod]!.label],
+                    ['access:refresh', 'refresh'],
                   ]
-                : [
-                    ['setup:vmStart', 'start VM'],
-                    ['setup:install', 'install'],
-                    ['setup:unlock', 'unlock'],
-                    ['setup:workspaces', 'workspaces'],
-                    ['setup:codex', 'Codex'],
-                    ['setup:claude', 'Claude'],
-                  ];
+                : context === 'skills'
+                  ? [
+                      ['skills:add', 'add'],
+                      ['skills:update', 'update'],
+                      ['skills:remove', 'remove'],
+                      ['focus:sidebar', 'sidebar'],
+                    ]
+                  : [
+                      ['setup:vmStart', 'start VM'],
+                      ['setup:install', 'install'],
+                      ['setup:unlock', 'unlock'],
+                      ['setup:workspaces', 'workspaces'],
+                      ['setup:codex', 'Codex'],
+                      ['setup:claude', 'Claude'],
+                    ];
   const status = pending.length
     ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
     : flash ||
@@ -1584,6 +1655,12 @@ export function App({
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
             <RuntimesView setup={setup} log={setupLog} />
+          ) : current === 'access' ? (
+            <Report
+              lines={accessSummaryLines(access, accessPeriod, textWidth)}
+              height={bodyHeight - 4}
+              scroll={scroll}
+            />
           ) : current === 'usage' ? (
             <Report
               lines={usageLines(
@@ -1915,6 +1992,7 @@ const CONTEXT_LABEL: Record<Context, string> = {
   skills: 'Skills',
   connectors: 'Connectors',
   usage: 'Usage',
+  access: 'Access',
 };
 
 /** Rows of the help: the view's bindings, then the global ones, then fixed keys. */
@@ -2300,10 +2378,27 @@ function ModalView({
         <Text bold color="cyan">
           External access of {modal.taskId}
         </Text>
-        <Report lines={lines} height={room} scroll={modal.scroll} />
+        {modal.pick !== undefined && modal.data ? (
+          <Box flexDirection="column" height={room}>
+            <Text>
+              Allow a host this task was refused (it comes from the agent&apos;s requests):
+            </Text>
+            {refusedHosts(modal.data)
+              .slice(0, room - 1)
+              .map((h, i) => (
+                <Text key={h} color={i === modal.pick ? 'cyan' : undefined} wrap="truncate">
+                  {i === modal.pick ? '› ' : '  '}
+                  {sanitizeLine(h)}
+                </Text>
+              ))}
+          </Box>
+        ) : (
+          <Report lines={lines} height={room} scroll={modal.scroll} />
+        )}
         <Text dimColor wrap="truncate">
-          ↑↓ PgUp PgDn scroll · Esc close · from the egress proxy&apos;s audit log; hosts and paths
-          come from the agent
+          {modal.pick !== undefined
+            ? '↑↓ choose · Enter review · Esc back'
+            : `↑↓ PgUp PgDn scroll${modal.data && refusedHosts(modal.data).length ? ' · e allow a refused host' : ''} · Esc close · from the egress proxy's audit log; hosts and paths come from the agent`}
         </Text>
       </Box>
     );

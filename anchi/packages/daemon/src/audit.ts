@@ -1,4 +1,4 @@
-import type { AuditRow, TaskAudit } from '@anchi/protocol';
+import type { AccessSummary, AgentAccess, AuditRow, TaskAudit } from '@anchi/protocol';
 
 /**
  * The external access of one task, from the egress proxy's audit rows: what its cells reached,
@@ -18,11 +18,33 @@ const REFUSED = new Set([
 const DETAIL_ROWS = 500;
 
 type Row = Record<string, unknown>;
+
+/**
+ * A task's rows as the VM has them now, joined with the rows the daemon saved earlier (which
+ * the log may have rotated away since). `live` is null when the VM could not be read.
+ */
+export function mergeAuditRows(
+  live: { rows: Row[]; total: number; truncated: boolean } | null,
+  saved: Row[],
+): { rows: Row[]; total: number; truncated: boolean; savedOnly: boolean } {
+  const seen = new Set(saved.map((r) => JSON.stringify(r)));
+  const rows = [...saved];
+  for (const r of live?.rows ?? []) {
+    const key = JSON.stringify(r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(r);
+  }
+  const ts = (r: Row) => (typeof r.ts === 'number' ? r.ts : 0);
+  rows.sort((a, b) => ts(a) - ts(b));
+  const total = Math.max(live?.total ?? 0, rows.length);
+  return { rows, total, truncated: rows.length < total, savedOnly: live === null };
+}
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
 export function summarizeAudit(
   taskId: string,
-  raw: { rows: Row[]; total: number; truncated: boolean },
+  raw: { rows: Row[]; total: number; truncated: boolean; savedOnly?: boolean },
   scan: string | null,
 ): TaskAudit {
   const requests = raw.rows.filter((r) => str(r.method) && str(r.host));
@@ -77,6 +99,7 @@ export function summarizeAudit(
     taskId,
     total: raw.total,
     truncated: raw.truncated,
+    ...(raw.savedOnly ? { savedOnly: true } : {}),
     cells: registers.length,
     registration: last
       ? {
@@ -110,6 +133,83 @@ function row(r: Row): AuditRow {
     rule: str(r.rule),
     credential: str(r.client_cred),
     reason: str(r.reason),
+  };
+}
+
+const LIST_MAX = 50;
+const HOSTS_MAX = 30;
+
+/** External access of all tasks in `rows` (audit rows of many tasks), by agent and by host. */
+export function summarizeAccess(rows: Row[], since: number, partial: boolean): AccessSummary {
+  const agents = new Map<string, AgentAccess & { taskIds: Set<string>; hostSet: Set<string> }>();
+  const hosts = new Map<string, AccessSummary['hosts'][number] & { agentSet: Set<string> }>();
+  const credentials: AccessSummary['credentials'] = [];
+  const refused: AccessSummary['refused'] = [];
+  const tasks = new Set<string>();
+  for (const r of rows) {
+    const agent = str(r.agent);
+    const task = str(r.task);
+    if (!agent || !task) continue;
+    tasks.add(task);
+    const a = agents.get(agent) ?? {
+      agent,
+      tasks: 0,
+      requests: 0,
+      injected: {},
+      credentialsOther: 0,
+      refused: 0,
+      held: 0,
+      hosts: 0,
+      taskIds: new Set<string>(),
+      hostSet: new Set<string>(),
+    };
+    agents.set(agent, a);
+    a.taskIds.add(task);
+    const decision = str(r.decision);
+    const isRequest = Boolean(str(r.method) && str(r.host));
+    const isRefused = REFUSED.has(decision) || decision.startsWith('held-');
+    if (isRefused) {
+      a.refused++;
+      refused.push({ ...row(r), task, agent });
+    }
+    if (typeof r.approval === 'string') a.held++;
+    if (!isRequest) continue;
+    const host = str(r.host);
+    a.requests++;
+    a.hostSet.add(host);
+    if (decision === 'inject') {
+      const rule = str(r.rule) || 'unknown';
+      a.injected[rule] = (a.injected[rule] ?? 0) + 1;
+    }
+    if (str(r.client_cred) === 'other') {
+      a.credentialsOther++;
+      credentials.push({ ...row(r), task, agent });
+    }
+    const h = hosts.get(host) ?? {
+      host,
+      requests: 0,
+      agents: [],
+      decisions: {},
+      agentSet: new Set(),
+    };
+    h.requests++;
+    h.agentSet.add(agent);
+    h.decisions[decision] = (h.decisions[decision] ?? 0) + 1;
+    hosts.set(host, h);
+  }
+  return {
+    since,
+    tasks: tasks.size,
+    agents: [...agents.values()]
+      .map(({ taskIds, hostSet, ...a }) => ({ ...a, tasks: taskIds.size, hosts: hostSet.size }))
+      .sort((x, y) => y.requests - x.requests),
+    hosts: [...hosts.values()]
+      .map(({ agentSet, ...h }) => ({ ...h, agents: [...agentSet].sort() }))
+      .sort((x, y) => y.requests - x.requests)
+      .slice(0, HOSTS_MAX),
+    credentials: credentials.reverse().slice(0, LIST_MAX),
+    refused: refused.reverse().slice(0, LIST_MAX),
+    partial,
   };
 }
 

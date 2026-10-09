@@ -19,11 +19,18 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 - TUI key bindings: every action through the leader key Ctrl+X with a panel of the keys that follow, plain keys in views without text input, a command palette (^X Space), shell line editing in the chat input, and `~/.anchi/keybindings.json` (`anchi keys`). Ctrl+X alone, Ctrl+A, Ctrl+E, Ctrl+T and Ctrl+O no longer act as before: new task is ^X n, approvals ^X a, the editor Ctrl+G or ^X e, tool calls ^X t, the builder proposal ^X o.
 - Running a failed or cancelled task again (R, ^X r, `anchi retry`): continue its session with a note of why it stopped, or start over as a new task.
 - A task's external access (a, ^X l, `anchi audit`): hosts reached and decisions, credentials injected by the proxy, what the cell sent as credential, refusals, held writes, bridge calls and the scan, read from the egress proxy's audit log.
+- A host refused by an agent's egress list is noted in the task, and can be allowed from the task's access view (e) or with `anchi agents allow-host`, after a confirmation.
+- git pushes larger than 8 MiB work: a push without a length streams through the proxy, which reads its ref updates before any of the body leaves. High-risk pushes of this size are refused with git's own report instead of waiting for approval.
+- Configure → Access and `anchi access`: every agent's external access over a period, the hosts most requested, credentials cells sent of their own and the latest refusals. Desktop notifications when a subscription window passes 80% and 95%, and when a limit is reached.
+- A task's audit rows are saved by the daemon when its cells close, so its access record outlives the log's rotation; a cell sending a credential that is not a placeholder is noted in the task and notified at once.
 - Token usage per turn (input, cached, output, reasoning, model, Claude Code's cost estimate) with totals by agent, model, runtime or day (Configure → Usage, `anchi usage`), and the subscription limits the egress proxy last saw: Codex's plan and 5-hour and weekly windows, Claude Code's rate-limit headers.
 - Live checks `make verify-anchi` and acceptance script `scripts/anchi-acceptance.sh`.
 
 ### Fixed
 
+- Deleting an agent with an idle cell left its home in the VM (`AGENT_HAS_CELLS`): the purge ran while the cell was still releasing its overlay. Closing a cell now waits for it to exit, also when it was already closing.
+- A request to a host outside an agent's egress list was audited as `pass` before its connection was refused, so the access view counted the host as reached. The proxy now refuses it as the request arrives, with a 403 that names the egress list.
+- A push's ref updates were matched in the first 64 KiB of its body only, so a push listing many refs could hide an update of `main` from the high-risk check. Every update is now parsed, and a push whose updates cannot be read is high-risk.
 - Installing (`setup install`, `scripts/install-anchi.sh`) and `make verify-anchi` ended running tasks: installing restarts the egress proxy, and the live checks reaped every cell. Both now refuse while tasks run, and the checks only ever reap their own cells.
 - The egress proxy hit its 1024 open-file limit under package installs with hundreds of connections (`Too many open files`); the limit is now 65536.
 - Request bodies over 8 MiB were audited as injected although their headers had already left; they are now audited as `pass:streamed`.

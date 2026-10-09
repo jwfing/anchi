@@ -1,6 +1,6 @@
 // Stands in for `anchi-cell start`: speaks the runner protocol on stdio.
 // FAKE_MODE: ok | bad-frame | wrong-turn | huge | slow | fail-start
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const mode = process.env.FAKE_MODE ?? 'ok';
@@ -84,4 +84,11 @@ rl.on('line', (line) => {
   send({ type: 'event', turn: cmd.turn, event: { type: 'turn.completed' } });
   send({ type: 'turn.end', turn: cmd.turn, ok: true });
 });
-rl.on('close', () => process.exit(0));
+// A real cell takes a moment to release its overlay after its input closes.
+rl.on('close', () => {
+  let ms = 0;
+  try {
+    ms = Number(readFileSync(process.env.FAKE_EXIT_FILE ?? '', 'utf8')) || 0;
+  } catch {}
+  setTimeout(() => process.exit(0), ms);
+});

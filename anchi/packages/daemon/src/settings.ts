@@ -92,6 +92,32 @@ export function updateAgentFile(
   return { ...result, applied: true };
 }
 
+const HOST = /^[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
+
+/**
+ * Adds one exact host to an agent's egress list (a host its cells were refused), keeping the
+ * rest of the file. An agent without a list reaches any public host already.
+ */
+export function allowEgressHost(
+  layout: HomeLayout,
+  id: string,
+  host: string,
+  opts: { inventory: Pick<Inventory, 'skills' | 'connectors' | 'agents'>; workspaceRoot: string },
+): { egress: string[] } {
+  const h = host.trim().toLowerCase().replace(/\.$/, '');
+  if (!HOST.test(h) || h.length > 253) {
+    throw new Error('give one host name, such as registry.npmjs.org; wildcards are not added here');
+  }
+  const egress = resolveAgent(id, layout).egress;
+  if (!egress) throw new Error(`@${id} has no egress list: it reaches any public host already`);
+  const covers = (p: string) => p === h || (p.startsWith('*.') && h.endsWith(p.slice(1)));
+  if (egress.some(covers)) throw new Error(`${h} is already in @${id}'s egress list`);
+  const next = [...egress, h];
+  const preview = updateAgentFile(layout, id, { egress: next }, opts);
+  updateAgentFile(layout, id, { egress: next }, { ...opts, apply: true, base: preview.base });
+  return { egress: next };
+}
+
 /** Replaces a file's text atomically, keeping its mode. */
 export function replaceFile(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.tmp`;

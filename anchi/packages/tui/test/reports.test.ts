@@ -1,6 +1,6 @@
 import type { TaskAudit } from '@anchi/protocol';
 import { describe, expect, it } from 'vitest';
-import { accessLines, usageLines } from '../src/tui/reports.ts';
+import { accessLines, accessSummaryLines, usageLines } from '../src/tui/reports.ts';
 
 const audit: TaskAudit = {
   taskId: 't-1',
@@ -54,6 +54,9 @@ describe('reports', () => {
     expect(text).toContain('! sent its own credential');
     // Agent-originated hosts are rendered without escape sequences.
     expect(text).not.toContain('\u001b');
+    expect(accessLines({ ...audit, savedOnly: true }, 200).map((l) => l.text)).toContain(
+      'The VM could not be read: these are the rows saved when the task’s cells closed.',
+    );
     expect(accessLines({ ...audit, credentialsSent: { placeholder: 2 } }, 200)[0]).toMatchObject({
       color: 'green',
     });
@@ -112,6 +115,28 @@ describe('reports', () => {
       ]),
     );
     expect(lines.find((l) => l.startsWith('Tokens'))).toBe('Tokens, last 7 days, by agent');
+    expect(
+      usageLines(
+        [],
+        [
+          {
+            runtime: 'codex',
+            ts: 0,
+            status: 200,
+            headers: {},
+            windows: [
+              { name: 'primary', usedPercent: 96, windowMinutes: 300, resetAt: null },
+              { name: 'secondary', usedPercent: 81, windowMinutes: 10_080, resetAt: null },
+            ],
+          },
+        ],
+        0,
+        'agent',
+        200,
+      )
+        .filter((l) => l.text.includes('window'))
+        .map((l) => l.color),
+    ).toEqual(['red', 'yellow']);
     expect(lines.find((l) => l.includes('lead'))).toMatch(
       /lead\s+1\s+1\.5M\s+0\s+2\.0k\s+0\s+\$1\.25/,
     );
@@ -121,5 +146,48 @@ describe('reports', () => {
     expect(usageLines([], [], 0, 'model', 200).map((l) => l.text)).toContain(
       '  No turns recorded in this period.',
     );
+  });
+  it("sums up access by agent and flags a credential of the cell's own", () => {
+    const row = {
+      ts: 0,
+      method: 'GET',
+      host: 'evil.example\u001b[2J',
+      path: '/x',
+      operation: '',
+      decision: 'pass',
+      rule: '',
+      credential: 'other',
+      reason: '',
+      task: 't-1',
+      agent: 'dev',
+    };
+    const summary = {
+      since: 0,
+      tasks: 1,
+      agents: [
+        {
+          agent: 'dev',
+          tasks: 1,
+          requests: 3,
+          injected: { github: 2 },
+          credentialsOther: 1,
+          refused: 0,
+          held: 0,
+          hosts: 2,
+        },
+      ],
+      hosts: [{ host: 'api.github.com', requests: 2, agents: ['dev'], decisions: { inject: 2 } }],
+      credentials: [row],
+      refused: [],
+      partial: false,
+    };
+    const lines = accessSummaryLines(summary, 0, 200);
+    expect(lines[1]).toMatchObject({ color: 'red' });
+    expect(lines.map((l) => l.text).join('\n')).toMatch(/dev\s+1\s+3\s+2\s+0\s+0\s+github 2/);
+    expect(lines.map((l) => l.text).join('\n')).not.toContain('\u001b');
+    expect(accessSummaryLines({ ...summary, agents: [] }, 0, 200).at(-1)!.text).toContain(
+      'No external access',
+    );
+    expect(accessSummaryLines(null, 0, 200).at(-1)!.text).toContain('Loading');
   });
 });
