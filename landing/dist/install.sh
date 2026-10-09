@@ -89,7 +89,7 @@ main() {
   mv -f "$launcher" "$bin/anchi"
   printf 'Installed Anchi %s: %s/anchi\n' "$version" "$bin"
   case ":$PATH:" in
-    *":$bin:"*) printf 'Run: anchi\n' ;;
+    *":$bin:"*) ;;
     *)
       line="export PATH=$(quote "$bin"):\$PATH"
       case "${SHELL:-}" in
@@ -108,7 +108,7 @@ main() {
       if ! grep -Fqx "$line" "$rc" 2>/dev/null; then
         printf '\n# Anchi\n%s\n' "$line" >> "$rc"
       fi
-      printf 'PATH configured in %s. Open a new terminal, or run:\n  %s\nThen run: anchi\n' "$rc" "$line"
+      printf 'PATH configured in %s. Open a new terminal, or run:\n  %s\n' "$rc" "$line"
       ;;
   esac
   printf '\nFirst use: open Runtimes in the TUI to install the VM and connect a runtime.\n'
@@ -119,6 +119,7 @@ main() {
     esac
   fi
   printf 'To update, rerun this installer. After tasks finish, run anchi daemon stop.\nIf login startup is enabled, also rerun anchi daemon install.\n'
+  printf '\nRun: anchi\n'
 }
 
 # Execute only after the complete script has arrived over the pipe.
