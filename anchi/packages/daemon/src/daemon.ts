@@ -98,6 +98,8 @@ export interface DaemonOptions {
   log?(msg: string): void;
   /** Skip desktop notifications (tests). */
   quiet?: boolean;
+  /** How long a task waits for a free cell (tests). */
+  roomWaitMs?: number;
   idleMs?: number;
   turnTimeoutMs?: number;
   /** Host commands of setup steps and of connector imports (tests replace them). */
@@ -309,6 +311,7 @@ export class Daemon {
       store: this.store,
       guest: this.guest,
       idleMs: opts.idleMs,
+      roomWaitMs: opts.roomWaitMs,
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
       workspaceRoot: this.workspaceRoot,

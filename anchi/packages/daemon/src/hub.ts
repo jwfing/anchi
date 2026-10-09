@@ -49,6 +49,8 @@ export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60_000;
 const SCAN_TIMEOUT_MS = 120_000;
 /** How long closing waits for the cell to exit (the runner is killed after 15 s). */
 const CLOSE_WAIT_MS = 20_000;
+/** How long a task waits for a free cell before it fails. */
+const ROOM_WAIT_MS = 10 * 60_000;
 const SHUTDOWN_SCAN_MS = 30_000;
 
 /**
@@ -62,6 +64,8 @@ export interface HubOptions {
   store: Store;
   guest: Guest;
   idleMs?: number;
+  /** How long a task waits for a free cell (default 10 minutes). */
+  roomWaitMs?: number;
   /** Scan each cell for real credential values before closing it, and save its audit rows after (default true). */
   scanOnClose?: boolean;
   /** Skills copied into an agent's cells. */
@@ -691,12 +695,36 @@ export class Hub extends EventEmitter<HubEvents> {
       return existing;
     }
     if (existing) await this.closeCell(task.id, 'agent settings changed');
-    // The guest limits concurrent cells; make room by closing the longest-idle one.
-    if (this.cells.size >= MAX_CELLS) {
+    // The guest limits concurrent cells, counting those still closing: make room by closing
+    // the longest-idle one, or wait until a cell is idle or gone.
+    let waitingSince = 0;
+    while (this.occupied() >= MAX_CELLS) {
       const idle = [...this.cells.entries()]
         .filter(([, c]) => c.idle)
         .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (idle) await this.closeCell(idle[0], 'making room for another task');
+      if (idle) {
+        await this.closeCell(idle[0], 'making room for another task');
+        continue;
+      }
+      if (!waitingSince) {
+        waitingSince = Date.now();
+        this.notice(task.id, `waiting for a free cell: ${MAX_CELLS} are in use`);
+      }
+      // Bounded: tasks waiting on each other's delegations must not wait for ever.
+      const left = waitingSince + (this.opts.roomWaitMs ?? ROOM_WAIT_MS) - Date.now();
+      if (left <= 0) {
+        throw new Error(
+          `TOO_MANY_CELLS: ${MAX_CELLS} cells stayed busy for ${Math.round((this.opts.roomWaitMs ?? ROOM_WAIT_MS) / 60_000)} minutes; try again when a task finishes`,
+        );
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, left);
+        timer.unref();
+        this.roomWaiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
     }
     const child = this.opts.guest.startCell({
       task: task.id,
@@ -725,6 +753,7 @@ export class Hub extends EventEmitter<HubEvents> {
     session.on('exit', (reason) => {
       if (this.cells.get(task.id) === cell) this.cells.delete(task.id);
       clearTimeout(cell.idle);
+      this.roomChanged();
       this.log(`cell ${task.id} ended: ${reason}`);
     });
     const version = await session.ready;
@@ -741,6 +770,21 @@ export class Hub extends EventEmitter<HubEvents> {
       this.opts.idleMs ?? IDLE_MS,
     );
     cell.idle.unref();
+    this.roomChanged();
+  }
+
+  /** Cells the guest counts: live ones and those still closing. */
+  private occupied(): number {
+    return (
+      this.cells.size + [...this.closingTasks.keys()].filter((id) => !this.cells.has(id)).length
+    );
+  }
+
+  private roomWaiters: (() => void)[] = [];
+
+  /** A cell became idle or went: tasks waiting for one look again. */
+  private roomChanged() {
+    for (const resolve of this.roomWaiters.splice(0)) resolve();
   }
 
   /**
@@ -767,6 +811,7 @@ export class Hub extends EventEmitter<HubEvents> {
       .finally(() => {
         this.closing.delete(closing);
         if (this.closingTasks.get(taskId) === closing) this.closingTasks.delete(taskId);
+        this.roomChanged();
       });
     this.closingTasks.set(taskId, closing);
     this.closing.add(closing);

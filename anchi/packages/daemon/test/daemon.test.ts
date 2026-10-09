@@ -37,6 +37,8 @@ class FakeTransport implements GuestTransport {
   /** Runner processes, standing in for cells; a purge must find them all exited. */
   children: { agent: string; child: ReturnType<typeof spawn> }[] = [];
   purgedWhileRunning = false;
+  /** The most fake cells alive at once; the guest allows four. */
+  maxLive = 0;
 
   /** Lines the fake `anchi-cell approvals watch` prints, then it stays open. */
   approvalLines: string[] = [];
@@ -59,6 +61,10 @@ class FakeTransport implements GuestTransport {
       env: { ...process.env, FAKE_MODE: this.mode, FAKE_EXIT_FILE: join(root, 'exit-ms') },
     });
     this.children.push({ agent: args[3] ?? '', child });
+    this.maxLive = Math.max(
+      this.maxLive,
+      this.children.filter((c) => c.child.exitCode === null && !c.child.signalCode).length,
+    );
     return child;
   }
 
@@ -183,6 +189,7 @@ class FakeTransport implements GuestTransport {
 let root: string;
 let transport: FakeTransport;
 let daemon: Daemon | undefined;
+let roomWaitMs: number | undefined;
 let client: DaemonClient | undefined;
 
 function write(rel: string, content: string) {
@@ -228,6 +235,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     log: () => {},
     quiet: true,
     idleMs,
+    roomWaitMs,
   });
   await d.start();
   daemon = d;
@@ -1524,6 +1532,50 @@ describe('helpers', () => {
       'https://github.com/o/r/pull/2',
       'https://x.dev/i/1',
     ]);
+  });
+});
+
+describe('cell limit', () => {
+  afterEach(() => {
+    roomWaitMs = undefined;
+  });
+
+  const busy = async (client: DaemonClient, n: number) => {
+    for (let i = 1; i <= n; i++) write(`agents/a${i}.yaml`, 'runtime: codex\n');
+    transport.mode = 'slow';
+    const tasks: TaskRow[] = [];
+    for (let i = 1; i <= 4; i++)
+      tasks.push(await client.call('tasks.create', { agentId: `a${i}`, text: 'long' }));
+    await new Promise((r) => setTimeout(r, 300));
+    return tasks;
+  };
+
+  it('waits for a free cell, counting cells still closing, instead of failing', async () => {
+    const { client } = await start();
+    const [first] = await busy(client, 5);
+    transport.mode = 'ok';
+    writeFileSync(join(root, 'exit-ms'), '400'); // a cancelled cell takes a moment to go
+    const fifth = await client.call('tasks.create', { agentId: 'a5', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await client.call('tasks.get', { taskId: fifth.id })).status).not.toBe('done');
+    await client.call('tasks.cancel', { taskId: first!.id });
+    const done = await client.call('tasks.wait', { taskId: fifth.id });
+    expect(done.status).toBe('done');
+    expect(transport.maxLive).toBe(4);
+    const notices = (await client.call('tasks.events', { taskId: fifth.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toContain('waiting for a free cell: 4 are in use');
+  });
+
+  it('fails a task that waited too long for a cell', async () => {
+    roomWaitMs = 300;
+    const { client } = await start();
+    await busy(client, 5);
+    const fifth = await client.call('tasks.create', { agentId: 'a5', text: 'hello' });
+    const done = await client.call('tasks.wait', { taskId: fifth.id });
+    expect(done.status).toBe('failed');
+    expect(done.result ?? '').toContain('stayed busy');
   });
 });
 
