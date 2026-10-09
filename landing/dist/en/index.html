@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f9f8f5" />
+    <meta name="theme-color" content="#10120f" />
     <title>Anchi — A Secured Agent Team</title>
     <meta
       name="description"
-      content="Run a team of Codex and Claude Code agents on your machine. Each task in a disposable cell, credentials never inside, each agent limited to what you give it, and the writes that matter wait for you."
+      content="Build an agent fleet and let it work safely. Anchi brings Codex and Claude Code together with isolated tasks, protected credentials, and write approvals."
     />
     <link rel="canonical" href="https://anchi.elseward.xyz/en/" />
     <meta property="og:title" content="Anchi — A Secured Agent Team" />
     <meta
       property="og:description"
-      content="Run a team of Codex and Claude Code agents on your machine. Each task in a disposable cell, credentials never inside, each agent limited to what you give it, and the writes that matter wait for you."
+      content="Build an agent fleet and let it work safely. Anchi brings Codex and Claude Code together with isolated tasks, protected credentials, and write approvals."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://anchi.elseward.xyz/en/" />
@@ -31,385 +31,584 @@
       href="https://anchi.elseward.xyz/"
     />
     <script src="/language.js" defer></script>
+    <script src="/terminal.js" defer></script>
   </head>
-  <body>
+  <body id="top">
     <a class="skip" href="#main">Skip to main content</a>
     <header class="header wrap">
-      <a class="brand" href="#" aria-label="Anchi home"
-        ><svg viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M5 26 16 5l11 21M10 20h12M16 13v15" /></svg
-        >anchi<span></span
-      ></a>
+      <a class="brand" href="#top" aria-label="Anchi home"
+        ><img
+          class="brand-mark"
+          src="/logo.svg"
+          width="36"
+          height="36"
+          alt=""
+          aria-hidden="true"
+        />
+        <span class="brand-wordmark">anchi</span></a
+      >
       <nav aria-label="Main navigation">
-        <a href="#environment">How it works</a><a href="#questions">FAQ</a
-        ><a class="nav-link" href="https://github.com/jwfing/anchi"
-          >GitHub <span aria-hidden="true">↗</span></a
+        <a href="#workflow">Workflow</a><a href="#environment">Security</a
+        ><a href="#platforms">Platforms</a
+        ><a href="https://github.com/jwfing/anchi" class="github-link"
+          >GitHub ↗</a
         >
         <div class="language-switch" role="group" aria-label="Language">
-          <a href="/zh/" lang="zh-CN" hreflang="zh-CN" data-language="zh"
-            >中文</a
+          <a href="/zh/" lang="zh-CN" hreflang="zh-CN" data-language="zh">中</a
+          ><span>/</span
           ><a
             href="/en/"
             lang="en"
             hreflang="en"
             data-language="en"
             aria-current="page"
-            >English</a
+            >EN</a
           >
         </div>
       </nav>
     </header>
     <main id="main">
-      <section class="hero wrap">
-        <p class="eyebrow">
-          <span class="status-dot"></span> ANCHI · 安栖 · AHN-CHEE
+      <section class="hero wrap fleet-hero">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="status-dot" aria-hidden="true"></span>ANCHI / A SECURED
+            AGENT FLEET
+          </p>
+          <h1>Build your fleet.<br /><span>Let it work safely.</span></h1>
+          <p class="intro">
+            Anchi lets agents work like colleagues. Create different roles,
+            assign tasks, and bring them together as a team.
+          </p>
+          <p class="intro intro-security">
+            Set boundaries for each agent. Real credentials stay out of
+            sandboxes. You authorize the writes that matter.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#setup">Get started ↗</a
+            ><a class="button secondary" href="https://github.com/jwfing/anchi"
+              >View source ↗</a
+            >
+          </div>
+          <p class="availability">Developer preview · Open source</p>
+        </div>
+        <figure class="fleet-figure">
+          <div
+            class="fleet-console"
+            role="img"
+            aria-label="You assign tasks and approve writes through Anchi. Anchi coordinates developer and reviewer tasks in separate cells inside a local VM. Requests reach services through a trusted gateway. Vault credentials stay outside task cells."
+          >
+            <div class="fleet-console-title" aria-hidden="true">
+              <span><span class="lime">❯</span> anchi / fleet</span
+              ><span class="fleet-local"
+                ><span class="status-dot"></span> local</span
+              >
+            </div>
+            <div class="fleet-flow" aria-hidden="true">
+              <div class="fleet-owner">
+                <span>[ you ]</span
+                ><span class="fleet-owner-action">tasks / approvals</span>
+              </div>
+              <div class="fleet-stem"></div>
+              <div class="fleet-coordinator">
+                <span>ANCHI</span><span>coordinate / delegate</span>
+              </div>
+              <div class="fleet-stem fleet-stem-entry"></div>
+              <div class="fleet-vm">
+                <span class="fleet-vm-label">LOCAL VM</span>
+                <div class="fleet-fork"><i></i><i></i></div>
+                <div class="fleet-agents">
+                  <div class="fleet-cell">
+                    <div class="fleet-cell-label">task cell / 01</div>
+                    <strong>@developer</strong><span>Codex</span>
+                  </div>
+                  <div class="fleet-cell fleet-cell-reviewer">
+                    <div class="fleet-cell-label">task cell / 02</div>
+                    <strong>@reviewer</strong><span>Claude Code</span>
+                  </div>
+                </div>
+                <div class="fleet-merge"><i></i><i></i></div>
+                <p class="fleet-isolation">
+                  Separate cells. No real credentials.
+                </p>
+                <div class="fleet-stem fleet-request-stem"></div>
+                <div class="fleet-trusted">
+                  <div class="fleet-vault">
+                    <span><b>[k]</b> vault</span><small>real keys</small>
+                  </div>
+                  <span class="fleet-key-arrow">─▶</span>
+                  <div class="fleet-gateway">
+                    <strong>trusted gateway</strong
+                    ><small>credentials used here</small>
+                  </div>
+                </div>
+              </div>
+              <div class="fleet-stem fleet-exit"></div>
+              <div class="fleet-services">
+                <span>your services</span><span>GitHub · AWS · …</span>
+              </div>
+            </div>
+          </div>
+          <figcaption>
+            Anchi coordinates the team. Credentials stay outside the cells.
+          </figcaption>
+        </figure>
+      </section>
+      <section class="section wrap workflow" id="workflow">
+        <div class="section-heading">
+          <p class="eyebrow">01 / WORKFLOW</p>
+          <h2>Build a team. Put it to work.</h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/agent.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Create agents</h3>
+            <p>Describe the teammate and define its role.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/team.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Form a team</h3>
+            <p>Choose teammates and set who can delegate to whom.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/task.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Assign tasks</h3>
+            <p>Give the team a goal and let it work together.</p>
+          </article>
+        </div>
+      </section>
+      <section class="section wrap security-section" id="environment">
+        <div class="section-heading">
+          <p class="eyebrow">02 / BOUNDARY</p>
+          <h2>Let agents work.<span>Keep the keys.</span></h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/isolation.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Isolated tasks</h3>
+            <p>Each task runs in its own cell inside a local VM.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/credentials.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Protected credentials</h3>
+            <p>Trusted services use real credentials outside the sandbox.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/authorization.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Access and approvals</h3>
+            <p>
+              Set folder, connector, and network access. Approve high-risk
+              writes.
+            </p>
+          </article>
+        </div>
+        <div class="security-note">
+          <span aria-hidden="true">[i]</span>
+          <p>
+            Credential isolation is not data isolation. What an agent reads can
+            still reach a cloud model.
+            <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
+              >Security model ↗</a
+            >
+          </p>
+        </div>
+      </section>
+      <section class="section wrap platforms-section" id="platforms">
+        <div class="section-heading">
+          <p class="eyebrow">03 / PLATFORMS &amp; RUNTIMES</p>
+          <h2>Your platform. Your runtime.</h2>
+        </div>
+        <div class="support-grid">
+          <div class="support-group">
+            <p>HOST PLATFORMS</p>
+            <dl>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/macos-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>macOS</span>
+                </dt>
+                <dd>Apple Silicon</dd>
+              </div>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/linux-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>Linux</span>
+                </dt>
+                <dd>x86_64 · Experimental</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="support-group">
+            <p>AGENT RUNTIMES</p>
+            <dl>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/codex-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>Codex</span>
+                </dt>
+                <dd>OpenAI</dd>
+              </div>
+              <div>
+                <dt>
+                  <span class="platform-mark"
+                    ><img
+                      src="/icons/claude-ascii.svg"
+                      alt=""
+                      aria-hidden="true"
+                      width="30"
+                      height="30" /></span
+                  ><span>Claude Code</span>
+                </dt>
+                <dd>Anthropic</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+        <p class="extension-note">
+          Want another platform or runtime?
+          <a href="https://github.com/jwfing/anchi/blob/main/CONTRIBUTING.md"
+            >Help extend Anchi ↗</a
+          >
         </p>
-        <h1>A secured<br /><span>agent team.</span></h1>
-        <p class="hero-title">
-          Agents that act on your accounts, without holding the keys.
-        </p>
-        <p class="intro">
-          Build Codex and Claude Code agents by describing them, hand them
-          tasks, let them delegate to each other.<br />Each works in a
-          disposable cell, sees only what you give it, and waits for you before
-          the writes that matter.
-        </p>
-        <div class="hero-actions">
+      </section>
+      <section class="section wrap boot-section" id="setup">
+        <div class="boot-heading">
+          <div>
+            <p class="eyebrow">04 / BOOT YOUR TEAM</p>
+            <h2>Open Anchi.<span>Grow your team here.</span></h2>
+          </div>
           <a
             class="button primary"
             href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
-            >Get started <span aria-hidden="true">↗</span></a
-          ><a class="button secondary" href="#environment"
-            >How it works <span aria-hidden="true">↓</span></a
+            >Setup guide ↗</a
           >
         </div>
-        <p class="availability">
-          Developer preview <span>·</span> macOS / Apple Silicon
-          <span>·</span> Linux (experimental) <span>·</span> Open source
-        </p>
-        <div
-          class="environment-visual"
-          role="img"
-          aria-label="Concept: a team of agents runs in disposable cells inside a local VM. They reach your accounts, AI models and the folders you list through Anchi. Credentials stay outside the cells."
+        <section
+          class="demo"
+          id="terminal"
+          aria-label="INTERACTIVE TUI PREVIEW"
         >
-          <div class="visual-top">
-            <span><span class="status-dot"></span> THE ANCHI TEAM</span
-            ><span>Concept / Local VM</span>
-          </div>
-          <div class="visual-body">
-            <div class="resource resource-files">
-              <span class="resource-icon" aria-hidden="true">▤</span>
-              <div>
-                <strong>Your folders</strong
-                ><small>Only the ones you list</small>
-              </div>
+          <div class="terminal">
+            <div class="terminal-title">
+              <span><span class="prompt">❯</span> scripts/anchi</span
+              ><span>anchi — ~/workspace</span
+              ><span class="window-mark" aria-hidden="true">─ □ ×</span>
             </div>
-            <div class="resource resource-accounts">
-              <span class="resource-icon" aria-hidden="true">◎</span>
-              <div>
-                <strong>Your accounts</strong
-                ><small>GitHub, AWS, Google and more</small>
-              </div>
+            <div
+              class="view-tabs"
+              role="tablist"
+              aria-label="INTERACTIVE TUI PREVIEW"
+              hidden
+            >
+              <button
+                type="button"
+                id="view-team"
+                role="tab"
+                aria-controls="panel-team"
+                aria-selected="true"
+                tabindex="0"
+                data-view="team"
+              >
+                01 Teamwork</button
+              ><button
+                type="button"
+                id="view-builder"
+                role="tab"
+                aria-controls="panel-builder"
+                aria-selected="false"
+                tabindex="-1"
+                data-view="builder"
+              >
+                02 Agent builder</button
+              ><button
+                type="button"
+                id="view-approval"
+                role="tab"
+                aria-controls="panel-approval"
+                aria-selected="false"
+                tabindex="-1"
+                data-view="approval"
+              >
+                03 Approvals
+              </button>
             </div>
-            <div class="resource resource-models">
-              <span class="resource-icon" aria-hidden="true">✳</span>
-              <div>
-                <strong>AI models</strong
-                ><small>Codex, Claude Code</small>
-              </div>
-            </div>
-            <div class="boundary">
-              <span class="boundary-label">ANCHI · CELL BOUNDARY</span>
-              <div class="agent-space">
-                <div class="agent-symbol" aria-hidden="true">
-                  <span></span><span></span><i></i>
+            <div class="terminal-body">
+              <aside class="terminal-sidebar" aria-label="Example sidebar">
+                <div class="sidebar-brand">anchi <span>安栖</span></div>
+                <p class="sidebar-heading">Configure</p>
+                <span>Runtimes</span><span>Skills</span><span>Connectors</span
+                ><span>Usage</span><span>Access</span>
+                <p class="sidebar-heading">Agents <span>3</span></p>
+                <span data-side="builder">+ Agent builder</span
+                ><span data-side="team" class="side-selected"
+                  >› @lead <i class="lime">●</i></span
+                ><span>@developer <i class="lime">●</i></span
+                ><span>@reviewer <i class="amber">●</i></span>
+                <p class="sidebar-heading">Tasks</p>
+                <span class="side-task">✓ review-release</span
+                ><span class="side-task">✓ check-diff</span>
+                <div class="sidebar-bottom">
+                  <span class="status-dot" aria-hidden="true"></span> local VM
                 </div>
-                <strong>Your agent team</strong
-                ><span>One disposable cell per task</span>
-                <div class="workspace-tags">
-                  <span>@lead</span><span>@developer</span
-                  ><span>@reviewer</span>
-                </div>
+              </aside>
+              <div class="terminal-main">
+                <section
+                  class="demo-panel"
+                  id="panel-team"
+                  role="tabpanel"
+                  aria-labelledby="view-team"
+                  tabindex="0"
+                >
+                  <div class="panel-heading">
+                    <span>@lead / review the release</span
+                    ><span class="amber">● waiting</span>
+                  </div>
+                  <div class="transcript">
+                    <div class="message">
+                      <span class="speaker cyan">you</span>
+                      <p>
+                        Review the release. Ask @reviewer to check the changes.
+                      </p>
+                    </div>
+                    <div class="message">
+                      <span class="speaker lime"
+                        >@lead <span class="muted">/ codex</span></span
+                      >
+                      <p>
+                        I’ll inspect the branch and delegate the code review.
+                      </p>
+                    </div>
+                    <div class="tool-call">
+                      <span class="amber">↳ delegate → @reviewer</span>
+                      <p>Check the diff for bugs and missing tests.</p>
+                      <span class="muted"
+                        >└ <span class="lime">✓</span> Review complete. The
+                        patch is ready.</span
+                      >
+                    </div>
+                    <div class="held-write">
+                      <span class="amber">! approval_required</span
+                      ><span>Merge held for your approval.</span
+                      ><code>github.pull_request.merge</code>
+                    </div>
+                  </div>
+                  <div class="terminal-input">
+                    <span class="prompt">❯</span> Send a follow-up…<span
+                      class="block-cursor"
+                      aria-hidden="true"
+                    ></span>
+                  </div>
+                </section>
+                <section
+                  class="demo-panel"
+                  id="panel-builder"
+                  role="tabpanel"
+                  aria-labelledby="view-builder"
+                  tabindex="0"
+                  hidden
+                >
+                  <div class="panel-heading">
+                    <span>Agent builder</span
+                    ><span class="lime">+ new agent</span>
+                  </div>
+                  <div class="transcript">
+                    <div class="message">
+                      <span class="speaker cyan">you</span>
+                      <p>
+                        Create a reviewer. Give it GitHub access, read-only
+                        project files, and ask before writes.
+                      </p>
+                    </div>
+                    <div class="message">
+                      <span class="speaker lime">builder</span>
+                      <p>
+                        Here is the proposed agent. Review its scope before
+                        saving.
+                      </p>
+                    </div>
+                    <div class="config-preview">
+                      <p>
+                        <span class="muted">agent</span
+                        ><span class="lime">@reviewer</span>
+                      </p>
+                      <p>
+                        <span class="muted">runtime</span><span>claude</span>
+                      </p>
+                      <p>
+                        <span class="muted">connectors</span
+                        ><span>github <span class="amber">[ask]</span></span>
+                      </p>
+                      <p>
+                        <span class="muted">workspace</span
+                        ><span
+                          >project <span class="cyan">[read-only]</span></span
+                        >
+                      </p>
+                      <p><span class="muted">delegates</span><span>[]</span></p>
+                    </div>
+                  </div>
+                  <div class="terminal-input">
+                    <span class="lime">+</span> Proposal / review before
+                    anything is written
+                  </div>
+                </section>
+                <section
+                  class="demo-panel"
+                  id="panel-approval"
+                  role="tabpanel"
+                  aria-labelledby="view-approval"
+                  tabindex="0"
+                  hidden
+                >
+                  <div class="panel-heading">
+                    <span>Approvals / github</span
+                    ><span class="amber">1 pending</span>
+                  </div>
+                  <div class="transcript approval-transcript">
+                    <p class="approval-tag">WAITING FOR YOU</p>
+                    <h3>Approve a write by @lead?</h3>
+                    <p>
+                      Anchi pauses high-risk writes so you can review the
+                      operation and how it started.
+                    </p>
+                    <div class="approval-detail">
+                      <p>
+                        <span>operation</span><code>pull_request.merge</code>
+                      </p>
+                      <p><span>target</span><code>example/app #42</code></p>
+                      <p>
+                        <span>started by</span
+                        ><code>you → @lead → @reviewer → @lead</code>
+                      </p>
+                    </div>
+                    <div class="approval-actions">
+                      <button type="button" data-decision="approved">
+                        [y] Approve example</button
+                      ><button type="button" data-decision="denied">
+                        [n] Deny example</button
+                      ><button type="button" data-reset hidden>
+                        Replay example ↺
+                      </button>
+                    </div>
+                    <p
+                      class="decision-result"
+                      role="status"
+                      aria-live="polite"
+                    ></p>
+                  </div>
+                  <div class="terminal-input muted">
+                    This preview never executes an operation.
+                  </div>
+                </section>
               </div>
-              <span class="boundary-foot"
-                >PLACEHOLDERS ONLY · SCANNED BEFORE IT CLOSES</span
-              >
             </div>
-            <div class="permission-note">
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <rect x="4" y="8" width="12" height="9" rx="2" />
-                <path d="M7 8V6a3 3 0 0 1 6 0v2" /></svg
-              >Credentials never enter a cell
+            <div class="terminal-status">
+              <span
+                ><kbd>Tab</kbd> switch pane <kbd>Ctrl+X P</kbd> commands
+                <kbd>Ctrl+X ?</kbd> help</span
+              ><span><span class="lime">●</span> Codex + Claude Code</span>
             </div>
           </div>
-          <div class="visual-bottom">
-            <span>Each agent gets only what you give it.</span
-            ><span>POWERED BY ANCHI</span>
-          </div>
-        </div>
-      </section>
-      <section class="environment wrap section" id="environment">
-        <div class="section-heading">
-          <p class="eyebrow">A TEAM WITH BOUNDARIES</p>
-          <h2>
-            Let your agents do real work.<br />Keep the keys and the final say.
-          </h2>
-          <p>Credentials, scope and decisions. Each in its place.</p>
-        </div>
-        <div class="features">
-          <article>
-            <div class="feature-top">
-              <span>01</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="6" y="13" width="20" height="15" rx="3" />
-                <path d="M10 13V9a6 6 0 0 1 12 0v4M16 19v4" />
-              </svg>
-            </div>
-            <h3>Access without the keys</h3>
-            <p>
-              Cells hold placeholders only. A trusted proxy injects or re-signs
-              GitHub, AWS, Linear and model credentials on the way out; trusted
-              services act for agents on Gmail, Drive, Notion and Slack.
-            </p>
-            <span class="feature-label">CREDENTIALS STAY OUTSIDE</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>02</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <path d="M5 9h22M5 23h22" />
-                <circle cx="12" cy="9" r="4" />
-                <circle cx="21" cy="23" r="4" />
-              </svg>
-            </div>
-            <h3>Each agent, only its own</h3>
-            <p>
-              Every agent has its own connectors, folders, skills and the
-              agents it may delegate to, and optionally a list of hosts it may
-              reach. Change them in a settings panel; nothing else is in reach.
-            </p>
-            <span class="feature-label">SCOPED PER AGENT</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>03</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <circle cx="16" cy="16" r="11" />
-                <path d="M11 16.5l3.5 3.5L21 13" />
-              </svg>
-            </div>
-            <h3>The writes that matter wait for you</h3>
-            <p>
-              Merges, deletions, pushes to main and access changes always wait
-              for your approval, whoever asked. Mark an agent's connector
-              <code>ask</code> and all its writes there wait too, with the chain
-              of how the task started.
-            </p>
-            <span class="feature-label">YOUR FINAL SAY</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>04</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="4" y="4" width="24" height="24" rx="5" />
-                <rect x="11" y="11" width="10" height="10" rx="2" />
-              </svg>
-            </div>
-            <h3>A fresh cell for every task</h3>
-            <p>
-              Each task runs in a disposable cell inside a local VM, with no
-              network but its own proxy. Before a cell is destroyed, it is
-              scanned for real credential values.
-            </p>
-            <span class="feature-label">ISOLATED AND CHECKED</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>05</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <circle cx="9" cy="10" r="4" />
-                <circle cx="23" cy="10" r="4" />
-                <circle cx="16" cy="23" r="4" />
-                <path d="M12 13l3 7M20 13l-3 7" />
-              </svg>
-            </div>
-            <h3>A team, not a single bot</h3>
-            <p>
-              Describe an agent and the builder proposes it. Agents delegate to
-              each other, start on a schedule or for new issues, and share
-              skills you add from a folder or GitHub.
-            </p>
-            <span class="feature-label">BUILD, DELEGATE, TRIGGER</span>
-          </article>
-          <article>
-            <div class="feature-top">
-              <span>06</span
-              ><svg viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="4" y="7" width="24" height="18" rx="3" />
-                <path d="M9 13l4 3-4 3M16 19h7" />
-              </svg>
-            </div>
-            <h3>Made for your terminal</h3>
-            <p>
-              A terminal UI and a CLI: chat with agents, follow their tasks,
-              review held writes in full-screen dialogs. Every action is one
-              leader key away, or in the command palette.
-            </p>
-            <span class="feature-label">TUI AND CLI</span>
-          </article>
-        </div>
-      </section>
-      <section class="setup wrap">
-        <div>
-          <p class="eyebrow">FROM ZERO TO A WORKING TEAM</p>
-          <h2>Set it up once.<br />Then hand out tasks.</h2>
-          <p>
-            Install from the terminal, connect what your agents need,<br
-              class="desktop-break"
-            />and describe your first agent.
-          </p>
-          <a
-            class="text-link"
-            href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
-            >Read the getting started guide <span aria-hidden="true">↗</span></a
-          >
-        </div>
-        <ol class="steps">
-          <li>
-            <span>01</span>
-            <div>
-              <h3>Install</h3>
-              <p>
-                <code>scripts/anchi setup install</code> creates the VM, the
-                trusted services and the base image. Unlock the vault once per
-                VM start.
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>02</span>
-            <div>
-              <h3>Connect runtimes and accounts</h3>
-              <p>
-                Import your Codex login or a Claude Code token, and connect the
-                services your agents need. Secrets go straight to the VM vault.
-              </p>
-            </div>
-          </li>
-          <li>
-            <span>03</span>
-            <div>
-              <h3>Build your team</h3>
-              <p>
-                Describe an agent to the builder, review its proposal, and give
-                it a task. Approve the writes it holds for you.
-              </p>
-            </div>
-          </li>
-        </ol>
-      </section>
-      <section class="faq wrap section" id="questions">
-        <div>
-          <p class="eyebrow">A FEW THINGS TO KNOW</p>
-          <h2>Before you begin.</h2>
-          <a
-            class="text-link"
-            href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
-            >Read the security model <span aria-hidden="true">↗</span></a
-          >
-        </div>
-        <div class="questions">
-          <details>
-            <summary>
-              Can I use Anchi today?<span aria-hidden="true">+</span>
-            </summary>
-            <p>
-              Anchi is an open-source developer preview that runs from a
-              checkout of its repository. It has not had a security audit and
-              is not distributed as signed releases. macOS on Apple Silicon is
-              supported; Linux is experimental. Follow the getting started
-              guide to set it up.
-            </p>
-          </details>
-          <details>
-            <summary>
-              Does credential isolation keep my data private?<span
-                aria-hidden="true"
-                >+</span
-              >
-            </summary>
-            <p>
-              No. What an agent reads can reach the cloud model and any public
-              host the agent may reach; an egress list narrows those hosts but
-              cannot stop an allowed one from receiving data. Anchi keeps
-              credentials out of agents' hands; it is not data isolation, and
-              not suited to unattended work on sensitive real accounts.
-            </p>
-          </details>
-          <details>
-            <summary>
-              What could a compromised agent still do?<span aria-hidden="true"
-                >+</span
-              >
-            </summary>
-            <p>
-              Use what it was given: the operations its connectors allow, the
-              folders it was listed, the hosts it may reach. It cannot take a
-              credential with it, reach another agent's resources, or get past
-              the approvals that hold its writes.
-            </p>
-          </details>
-          <details>
-            <summary>
-              Do I need to approve every action?<span aria-hidden="true"
-                >+</span
-              >
-            </summary>
-            <p>
-              No. Tool calls inside a cell run freely; the cell is the
-              boundary. High-risk operations always wait for you, and other
-              writes wait where you set an agent's connector to
-              <code>ask</code>. Gmail, Drive, Notion and Slack can also be set to
-              ask before every request of every agent.
-            </p>
-          </details>
-          <details>
-            <summary>
-              Which agents and services are supported?<span aria-hidden="true"
-                >+</span
-              >
-            </summary>
-            <p>
-              Codex and Claude Code, with your subscriptions. GitHub, AWS and
-              Linear through the proxy; Gmail (read-only), Google Drive, Notion
-              and Slack through trusted services; folders under
-              <code>~/AnchiWorkspaces</code> on macOS. Validation with every
-              real account is still in progress.
-            </p>
-          </details>
-        </div>
-      </section>
-      <section class="closing wrap">
-        <span class="closing-mark" aria-hidden="true">↗</span>
-        <p class="eyebrow">PUT YOUR AGENTS TO WORK</p>
-        <h2><span>A team that does the work.</span><span> You keep the keys.</span></h2>
-        <a
-          class="button primary"
-          href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
-          >Explore Anchi <span aria-hidden="true">↗</span></a
-        >
-        <p class="closing-note">Open source · Apache 2.0 · Developer preview</p>
+          <p class="demo-caption">Interactive example · No live tasks</p>
+        </section>
       </section>
     </main>
     <footer class="footer wrap">
-      <a class="brand" href="#">anchi<span></span></a>
-      <p>A secured agent team.</p>
       <div>
+        <a class="brand" href="#top"
+          ><img
+            class="brand-mark"
+            src="/logo.svg"
+            width="36"
+            height="36"
+            alt=""
+            aria-hidden="true"
+          /><span class="brand-wordmark">anchi</span></a
+        >
+        <p>Developer preview. Not security-audited.</p>
+      </div>
+      <div class="footer-links">
         <a href="https://github.com/jwfing/anchi">GitHub ↗</a
         ><a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
-          >Security model</a
-        ><span>© 2026 Anchi</span>
+          >Security ↗</a
+        ><a href="https://github.com/jwfing/anchi/blob/main/license.md"
+          >Apache-2.0</a
+        ><a href="#top">Back to top ↑</a>
       </div>
+      <p class="footer-bottom">
+        © 2026 Anchi<span>安栖 / a safe place to settle.</span>
+      </p>
     </footer>
   </body>
 </html>

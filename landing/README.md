@@ -19,3 +19,52 @@ language when browser storage is available and applies it on the next visit to
 current section and query string; both pages remain usable without JavaScript.
 Keep the root `index.html` identical to `zh/index.html`, update both translations
 when changing content, and keep the alternate-language metadata and sitemap in sync.
+
+## Brand
+
+`dist/logo.svg` is the transparent roof-and-cross mark used in the header and
+footer. `dist/favicon.svg` uses the same geometry on a dark tile. The wordmark
+is live text so it stays crisp and accessible.
+
+## Terminal design
+
+The page introduces safe agent collaboration with a responsive character-style architecture
+figure, followed by workflow, security boundaries, platforms/runtimes, and a TUI
+preview. Keep the platform status and security claims aligned with the root README.
+
+`terminal.js` enhances the static page with keyboard-accessible tabs (teamwork,
+agent builder, approvals) and simulated approval outcomes. The demo never connects
+to the daemon or executes operations. Without JavaScript, the default session and
+documentation links remain available.
+
+The architecture figure uses HTML/CSS nodes and connectors to keep lines aligned
+across fonts and screen sizes. Its accessible description explains both delegation
+and credential flow.
+
+Keep the demo aligned with the real TUI and its key bindings. On small screens the
+illustrative sidebar is hidden so the transcript remains readable. Animations and
+smooth scrolling honor `prefers-reduced-motion`.
+
+## Section icons and brand assets
+
+The six feature icons in `dist/icons/` are original SVG drawings for Anchi:
+`agent`, `team`, `task`, `isolation`, `credentials`, and `authorization`.
+
+The four active platform/runtime icons (`*-ascii.svg`) are custom, monochrome
+character-grid illustrations for this page: an apple silhouette, a penguin,
+the six-loop OpenAI knot for Codex, and a radial star for Claude. They share
+the page's green accent and a pixel grid treatment. Codex uses a 28×28 grid
+to preserve its interwoven loops and central hexagon. These are stylized identifiers, not official
+brand assets; platform and runtime names remain plain text alongside them.
+
+The earlier official-source assets (`apple.svg`, `linux.png`, `openai.svg`, and
+`claude.svg`) are retained as references but are not loaded by the page:
+
+- Apple symbol: [Apple navigation](https://www.apple.com/).
+- Tux: [kernel.org](https://www.kernel.org/theme/images/logos/tux.png),
+  created by Larry Ewing with the GIMP.
+- OpenAI Blossom: [Codex documentation](https://developers.openai.com/codex/).
+- Claude symbol: [Claude Code page](https://claude.com/product/claude-code).
+
+Brand marks belong to their respective owners. They identify supported platforms
+and runtimes, not an endorsement.
