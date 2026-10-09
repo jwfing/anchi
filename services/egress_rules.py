@@ -730,7 +730,9 @@ def high_risk(decision, method, path, body, disabled=()):
 
 EGRESS_PATTERN = re.compile(r'^(\*\.)?[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$')
 BASE_EGRESS = {
-    'codex': ('chatgpt.com', '*.chatgpt.com'),
+    # Codex fetches files it lists (plugin files, attachments) from OpenAI's content CDN, at
+    # links chatgpt.com hands out; chatgpt.com is reachable anyway.
+    'codex': ('chatgpt.com', '*.chatgpt.com', '*.oaiusercontent.com'),
     'claude': ('api.anthropic.com',),
     'github': ('github.com', 'api.github.com', 'codeload.github.com', '*.githubusercontent.com'),
     'aws': ('*.amazonaws.com',),

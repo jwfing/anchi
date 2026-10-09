@@ -28,6 +28,8 @@ The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install
 
 ### Fixed
 
+- A task could fail with `TOO_MANY_CELLS` while a cell was still closing: the daemon counted only live cells, the VM every cell directory. The daemon now counts closing cells too, and a task waits up to 10 minutes for a free cell instead of failing.
+- Codex agents with an egress list were refused OpenAI's content CDN (`*.oaiusercontent.com`), which Codex fetches its listed files from; it is now one of Codex's base hosts.
 - Deleting an agent with an idle cell left its home in the VM (`AGENT_HAS_CELLS`): the purge ran while the cell was still releasing its overlay. Closing a cell now waits for it to exit, also when it was already closing.
 - A request to a host outside an agent's egress list was audited as `pass` before its connection was refused, so the access view counted the host as reached. The proxy now refuses it as the request arrives, with a 403 that names the egress list.
 - A push's ref updates were matched in the first 64 KiB of its body only, so a push listing many refs could hide an update of `main` from the high-risk check. Every update is now parsed, and a push whose updates cannot be read is high-risk.
