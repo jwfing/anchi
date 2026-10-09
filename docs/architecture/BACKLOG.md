@@ -12,8 +12,9 @@ Open requests and known gaps of the secured agent team that are not planned into
 | G2 | Linux workspaces (phase 3 P7) | After Linux hosts are confirmed on a Linux machine |
 | G3 | Live acceptance with real accounts (phase 3 P9) | Needs a Claude token, Drive sign-in again, and an AWS bucket for `aws-chunked` uploads |
 | G4 | Allow a refused egress host from the TUI | The audit log names it (`egress-denied`); adding it to `egress` is a manual edit |
-| R8 | Audit log of each task's external access, for the user to see | Recorded in the VM; no way to view it from Anchi |
-| R9 | Token use of Codex and Claude Code, totals, and how much of the subscription quota is used | Per-task input and output tokens only |
+| G5 | Cell count disagrees between the daemon and the VM | The daemon counts its own live cells; the VM counts cell directories, including cells still closing. A task started as an idle cell closes can fail with `TOO_MANY_CELLS` |
+| G6 | Claude subscription limits | The proxy keeps `anthropic-ratelimit-*` headers, but which ones a Claude subscription returns is not verified against live traffic (no Claude token yet; with G3) |
+| G7 | Follow-ups of R8 and R9 | Audit rows stay in the VM log until rotation when a task is deleted; no global access view across tasks; no warning when a quota window passes a threshold |
 
 ## R1 — File preview through a plugin
 
@@ -50,55 +51,6 @@ Open requests and known gaps of the secured agent team that are not planned into
 
 **Options.** Read the push's ref commands from the first bytes of the stream before forwarding (the pkt-lines precede the pack), then inject; or raise the streaming threshold for `git-receive-pack` at the cost of buffering large packs in memory.
 
-## R8 — Audit log of external access
-
-**Request.** Agents reach outside systems only through the proxy, which swaps placeholders for credentials. Record that and show it to the user: for a task, which external systems its agents reached and how, so the user can see that the "secured" claims hold.
-
-**Today.**
-
-- The proxy appends JSON lines to `/var/log/anchi-egress/audit.jsonl` in the VM: per request the task, agent, method, host, path (no query string), rule, operation and decision (`inject`, `pass`, `deny`, `held-*`, `egress-denied`, `blocked-destination`, `pass:streamed`, `upstream-error`), what the cell sent as credential (`placeholder`, `none` or `other`), high-risk id and approval outcome; per cell its registration (connectors, `ask`, egress list, services) and end; per bridge call the service and operation; connector verification and polls. Header values and query strings are never written.
-- The policy service keeps its own audit of connector-service grants and decisions (`policy_admin.py audit`).
-- Credential scans before a cell closes are noted in the task.
-- There is no RPC, CLI command or TUI view for any of it; only root in the VM can read the file. It is never rotated (1.6 MB and 6,668 lines after two days), and it mixes in the `chk-*` cells of `make verify-anchi`.
-
-**Possible shape.**
-
-- A daemon RPC, `audit.task {taskId}`, reading the task's rows through a fixed guest command (`anchi-cell audit TASK`), bounded and filtered by task id in the VM.
-- **TUI:** an **Access** tab in the task view: hosts reached, with counts and decisions; which connector injected credentials; writes held and their outcome; refused hosts; bridge calls; the scan result.
-- **A summary line that backs the claims:** "42 requests, 17 with credentials injected; the cell sent only placeholders; 2 hosts refused; scan clean".
-- **CLI:** `anchi audit <task> [--json]`.
-- **Retention:** rotate the file and delete rows with the task (`anchi rm`) or after `retentionDays`; keep check cells out of it, or mark them.
-
-**Open questions.**
-
-1. Trust in the view: the rows are written by the trusted proxy, but hosts and paths come from agent requests; render them sanitized like any agent text.
-2. Per-request rows or an aggregate only (hosts and counts), and how long to keep each.
-3. Whether to include traffic that is not credentialed (package downloads, web reads), which is most of it.
-4. A global view across tasks (by agent, by connector) as well as the per-task one.
-
-## R9 — Token use and subscription quota
-
-**Request.** Track the tokens Claude Code and Codex use, with global totals, so the user knows how much of the subscription's quota is used.
-
-**Today.**
-
-- The runner reports `usage` events (input and output tokens) from the runtimes: Codex at the end of each turn, Claude Code with each result.
-- The daemon adds them to the task (`input_tokens`, `output_tokens`), and the task view shows "12.3k in / 4.5k out".
-- Not recorded: cached input tokens, reasoning tokens, Claude's reported cost, the model used, or time. There are no totals by agent, runtime, model or day.
-- Nothing about subscription quotas.
-
-**Possible shape.**
-
-- **Record per turn:** runtime, model, input, cached input and output tokens, and cost where the runtime reports it. Turns are the unit the runtimes report.
-- **Totals:** a **Usage** screen under Configure, and `anchi usage [--since 7d] [--by agent|runtime|model]`, aggregated from the task store.
-- **Quota:** the egress proxy already sees every response from `chatgpt.com` and `api.anthropic.com`. Subscription plans return rate-limit and usage information there: Codex's usage-percent windows, and Anthropic's unified rate-limit headers for subscription tokens. The proxy, on the trusted side, could record the latest values per runtime, and the daemon could show "Codex: 5-hour window 38% used, resets 14:20". This covers every cell without trusting the runtime's own reports.
-
-**Open questions.**
-
-1. Which response headers or fields each plan returns, and their stability: to verify against live traffic before relying on them.
-2. Whether to warn (notification, footer) when a window passes a threshold, and whether to pause triggers when a quota is nearly used.
-3. Cost for subscriptions is notional; show tokens and quota, and cost only for API-key use.
-
 ## Delivered
 
 | # | Requirement | Where |
@@ -108,3 +60,5 @@ Open requests and known gaps of the secured agent team that are not planned into
 | R5 | The builder knows what exists; proposals are checked and their settings adjustable | #32; [Create agents](../AGENT_TEAM.md#create-agents) |
 | R6 | Key bindings: leader key, plain keys in views, command palette, line editing, `keybindings.json` | #31; [Key bindings](../KEYBINDINGS.md) |
 | R7 | Run a failed or cancelled task again, continuing its session or from scratch | #34; [Run tasks](../AGENT_TEAM.md#run-tasks) |
+| R8 | Each task's external access, for the user to see: hosts, injections, credentials the cell sent, refusals, held writes, bridge calls | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
+| R9 | Token use per turn with totals by agent, model, runtime and day; subscription limits read by the proxy (Codex verified) | [Access and usage](../AGENT_TEAM.md#access-and-usage) |

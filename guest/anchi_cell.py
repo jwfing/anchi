@@ -38,6 +38,8 @@ LIB = Path('/opt/secure-vm/anchi')
 SERVICES = Path('/opt/secure-vm/services')
 EGRESS_CONTROL = Path('/run/anchi-egress/control.sock')
 EGRESS_CELLS = Path('/run/anchi-egress/cells')
+AUDIT_LOG = Path('/var/log/anchi-egress/audit.jsonl')
+AUDIT_MAX_ROWS = 2000
 CELL_ENV = Path('/opt/secure-vm/cell.env')
 APPARMOR_PROFILE = Path('/etc/apparmor.d/anchi-cell-bwrap')
 MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '4'))
@@ -463,6 +465,32 @@ def agent_home(agent, uid):
     # Root-owned parents; the home itself belongs to the mapped agent user.
     os.chmod(HOMES / agent, 0o755)
     return home
+
+
+def audit_rows(task, paths, limit=AUDIT_MAX_ROWS):
+    """The egress audit rows of one task, oldest first, from the rotated log and the current one;
+    the most recent `limit` when there are more."""
+    needle = json.dumps({'task': task})[1:-1]  # "task": "<id>", as the proxy writes it
+    rows, total = [], 0
+    for path in paths:
+        try:
+            lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
+        except FileNotFoundError:
+            continue
+        for line in lines:
+            if needle not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get('task') != task:
+                continue
+            total += 1
+            rows.append(row)
+            if len(rows) > limit:
+                rows.pop(0)
+    return {'rows': rows, 'total': total, 'truncated': total > len(rows)}
 
 
 def mounts_under(path, mountinfo):
@@ -1066,6 +1094,11 @@ def main(argv):
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.
         return emit(egress({'op': 'settings.set', 'settings': json.loads(sys.stdin.read(65536) or '{}')}))
+    if command == 'audit' and len(rest) == 1:
+        name(rest[0], 'BAD_TASK')
+        return emit(audit_rows(rest[0], [AUDIT_LOG.with_suffix('.jsonl.1'), AUDIT_LOG]))
+    if command == 'quota' and not rest:
+        return emit(egress({'op': 'quota'}))
     if command == 'purge-agent' and len(rest) == 1:
         return agent_purge(rest[0])
     if command == 'skills' and len(rest) == 2 and rest[0] == 'set':

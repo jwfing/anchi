@@ -165,6 +165,7 @@ In the TUI, select an agent and type a task. **Enter** sends it.
 - **^X n** starts a new task, which is also a new Codex or Claude session; **Enter** otherwise sends a follow-up to the task shown. **Esc** cancels the running turn.
 - The input edits like a shell line (**Ctrl+A**, **Ctrl+E**, **Ctrl+W**, **Ctrl+U**, arrows). **Ctrl+G** (or **^X e**) composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
 - The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript; **Enter** continues it in its agent's chat, **R** runs a failed one again, **c** cancels it, **D** deletes it, **[** and **]** turn the page. Clicking works too.
+- **a** on a task (or **^X l**) shows its external access: see [Access and usage](#access-and-usage).
 - Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **^X t**) expands the list.
 
 The CLI does the same:
@@ -175,9 +176,28 @@ scripts/anchi send t-0123456789 "Also add a test"
 scripts/anchi tasks --status failed --since 7d --search login
 scripts/anchi rm t-0123456789       # delete a finished task and the tasks it delegated
 scripts/anchi scan t-0123456789     # credential-invariant scan of the live cell
+scripts/anchi audit t-0123456789    # what the task reached outside, and with which credentials
+scripts/anchi usage --since 7d --by model
 ```
 
 Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. It is mounted at `/home/agent` in the agent's cells and holds the work directory and Codex sessions. Everything else in a cell is discarded when the cell ends.
+
+## Access and usage
+
+**A task's access.** The egress proxy writes a row for every request a cell makes, every cell registration and every bridge call. **a** on a task (**^X l**, `scripts/anchi audit <task> [--json]`) reads the task's rows from the VM and shows:
+
+- A headline that checks the boundary, for example "42 requests; 17 with credentials injected by the proxy; the cell sent only placeholders or no credential; 2 refused or held; scan: clean". It turns red when a cell sent a credential of its own (something other than a placeholder) to a host.
+- The scope of the cell: connectors, bridge services, egress list and the writes it holds.
+- The hosts reached, with a count of each decision (`inject`, `pass`, `deny`, `egress-denied`, …).
+- The requests refused or held, with the outcome of each approval.
+- Gmail, Drive, Notion and Slack calls through the bridge.
+- The latest requests (method, host, path, decision). Query strings and header values are never recorded.
+
+Hosts and paths come from the agent's requests, so they are shown as agent text. The VM keeps the log up to 50 MB and one rotated file; older rows of long-lived tasks are gone, and the view says when it shows only the latest of a task's rows.
+
+**Token usage.** Every turn's tokens are recorded with the agent, runtime and model: input, cached input, output and reasoning tokens, and Claude Code's cost estimate (notional on a subscription). **Configure → Usage** (`scripts/anchi usage [--since 24h|7d|30d] [--by agent|model|runtime|day] [--json]`) shows the totals; on the screen **p** changes the period, **b** the grouping and **r** refreshes. Deleting a task keeps its usage rows.
+
+**Subscription limits.** The same screen shows the limits of each runtime's subscription as the egress proxy last saw them: for Codex, the plan and its 5-hour and weekly windows ("40% used, resets 14:05") from the model stream; for Claude Code, its rate-limit headers. They are read on the trusted side, from the providers' responses, not from what the runtime in the cell reports. They appear after a turn of each runtime and are lost when the egress proxy restarts. Codex's are verified against live traffic; Claude Code's are not yet.
 
 ## Limits
 

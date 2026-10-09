@@ -125,6 +125,36 @@ describe('codex mapping', () => {
     }
     expect(events.map((e) => e.type)).toEqual(['tool.call', 'tool.result']);
   });
+
+  it('reports cached, cache-write and reasoning tokens of a Codex turn', () => {
+    const state = { calls: new Set<string>(), warnings: new Set<string>() };
+    const events = [
+      ...mapCodexEvent(
+        {
+          type: 'turn.completed',
+          usage: {
+            input_tokens: 1200,
+            cached_input_tokens: 800,
+            cache_write_input_tokens: 0,
+            output_tokens: 90,
+            reasoning_output_tokens: 40,
+          },
+        } as never,
+        state,
+      ),
+    ];
+    expect(events[0]).toEqual({
+      type: 'usage',
+      inputTokens: 1200,
+      outputTokens: 90,
+      cachedInputTokens: 800,
+      cacheWriteTokens: 0,
+      reasoningTokens: 40,
+    });
+    expect(
+      cellMessageSchema.safeParse({ type: 'event', turn: 't', event: events[0] }).success,
+    ).toBe(true);
+  });
 });
 
 describe('tool relay', () => {
@@ -245,6 +275,29 @@ describe('Claude Code mapping', () => {
         errors: ['too many turns'],
         usage: { input_tokens: 1, output_tokens: 1 },
       },
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        usage: { input_tokens: 3, output_tokens: 2 },
+        modelUsage: {
+          'claude-opus-5-5': {
+            inputTokens: 30,
+            outputTokens: 20,
+            cacheReadInputTokens: 500,
+            cacheCreationInputTokens: 40,
+            thinkingTokens: 5,
+            costUSD: 0.12,
+          },
+          'claude-haiku-4-5': {
+            inputTokens: 7,
+            outputTokens: 3,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            costUSD: 0.001,
+          },
+        },
+      },
     ].flatMap((m) => [...mapClaudeMessage(m as never)]);
     expect(events).toEqual([
       { type: 'session.started', resumeId: 'sess-1' },
@@ -255,6 +308,29 @@ describe('Claude Code mapping', () => {
       { type: 'turn.completed' },
       { type: 'usage', inputTokens: 1, outputTokens: 1 },
       { type: 'error', message: 'Claude stopped: error_max_turns (too many turns)', fatal: true },
+      { type: 'turn.completed' },
+      {
+        type: 'usage',
+        model: 'claude-opus-5-5',
+        inputTokens: 30,
+        outputTokens: 20,
+        cachedInputTokens: 500,
+        cacheWriteTokens: 40,
+        reasoningTokens: 5,
+        costUsd: 0.12,
+        cumulative: true,
+      },
+      {
+        type: 'usage',
+        model: 'claude-haiku-4-5',
+        inputTokens: 7,
+        outputTokens: 3,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: undefined,
+        costUsd: 0.001,
+        cumulative: true,
+      },
       { type: 'turn.completed' },
     ]);
   });

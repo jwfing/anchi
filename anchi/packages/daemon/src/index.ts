@@ -1,3 +1,4 @@
+export * from './audit.ts';
 export * from './builder.ts';
 export * from './cell.ts';
 export * from './daemon.ts';

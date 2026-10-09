@@ -45,7 +45,8 @@ The recipe's content hash names the built layer. A changed recipe is a new image
 
 JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON frames of at most 8 MiB. Request `{id, method, params}`, response `{id, result}` or `{id, error: {message}}`, notification `{method, params}`. The method table is `Methods` in `protocol/src/rpc.ts`.
 
-- **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.retry` (a failed or cancelled task: continue its session, or `fresh` for a new task with the same request), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, and `tasks.scan` (credential-invariant scan of the task's live cell).
+- **Tasks:** `tasks.create`, `tasks.send` (a follow-up turn), `tasks.retry` (a failed or cancelled task: continue its session, or `fresh` for a new task with the same request), `tasks.cancel`, `tasks.list`, `tasks.get`, `tasks.events`, `tasks.wait`, `tasks.scan` (credential-invariant scan of the task's live cell), and `tasks.audit` (the task's rows of the egress audit log, summarized: hosts and decisions, injections by rule, credentials the cell sent, refusals, held writes, bridge calls, its registration, the latest 500 requests).
+- **Usage:** `usage.summary {since?, by?}` (token totals of turns since a time, by `agent`, `runtime`, `model` or `day`) and `usage.quota` (the subscription limits the egress proxy last saw, per runtime: Codex's plan and windows, Claude Code's rate-limit headers).
 - **Agents and builder:** `agents.list`, `agents.reload`, `agents.settings`, `agents.update`, `agents.deletePreview`, `agents.delete` (the id typed by the user confirms it), `builder.proposal`, `builder.revise`, `builder.apply`, `builder.discard`. Only `builder.apply` and `agents.update` with `apply` write agent or image files, and the TUI calls them only after a dialog showing the change. `agents.update` changes `skills`, `connectors` and `workspaces` of an agent file, keeping the rest; with `apply` it requires the digest (`base`) of the file the reviewed diff was made from. Proposals and settings changes are checked against what exists: missing skills, delegates or directories block, connectors not yet connected warn.
 - **Setup and connectors:**
   - `setup.status` and `setup.importCodex`;
@@ -79,6 +80,8 @@ The daemon runs only fixed commands: `limactl shell secure-vm -- sudo <command>`
 | `anchi-cell reap [TASK...]` | Stop every cell not named, and unmount stale overlays |
 | `anchi-cell scan TASK` | Credential-invariant scan of a running cell: environment, process list and writable layer |
 | `anchi-cell verify CONNECTOR` | Has the egress proxy call the connector's identity endpoint (GitHub `/user`, Linear `viewer`, AWS `GetCallerIdentity`) with the stored credential. Prints the account, or `CREDENTIAL_REJECTED` |
+| `anchi-cell audit TASK` | The task's rows of the egress audit log and its rotated file, the latest 2000, as JSON with their total |
+| `anchi-cell quota` | The latest subscription limits the egress proxy saw in runtime responses, as JSON |
 | `anchi-cell exec TASK -- COMMAND...` | Run a command as the agent user in a running cell, for live checks |
 | `anchi-image status ID HASH` | Whether a built layer exists for this recipe hash (and the current base) |
 | `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin (`codex base` builds the built-in image). Prints metadata and the build log path |

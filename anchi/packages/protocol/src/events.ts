@@ -29,10 +29,21 @@ export const runtimeEventSchema = z.discriminatedUnion('type', [
     output: z.string().max(MAX_TOOL_OUTPUT),
     isError: z.boolean(),
   }),
+  /**
+   * Tokens a turn used. `cumulative` marks running totals for the session (Claude Code's
+   * per-model figures), which the daemon turns into per-turn amounts; otherwise per turn.
+   * Input counts follow the runtime: Codex's include cached input, Claude's do not.
+   */
   z.strictObject({
     type: z.literal('usage'),
+    model: z.string().max(100).optional(),
     inputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),
+    cachedInputTokens: z.number().int().nonnegative().optional(),
+    cacheWriteTokens: z.number().int().nonnegative().optional(),
+    reasoningTokens: z.number().int().nonnegative().optional(),
+    costUsd: z.number().nonnegative().optional(),
+    cumulative: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal('error'), message: text, fatal: z.boolean() }),
   /** Something Anchi (not the model) tells the user about the session. */

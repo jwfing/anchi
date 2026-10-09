@@ -472,8 +472,27 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   private record(task: TaskRow, event: RuntimeEvent): void {
-    if (event.type === 'usage')
-      this.opts.store.addUsage(task.id, event.inputTokens, event.outputTokens);
+    if (event.type === 'usage') {
+      const agent = this.states.get(task.agentId)?.agent;
+      const runtime = agent?.runtime ?? 'unknown';
+      this.opts.store.recordUsage(
+        {
+          taskId: task.id,
+          agentId: task.agentId,
+          runtime,
+          model: event.model ?? agent?.model ?? `${runtime} default`,
+        },
+        {
+          input: event.inputTokens ?? 0,
+          cachedInput: event.cachedInputTokens ?? 0,
+          cacheWrite: event.cacheWriteTokens ?? 0,
+          output: event.outputTokens ?? 0,
+          reasoning: event.reasoningTokens ?? 0,
+          costUsd: event.costUsd ?? 0,
+        },
+        event.cumulative === true,
+      );
+    }
     const seq =
       event.type === 'text.delta' ? undefined : this.opts.store.appendEvent(task.id, event);
     this.emit('event', { taskId: task.id, agentId: task.agentId, seq, event });

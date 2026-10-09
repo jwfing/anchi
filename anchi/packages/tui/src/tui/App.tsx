@@ -1,5 +1,8 @@
 /** @jsxRuntime automatic */
 import type {
+  QuotaInfo,
+  TaskAudit,
+  UsageRow,
   AgentDeletionPreview,
   AgentPatch,
   AgentSettings,
@@ -37,6 +40,7 @@ import {
   strokeOf,
 } from './keys.ts';
 import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
+import { accessLines, GROUPS, PERIODS, type ReportLine, usageLines } from './reports.ts';
 import {
   initialSettings,
   type SettingsRow,
@@ -50,12 +54,13 @@ import type { MouseEvent } from './mouse.ts';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
-const CONFIG = ['runtimes', 'skills', 'connectors'] as const;
+const CONFIG = ['runtimes', 'skills', 'connectors', 'usage'] as const;
 type ConfigItem = (typeof CONFIG)[number];
 const CONFIG_LABEL: Record<ConfigItem, string> = {
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
+  usage: 'Usage',
 };
 /** Sidebar item of a task (agent ids cannot contain ':'). */
 const TASK_ITEM = 'task:';
@@ -147,6 +152,7 @@ type Modal =
       cursor: number;
     }
   | { kind: 'retry'; taskId: string; agentId: string; status: TaskStatus }
+  | { kind: 'access'; taskId: string; data: TaskAudit | null; scroll: number; error?: string }
   | {
       kind: 'deleteAgent';
       agentId: string;
@@ -270,6 +276,26 @@ export function App({
   const [connectorCursor, setConnectorCursor] = useState(0);
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [skillCursor, setSkillCursor] = useState(0);
+  const [usage, setUsage] = useState<{ rows: UsageRow[] | null; quota: QuotaInfo[] | null }>({
+    rows: null,
+    quota: null,
+  });
+  const [usagePeriod, setUsagePeriod] = useState(1);
+  const [usageGroup, setUsageGroup] = useState(0);
+  const refreshUsage = useCallback(
+    (period: number, group: number) => {
+      setUsage({ rows: null, quota: null });
+      void client
+        .call('usage.summary', { since: Date.now() - PERIODS[period]!.ms, by: GROUPS[group] })
+        .then((rows) => setUsage((u) => ({ ...u, rows })))
+        .catch(() => setUsage((u) => ({ ...u, rows: [] })));
+      void client
+        .call('usage.quota')
+        .then((quota) => setUsage((u) => ({ ...u, quota })))
+        .catch(() => setUsage((u) => ({ ...u, quota: [] })));
+    },
+    [client],
+  );
   const refreshSkills = useCallback(() => {
     void client
       .call('skills.list')
@@ -387,6 +413,7 @@ export function App({
   useEffect(() => {
     if (current === 'runtimes' || current === 'connectors') refreshSetup();
     if (current === 'skills') refreshSkills();
+    if (current === 'usage') refreshUsage(usagePeriod, usageGroup);
     setScroll(0);
   }, [current, refreshSetup]);
 
@@ -798,6 +825,33 @@ export function App({
           .call('tasks.cancel', { taskId: t!.id })
           .catch((e: Error) => say(e.message));
       }
+      case 'task:access': {
+        const t = detail ?? task;
+        if (!t) return say('select a task first');
+        setModal({ kind: 'access', taskId: t.id, data: null, scroll: 0 });
+        return void client
+          .call('tasks.audit', { taskId: t.id })
+          .then((data) =>
+            setModal((m) => (m?.kind === 'access' && m.taskId === t.id ? { ...m, data } : m)),
+          )
+          .catch((e: Error) =>
+            setModal((m) =>
+              m?.kind === 'access' && m.taskId === t.id ? { ...m, error: e.message } : m,
+            ),
+          );
+      }
+      case 'usage:period': {
+        const next = (usagePeriod + 1) % PERIODS.length;
+        setUsagePeriod(next);
+        return refreshUsage(next, usageGroup);
+      }
+      case 'usage:group': {
+        const next = (usageGroup + 1) % GROUPS.length;
+        setUsageGroup(next);
+        return refreshUsage(usagePeriod, next);
+      }
+      case 'usage:refresh':
+        return refreshUsage(usagePeriod, usageGroup);
       case 'task:retry': {
         const t = detail ?? task;
         if (!t || (t.status !== 'failed' && t.status !== 'cancelled')) {
@@ -845,8 +899,11 @@ export function App({
       case 'transcript:verbose':
         return setVerbose((v) => !v);
       case 'scroll:up':
+        // Report views clamp their own scroll.
+        if (context === 'usage') return setScroll((s) => Math.max(0, s - 1));
         return setScroll((s) => Math.min(maxScroll, s + 1));
       case 'scroll:down':
+        if (context === 'usage') return setScroll((s) => s + 1);
         return setScroll((s) => Math.max(0, s - 1));
       case 'scroll:pageUp':
         return setScroll((s) => Math.min(maxScroll, s + halfPage));
@@ -1219,6 +1276,19 @@ export function App({
       }
       return;
     }
+    if (modal?.kind === 'access') {
+      if (key.escape || ch === 'q') return setModal(null);
+      const step = key.pageUp || key.pageDown ? 10 : 1;
+      if (key.upArrow || key.pageUp || ch === 'k') {
+        return setModal((m) =>
+          m?.kind === 'access' ? { ...m, scroll: Math.max(0, m.scroll - step) } : m,
+        );
+      }
+      if (key.downArrow || key.pageDown || ch === 'j') {
+        return setModal((m) => (m?.kind === 'access' ? { ...m, scroll: m.scroll + step } : m));
+      }
+      return;
+    }
     if (modal?.kind === 'retry') {
       if (key.escape) return setModal(null);
       if (ch !== 'c' && ch !== 'n') return;
@@ -1360,6 +1430,7 @@ export function App({
       : context === 'task'
         ? [
             ['task:continue', `continue in @${detail?.agentId}`],
+            ['task:access', 'access'],
             ...((detail?.status === 'failed' || detail?.status === 'cancelled'
               ? [['task:retry', 'retry']]
               : []) as [ActionId, string][]),
@@ -1384,21 +1455,27 @@ export function App({
                 ['connectors:mode', 'service writes'],
                 ['connectors:disconnect', 'disconnect'],
               ]
-            : context === 'skills'
+            : context === 'usage'
               ? [
-                  ['skills:add', 'add'],
-                  ['skills:update', 'update'],
-                  ['skills:remove', 'remove'],
-                  ['focus:sidebar', 'sidebar'],
+                  ['usage:period', PERIODS[usagePeriod]!.label],
+                  ['usage:group', `by ${GROUPS[usageGroup]}`],
+                  ['usage:refresh', 'refresh'],
                 ]
-              : [
-                  ['setup:vmStart', 'start VM'],
-                  ['setup:install', 'install'],
-                  ['setup:unlock', 'unlock'],
-                  ['setup:workspaces', 'workspaces'],
-                  ['setup:codex', 'Codex'],
-                  ['setup:claude', 'Claude'],
-                ];
+              : context === 'skills'
+                ? [
+                    ['skills:add', 'add'],
+                    ['skills:update', 'update'],
+                    ['skills:remove', 'remove'],
+                    ['focus:sidebar', 'sidebar'],
+                  ]
+                : [
+                    ['setup:vmStart', 'start VM'],
+                    ['setup:install', 'install'],
+                    ['setup:unlock', 'unlock'],
+                    ['setup:workspaces', 'workspaces'],
+                    ['setup:codex', 'Codex'],
+                    ['setup:claude', 'Claude'],
+                  ];
   const status = pending.length
     ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
     : flash ||
@@ -1507,6 +1584,18 @@ export function App({
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
             <RuntimesView setup={setup} log={setupLog} />
+          ) : current === 'usage' ? (
+            <Report
+              lines={usageLines(
+                usage.rows,
+                usage.quota,
+                usagePeriod,
+                GROUPS[usageGroup]!,
+                textWidth,
+              )}
+              height={bodyHeight - 4}
+              scroll={scroll}
+            />
           ) : (
             <SkillsView skills={skills} cursor={skillCursor} />
           )}
@@ -1825,6 +1914,7 @@ const CONTEXT_LABEL: Record<Context, string> = {
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
+  usage: 'Usage',
 };
 
 /** Rows of the help: the view's bindings, then the global ones, then fixed keys. */
@@ -1865,6 +1955,28 @@ export function helpRows(keymap: KeyMap, context: Context): [string, string][] {
     ['Space Enter', 'agent settings: select, then review the change (s in a proposal)'],
   );
   return rows;
+}
+
+/** Report lines in a fixed height, from line `scroll`. */
+function Report({
+  lines,
+  height,
+  scroll,
+}: {
+  lines: ReportLine[];
+  height: number;
+  scroll: number;
+}) {
+  const start = Math.min(scroll, Math.max(0, lines.length - height));
+  return (
+    <Box flexDirection="column" height={height}>
+      {lines.slice(start, start + height).map((l, i) => (
+        <Text key={i} color={l.color} bold={l.bold} dimColor={l.dim} wrap="truncate">
+          {l.text || ' '}
+        </Text>
+      ))}
+    </Box>
+  );
 }
 
 function ModalView({
@@ -2165,6 +2277,33 @@ function ModalView({
         <Box flexGrow={1} />
         <Text bold>
           {modal.input === modal.agentId && p ? 'Enter delete · Esc cancel' : 'Esc cancel'}
+        </Text>
+      </Box>
+    );
+  }
+  if (modal.kind === 'access') {
+    const lines: ReportLine[] = modal.error
+      ? [{ text: sanitizeLine(modal.error), color: 'red' }]
+      : modal.data
+        ? accessLines(modal.data, inner)
+        : [{ text: 'Reading the audit log in the VM…', dim: true }];
+    const room = Math.max(3, height - 4);
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          External access of {modal.taskId}
+        </Text>
+        <Report lines={lines} height={room} scroll={modal.scroll} />
+        <Text dimColor wrap="truncate">
+          ↑↓ PgUp PgDn scroll · Esc close · from the egress proxy&apos;s audit log; hosts and paths
+          come from the agent
         </Text>
       </Box>
     );

@@ -262,6 +262,92 @@ export interface AgentUpdate {
   applied: boolean;
 }
 
+/** One request the egress proxy saw for a task. Host and path are agent-originated text. */
+export interface AuditRow {
+  ts: number;
+  method: string;
+  host: string;
+  path: string;
+  operation: string;
+  /** `inject`, `pass`, `deny`, `held-denied`, `egress-denied`, `pass:streamed`, … */
+  decision: string;
+  rule: string;
+  /** What the cell sent as credential: `placeholder`, `none` or `other`. */
+  credential: string;
+  reason: string;
+}
+
+/** A task's external access, from the egress proxy's audit log. */
+export interface TaskAudit {
+  taskId: string;
+  /** Rows of the task in the log, and whether only the latest were read. */
+  total: number;
+  truncated: boolean;
+  /** Cells the task ran in, and the last one's registration. */
+  cells: number;
+  registration: {
+    connectors: string[];
+    services: string[];
+    egress: string[] | null;
+    ask: string[];
+  } | null;
+  requests: number;
+  /** Requests whose credentials the proxy injected, by rule. */
+  injected: Record<string, number>;
+  /** What the cell itself sent as credential, counted. */
+  credentialsSent: Record<string, number>;
+  hosts: { host: string; requests: number; injected: number; decisions: Record<string, number> }[];
+  refused: AuditRow[];
+  held: { operation: string; host: string; risk: string | null; outcome: string }[];
+  /** Large requests that left without credentials (see the proxy's streaming limit). */
+  streamed: number;
+  /** Calls to Gmail, Drive, Notion and Slack through the bridge. */
+  bridge: { service: string; operation: string; calls: number }[];
+  /** The credential scan before the cell closed, as noted in the task. */
+  scan: string | null;
+  /** The latest request rows. */
+  rows: AuditRow[];
+}
+
+/** The latest quota information a runtime's responses carried, read by the egress proxy. */
+/** A usage window of a subscription plan, as the provider reported it. */
+export interface QuotaWindow {
+  /** `primary` (Codex: 5 hours) or `secondary` (Codex: a week). */
+  name: string;
+  usedPercent: number | null;
+  windowMinutes: number | null;
+  /** When the window resets, in ms. */
+  resetAt: number | null;
+}
+
+/** The latest limits of a runtime's subscription, as the egress proxy last saw them. */
+export interface QuotaInfo {
+  runtime: string;
+  ts: number;
+  status: number;
+  /** Rate-limit headers of the responses (Claude Code). */
+  headers: Record<string, string>;
+  /** Codex: the plan and its windows, from the rate-limit message of the model stream. */
+  plan?: string | null;
+  limited?: boolean;
+  windows?: QuotaWindow[];
+}
+
+export type UsageGroup = 'agent' | 'runtime' | 'model' | 'day';
+
+/** Token totals of one group. Input follows the runtime: Codex's includes cached input. */
+export interface UsageRow {
+  key: string;
+  turns: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  /** As the runtime estimates it (Claude Code); notional on a subscription. */
+  costUsd: number;
+}
+
 /** What deleting an agent deletes and changes, for the confirmation dialog. */
 export interface AgentDeletionPreview {
   agentId: string;
@@ -341,6 +427,8 @@ export interface Methods {
    */
   'tasks.retry': [{ taskId: string; fresh?: boolean }, TaskRow];
   'tasks.cancel': [{ taskId: string }, null];
+  /** The task's external access, from the egress audit log in the VM. */
+  'tasks.audit': [{ taskId: string }, TaskAudit];
   'tasks.events': [{ taskId: string; afterSeq?: number }, StoredEvent[]];
   /**
    * Credential-invariant scan of the task's live cell (before its idle timeout destroys it):
@@ -383,6 +471,10 @@ export interface Methods {
   'approvals.list': [Record<string, never>, Approval[]];
   'triggers.list': [Record<string, never>, TriggerInfo[]];
   'skills.list': [Record<string, never>, SkillInfo[]];
+  /** Token totals since `since` (ms, default 30 days ago), grouped. */
+  'usage.summary': [{ since?: number; by?: UsageGroup }, UsageRow[]];
+  /** What the runtimes' responses last said about subscription limits (empty until seen). */
+  'usage.quota': [Record<string, never>, QuotaInfo[]];
   'services.setToken': [{ id: ServiceConnectorId; token: string }, null];
   'services.disconnect': [{ id: ServiceConnectorId }, null];
   'services.setMode': [{ id: ServiceConnectorId; mode: 'auto' | 'ask' }, null];
