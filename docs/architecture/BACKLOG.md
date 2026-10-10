@@ -8,7 +8,6 @@ Open requests and known gaps of the secured agent team that are not planned into
 |---|---|---|
 | R1 | Preview the files an agent changed, through a plugin | Not started; design questions below |
 | R3 | A clean start for a new task | Partly: **^X n** starts a new session; all of an agent's tasks share its work directory |
-| G2 | Linux workspaces (phase 3 P7) | After Linux hosts are confirmed on a Linux machine |
 | G3 | Live acceptance with real accounts (phase 3 P9) | Needs a Claude token, Drive sign-in again, and an AWS bucket for `aws-chunked` uploads |
 | G6 | Claude subscription limits | The proxy keeps `anthropic-ratelimit-*` headers, but which ones a Claude subscription returns is not verified against live traffic (no Claude token yet; with G3) |
 | G8 | Large high-risk pushes | A streamed push to `main`, or one deleting a branch, is refused rather than held: approving would need the push to be repeated after approval |
@@ -57,4 +56,5 @@ Open requests and known gaps of the secured agent team that are not planned into
 | G5 | The daemon counts cells still closing, and a task waits for a free cell (up to 10 minutes) instead of failing with `TOO_MANY_CELLS` | [Limits](../AGENT_TEAM.md#limits) |
 | G9 | Codex agents with an egress list reach OpenAI's content CDN (`*.oaiusercontent.com`), which serves files at links from `chatgpt.com` | [Teams, approvals, triggers and skills](../AGENT_TEAM.md#teams-approvals-triggers-and-skills) |
 | R8 | Each task's external access, for the user to see: hosts, injections, credentials the cell sent, refusals, held writes, bridge calls | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
+| G2 | Linux workspaces: 9p share mapped to the cell agent with bindfs in the VM; verified on a Linux host (qemu) | [Linux differences](../GETTING_STARTED.md#linux-differences) |
 | R9 | Token use per turn with totals by agent, model, runtime and day; subscription limits read by the proxy (Codex verified) | [Access and usage](../AGENT_TEAM.md#access-and-usage) |

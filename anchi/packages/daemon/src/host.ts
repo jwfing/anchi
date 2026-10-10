@@ -14,11 +14,16 @@ export const REPO_ROOT = resolve(
 
 export const WORKSPACE_MOUNT = '/mnt/anchi-host';
 
-/** Fixed host commands per setup step, run from the checkout in order. */
-export const SETUP_STEPS: Record<SetupAction, string[][]> = {
-  // Mounts ~/AnchiWorkspaces into the VM once (virtiofs, macOS); restarts the VM, which locks
-  // the vault, so it is unlocked again at the end.
-  workspaces: [
+/**
+ * How ~/AnchiWorkspaces reaches the VM. macOS: virtiofs at the mount itself, where files show as
+ * owned by their reader. Linux: 9p, where the guest checks the host owner's uid, at a raw share
+ * only root reaches; the guest's anchi-workspaces.service maps it onto the mount for the cell
+ * agent with bindfs, and installing the guest pieces brings that service and starts it.
+ */
+export function workspaceSteps(platform: NodeJS.Platform = process.platform): string[][] {
+  const linux = platform === 'linux';
+  const mountPoint = linux ? '/mnt/anchi-host-raw/share' : WORKSPACE_MOUNT;
+  return [
     ['mkdir', '-p', join(homedir(), 'AnchiWorkspaces')],
     ['limactl', 'stop', 'secure-vm'],
     [
@@ -27,13 +32,21 @@ export const SETUP_STEPS: Record<SetupAction, string[][]> = {
       'secure-vm',
       '--tty=false',
       '--set',
-      `.mounts=[{"location":"~/AnchiWorkspaces","mountPoint":"${WORKSPACE_MOUNT}","writable":true}]`,
+      `.mounts=[{"location":"~/AnchiWorkspaces","mountPoint":"${mountPoint}","writable":true}]`,
       '--set',
-      '.mountType="virtiofs"',
+      `.mountType="${linux ? '9p' : 'virtiofs'}"`,
     ],
     ['limactl', 'start', '--tty=false', 'secure-vm'],
+    ...(linux ? [['bash', 'scripts/install-anchi.sh']] : []),
     ['python3', 'scripts/vault.py', 'unlock'],
-  ],
+  ];
+}
+
+/** Fixed host commands per setup step, run from the checkout in order. */
+export const SETUP_STEPS: Record<SetupAction, string[][]> = {
+  // Mounts ~/AnchiWorkspaces into the VM once; restarts the VM, which locks the vault, so it is
+  // unlocked again at the end.
+  workspaces: workspaceSteps(),
   'vm-start': [['limactl', 'start', '--tty=false', 'secure-vm']],
   install: [
     ['bash', 'scripts/up.sh'],
@@ -65,8 +78,8 @@ export class SetupRunner {
 
   async run(action: SetupAction | 'reset', onLine: (line: string) => void): Promise<void> {
     if (this.running) throw new Error(`setup step "${this.running}" is already running`);
-    if (action === 'workspaces' && process.platform !== 'darwin') {
-      throw new Error('workspaces are available on macOS only for now');
+    if (action === 'workspaces' && process.platform !== 'darwin' && process.platform !== 'linux') {
+      throw new Error('workspaces are available on macOS and Linux hosts only');
     }
     this.running = action;
     try {

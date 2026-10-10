@@ -35,13 +35,17 @@ fi
 # Pi was retired with the desktop app; remove what it left in the cell rootfs.
 rm -rf "$rootfs/opt/secure-pi" /opt/secure-vm/pi-build "$rootfs/opt/secure-vm/check-pi.py" \
   "$rootfs/opt/secure-vm/agent.py" "$rootfs/opt/secure-vm/check-inference.py"
-for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_cell.py anchi-build-base.sh check-anchi.py; do
+for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_cell.py anchi-build-base.sh check-anchi.py anchi-workspaces.sh; do
   [[ -f $src/$f ]] || { echo "missing $f in bootstrap bundle" >&2; exit 1; }
 done
-if ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
+# bindfs maps the workspaces share of a Linux host to the cell agent (anchi-workspaces.sh).
+packages=()
+python3 -c 'import venv, ensurepip' 2>/dev/null || packages+=(python3-venv)
+command -v bindfs >/dev/null || packages+=(bindfs)
+if ((${#packages[@]})); then
   export DEBIAN_FRONTEND=noninteractive
   apt-get -o DPkg::Lock::Timeout=600 update
-  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends python3-venv
+  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends "${packages[@]}"
 fi
 id anchi-egress >/dev/null 2>&1 ||
   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin anchi-egress
@@ -65,13 +69,22 @@ install -m 0644 "$src/anchi-cell/runner.mjs" "$src/anchi-cell/forward.mjs" "$src
 install -m 0644 "$src/anchi-build-base.sh" /opt/secure-vm/anchi/build-base.sh
 install -m 0755 "$src/anchi_cell.py" /opt/secure-vm/anchi/anchi_cell.py
 install -m 0755 "$src/check-anchi.py" /opt/secure-vm/check-anchi.py
+install -m 0755 "$src/anchi-workspaces.sh" /opt/secure-vm/anchi/workspaces.sh
 ln -sf /opt/secure-vm/anchi/anchi_cell.py /usr/local/sbin/anchi-cell
 ln -sf /opt/secure-vm/anchi/anchi_cell.py /usr/local/sbin/anchi-image
 install -d -m 0700 /var/lib/anchi
 install -d -m 0755 /var/lib/anchi/layers /var/lib/anchi/agents
 
-install -m 0644 "$src/systemd/anchi-egress.service" /etc/systemd/system/
+install -m 0644 "$src/systemd/anchi-egress.service" "$src/systemd/anchi-workspaces.service" /etc/systemd/system/
 systemctl daemon-reload
+# Mounts the workspaces share of a Linux host, if there is one; a no-op otherwise. The unit may
+# have run at boot before cloud-init mounted a share just added: then it runs again.
+systemctl enable anchi-workspaces.service
+if mountpoint -q /mnt/anchi-host-raw/share && ! mountpoint -q /mnt/anchi-host; then
+  systemctl restart anchi-workspaces.service
+else
+  systemctl start anchi-workspaces.service
+fi
 # Network rules include the proxy user's backstop once the user exists.
 systemctl restart secure-egress.service
 systemctl enable anchi-egress.service
