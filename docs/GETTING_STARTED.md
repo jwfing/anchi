@@ -25,7 +25,9 @@ It does not need sudo or modify your vault, agents or VM.
 
 ## First use on macOS
 
-The TUI opens without a VM. To run agents:
+The TUI opens without a VM. First launch opens **Getting started**, which detects completed steps and guides you through prerequisites, environment installation, vault initialization/unlock, runtime login, Agent builder and a first task. Press **Enter** for the next step; **Ctrl+X, L** shows installation logs and **Ctrl+X, !** opens persistent error details and recovery actions. Agent builder currently requires a Codex login. Teams with setup and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the guide.
+
+To configure these steps individually:
 
 1. Install VM prerequisites: `brew install lima python`. Keep at least 8 GB of free disk;
    the VM uses 4 GB of RAM and up to 30 GB of dynamically allocated disk.

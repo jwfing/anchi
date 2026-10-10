@@ -12,6 +12,7 @@ import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
+import { nextSetupAction, teamActivity, welcomeStep } from '../src/tui/usability.ts';
 import { App, filterTasks } from '../src/tui/App.tsx';
 import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
@@ -387,17 +388,20 @@ describe('App', () => {
     for (const header of ['CONFIGURE', 'AGENTS', 'TASKS']) expect(frame).toContain(header);
     expect(frame).toContain('@dev fix the bug');
     // Rows: title, CONFIGURE, 5 settings, AGENTS, builder, dev, TASKS, then the tasks.
-    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 11 });
+    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 14 });
     await tick();
     expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
     expect(ui.lastFrame()).toContain('https://github.com/o/r/pull/9');
-    expect(ui.lastFrame()).toContain('Opened the PR.');
+    expect(ui.lastFrame()).toContain('Artifacts and links');
     ui.stdin.write('\u000e'); // ^N → the running task
     await tick();
     ui.stdin.write('\r'); // the click focused the sidebar; Enter opens the task
     await tick();
     expect(ui.lastFrame()).toContain('c cancel');
     ui.stdin.write('c');
+    await tick();
+    expect(calls.some(([m]) => m === 'tasks.cancel')).toBe(false);
+    ui.stdin.write('y');
     await tick();
     expect(calls.find(([m]) => m === 'tasks.cancel')?.[1]).toEqual({ taskId: 't-a000000001' });
     ui.stdin.write('\r'); // continue in the agent's chat
@@ -437,6 +441,9 @@ describe('App', () => {
     await tick();
     ui.stdin.write('c');
     await tick();
+    expect(calls.some(([m]) => m === 'tasks.cancel')).toBe(false);
+    ui.stdin.write('y');
+    await tick();
     expect(calls.find(([m]) => m === 'tasks.cancel')?.[1]).toEqual({ taskId: 't-a000000001' });
     ui.stdin.write('\u001b'); // back to the sidebar
     await tick();
@@ -444,12 +451,12 @@ describe('App', () => {
     await tick();
     ui.stdin.write('\u001b[C'); // → opens it
     await tick();
-    expect(ui.lastFrame()).toContain('s start VM');
+    expect(ui.lastFrame()).toContain('VM: running');
     ui.stdin.write('\t'); // Tab back to the sidebar
     await tick();
     ui.stdin.write('?');
     await tick();
-    expect(ui.lastFrame()).toContain('Switch between the sidebar and the main pane');
+    expect(ui.lastFrame()).toContain('Keys');
     ui.stdin.write('\u001b');
     await tick();
     expect(ui.lastFrame()).not.toContain('Esc or ? close');
@@ -482,7 +489,7 @@ describe('App', () => {
     let frame = ui.lastFrame() ?? '';
     expect(frame).toContain('TASKS · filtered');
     expect(frame).toContain('fix signup');
-    expect(frame).not.toContain('fix login');
+    expect(frame).not.toContain('@dev fix login');
     expect(frame).not.toContain('rotate logs');
     // An empty filter shows everything again.
     ui.stdin.write('/');
@@ -597,24 +604,18 @@ describe('App', () => {
       reason: 'high-risk: push to main or master',
       origin: 'poll → @lead (t-a000000000) → @dev (t-a000000001)',
     };
-    // A write held while another dialog is open gets its dialog once that one closes.
-    ui.stdin.write('\u001b'); // to the sidebar
-    await tick();
-    ui.stdin.write('?');
-    expect(await frameWith(ui, 'Switch between the sidebar')).toContain(
-      'Switch between the sidebar',
-    );
-    emit('approvals', { approvals: [{ ...approval, id: 'b'.repeat(16) }] });
+    ui.stdin.write('my draft');
+    emit('approvals', { approvals: [approval] });
     await tick();
     expect(ui.lastFrame()).not.toContain('Approve a write by @dev?');
-    ui.stdin.write('q');
-    expect(await frameWith(ui, 'Approve a write by @dev?')).toContain('Approve a write by @dev?');
-    ui.stdin.write('\u001b'); // later
-    // b's dialog is closed before a arrives, so the next wait sees a's dialog, not b's.
-    await frameWith(ui, 'waiting for approval');
-    emit('approvals', { approvals: [approval] });
+    expect(ui.lastFrame()).toContain('my draft');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m]) => m === 'approvals.decide')).toBe(false);
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('a');
     const frame = await frameWith(ui, 'Approve a write by @dev?');
-    expect(frame).toContain('Approve a write by @dev?');
     expect(frame).toContain('why        high-risk: push to main or master');
     expect(frame).toContain('started by poll → @lead (t-a000000000) → @dev (t-a000000001)');
     expect(frame).toContain('git push: refs/heads/fix');
@@ -628,6 +629,9 @@ describe('App', () => {
     ui.stdin.write('a');
     await frameWith(ui, 'Approve a write by @dev?');
     ui.stdin.write('n');
+    await tick();
+    expect(calls.some(([m]) => m === 'approvals.decide')).toBe(false);
+    ui.stdin.write('\r');
     await tick();
     expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({
       id: 'a'.repeat(16),
@@ -1342,7 +1346,7 @@ describe('access and usage views', () => {
     ui.stdin.write('\t');
     expect(await frameWith(ui, 'a access')).toContain('a access');
     ui.stdin.write('a');
-    const frame = await frameWith(ui, 'External access of t-a000000001');
+    const frame = await frameWith(ui, '1 with credentials injected by the proxy');
     expect(frame).toContain('1 with credentials injected by the proxy');
     expect(frame).toContain('egress       github.com');
     ui.stdin.write(ESC);
@@ -1373,5 +1377,211 @@ describe('access and usage views', () => {
     expect(await frameWith(ui, 'github-api 2')).toContain('External access, last 30 days');
     expect(calls.filter(([m]) => m === 'access.summary')).toHaveLength(2);
     ui.unmount();
+  });
+});
+
+describe('usability workflows', () => {
+  it('keeps a failed send draft and exposes a persistent recovery screen', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'tasks.create': () => {
+          throw new Error('vault is locked');
+        },
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('keep my work');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.filter(([m]) => m === 'tasks.create')).toHaveLength(1);
+    expect(ui.lastFrame()).toContain('keep my work');
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('!');
+    expect(await frameWith(ui, 'Unlock your credentials')).toContain('vault is locked');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Welcome to Anchi')).toContain('Welcome to Anchi');
+    ui.unmount();
+  });
+
+  it('keeps drafts per agent and Escape never cancels a running task', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev'), agent('ops')]}
+        initialTasks={[task('t-running', 'dev', { status: 'running' })]}
+      />,
+    );
+    await tick();
+    ui.stdin.write('dev draft');
+    await tick();
+    ui.stdin.write('\u001b');
+    await tick();
+    expect(calls.some(([m]) => m === 'tasks.cancel')).toBe(false);
+    ui.stdin.write('\u000e');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('ops draft');
+    await tick();
+    expect(ui.lastFrame()).toContain('ops draft');
+    expect(ui.lastFrame()).not.toContain('dev draft');
+    ui.stdin.write('\u0010');
+    await tick();
+    expect(ui.lastFrame()).toContain('dev draft');
+    expect(ui.lastFrame()).not.toContain('ops draft');
+    ui.unmount();
+  });
+
+  it('previews multiline input without sending until explicitly confirmed', async () => {
+    const { client, calls } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('第一行\nsecond line');
+    await tick();
+    expect(calls.some(([m]) => m === 'tasks.create')).toBe(false);
+    ui.stdin.write('\r');
+    await tick();
+    expect(ui.lastFrame()).toContain('second line');
+    expect(calls.some(([m]) => m === 'tasks.create')).toBe(false);
+    ui.stdin.write('\u001b');
+    await tick();
+    expect(ui.lastFrame()).toContain('第一行');
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: '第一行\nsecond line',
+    });
+    ui.unmount();
+  });
+
+  it('resumes onboarding at the missing vault step', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          installed: true,
+          vaultUnlocked: false,
+          vaultKeyPresent: false,
+          codex: { connected: false, expiresAt: null },
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialView="welcome"
+        initialAgents={[agent('builder')]}
+        initialTasks={[]}
+      />,
+    );
+    expect(await frameWith(ui, 'Initialize the vault')).toContain('✓ Prepare local environment');
+    ui.stdin.write('\r');
+    await tick();
+    expect(ui.lastFrame()).toContain('Initialize the vault');
+    expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.find(([m]) => m === 'setup.run')?.[1]).toEqual({ action: 'vault-init' });
+    ui.unmount();
+  });
+
+  it('shows results first and can reveal the event history', async () => {
+    const { client } = fakeClient({
+      't-result': [{ seq: 1, ts: 1, event: { type: 'message', text: 'intermediate event' } }],
+    });
+    const ui = render(
+      <App
+        client={client}
+        initialView="task:t-result"
+        initialAgents={[agent('dev')]}
+        initialTasks={[
+          task('t-result', 'dev', {
+            result: 'final answer',
+            links: ['https://example.com/artifact'],
+          }),
+        ]}
+      />,
+    );
+    await tick();
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('3');
+    await tick();
+    expect(ui.lastFrame()).toContain('final answer');
+    expect(ui.lastFrame()).toContain('https://example.com/artifact');
+    expect(ui.lastFrame()).not.toContain('intermediate event');
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('h');
+    await tick();
+    expect(ui.lastFrame()).toContain('intermediate event');
+    ui.unmount();
+  });
+});
+
+describe('onboarding and team state', () => {
+  it('resumes each setup stage and detects expired runtime credentials', async () => {
+    const { client } = fakeClient();
+    const ready = await client.call('setup.status');
+    expect(nextSetupAction({ ...ready, vm: 'stopped' })).toBe('vm-start');
+    expect(nextSetupAction({ ...ready, installed: false })).toBe('install');
+    expect(nextSetupAction({ ...ready, vaultUnlocked: false, vaultKeyPresent: false })).toBe(
+      'vault-init',
+    );
+    expect(nextSetupAction({ ...ready, vaultUnlocked: false, vaultKeyPresent: true })).toBe(
+      'vault-unlock',
+    );
+    expect(
+      nextSetupAction({
+        ...ready,
+        host: { platform: 'linux', missing: ['limactl'], installHint: 'Install Lima' },
+      }),
+    ).toBeUndefined();
+    expect(welcomeStep({ ...ready, codex: { ...ready.codex, expiresAt: 1 } }, [], [])).toBe(
+      'runtime',
+    );
+    expect(welcomeStep(ready, [], [])).toBe('agent');
+    expect(welcomeStep(ready, [agent('dev')], [])).toBe('task');
+    expect(welcomeStep(ready, [agent('dev')], [task('t-done', 'dev')])).toBe('done');
+  });
+  it('shows actual pending tools and delegated work in the team overview', () => {
+    const running = task('t-running', 'dev', { status: 'running' });
+    const tool: StoredEvent = {
+      seq: 1,
+      ts: 1,
+      event: { type: 'tool.call', id: 'call-1', name: 'shell', input: '{"command":"git status"}' },
+    };
+    expect(teamActivity(agent('dev'), [running], [], [tool])).toContain('git status');
+    expect(
+      teamActivity(
+        agent('dev'),
+        [running],
+        [],
+        [
+          tool,
+          {
+            seq: 2,
+            ts: 2,
+            event: { type: 'tool.result', id: 'call-1', output: 'ok', isError: false },
+          },
+        ],
+      ),
+    ).toContain('Working:');
+    expect(
+      teamActivity(
+        agent('dev'),
+        [running, task('t-child', 'ops', { status: 'running', parentId: running.id })],
+        [],
+      ),
+    ).toContain('Delegated work in progress: @ops');
   });
 });

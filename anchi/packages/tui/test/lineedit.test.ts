@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Draft, draftOf, edit, insert, inputWindow } from '../src/tui/lineedit.ts';
+import { type Draft, draftOf, edit, insert, inputWindow, inputRows } from '../src/tui/lineedit.ts';
 
 const apply = (d: Draft, ...strokes: string[]) => strokes.reduce((x, s) => edit(x, s)!, d);
 
@@ -44,5 +44,21 @@ describe('line editing', () => {
     const middle = inputWindow({ text: 'x'.repeat(100), cursor: 50 }, 40);
     expect(middle.after.length).toBeGreaterThan(0);
     expect(middle.before.length + 1 + middle.after.length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe('multiline composer', () => {
+  it('edits line boundaries and deletes whole grapheme clusters', () => {
+    expect(edit(draftOf('first\n你好👨‍👩‍👧‍👦'), 'backspace')?.text).toBe('first\n你好');
+    expect(edit(draftOf('first\nsecond'), 'ctrl+u')?.text).toBe('first\n');
+    expect(edit({ text: '\ntext', cursor: 0 }, 'home')?.cursor).toBe(0);
+    expect(edit(draftOf('é'), 'left')?.cursor).toBe(0);
+  });
+  it('wraps CJK and keeps the cursor in a bounded growing viewport', () => {
+    const view = inputRows(draftOf('你好世界\nlast'), 4, 2);
+    expect(view.rows).toHaveLength(2);
+    expect(view.hiddenAbove).toBeGreaterThan(0);
+    expect(view.rows.at(-1)?.cursor).toBe(true);
+    expect(view.rows.at(-1)?.at).toBe(' ');
   });
 });

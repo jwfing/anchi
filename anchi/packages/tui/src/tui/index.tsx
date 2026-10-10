@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink';
+import { welcomeStep } from './usability.ts';
 import { App, type AppProps } from './App.tsx';
 import { loadKeyMap, watchKeyMap } from './keyconfig.ts';
 import { captureMouse, MOUSE_OFF, MOUSE_ON, type MouseEvent } from './mouse.ts';
@@ -30,9 +31,10 @@ export function composeInEditor(draft: string): string {
  * `keysFile` and follow its changes while the client runs.
  */
 export async function runTui(client: DaemonClient, keysFile?: string): Promise<void> {
-  const [agents, tasks] = await Promise.all([
+  const [agents, tasks, setup] = await Promise.all([
     client.call('agents.list'),
     client.call('tasks.list', { limit: 500 }),
+    client.call('setup.status').catch(() => null),
   ]);
   let mouseHandler: ((e: MouseEvent) => void) | undefined;
   const releaseMouse = process.stdin.isTTY
@@ -41,6 +43,7 @@ export async function runTui(client: DaemonClient, keysFile?: string): Promise<v
   const app = (keys: Pick<AppProps, 'keymap' | 'keyWarnings'>) => (
     <App
       client={client}
+      initialView={setup && welcomeStep(setup, agents, tasks) === 'done' ? 'team' : 'welcome'}
       initialAgents={agents}
       initialTasks={tasks}
       onMouse={(h) => {

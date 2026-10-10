@@ -132,6 +132,9 @@ export interface ServiceConnectorStatus {
 }
 
 export interface SetupStatus {
+  /** Host-only readiness; optional for clients connected to an older daemon. */
+  vaultKeyPresent?: boolean;
+  host?: { platform: string; missing: string[]; installHint: string };
   vm: 'missing' | 'stopped' | 'running' | 'unknown';
   vaultUnlocked: boolean;
   installed: boolean;
