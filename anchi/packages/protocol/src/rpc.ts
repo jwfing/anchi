@@ -420,6 +420,8 @@ export interface AgentAccess {
   refused: number;
   held: number;
   hosts: number;
+  /** Calls to Gmail, Drive, Notion and Slack through the bridge. */
+  services: number;
 }
 
 /** External access of all tasks over a period, from the audit rows the daemon has. */
@@ -429,6 +431,17 @@ export interface AccessSummary {
   agents: AgentAccess[];
   /** The hosts most requested, with the agents that requested them (agent-originated). */
   hosts: { host: string; requests: number; agents: string[]; decisions: Record<string, number> }[];
+  /**
+   * Calls to Gmail, Drive, Notion and Slack through the bridge, with the Google account the
+   * bridge pinned. The services reach their providers themselves, so these hosts are not above.
+   */
+  services: {
+    service: string;
+    operation: string;
+    account: string | null;
+    calls: number;
+    agents: string[];
+  }[];
   /** Requests where a cell sent a credential of its own, latest first. */
   credentials: (AuditRow & { task: string; agent: string })[];
   /** Refusals and held writes, latest first. */

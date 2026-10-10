@@ -6,7 +6,7 @@ import type { Line, Span } from './lines.ts';
  * (scrolling and clicks count rows). Only styling is produced, never escape sequences: the input
  * is already sanitized, and links show their target as text instead of becoming OSC 8 links.
  * Covers what agents write: headings, emphasis, inline code, fenced code, lists, task lists,
- * quotes, rules and pipe tables (kept as text).
+ * quotes, rules and pipe tables.
  */
 export function markdownLines(text: string, width: number): Line[] {
   const out: Line[] = [];
@@ -17,7 +17,9 @@ export function markdownLines(text: string, width: number): Line[] {
   };
   let fence: string | undefined;
   let blank = false;
-  for (const raw of text.split('\n')) {
+  const rows = text.split('\n');
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i]!;
     if (fence !== undefined) {
       if (raw.trim().startsWith(fence) && raw.trim().replace(/[`~]/g, '') === '') {
         fence = undefined;
@@ -65,17 +67,118 @@ export function markdownLines(text: string, width: number): Line[] {
       emit(inline(item[4]!), [{ text: `${'  '.repeat(depth)}${marker} ` }]);
       continue;
     }
-    if (/^\s*\|/.test(raw)) {
-      // A table's delimiter row (|---|:--:|) becomes a rule; cells keep their text.
-      if (/^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-*:?\s*$/.test(raw)) {
-        out.push(line([{ text: raw.replace(/[-:]/g, '─').trim(), dim: true }]));
-      } else emit(inline(raw.trim()));
+    // A table: a header row, then a delimiter row (|---|:--:|), then body rows with pipes.
+    const align = raw.includes('|') ? delimiter(rows[i + 1]) : undefined;
+    if (align && cells(raw).length === align.length) {
+      const body: string[][] = [];
+      for (i += 2; i < rows.length && rows[i]!.includes('|') && rows[i]!.trim(); i++)
+        body.push(cells(rows[i]!));
+      i--;
+      out.push(...table(cells(raw), align, body, width));
       continue;
     }
     emit(inline(raw));
   }
   while (out.length && !out.at(-1)!.text) out.pop();
   return out;
+}
+
+type Align = 'left' | 'center' | 'right';
+
+/** The alignments of a table's delimiter row, or undefined when `raw` is not one. */
+function delimiter(raw: string | undefined): Align[] | undefined {
+  if (!raw?.includes('-')) return undefined;
+  const parts = cells(raw);
+  if (!parts.length || !parts.every((c) => /^:?-+:?$/.test(c))) return undefined;
+  if (parts.length === 1 && !raw.includes('|')) return undefined;
+  return parts.map((c) =>
+    c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : 'left',
+  );
+}
+
+/** A table row's cells: split on unescaped pipes, without the outer ones. */
+function cells(raw: string): string[] {
+  let row = raw.trim();
+  if (row.startsWith('|')) row = row.slice(1);
+  if (row.endsWith('|') && !row.endsWith('\\|')) row = row.slice(0, -1);
+  return row.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+}
+
+const SEP = ' │ ';
+
+/**
+ * A table laid out in columns: the header bold above a rule, cells padded to their column and
+ * aligned. Columns wider than the room share it and their cells wrap; with no room for columns at
+ * all, each body row becomes `header: value` lines.
+ */
+function table(header: string[], align: Align[], body: string[][], width: number): Line[] {
+  const n = header.length;
+  const grid = [header, ...body].map((r) =>
+    Array.from({ length: n }, (_, c) => inline(r[c] ?? '')),
+  );
+  grid[0] = grid[0]!.map((spans) => spans.map((s) => ({ ...s, bold: true })));
+  const room = width - stringWidth(SEP) * (n - 1);
+  if (room < n * 4) {
+    const out: Line[] = [];
+    for (const r of grid.slice(1)) {
+      if (out.length) out.push(line([]));
+      r.forEach((spans, c) => {
+        const prefix = [...grid[0]![c]!, { text: ': ' }];
+        for (const row of wrapSpans(spans, width, prefix, [{ text: '  ' }])) out.push(line(row));
+      });
+    }
+    return out;
+  }
+  const natural = Array.from({ length: n }, (_, c) =>
+    Math.max(1, ...grid.map((r) => stringWidth(r[c]!.map((s) => s.text).join('')))),
+  );
+  const widths = fitColumns(natural, room);
+  const sep: Span = { text: SEP, dim: true };
+  const out: Line[] = [];
+  grid.forEach((r, ri) => {
+    const wrapped = r.map((spans, c) => wrapSpans(spans, widths[c]!));
+    const height = Math.max(...wrapped.map((w) => w.length));
+    for (let k = 0; k < height; k++) {
+      const spans: Span[] = [];
+      wrapped.forEach((rowsOfCell, c) => {
+        if (c) spans.push(sep);
+        const content = rowsOfCell[k] ?? [];
+        const pad = widths[c]! - stringWidth(content.map((s) => s.text).join(''));
+        const a = ri === 0 ? 'left' : align[c]!;
+        const left = a === 'right' ? pad : a === 'center' ? Math.floor(pad / 2) : 0;
+        if (left) spans.push({ text: ' '.repeat(left) });
+        spans.push(...content);
+        if (pad - left && c < n - 1) spans.push({ text: ' '.repeat(pad - left) });
+      });
+      out.push(line(spans));
+    }
+    if (ri === 0) {
+      const rule = widths.map((w) => '─'.repeat(w)).join(SEP.replace(/ /g, '─').replace('│', '┼'));
+      out.push(line([{ text: rule, dim: true }]));
+    }
+  });
+  return out;
+}
+
+/**
+ * Column widths within `room`: columns that fit their fair share keep their natural width, the
+ * rest share what is left evenly.
+ */
+function fitColumns(natural: number[], room: number): number[] {
+  const widths = [...natural];
+  let open = natural.map((_, c) => c);
+  let left = room;
+  for (;;) {
+    const share = Math.floor(left / open.length);
+    const fits = open.filter((c) => natural[c]! <= share);
+    if (!fits.length) {
+      open.forEach((c, k) => (widths[c] = share + (k < left - share * open.length ? 1 : 0)));
+      return widths;
+    }
+    for (const c of fits) left -= natural[c]!;
+    open = open.filter((c) => natural[c]! > share);
+    if (!open.length) return widths;
+  }
 }
 
 function line(spans: Span[]): Line {

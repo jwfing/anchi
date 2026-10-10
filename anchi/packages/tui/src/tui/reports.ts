@@ -157,7 +157,7 @@ export function accessSummaryLines(
     head('By agent'),
     {
       text: fit(
-        `  ${'agent'.padEnd(16)}${'tasks'.padStart(6)}${'requests'.padStart(10)}${'hosts'.padStart(7)}${'refused'.padStart(9)}${'held'.padStart(6)}  injected by the proxy`,
+        `  ${'agent'.padEnd(16)}${'tasks'.padStart(6)}${'requests'.padStart(10)}${'hosts'.padStart(7)}${'bridge'.padStart(8)}${'refused'.padStart(9)}${'held'.padStart(6)}  injected by the proxy`,
       ),
       dim: true,
     },
@@ -169,7 +169,7 @@ export function accessSummaryLines(
       .join(', ');
     lines.push({
       text: fit(
-        `  ${truncate(clean(a.agent), 15).padEnd(16)}${String(a.tasks).padStart(6)}${String(a.requests).padStart(10)}${String(a.hosts).padStart(7)}${String(a.refused).padStart(9)}${String(a.held).padStart(6)}  ${injected || '-'}`,
+        `  ${truncate(clean(a.agent), 15).padEnd(16)}${String(a.tasks).padStart(6)}${String(a.requests).padStart(10)}${String(a.hosts).padStart(7)}${String(a.services ?? 0).padStart(8)}${String(a.refused).padStart(9)}${String(a.held).padStart(6)}  ${injected || '-'}`,
       ),
       color: a.credentialsOther ? 'red' : undefined,
     });
@@ -196,6 +196,19 @@ export function accessSummaryLines(
       ),
     });
   }
+  // A daemon started before bridge calls were summed up sends none.
+  const services = s.services ?? [];
+  if (services.length) {
+    lines.push(gap, head('Gmail, Drive, Notion and Slack calls (through the bridge)'));
+    for (const c of services) {
+      const name = `${clean(c.service)} ${clean(c.operation)}${c.account ? ` [${clean(c.account)}]` : ''}`;
+      lines.push({
+        text: fit(
+          `  ${truncate(name, 31).padEnd(32)}${String(c.calls).padStart(6)}  (${c.agents.map((a) => `@${clean(a)}`).join(' ')})`,
+        ),
+      });
+    }
+  }
   if (s.refused.length) {
     lines.push(gap, head('Refused or held, latest first'));
     for (const r of s.refused) {
@@ -209,7 +222,7 @@ export function accessSummaryLines(
   }
   lines.push(gap, {
     text: fit(
-      'From the egress proxy’s audit rows the daemon keeps with each task; hosts and paths come from the agents. Press a on a task for its detail.',
+      'From the egress proxy’s audit rows the daemon keeps with each task; hosts and paths come from the agents. The bridge services reach Google, Notion and Slack themselves, so those hosts are not listed. Press a on a task for its detail.',
     ),
     dim: true,
   });
