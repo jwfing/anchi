@@ -3,6 +3,7 @@ import re
 from urllib.parse import urlencode
 
 from common import Denied, fields, google_json, rpc
+import connector_base
 import policy_client
 
 AUTH_SOCKET = '/run/secure-auth/token.sock'
@@ -47,11 +48,19 @@ def validate(op, params):
         raise Denied('OPERATION_DENIED')
 
 
+def probe(token):
+    profile = google_json('gmail.googleapis.com', 'GET', '/gmail/v1/users/me/profile', token=token)
+    email = profile.get('emailAddress', '')
+    if not isinstance(email, str) or not 3 <= len(email) <= 200:
+        raise Denied('PROBE_FAILED')
+    return email
+
+
 def handle(request):
     op = request.get('op')
     if op == 'status':
         fields(request, ('op',), ('op',))
-        return rpc(AUTH_SOCKET, {'op': 'status'})['gmail']
+        return rpc(AUTH_SOCKET, {'op': 'status', 'account': connector_base.ACCOUNT})['gmail']
     if op == 'list':
         fields(request, ('op', 'query', 'limit'), ('op',))
         query, limit = request.get('query', 'in:inbox'), request.get('limit', 5)
@@ -69,7 +78,7 @@ def handle(request):
         params = {'id': request['id']}
     else:
         raise Denied('OPERATION_DENIED')
-    credentials = rpc(AUTH_SOCKET, {'op': 'access_token'})
+    credentials = rpc(AUTH_SOCKET, {'op': 'access_token', 'account': connector_base.ACCOUNT})
     token = credentials['access_token']
     policy_client.require({'operation': 'gmail.' + op, 'account': credentials['account_generation'], 'params': params})
     result = google_json('gmail.googleapis.com', 'GET', path, token=token)

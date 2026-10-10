@@ -121,14 +121,44 @@ export interface ClaudeAccountStatus {
 /** Connectors served by trusted services in the VM (formerly set up in the desktop app). */
 export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack';
 
+/** A named Google account of Gmail or Drive (`default` unless the user named it). */
+export interface ServiceAccountStatus {
+  /** Slug agents refer to in `accounts: {gmail: work}`. */
+  name: string;
+  connected: boolean;
+  /** Label the service reported, such as the email address. */
+  account: string | null;
+  reauthRequired: boolean;
+  /** Disconnected, but Google has not confirmed the revocation; disconnect again to retry. */
+  revocationPending: boolean;
+}
+
 export interface ServiceConnectorStatus {
   id: ServiceConnectorId;
+  /** Any account connected. */
   connected: boolean;
+  /** The default account's label, else the first connected account's. */
   account: string | null;
   /** Google: the refresh token stopped working; sign in again. */
   reauthRequired: boolean;
   /** `ask`: every write waits for approval. */
   mode: 'auto' | 'ask';
+  /** Gmail and Drive: their accounts, by name; empty for Notion and Slack. */
+  accounts: ServiceAccountStatus[];
+}
+
+/** `user`: imported by the user (takes precedence); `builtin`: shipped with Anchi. */
+export type GoogleClientSource = 'user' | 'builtin' | null;
+
+/** What `setup.reset` deletes; `--all` (CLI only) also deletes the vault key and Anchi home. */
+export interface ResetPreview {
+  vm: SetupStatus['vm'];
+  /** Running or queued tasks; reset refuses while there are any. */
+  busy: number;
+  /** Live (idle) cells; closed first. */
+  cells: number;
+  home: string;
+  vaultKey: string;
 }
 
 export interface SetupStatus {
@@ -142,8 +172,10 @@ export interface SetupStatus {
   claude: ClaudeAccountStatus;
   connectors: ConnectorStatus[];
   services: ServiceConnectorStatus[];
-  /** Whether a Google OAuth client is stored (needed for Gmail and Drive). */
+  /** Whether a Google OAuth client is available (needed for Gmail and Drive). */
   googleClient: boolean;
+  /** Where that client comes from; optional for clients connected to an older daemon. */
+  googleClientSource?: GoogleClientSource;
   /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
   workspaces: boolean;
 }
@@ -208,6 +240,11 @@ export interface SkillInfo {
 export interface BuilderProposal {
   id: string;
   agentId: string;
+  /**
+   * `create`: a new agent; `replace`: a whole new file for an existing agent; `update`: a
+   * settings patch to an existing agent's file (the rest of the file, comments included, stays).
+   */
+  kind: 'create' | 'replace' | 'update';
   /** Candidate agent YAML and image recipe, exactly as they would be written. */
   agentYaml: string;
   imageYaml: string | null;
@@ -218,6 +255,9 @@ export interface BuilderProposal {
   errors: string[];
   /** Worth knowing but not blocking, such as a connector that is not connected yet. */
   warnings: string[];
+  /** For `update`: the patch, and the digest of the file it was made against. */
+  patch?: AgentPatch;
+  base?: string;
 }
 
 /** A directory of ~/AnchiWorkspaces bound into an agent's cells. */
@@ -227,18 +267,68 @@ export interface WorkspaceSetting {
   name?: string;
 }
 
-/** The settings the agent settings panel edits; omitted fields stay as they are. */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
+
+/**
+ * The settings the agent settings panel edits; omitted fields stay as they are. An empty
+ * description, model or effort removes the key (the template's value or the runtime default).
+ */
 export interface AgentPatch {
+  name?: string;
+  description?: string;
+  runtime?: 'codex' | 'claude-code';
+  model?: string;
+  effort?: Effort | '';
+  prompt?: { mode?: 'append' | 'replace'; text?: string };
   skills?: string[];
   connectors?: string[];
   workspaces?: WorkspaceSetting[];
+}
+
+/** An agent's editable settings, as resolved (templates included). */
+export interface AgentSettingValues {
+  name: string;
+  description: string;
+  runtime: 'codex' | 'claude-code';
+  /** '' for the runtime default. */
+  model: string;
+  effort: Effort | '';
+  prompt: { mode: 'append' | 'replace'; text: string };
+  skills: string[];
+  connectors: string[];
+  workspaces: WorkspaceSetting[];
+}
+
+/** Settings the panel shows but does not edit (they are changed in the agent file). */
+export interface FixedSettings {
+  /** The template the agent extends. */
+  extends?: string;
+  /** Set when the agent's own file takes its prompt from a file: the prompt is read-only. */
+  promptFile?: string;
+  image: string;
+  sandbox: string;
+  delegates: string[];
+  /** One line per trigger. */
+  triggers: string[];
+  approvals: Record<string, string>;
+  /** null: any public host. */
+  egress: string[] | null;
+  /** Named Google accounts of gmail and drive (`default` when absent). */
+  accounts?: Record<string, string>;
 }
 
 /** What can be given to agents now. */
 export interface Inventory {
   skills: { id: string; name: string; description: string }[];
   /** `connected` is null when the VM could not be asked. */
-  connectors: { id: string; connected: boolean | null }[];
+  connectors: {
+    id: string;
+    connected: boolean | null;
+    /** Gmail and Drive: names of the connected accounts, for an agent's `accounts:`. */
+    accounts?: string[];
+  }[];
+  /** Runtimes an agent can run on; `connected` is null when the VM could not be asked. */
+  runtimes: { id: 'codex' | 'claude-code'; connected: boolean | null }[];
   /** Directories under ~/AnchiWorkspaces (two levels); `shared` once the VM mounts it. */
   workspaces: { shared: boolean | null; dirs: string[] };
   agents: string[];
@@ -251,7 +341,10 @@ export interface AgentSettings {
   /** False for the built-in builder, or an agent whose file cannot be edited. */
   editable: boolean;
   reason?: string;
-  current: { skills: string[]; connectors: string[]; workspaces: WorkspaceSetting[] };
+  current: AgentSettingValues;
+  /** Fields of `current` whose value comes from the template, not the agent's own file. */
+  inherited: (keyof AgentSettingValues)[];
+  fixed: FixedSettings;
   inventory: Inventory;
 }
 
@@ -480,6 +573,15 @@ export interface Methods {
   'setup.importClaude': [{ token: string }, ClaudeAccountStatus];
   /** Runs a setup step; the caller has the user's consent. Progress arrives as `setup`. */
   'setup.run': [{ action: SetupAction }, SetupStatus];
+  /** What `setup.reset` would delete and whether anything blocks it; changes nothing. */
+  'setup.resetPreview': [Record<string, never>, ResetPreview];
+  /**
+   * Deletes the secure-vm VM with everything in it (vault contents included), for a
+   * first-launch state; refused while tasks run. `confirm` is `reset`, typed by the user.
+   * Progress arrives as `reset`. The vault key and Anchi home stay (the CLI's `--all` deletes
+   * them after stopping the daemon).
+   */
+  'setup.reset': [{ confirm: string }, SetupStatus];
   'connectors.set': [ConnectorSecret, ConnectorStatus];
   /** Imports the token of the host GitHub CLI (`gh auth token`); the caller has consent. */
   'connectors.importGh': [Record<string, never>, ConnectorStatus];
@@ -513,12 +615,18 @@ export interface Methods {
   'usage.quota': [Record<string, never>, QuotaInfo[]];
   'access.summary': [{ since?: number }, AccessSummary];
   'services.setToken': [{ id: ServiceConnectorId; token: string }, null];
-  'services.disconnect': [{ id: ServiceConnectorId }, null];
+  /** Gmail and Drive: one account (`default` when omitted). */
+  'services.disconnect': [{ id: ServiceConnectorId; account?: string }, null];
   'services.setMode': [{ id: ServiceConnectorId; mode: 'auto' | 'ask' }, null];
   /** The Google Cloud Desktop OAuth client JSON (its text), for Gmail and Drive. */
   'services.googleClient': [{ json: string }, null];
   /** Starts Google sign-in; returns the URL (also opened in the browser). Ends with `oauth`. */
-  'services.googleLogin': [{ id: ServiceConnectorId }, { url: string }];
+  'services.googleLogin': [{ id: ServiceConnectorId; account?: string }, { url: string }];
+  /**
+   * Removes the imported Google client, so the built-in one applies (when Anchi ships one).
+   * Refused while any Google account is connected (DISCONNECT_BEFORE_REPLACING_CLIENT).
+   */
+  'services.removeGoogleClient': [Record<string, never>, null];
   /** Adds a skill from a local directory or a GitHub tree URL (pinned to its commit). */
   'skills.add': [{ source: string; id?: string }, SkillInfo];
   'skills.remove': [{ id: string }, null];
@@ -539,7 +647,9 @@ export interface Notifications {
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
   /** A Google sign-in finished. */
-  oauth: { id: ServiceConnectorId; ok: boolean; error?: string };
+  oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
+  /** One line of `setup.reset` output (host command output; sanitize for display). */
+  reset: { line: string };
   /** Tasks were deleted; clients reload their task list. */
   tasksDeleted: Record<string, never>;
   /** The pending approvals, whenever they change. */

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import {
   ConfigError,
   homeLayout,
@@ -144,6 +145,28 @@ describe('loadImage', () => {
     write('agents/cron.yaml', "runtime: codex\ntriggers: [{ schedule: 'daily', text: x }]\n");
     expect(() => resolveAgent('cron', layout())).toThrow();
   });
+
+  it('pins Google accounts for connectors the agent has', () => {
+    write(
+      'agents/mail.yaml',
+      'runtime: codex\nconnectors: [gmail, drive]\naccounts: { gmail: work }\n',
+    );
+    expect(resolveAgent('mail', layout()).accounts).toEqual({ gmail: 'work' });
+    write('agents/plain.yaml', 'runtime: codex\nconnectors: [gmail]\n');
+    expect(resolveAgent('plain', layout()).accounts).toEqual({});
+    write(
+      'agents/missing.yaml',
+      'runtime: codex\nconnectors: [gmail]\naccounts: { drive: work }\n',
+    );
+    expect(() => resolveAgent('missing', layout())).toThrow(/needs its connector/);
+    write(
+      'agents/notion.yaml',
+      'runtime: codex\nconnectors: [notion]\naccounts: { notion: work }\n',
+    );
+    expect(() => resolveAgent('notion', layout())).toThrow();
+    write('agents/bad.yaml', 'runtime: codex\nconnectors: [gmail]\naccounts: { gmail: Work }\n');
+    expect(() => resolveAgent('bad', layout())).toThrow();
+  });
 });
 
 describe('patchAgentYaml', () => {
@@ -195,6 +218,42 @@ describe('patchAgentYaml', () => {
     expect(
       patchAgentYaml('runtime: codex\negress: [a.com]\n', { egress: ['a.com', 'b.org'] }),
     ).toBe('runtime: codex\negress: [a.com, b.org]\n');
+  });
+
+  it('sets and removes single values in place, and new ones near the top', () => {
+    const text = '# dev\nruntime: codex # which\nmodel: gpt-5.5\nskills: [a]\n';
+    expect(patchAgentYaml(text, { runtime: 'claude-code', model: '', name: 'Dev' })).toBe(
+      '# dev\nname: Dev\nruntime: claude-code # which\nskills: [a]\n',
+    );
+    expect(patchAgentYaml(text, { effort: 'high', description: 'Ships' })).toBe(
+      '# dev\ndescription: Ships\nruntime: codex # which\nmodel: gpt-5.5\neffort: high\nskills: [a]\n',
+    );
+    expect(patchAgentYaml('runtime: codex\neffort: low\n', { effort: '' })).toBe(
+      'runtime: codex\n',
+    );
+  });
+
+  it('writes a multi-line prompt as a block, keeping the comments around it', () => {
+    const text =
+      'runtime: codex\nprompt: { mode: append, text: Old. } # instructions\nskills: [a]\n';
+    const out = patchAgentYaml(text, { prompt: { text: 'Line one.\nLine two.\n' } });
+    expect(out).toBe(
+      'runtime: codex\nprompt:\n  # instructions\n  mode: append\n  text: |\n    Line one.\n    Line two.\nskills: [a]\n',
+    );
+    expect(parseYaml(out).prompt.text).toBe('Line one.\nLine two.\n');
+    expect(
+      patchAgentYaml('runtime: codex\n', { prompt: { mode: 'replace', text: 'Short.' } }),
+    ).toBe('runtime: codex\nprompt:\n  mode: replace\n  text: Short.\n');
+    // Emptied: removed, unless a template's prompt must be overridden.
+    expect(patchAgentYaml('runtime: codex\nprompt:\n  text: x\n', { prompt: { text: '' } })).toBe(
+      'runtime: codex\n',
+    );
+    expect(patchAgentYaml('extends: base\n', { prompt: { text: '' } })).toBe(
+      'extends: base\nprompt:\n  text: ""\n',
+    );
+    expect(() =>
+      patchAgentYaml('runtime: codex\nprompt: { file: p.md }\n', { prompt: { text: 'x' } }),
+    ).toThrow(/prompt comes from a file/);
   });
 
   it('lets resolveAgent validate a change before it is written', () => {

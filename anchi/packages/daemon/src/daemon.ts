@@ -33,6 +33,7 @@ import {
   type Methods,
   SETUP_ACTIONS,
   type SetupAction,
+  type ResetPreview,
   type ServiceConnectorId,
   type TaskStatus,
 } from '@anchi/protocol';
@@ -53,7 +54,12 @@ import {
   writeHostConnectors,
 } from './host.ts';
 import { Hub } from './hub.ts';
-import { builderInventoryText, listWorkspaceDirs } from './inventory.ts';
+import {
+  agentSummary,
+  type BuilderAgentInfo,
+  builderInventoryText,
+  listWorkspaceDirs,
+} from './inventory.ts';
 import { tryConnect } from './launch.ts';
 import { desktopNotify } from './notify.ts';
 import { Peer } from './rpc.ts';
@@ -68,13 +74,14 @@ import {
   setupStatus,
 } from './setup.ts';
 import { Store } from './store.ts';
-import { SERVICE_IDS, ServiceSetup } from './services.ts';
+import { ACCOUNT, SERVICE_IDS, ServiceSetup } from './services.ts';
 import {
   allowEgressHost,
   delegatorsOf,
   parsePatch,
   removeDelegate,
-  settingsOf,
+  agentSettingsView,
+  settingsView,
   updateAgentFile,
 } from './settings.ts';
 import { type SkillRemote, SkillStore } from './skills.ts';
@@ -84,6 +91,13 @@ import { parse as parseYaml } from 'yaml';
 function serviceId(v: unknown): ServiceConnectorId {
   if (!SERVICE_IDS.includes(v as ServiceConnectorId)) throw new Error('unknown service connector');
   return v as ServiceConnectorId;
+}
+
+/** A Google account name for Gmail or Drive; omitted means `default`. */
+function optionalAccount(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'string' || !ACCOUNT.test(v)) throw new Error('invalid account name');
+  return v;
 }
 
 const STATUSES: TaskStatus[] = ['queued', 'running', 'done', 'failed', 'cancelled'];
@@ -104,6 +118,8 @@ export interface DaemonOptions {
   turnTimeoutMs?: number;
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Record<SetupAction, string[][]>;
+  /** Host commands of `setup.reset` (tests replace them; the default deletes the VM). */
+  resetSteps?: string[][];
   hostRun?: typeof hostOutput;
   /** Keep the vault's Codex token in step with the Mac's login (default true). */
   codexSync?: boolean;
@@ -267,7 +283,7 @@ export class Daemon {
       workspaceRoot: this.workspaceRoot,
     }));
     this.services = new ServiceSetup(this.guest, (r) => this.broadcast('oauth', r), opts.openUrl);
-    this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS);
+    this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS, undefined, opts.resetSteps);
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
       this.hub.origin(id),
     );
@@ -315,10 +331,11 @@ export class Daemon {
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
       workspaceRoot: this.workspaceRoot,
-      // The builder starts each turn knowing what exists (skills, connectors, directories).
+      // The builder starts each turn knowing what exists (skills, connectors, directories,
+      // agents, with the files of those the message names).
       turnInput: async (agent, text) =>
         agent.id === BUILDER_ID
-          ? `${builderInventoryText(await this.inventory())}\n\n${text}`
+          ? `${builderInventoryText(await this.inventory(), this.builderAgents(), text)}\n\n${text}`
           : text,
       onPolicyApproval: (task, connector, id) =>
         this.approvals.addPolicy(this.guest, task, connector, id),
@@ -410,8 +427,17 @@ export class Daemon {
         })),
         ...SERVICE_IDS.map((id) => {
           const svc = status?.services?.find((x) => x.id === id);
-          return { id, connected: known && svc ? svc.connected : null };
+          const accounts = svc?.accounts?.filter((a) => a.connected).map((a) => a.name) ?? [];
+          return {
+            id,
+            connected: known && svc ? svc.connected : null,
+            ...(known && accounts.length ? { accounts } : {}),
+          };
         }),
+      ],
+      runtimes: [
+        { id: 'codex', connected: known ? status.codex.connected : null },
+        { id: 'claude-code', connected: known ? status.claude.connected : null },
       ],
       workspaces: {
         shared: status?.vm === 'running' ? status.workspaces : null,
@@ -423,21 +449,47 @@ export class Daemon {
         .filter((id) => id !== BUILDER_ID),
       images: listImageIds(this.opts.layout),
     };
-    if (!status) inventory.connectors = this.quickInventory().connectors;
+    if (!status) {
+      const quick = this.quickInventory();
+      inventory.connectors = quick.connectors;
+      inventory.runtimes = quick.runtimes;
+    }
     this.lastInventory = inventory;
     return inventory;
   }
 
   /** The inventory without asking the VM: connector states from the last full one. */
-  private quickInventory(): Pick<Inventory, 'skills' | 'connectors' | 'agents'> {
+  private quickInventory(): Pick<Inventory, 'skills' | 'connectors' | 'runtimes' | 'agents'> {
     return {
       skills: this.skills.list(),
       connectors: this.lastInventory?.connectors ?? [],
+      runtimes: this.lastInventory?.runtimes ?? [],
       agents: this.hub
         .summaries()
         .map((a) => a.id)
         .filter((id) => id !== BUILDER_ID),
     };
+  }
+
+  /** Existing agents for the builder: a summary of each and its own file. */
+  private builderAgents(): BuilderAgentInfo[] {
+    return listAgentIds(this.opts.layout)
+      .filter((id) => id !== BUILDER_ID)
+      .map((id) => {
+        let summary: string;
+        try {
+          summary = agentSummary(resolveAgent(id, this.opts.layout));
+        } catch (err) {
+          summary = `does not load: ${(err as Error).message}`;
+        }
+        let yaml = '';
+        try {
+          yaml = readFileSync(agentFile(this.opts.layout, id), 'utf8');
+        } catch {
+          // Listed a moment ago; gone now.
+        }
+        return { id, summary, yaml };
+      });
   }
 
   private async agentSettings(
@@ -446,8 +498,13 @@ export class Daemon {
     const inventory = await this.inventory();
     if ('proposalId' in params) {
       const proposal = this.proposals.get(str(params.proposalId, 'proposal', 20));
-      const layer = parseYamlAs(proposal.agentYaml, agentLayerSchema);
-      return { agentId: proposal.agentId, editable: true, current: settingsOf(layer), inventory };
+      const id = proposal.agentId;
+      // A patch proposal is the agent's file as it would be: templates still apply.
+      const view =
+        proposal.kind === 'update'
+          ? agentSettingsView(this.opts.layout, id, proposal.agentYaml)
+          : settingsView({ ...parseYamlAs(proposal.agentYaml, agentLayerSchema), id });
+      return { agentId: id, editable: true, ...view, inventory };
     }
     const id = str(params.agentId, 'agent', 40);
     if (id === BUILDER_ID) {
@@ -455,7 +512,7 @@ export class Daemon {
         agentId: id,
         editable: false,
         reason: 'the builder is built in; its settings are fixed',
-        current: settingsOf({}),
+        ...settingsView({ id }),
         inventory,
       };
     }
@@ -463,7 +520,7 @@ export class Daemon {
       return {
         agentId: id,
         editable: true,
-        current: settingsOf(resolveAgent(id, this.opts.layout)),
+        ...agentSettingsView(this.opts.layout, id),
         inventory,
       };
     } catch (err) {
@@ -471,7 +528,7 @@ export class Daemon {
         agentId: id,
         editable: false,
         reason: `fix the agent file first: ${(err as Error).message}`,
-        current: settingsOf({}),
+        ...settingsView({ id }),
         inventory,
       };
     }
@@ -672,6 +729,18 @@ export class Daemon {
       this.log(`setup ${action} done`);
       return setupStatus(this.guest, this.lima);
     },
+    'setup.resetPreview': async () => this.resetPreview(),
+    'setup.reset': async ({ confirm }) => {
+      if (confirm !== 'reset') throw new Error('type reset to confirm');
+      const { busy } = await this.resetPreview();
+      if (busy) throw new Error(`${busy} task(s) running or queued; cancel them or wait first`);
+      // Idle cells end with the VM anyway; closing them first keeps their transcripts whole.
+      await Promise.all(this.hub.liveTasks().map((t) => this.hub.closeCell(t, 'reset')));
+      this.log('setup reset started');
+      await this.setup.run('reset', (line) => this.broadcast('reset', { line }));
+      this.log('setup reset done: the VM is deleted');
+      return setupStatus(this.guest, this.lima);
+    },
     'connectors.set': async (params) => {
       const secret = connectorSecret(params);
       // Keys entered by hand replace a profile the daemon was refreshing.
@@ -731,8 +800,8 @@ export class Daemon {
       await this.services.setToken(serviceId(id), str(token, 'token', 500).trim());
       return null;
     },
-    'services.disconnect': async ({ id }) => {
-      await this.services.disconnect(serviceId(id));
+    'services.disconnect': async ({ id, account }) => {
+      await this.services.disconnect(serviceId(id), optionalAccount(account));
       return null;
     },
     'services.setMode': async ({ id, mode }) => {
@@ -744,9 +813,13 @@ export class Daemon {
       await this.services.setGoogleClient(str(json, 'client JSON', 16_384));
       return null;
     },
-    'services.googleLogin': async ({ id }) => ({
-      url: await this.services.googleLogin(serviceId(id)),
+    'services.googleLogin': async ({ id, account }) => ({
+      url: await this.services.googleLogin(serviceId(id), optionalAccount(account)),
     }),
+    'services.removeGoogleClient': async () => {
+      await this.services.removeGoogleClient();
+      return null;
+    },
     'skills.add': async ({ source, id }) => {
       const skill = await this.skills.add(
         str(source, 'source', 500),
@@ -782,6 +855,20 @@ export class Daemon {
       return null;
     },
   };
+
+  private async resetPreview(): Promise<ResetPreview> {
+    const busy = (['running', 'queued'] as const).reduce(
+      (n, status) => n + this.store.search({ status, limit: 500 }).length,
+      0,
+    );
+    return {
+      vm: await this.lima.vmStatus(),
+      busy,
+      cells: this.hub.cellCount(),
+      home: this.opts.layout.root,
+      vaultKey: join(homedir(), '.config/secure-vm/vault.key'),
+    };
+  }
 
   /** Stores a credential, verifies it with the service and records the account it reports. */
   private async connect(secret: ConnectorSecret): Promise<ConnectorStatus> {

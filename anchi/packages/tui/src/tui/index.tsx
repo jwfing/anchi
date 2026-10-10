@@ -49,6 +49,9 @@ export async function runTui(client: DaemonClient, keysFile?: string): Promise<v
       onMouse={(h) => {
         mouseHandler = h;
       }}
+      setMouse={(on) => {
+        if (process.stdin.isTTY) process.stdout.write(on ? MOUSE_ON : MOUSE_OFF);
+      }}
       compose={composeInEditor}
       keymap={keys.keymap}
       keyWarnings={keys.keyWarnings}

@@ -228,6 +228,8 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     codexSync: false,
     hostRun,
     setupSteps: SETUP_STEPS,
+    // Never the real `limactl delete`.
+    resetSteps: [['echo', 'deleted']],
     layout,
     guest: new Guest(transport),
     // No limactl: the tests never depend on a VM of the machine they run on.
@@ -282,6 +284,7 @@ describe('daemon tasks', () => {
       '-',
       '-',
       '-',
+      '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([
@@ -291,6 +294,34 @@ describe('daemon tasks', () => {
       'tool.result',
       'message',
       'turn.completed',
+    ]);
+  });
+
+  it('resets only when confirmed and nothing runs', async () => {
+    const { client } = await start();
+    const preview = await client.call('setup.resetPreview');
+    expect(preview).toMatchObject({ busy: 0, cells: 0, home: root });
+    expect(preview.vaultKey).toMatch(/\.config\/secure-vm\/vault\.key$/);
+    await expect(client.call('setup.reset', { confirm: 'yes' })).rejects.toThrow(/type reset/);
+    const lines: string[] = [];
+    client.on('reset', (n) => lines.push(n.line));
+    await client.call('setup.reset', { confirm: 'reset' });
+    expect(lines).toEqual(['$ echo deleted', 'deleted']);
+  });
+
+  it("pins the agent's Google accounts to its cell", async () => {
+    write('agents/mail.yaml', 'runtime: codex\nconnectors: [gmail]\naccounts: { gmail: work }\n');
+    const { client } = await start();
+    const task = await client.call('tasks.create', { agentId: 'mail', text: 'read' });
+    await client.call('tasks.wait', { taskId: task.id });
+    expect(transport.starts.at(-1)!.slice(6)).toEqual([
+      'gmail',
+      'cell',
+      'codex',
+      '-',
+      '-',
+      '-',
+      'gmail=work',
     ]);
   });
 
@@ -781,7 +812,7 @@ describe('daemon tasks', () => {
       text: `write ${join(ws, 'app', '.git', 'hooks', 'post-checkout')}`,
     });
     await client.call('tasks.wait', { taskId: t.id });
-    const arg = transport.starts.at(-1)!.at(-2)!;
+    const arg = transport.starts.at(-1)!.at(-3)!;
     expect(JSON.parse(Buffer.from(arg, 'base64url').toString())).toEqual([
       { name: 'app', path: 'app', mode: 'rw' },
       { name: 'docs', path: 'docs', mode: 'ro' },
@@ -1419,7 +1450,18 @@ describe('agent settings', () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
     const { client } = await start(60_000, undefined, workspaceTree());
     const settings = await client.call('agents.settings', { agentId: 'dev' });
-    expect(settings.current).toEqual({ skills: [], connectors: ['github'], workspaces: [] });
+    expect(settings.current).toEqual({
+      name: 'dev',
+      description: '',
+      runtime: 'codex',
+      model: '',
+      effort: '',
+      prompt: { mode: 'append', text: '' },
+      skills: [],
+      connectors: ['github'],
+      workspaces: [],
+    });
+    expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
     expect(settings.inventory.workspaces.dirs).toEqual(['docs', 'projects', 'projects/webapp']);
     expect(settings.inventory.agents).toEqual(['dev']);
@@ -1494,6 +1536,7 @@ describe('agent settings', () => {
     expect(said.text).toContain('<anchi-inventory>');
     expect(said.text).toContain('- review: Reviews pull requests');
     expect(said.text).toContain('projects/webapp');
+    expect(said.text).toMatch(/Runtimes \(runtime: \.\.\.\): codex \(\w[\w ]*\), claude-code \(/);
 
     const missing = daemon.proposals.add(
       parseBlocks('```anchi-agent id=rev\nruntime: codex\nskills: [nope]\ndelegates: [ghost]\n```'),
@@ -1518,6 +1561,156 @@ describe('agent settings', () => {
     ).toEqual(['review']);
     await client.call('builder.apply', { proposalId: proposal.id });
     expect(readFileSync(join(root, 'agents/rev.yaml'), 'utf8')).toMatch(/skills: \[review\]/);
+  });
+
+  it('edits name, runtime, model, effort and prompt, over inherited values, and blocks what does not resolve', async () => {
+    write('templates/base.yaml', 'runtime: codex\nmodel: gpt-5.5\nprompt:\n  text: Be careful.\n');
+    write('agents/dev.yaml', '# mine\nextends: base\nconnectors: [github] # pushes\n');
+    write('agents/sb.yaml', 'runtime: codex\nsandbox: codex-workspace-write\n');
+    write('agents/m.yaml', 'runtime: codex\nmodel: gpt-5.5 # fast\neffort: high\n');
+    write('agents/pf.yaml', 'runtime: codex\nprompt: { file: pf.md }\n');
+    write('agents/pf.md', 'From a file.\n');
+    const { client } = await start();
+    const settings = await client.call('agents.settings', { agentId: 'dev' });
+    expect(settings.current).toMatchObject({
+      runtime: 'codex',
+      model: 'gpt-5.5',
+      prompt: { mode: 'append', text: 'Be careful.' },
+    });
+    expect(settings.inherited).toEqual(['runtime', 'model', 'prompt']);
+    expect(settings.fixed).toMatchObject({ extends: 'base', sandbox: 'cell', triggers: [] });
+
+    const patch = {
+      name: 'Developer',
+      runtime: 'claude-code' as const,
+      model: 'claude-sonnet-5-5',
+      prompt: { mode: 'replace' as const, text: 'Line one.\nLine two.\n' },
+    };
+    const preview = await client.call('agents.update', { agentId: 'dev', patch });
+    expect(preview.errors).toEqual([]);
+    expect(preview.diff).toMatch(/^\+ runtime: claude-code$/m);
+    expect(preview.diff).toMatch(/^\+ {3}text: \|\n\+ {5}Line one\.\n\+ {5}Line two\.$/m);
+    await client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base });
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(
+      [
+        '# mine',
+        'name: Developer',
+        'extends: base',
+        'runtime: claude-code',
+        'model: claude-sonnet-5-5',
+        'prompt:',
+        '  mode: replace',
+        '  text: |',
+        '    Line one.',
+        '    Line two.',
+        'connectors: [github] # pushes',
+        '',
+      ].join('\n'),
+    );
+    const after = await client.call('agents.settings', { agentId: 'dev' });
+    expect(after.current.prompt).toEqual({ mode: 'replace', text: 'Line one.\nLine two.\n' });
+    expect(after.inherited).toEqual([]);
+
+    // Empty removes the key; the runtime default applies again.
+    const cleared = await client.call('agents.update', {
+      agentId: 'm',
+      patch: { model: '', effort: '' },
+    });
+    expect(cleared.diff).toBe('  runtime: codex\n- model: gpt-5.5 # fast\n- effort: high');
+
+    const blocked = await client.call('agents.update', {
+      agentId: 'sb',
+      patch: { runtime: 'claude-code' },
+    });
+    expect(blocked.errors.join()).toMatch(/needs runtime codex/);
+    await expect(
+      client.call('agents.update', {
+        agentId: 'sb',
+        patch: { runtime: 'claude-code' },
+        apply: true,
+        base: blocked.base,
+      }),
+    ).rejects.toThrow(/cannot save/);
+    for (const bad of [
+      { model: 'gpt 5' },
+      { effort: 'max' },
+      { runtime: 'gemini' },
+      { image: 'x' },
+    ]) {
+      await expect(
+        client.call('agents.update', { agentId: 'm', patch: bad as never }),
+      ).rejects.toThrow(/invalid settings/);
+    }
+
+    const pf = await client.call('agents.settings', { agentId: 'pf' });
+    expect(pf.fixed.promptFile).toBe('pf.md');
+    expect(pf.current.prompt.text).toBe('From a file.\n');
+    await expect(
+      client.call('agents.update', { agentId: 'pf', patch: { prompt: { text: 'x' } } }),
+    ).rejects.toThrow(/prompt comes from a file/);
+  });
+
+  it('shows the builder agent files the user names and turns its patches into update proposals', async () => {
+    write('agents/dev.yaml', '# my developer\nruntime: codex # rt\nconnectors: [github]\n');
+    const { client, daemon } = await start(60_000, undefined, workspaceTree());
+    const said = async (text: string) => {
+      const task = await client.call('tasks.create', { agentId: 'builder', text });
+      await client.call('tasks.wait', { taskId: task.id });
+      const events = await client.call('tasks.events', { taskId: task.id });
+      return (events.find((e) => e.event.type === 'message')?.event as { text: string }).text;
+    };
+    const plain = await said('hello');
+    expect(plain).toContain('- dev: "dev": runtime codex, connectors github');
+    expect(plain).not.toContain('<agent-file');
+    const named = await said('give @dev the review skill');
+    expect(named).toContain('<agent-file id="dev">\n# my developer\nruntime: codex # rt');
+
+    const patch = (yaml: string, extra = '') =>
+      daemon.proposals.add(parseBlocks(`\`\`\`anchi-agent-patch id=dev\n${yaml}\n\`\`\`${extra}`))!;
+    const proposal = patch('model: gpt-5.5\nskills: [review]');
+    expect(proposal).toMatchObject({ kind: 'update', errors: [], warnings: [] });
+    expect(proposal.agentDiff).toBe(
+      '  # my developer\n  runtime: codex # rt\n+ model: gpt-5.5\n  connectors: [github]\n+ skills: [review]',
+    );
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).not.toMatch(/model/);
+    expect((await client.call('agents.settings', { proposalId: proposal.id })).current.model).toBe(
+      'gpt-5.5',
+    );
+    const revised = await client.call('builder.revise', {
+      proposalId: proposal.id,
+      patch: { effort: 'high' },
+    });
+    expect(revised).toMatchObject({ id: proposal.id, kind: 'update', errors: [] });
+    expect(revised.patch).toEqual({ model: 'gpt-5.5', skills: ['review'], effort: 'high' });
+    await client.call('builder.apply', { proposalId: proposal.id });
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(
+      '# my developer\nruntime: codex # rt\nmodel: gpt-5.5\neffort: high\nconnectors: [github]\nskills: [review]\n',
+    );
+
+    // The file changed after the proposal: applying it is refused.
+    const stale = patch('model: ""');
+    expect(stale.errors).toEqual([]);
+    write('agents/dev.yaml', 'runtime: codex\n');
+    await expect(client.call('builder.apply', { proposalId: stale.id })).rejects.toThrow(
+      /changed since this proposal; ask the builder again/,
+    );
+
+    expect(patch('triggers: []').errors.join()).toMatch(/send a complete anchi-agent block/);
+    expect(patch('skills: [nope]').errors).toEqual(['skill "nope" is not installed']);
+    expect(patch('runtime: codex').errors).toEqual(['the patch changes nothing']);
+    expect(patch('model: x', '\n```anchi-image id=img\npackages: [jq]\n```').errors.join()).toMatch(
+      /cannot add an image/,
+    );
+    const ghost = daemon.proposals.add(
+      parseBlocks('```anchi-agent-patch id=ghost\nmodel: x\n```'),
+    )!;
+    expect(ghost.errors.join()).toMatch(/does not exist/);
+    // The last agent or patch block wins; a full block for an existing agent replaces its file.
+    const blocks = parseBlocks(
+      '```anchi-agent-patch id=dev\nmodel: x\n```\n```anchi-agent id=dev\nruntime: codex\n```',
+    );
+    expect(blocks.patch).toBeUndefined();
+    expect(daemon.proposals.add(blocks)?.kind).toBe('replace');
   });
 });
 

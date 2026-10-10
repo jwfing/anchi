@@ -4,7 +4,7 @@ Anchi runs a secured team of Codex and Claude Code agents. Each task runs in a d
 
 ## Install
 
-Prerequisites: Lima (`brew install lima`), Node 22+ and pnpm on the Mac. On a Linux host (experimental), "the Mac" in this guide means that machine; its prerequisites and differences are in [Getting started](GETTING_STARTED.md#linux).
+Prerequisites: Lima (`brew install lima`), Node 22+ and pnpm on the Mac. On a Linux host (experimental), "the Mac" in this guide means that machine; its prerequisites and differences are in [Getting started](GETTING_STARTED.md#linux-prerequisites).
 
 ```bash
 pnpm --dir anchi install
@@ -54,8 +54,9 @@ Each command checks the credential with the service and prints the account it be
 Gmail, Drive, Notion and Slack are trusted services in the VM. Agents with these connectors call them through Anchi tools; the services' own policy decides each request.
 
 ```bash
-scripts/anchi setup google-client ~/Downloads/client.json  # once: a Google Cloud "Desktop app" OAuth client
+scripts/anchi setup google-client ~/Downloads/client.json  # once, unless Anchi ships a built-in client
 scripts/anchi setup service gmail      # Google sign-in in the browser (read-only scope)
+scripts/anchi setup service gmail --account work   # a second Google account, named "work"
 scripts/anchi setup service drive
 scripts/anchi setup service notion     # internal integration secret, without echo
 scripts/anchi setup service slack      # bot token
@@ -63,6 +64,15 @@ scripts/anchi setup service-mode notion ask   # every Notion write waits for you
 ```
 
 Google tokens are obtained in the VM from the authorization code; they never reach the Mac. In the TUI, the **Services** part of **Connectors** does the same (`Enter` connect, `m` write mode, `d` disconnect).
+
+Gmail and Drive can each hold several Google accounts, by name (`default` unless you pass `--account`). An agent uses `default` unless its file names another one, for connectors it has:
+
+```yaml
+connectors: [gmail, drive]
+accounts: { gmail: work }       # Drive stays on `default`
+```
+
+The account is pinned to the agent's cells by the bridge in the VM; the agent cannot ask for another account, and approvals bind to the account they were given for. `scripts/anchi setup disconnect gmail --account work` disconnects one account.
 
 Grant only what agents need:
 
@@ -79,7 +89,9 @@ Open the TUI, select **Agent builder**, and describe the agent: its job, the ser
 - an image recipe, if the agent needs tools beyond the base image (git, gh, curl, jq and Codex on Debian 12);
 - what blocks it (a skill that is not installed, a directory that does not exist, an unknown delegate) and what is worth knowing (a connector not connected yet).
 
-Press `y` to write the files, `n` to discard the proposal, or `s` to pick its skills, connectors and workspaces yourself in the settings panel; the proposal is checked again and shown with your changes.
+Press `y` to write the files, `n` to discard the proposal, or `s` to change its settings yourself in the settings panel; the proposal is checked again and shown with your changes.
+
+The builder can also change an existing agent. Each turn it gets a one-line summary of every agent, and the agent file of each agent your message names by id (`dev` or `@dev`; up to 4 KB per file). For a change it proposes a patch with only the fields to change: name, description, runtime, model, effort, prompt, skills, connectors and workspaces. The dialog shows the change as a diff of the agent file, and the rest of the file, comments included, stays as it is. If the file changes before you press `y`, the patch is refused; ask the builder again. For other fields (triggers, approvals, egress, delegates, image), the builder proposes the whole file, which replaces the old one. The builder cannot write any file itself.
 
 Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images/`. You can also edit them directly; the daemon reloads them on change. See [Agent configuration](architecture/AGENT_TEAM_CONTRACTS.md#agent-configuration).
 
@@ -95,7 +107,16 @@ prompt:
 
 ## Agent settings
 
-**^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel: every installed skill, every connector (marked connected or not) and every directory under `~/AnchiWorkspaces`. **Space** selects; a workspace goes off → `ro` → `rw`. **Enter** shows the change to the agent file as a diff, checked like a proposal; **y** saves it. Only those three fields change, and the rest of the file, comments included, stays as it is. The change applies to the agent's next cell.
+**^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel. It lists the agent's name, description, runtime (marked connected or not), model, effort and prompt, then every installed skill, every connector (marked connected or not) and every directory under `~/AnchiWorkspaces`. **Space** changes the selected row:
+
+- on name, description or model, you type the new value (an empty model means the runtime's default);
+- runtime switches between `codex` and `claude-code`, and effort goes through unset, `low`, `medium`, `high` and `xhigh` (only Codex uses it);
+- the prompt mode switches between `append` and `replace`, and the prompt text opens in `$EDITOR`;
+- skills and connectors are selected or deselected, and a workspace goes off → `ro` → `rw`.
+
+At the bottom, the panel shows what it cannot change: template, image, sandbox, delegates, approvals, egress and triggers. Edit those in the agent file. For an agent that `extends` a template, an inherited value is marked `from template <id>`. Changing an inherited value writes an override into the agent's own file. A prompt that comes from `prompt.file` is read-only in the panel; edit that file instead.
+
+**Enter** shows the change to the agent file as a diff, checked like a proposal. Errors block saving, for example `sandbox: codex-workspace-write` with runtime `claude-code`. Warnings, such as a runtime that is not connected yet, do not block. **y** saves the change. Only the fields you changed are written; an emptied model, effort or description removes its key. The rest of the file, comments included, stays as it is. The change applies to the agent's next cell.
 
 ## Delete an agent
 
@@ -158,7 +179,7 @@ A writable directory lets an agent leave code that your own tools later run. Anc
 In the TUI, select an agent and type a task. **Enter** sends it.
 
 - Keyboard and mouse do the same things. **Tab** (or a click) moves between the sidebar and the main pane; the pane with the keys has a cyan border. In the sidebar, **↑ ↓** move, **1 2 3** jump to Configure, Agents and Tasks, **[ ]** turn task pages and **Enter** opens the item. In the main pane, **Esc** goes back to the sidebar (in a chat it first cancels a running turn and clears the draft).
-- Every action is also reachable through the leader key **Ctrl+X** and one more key; a panel shows what can follow. **^X Space** opens the command palette and **^X ?** lists the keys of the current view. Keys can be changed in `~/.anchi/keybindings.json`: see [Key bindings](KEYBINDINGS.md).
+- Every action is also reachable through the leader key **Ctrl+X** and one more key; a panel shows what can follow. **^X Space** opens the command palette and **^X ?** lists the keys of the current view; both stay at the right of the status line. To copy text, **^X m** turns on selection mode: the mouse goes back to the terminal, which selects and copies the transcript without borders or the sidebar. Keys can be changed in `~/.anchi/keybindings.json`: see [Key bindings](KEYBINDINGS.md).
 - A task runs in a fresh cell. Follow-up messages reuse the cell until it has been idle for 10 minutes; after that, the next message resumes the agent's Codex or Claude Code session in a new cell.
 - Before a cell is destroyed (idle timeout, cancellation, daemon shutdown), it is scanned for real credential values; the task notes `scan: clean`, and a finding raises a notification.
 - A failed or cancelled task can run again: **R** on the task (or **^X r** in its chat, or `scripts/anchi retry <task>`) either continues its session, telling the agent why the last turn stopped so it keeps the work it had done, or starts over as a new task with the same request (`--fresh`).

@@ -29,7 +29,8 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X D | Delete the agent with its tasks (type its id to confirm) |
 | ^X o | Reopen the pending builder proposal |
 | ^X l | External access of the task shown |
-| ^X t, ^X v | Expand tool calls, verbose tool output |
+| ^X t, ^X v | Expand tool calls, verbose tool output (with reasoning and plans) |
+| ^X m | Selection mode: select and copy text with the mouse; any other key ends it |
 | ^X / | Filter tasks |
 | ^X Space, ^X p | Command palette |
 | ^X ? | Keys of this view |

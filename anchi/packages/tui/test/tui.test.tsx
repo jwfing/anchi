@@ -12,7 +12,7 @@ import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
-import { nextSetupAction, teamActivity, welcomeStep } from '../src/tui/usability.ts';
+import { nextSetupAction, teamActivity, turnActivity, welcomeStep } from '../src/tui/usability.ts';
 import { App, filterTasks } from '../src/tui/App.tsx';
 import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
@@ -199,6 +199,25 @@ describe('lines', () => {
     expect(text(open).at(-1)).toBe('▸ 1 tool call · last: shell make test · click to expand');
   });
 
+  it('shows progress only in the verbose transcript, and the latest on the working line', () => {
+    const events: StoredEvent[] = [
+      { seq: 1, ts: 0, event: { type: 'input', text: 'build an agent', source: 'user' } },
+      { seq: 2, ts: 0, event: { type: 'progress', text: '**Choosing connectors**\n\ndetail' } },
+    ];
+    expect(transcriptLines(events, 80).map((l) => l.text)).toEqual(['› build an agent']);
+    expect(transcriptLines(events, 80, { verbose: true }).map((l) => l.text)).toContain(
+      '✻ **Choosing connectors**',
+    );
+    expect(turnActivity(events)).toBe('Choosing connectors');
+    expect(turnActivity(events.slice(0, 1))).toBe('thinking…');
+    const call: StoredEvent = {
+      seq: 3,
+      ts: 0,
+      event: { type: 'tool.call', id: 'c', name: 'shell', input: '{"command":"ls"}' },
+    };
+    expect(turnActivity([...events, call])).toBe('shell ls');
+  });
+
   it('parses mouse and normalizes Enter', () => {
     expect(parseMouse(`a${ESC}[<0;5;7Mb`).events).toEqual([
       { kind: 'press', button: 0, x: 5, y: 7 },
@@ -315,6 +334,98 @@ describe('App', () => {
     expect(calls.find(([m]) => m === 'connectors.set')?.[1]).toEqual({
       id: 'github',
       token: 'github_pat_secretvalue123',
+    });
+    ui.unmount();
+  });
+
+  it('shows Gmail as waiting for sign-in once the Google client is stored', async () => {
+    const service = (id: string) => ({
+      id,
+      connected: false,
+      account: null,
+      reauthRequired: false,
+      mode: 'auto',
+    });
+    const { client } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          codex: { runtime: 'codex', connected: true, accountId: 'a', expiresAt: Date.now() + 1e6 },
+          connectors: [{ id: 'github', connected: false, account: null }],
+          services: [service('gmail'), service('drive'), service('notion')],
+          googleClient: true,
+        }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('\u0010'); // ^P → access
+    ui.stdin.write('\u0010'); // ^P → usage
+    ui.stdin.write('\u0010'); // ^P → connectors
+    const frame = await frameWith(ui, 'SERVICES');
+    expect(frame).toMatch(/gmail +client stored — press Enter to sign in/);
+    expect(frame).toMatch(/drive +client stored — press Enter to sign in/);
+    expect(frame).toMatch(/notion +not connected/);
+    ui.unmount();
+  });
+
+  it('lists named Google accounts and disconnects the one chosen', async () => {
+    const account = (name: string, label: string) => ({
+      name,
+      connected: true,
+      account: label,
+      reauthRequired: false,
+      revocationPending: false,
+    });
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          codex: { runtime: 'codex', connected: true, accountId: 'a', expiresAt: Date.now() + 1e6 },
+          connectors: [{ id: 'github', connected: false, account: null }],
+          services: [
+            {
+              id: 'gmail',
+              connected: true,
+              account: 'me@home.example',
+              reauthRequired: false,
+              mode: 'auto',
+              accounts: [account('default', 'me@home.example'), account('work', 'me@work.example')],
+            },
+          ],
+          googleClient: true,
+          googleClientSource: 'builtin',
+        }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('\u0010'); // ^P → access
+    ui.stdin.write('\u0010'); // ^P → usage
+    ui.stdin.write('\u0010'); // ^P → connectors
+    const frame = await frameWith(ui, 'me@work.example');
+    expect(frame).toContain('Google client (Gmail, Drive): built-in');
+    expect(frame).toMatch(/└ work +me@work\.example/);
+    for (let i = 0; i < 3; i++) {
+      ui.stdin.write('j'); // github, aws, linear → gmail
+      await tick();
+    }
+    ui.stdin.write('d');
+    const dialog = await frameWith(ui, 'Disconnect a gmail account');
+    expect(dialog.replace(/[\s║]+/g, ' ')).toContain('work (me@work.example)');
+    ui.stdin.write('work');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'services.disconnect')?.[1]).toEqual({
+      id: 'gmail',
+      account: 'work',
     });
     ui.unmount();
   });
@@ -648,6 +759,7 @@ describe('App', () => {
       proposal: {
         id: 'p-1',
         agentId: 'devops',
+        kind: 'create',
         agentYaml: 'runtime: codex\n',
         imageYaml: null,
         agentDiff: `+ runtime: codex\n+ prompt: ${ESC}[2Jhidden`,
@@ -676,6 +788,7 @@ describe('App', () => {
       proposal: {
         id: 'p-2',
         agentId: 'x',
+        kind: 'create',
         agentYaml: '',
         imageYaml: null,
         agentDiff: '',
@@ -781,6 +894,14 @@ describe('key bindings in the TUI', () => {
     ui.unmount();
   });
 
+  it('keeps the commands and keys hints on the status line however many hints the view has', async () => {
+    const { client } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    const last = (await frameWith(ui, 'keys')).trimEnd().split('\n').at(-1) ?? '';
+    expect(last).toMatch(/\^X Space commands · \^X \? keys$/);
+    ui.unmount();
+  });
+
   it('shows the keys of the focused view, with line editing in the chat', async () => {
     const { client } = fakeClient();
     const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
@@ -868,7 +989,27 @@ describe('agent settings panel', () => {
   const settings = (over: Partial<AgentSettings['current']> = {}): AgentSettings => ({
     agentId: 'dev',
     editable: true,
-    current: { skills: [], connectors: ['github'], workspaces: [], ...over },
+    current: {
+      name: 'dev',
+      description: '',
+      runtime: 'codex',
+      model: '',
+      effort: '',
+      prompt: { mode: 'append', text: '' },
+      skills: [],
+      connectors: ['github'],
+      workspaces: [],
+      ...over,
+    },
+    inherited: [],
+    fixed: {
+      image: 'codex',
+      sandbox: 'cell',
+      delegates: [],
+      triggers: [],
+      approvals: {},
+      egress: null,
+    },
     inventory: {
       skills: [{ id: 'review', name: 'review', description: 'Reviews pull requests' }],
       connectors: [
@@ -876,6 +1017,7 @@ describe('agent settings panel', () => {
         { id: 'notion', connected: false },
       ],
       workspaces: { shared: true, dirs: ['projects/webapp'] },
+      runtimes: [],
       agents: ['dev'],
       images: [],
     },
@@ -905,7 +1047,9 @@ describe('agent settings panel', () => {
     expect(frame).toContain('@dev: settings');
     expect(frame).toMatch(/\[x\] +github +connected/);
     expect(frame).toMatch(/\[ \] +notion +not connected/);
-    ui.stdin.write(' '); // the first row: skill review
+    for (const _ of [1, 2, 3, 4, 5, 6, 7]) ui.stdin.write('j'); // past name … prompt
+    await tick();
+    ui.stdin.write(' '); // the first skill: review
     await tick();
     for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) ui.stdin.write('j'); // down to the workspace
     await tick();
@@ -940,6 +1084,100 @@ describe('agent settings panel', () => {
     ui.unmount();
   });
 
+  it('edits runtime, model and the prompt (in $EDITOR), and shows warnings before saving', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'agents.settings': () => settings(),
+        'agents.update': () => ({
+          ...update,
+          diff: '- runtime: codex\n+ runtime: claude-code\n+ model: claude-sonnet-5-5',
+          warnings: ['runtime claude-code is not connected yet'],
+        }),
+      },
+    );
+    const compose = vi.fn((draft: string) => `${draft}Line one.\nLine two.\n\n`);
+    const ui = render(
+      <App client={client} initialAgents={[agent('dev')]} initialTasks={[]} compose={compose} />,
+    );
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('s');
+    let frame = await frameWith(ui, '(runtime default)');
+    expect(frame).toMatch(/runtime +codex/);
+    for (const _ of [1, 2]) ui.stdin.write('j');
+    await tick();
+    ui.stdin.write(' '); // runtime: codex → claude-code
+    frame = await frameWith(ui, 'claude-code');
+    expect(frame).toMatch(/\* +runtime +claude-code/);
+    ui.stdin.write('j');
+    await tick();
+    ui.stdin.write(' '); // model: type it
+    await tick();
+    ui.stdin.write('bad model');
+    await tick();
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'a model id has')).toContain('Enter keep');
+    for (const _ of 'bad model') ui.stdin.write('\u007f');
+    await tick();
+    ui.stdin.write('claude-sonnet-5-5');
+    await tick();
+    ui.stdin.write('\r');
+    frame = await frameWith(ui, 'Space change');
+    expect(frame).toMatch(/\* +model +claude-sonnet-5-5/);
+    for (const _ of [1, 2, 3]) ui.stdin.write('j');
+    await tick();
+    ui.stdin.write(' '); // the prompt text, in the editor
+    frame = await frameWith(ui, '2 lines');
+    expect(compose).toHaveBeenCalledWith('');
+    expect(frame).toContain('│ Line one.');
+    ui.stdin.write('\r');
+    frame = await frameWith(ui, 'save these settings?');
+    expect(frame).toContain('! runtime claude-code is not connected yet');
+    expect(frame).toContain('[y] save');
+    expect(calls.find(([m]) => m === 'agents.update')?.[1]).toEqual({
+      agentId: 'dev',
+      patch: {
+        runtime: 'claude-code',
+        model: 'claude-sonnet-5-5',
+        prompt: { text: 'Line one.\nLine two.\n' },
+      },
+    });
+    ui.stdin.write('y');
+    expect(await frameWith(ui, 'settings saved')).toContain('@dev settings saved');
+    ui.unmount();
+  });
+
+  it('shows the diff of a builder patch to an existing agent and applies it on y', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    emit('proposal', {
+      proposal: {
+        id: 'p-3',
+        agentId: 'dev',
+        kind: 'update',
+        agentYaml: '# mine\nruntime: codex\nmodel: gpt-5.5\n',
+        imageYaml: null,
+        agentDiff: '  # mine\n  runtime: codex\n+ model: gpt-5.5',
+        imageDiff: '',
+        errors: [],
+        warnings: [],
+        patch: { model: 'gpt-5.5' },
+        base: 'b1',
+      },
+    });
+    const frame = await frameWith(ui, 'Changes to @dev');
+    expect(frame).toContain('only the + and - lines change');
+    expect(frame).toContain('+ model: gpt-5.5');
+    expect(frame).toContain('  # mine');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.find(([m]) => m === 'builder.apply')?.[1]).toEqual({ proposalId: 'p-3' });
+    ui.unmount();
+  });
+
   it('cannot save a change with errors, and n goes back to the panel', async () => {
     const { client, calls } = fakeClient(
       {},
@@ -954,7 +1192,7 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write('s');
     expect(await frameWith(ui, 'not installed')).toMatch(/\[x\] +gone +not installed/);
-    ui.stdin.write('j');
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) ui.stdin.write('j');
     await tick();
     ui.stdin.write(' '); // select review as well
     await tick();
@@ -968,7 +1206,7 @@ describe('agent settings panel', () => {
       false,
     );
     ui.stdin.write('n');
-    expect(await frameWith(ui, '@dev: settings')).toContain('Space select');
+    expect(await frameWith(ui, '@dev: settings')).toContain('Space change');
     ui.unmount();
   });
 
@@ -976,6 +1214,7 @@ describe('agent settings panel', () => {
     const proposal = {
       id: 'p-1',
       agentId: 'rev',
+      kind: 'create' as const,
       agentYaml: 'runtime: codex\n',
       imageYaml: null,
       agentDiff: '+ runtime: codex',
@@ -1001,6 +1240,8 @@ describe('agent settings panel', () => {
     expect(await frameWith(ui, '[s] settings')).toContain('Builder proposal');
     ui.stdin.write('s');
     expect(await frameWith(ui, 'Proposal for @rev: settings')).toContain('review');
+    for (const _ of [1, 2, 3, 4, 5, 6, 7]) ui.stdin.write('j');
+    await tick();
     ui.stdin.write(' ');
     await tick();
     ui.stdin.write('\r');
@@ -1126,11 +1367,31 @@ describe('deleting agents', () => {
         'agents.settings': () => ({
           agentId: 'dev',
           editable: true,
-          current: { skills: [], connectors: [], workspaces: [] },
+          current: {
+            name: 'dev',
+            description: '',
+            runtime: 'codex',
+            model: '',
+            effort: '',
+            prompt: { mode: 'append', text: '' },
+            skills: [],
+            connectors: [],
+            workspaces: [],
+          },
+          inherited: [],
+          fixed: {
+            image: 'codex',
+            sandbox: 'cell',
+            delegates: [],
+            triggers: [],
+            approvals: {},
+            egress: null,
+          },
           inventory: {
             skills: [],
             connectors: [],
             workspaces: { shared: true, dirs: [] },
+            runtimes: [],
             agents: [],
             images: [],
           },
@@ -1434,6 +1695,64 @@ describe('usability workflows', () => {
     await tick();
     expect(ui.lastFrame()).toContain('dev draft');
     expect(ui.lastFrame()).not.toContain('ops draft');
+    ui.unmount();
+  });
+
+  it('turns mouse reporting off in selection mode and back on with any other key', async () => {
+    const { client } = fakeClient({
+      't-a000000001': [{ seq: 1, ts: 0, event: { type: 'message', text: 'copy me' } }],
+    });
+    const mouse: boolean[] = [];
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { status: 'running' })]}
+        setMouse={(on) => mouse.push(on)}
+      />,
+    );
+    await frameWith(ui, 'copy me');
+    ui.stdin.write('\u0018'); // ^X
+    await tick();
+    ui.stdin.write('m');
+    const frame = await frameWith(ui, 'drag to select');
+    expect(mouse).toEqual([false]);
+    // No border or sidebar around the transcript.
+    expect(frame).not.toContain('AGENTS');
+    expect(
+      frame
+        .split('\n')
+        .find((l) => l.includes('copy me'))
+        ?.trimEnd(),
+    ).toBe('copy me');
+    ui.stdin.write('\u001b[A'); // ↑ scrolls and stays in selection mode
+    await tick();
+    expect(mouse).toEqual([false]);
+    ui.stdin.write('x');
+    await tick();
+    expect(mouse).toEqual([false, true]);
+    expect(ui.lastFrame()).not.toContain('drag to select');
+    ui.unmount();
+  });
+
+  it('shows what a running turn is doing under its transcript', async () => {
+    const { client } = fakeClient({
+      't-a000000001': [
+        { seq: 1, ts: 0, event: { type: 'input', text: 'design an agent', source: 'user' } },
+        { seq: 2, ts: 0, event: { type: 'progress', text: '**Picking connectors**' } },
+      ],
+    });
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[
+          task('t-a000000001', 'dev', { status: 'running', startedAt: Date.now() - 65_000 }),
+        ]}
+      />,
+    );
+    const frame = await frameWith(ui, 'Picking connectors');
+    expect(frame).toMatch(/working 1m\d+s · Picking connectors/);
     ui.unmount();
   });
 

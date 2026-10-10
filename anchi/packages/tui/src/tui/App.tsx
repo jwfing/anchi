@@ -23,6 +23,7 @@ import type {
 } from '@anchi/protocol';
 import type { DaemonClient } from '@anchi/daemon';
 import { readFile, stat } from 'node:fs/promises';
+import { resolve as resolvePath } from 'node:path';
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from 'ink';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
@@ -53,16 +54,28 @@ import {
 } from './reports.ts';
 import {
   initialSettings,
+  isTextField,
+  MODEL,
   type SettingsRow,
   type SettingsState,
   settingsPatch,
   settingsRows,
+  TEXT_FIELDS,
+  type TextField,
   toggleSetting,
 } from './settings.ts';
 import { type Line, type Tone, transcriptLines, truncate, wrap } from './lines.ts';
 import type { MouseEvent } from './mouse.ts';
+import { completePath, type PathKind } from './pathcomplete.ts';
 import { WelcomeView, TeamView } from './UsabilityViews.tsx';
-import { welcomeStep, nextSetupAction, recoveryFor, resultLines, setupPhase } from './usability.ts';
+import {
+  welcomeStep,
+  nextSetupAction,
+  recoveryFor,
+  resultLines,
+  setupPhase,
+  turnActivity,
+} from './usability.ts';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
@@ -104,6 +117,10 @@ const TASK_COLOR: Record<TaskStatus, string> = {
   failed: 'red',
   cancelled: 'gray',
 };
+/** The Google account used when an agent names none (accounts connected before are this one). */
+const DEFAULT_ACCOUNT = 'default';
+const ACCOUNT_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+
 const TONE: Record<Tone, { color?: string; dimColor?: boolean; bold?: boolean }> = {
   user: { color: 'cyan', bold: true },
   assistant: {},
@@ -114,6 +131,29 @@ const TONE: Record<Tone, { color?: string; dimColor?: boolean; bold?: boolean }>
   dim: { dimColor: true },
   system: { color: 'blue' },
 };
+
+/** One transcript row: its tone, and the styled runs of rendered markdown when it has them. */
+function LineText({ line }: { line: Line }) {
+  return (
+    <Text {...TONE[line.tone]} wrap="truncate">
+      {line.spans?.length
+        ? line.spans.map((s, i) => (
+            <Text
+              key={i}
+              bold={s.bold}
+              italic={s.italic}
+              underline={s.underline}
+              strikethrough={s.strike}
+              dimColor={s.dim}
+              color={s.code ? 'green' : undefined}
+            >
+              {s.text}
+            </Text>
+          ))
+        : line.text || ' '}
+    </Text>
+  );
+}
 
 type SecretField = { key: string; label: string; masked: boolean; optional?: boolean };
 /** Masked inputs: connector credentials, and the Claude Code token (`claude`). */
@@ -175,6 +215,8 @@ type Modal =
       data: AgentSettings | null;
       state: SettingsState | null;
       cursor: number;
+      /** A text field being typed in the panel. */
+      editing?: { field: TextField; input: string; error?: string };
     }
   | { kind: 'retry'; taskId: string; agentId: string; status: TaskStatus }
   | {
@@ -210,6 +252,10 @@ type Modal =
       submit: (value: string) => Promise<unknown>;
       /** Enter with an empty input submits it (clears a filter). */
       allowEmpty?: boolean;
+      /** A path on this computer: Tab completes it. */
+      paths?: PathKind;
+      /** Entries listed by the last Tab with several matches. */
+      candidates?: string[];
     };
 
 export interface AppProps {
@@ -218,6 +264,8 @@ export interface AppProps {
   initialTasks: TaskRow[];
   initialView?: string;
   onMouse?(handler: (e: MouseEvent) => void): void;
+  /** Turns the terminal's mouse reporting on or off (off: the terminal selects text natively). */
+  setMouse?(on: boolean): void;
   /** Opens $EDITOR on a draft and returns the edited text (CJK input fallback). */
   compose?(draft: string): string;
   /** Effective key bindings (defaults merged with ~/.anchi/keybindings.json). */
@@ -278,6 +326,7 @@ export function App({
   initialTasks,
   initialView,
   onMouse,
+  setMouse,
   compose,
   keymap = DEFAULT_KEYMAP,
   keyWarnings = [],
@@ -353,6 +402,15 @@ export function App({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
+  // Selection mode: mouse reporting off, transcript full width without borders, so the
+  // terminal's own selection copies clean text.
+  const [selecting, setSelecting] = useState(false);
+  useEffect(() => {
+    if (selecting) {
+      setMouse?.(false);
+      return () => setMouse?.(true);
+    }
+  }, [selecting, setMouse]);
   const [setupLog, setSetupLog] = useState<string[]>([]);
   const [proposals, setProposals] = useState<BuilderProposal[]>([]);
   // Writes the egress proxy holds for the user, oldest first.
@@ -468,8 +526,9 @@ export function App({
         approvalsNotified.current = true;
         setApprovals(next);
       }),
-      client.on('oauth', ({ id, ok, error }) => {
-        say(ok ? `${id} connected` : `${id}: ${error ?? 'sign-in failed'}`);
+      client.on('oauth', ({ id, account, ok, error }) => {
+        const which = account && account !== DEFAULT_ACCOUNT ? `${id} (${account})` : id;
+        say(ok ? `${which} connected` : `${which}: ${error ?? 'sign-in failed'}`);
         refreshSetup();
       }),
       client.on('tasksDeleted', () => {
@@ -560,9 +619,9 @@ export function App({
   // While a chord is pending, the keys that can follow it (which-key), above the status line.
   const next = pending.length ? continuations(keymap, active, pending) : [];
   const whichKeyRows = next.length ? Math.ceil(next.length / 2) + 1 : 0;
-  const sideWidth = columns < 72 ? 0 : SIDEBAR_WIDTH;
+  const sideWidth = columns < 72 || selecting ? 0 : SIDEBAR_WIDTH;
   const mainWidth = Math.max(20, columns - sideWidth);
-  const textWidth = mainWidth - 4;
+  const textWidth = selecting ? mainWidth : mainWidth - 4;
   const bodyHeight = rows - 1 - whichKeyRows;
   // The chat has an input box below the transcript; a task's detail has two meta lines above it.
   const composer = inputRows(
@@ -624,6 +683,15 @@ export function App({
     Math.max(0, lines.length - transcriptHeight - offset),
     lines.length - offset,
   );
+  // Under a running turn's transcript: a spinner, how long it has run and what it is doing.
+  const working =
+    task && (task.status === 'running' || task.status === 'queued')
+      ? `${SPINNER[frame % SPINNER.length]} ${
+          task.status === 'queued'
+            ? 'queued'
+            : `working${task.startedAt ? ` ${duration(Date.now() - task.startedAt)}` : ''} · ${turnActivity(logs[task.id] ?? [])}`
+        }`
+      : '';
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const firstRowRef = useRef(transcriptFirstRow);
@@ -740,13 +808,33 @@ export function App({
     }).then(() => setDraft(draftOf(result.replace(/\n+$/, ''))));
   };
 
+  /** Edits the prompt of the open settings panel in $EDITOR. */
+  const editPrompt = () => {
+    if (!compose) return say('set $EDITOR to edit the prompt');
+    if (modal?.kind !== 'settings' || !modal.state) return;
+    let result = modal.state.promptText;
+    // Without a terminal to hand over (tests), the editor runs in place.
+    const hand = suspendTerminal ?? (async (fn: () => void) => fn());
+    void hand(() => {
+      result = compose(result);
+    }).then(() =>
+      setModal((m) =>
+        m?.kind === 'settings' && m.state ? { ...m, state: { ...m.state, promptText: result } } : m,
+      ),
+    );
+  };
+
   const openConnector = (id: ConnectorId) =>
     setModal({ kind: 'secret', connector: id, index: 0, values: {}, input: '' });
 
   /** Edits the input of the open text or secret dialog from its latest state (fast typing). */
   const editModalInput = (edit: (value: string) => string) =>
     setModal((m) =>
-      m && (m.kind === 'text' || m.kind === 'secret') ? { ...m, input: edit(m.input) } : m,
+      m && m.kind === 'text'
+        ? { ...m, input: edit(m.input), candidates: undefined }
+        : m && m.kind === 'secret'
+          ? { ...m, input: edit(m.input) }
+          : m,
     );
 
   const runAction = (action: () => Promise<unknown>, done: string) => {
@@ -933,6 +1021,32 @@ export function App({
     return proposal ? { kind: 'proposal', proposal, scroll: 0 } : undefined;
   };
 
+  /** Asks for the Google Cloud Desktop app OAuth client JSON (for Gmail and Drive). */
+  const importGoogleClient = () =>
+    setModal({
+      kind: 'text',
+      title: 'Google OAuth client',
+      label:
+        'Path of the Desktop app OAuth client JSON from Google Cloud (needed once for Gmail and Drive; it takes precedence over a built-in client)',
+      input: '',
+      paths: { extensions: ['.json'] },
+      submit: async (path) => {
+        const text = await readClientFile(path.trim());
+        await client.call('services.googleClient', { json: text });
+        refreshSetup();
+        say('Google client stored; press Enter to sign in');
+      },
+    });
+  /** Opens Google sign-in in the browser for one account of Gmail or Drive. */
+  const googleLogin = (id: ServiceConnectorId, account: string) =>
+    runAction(
+      async () => {
+        const { url } = await client.call('services.googleLogin', { id, account });
+        say(`sign in to Google in your browser (${url.slice(0, 60)}…)`);
+      },
+      `opened Google sign-in for ${id}${account === DEFAULT_ACCOUNT ? '' : ` (${account})`}`,
+    );
+
   /** Runs a bound action in the current view. */
   const run = (action: ActionId): void => {
     const running = (t?: TaskRow) => t && (t.status === 'running' || t.status === 'queued');
@@ -994,6 +1108,8 @@ export function App({
         return setModal({ kind: 'help', context, scroll: 0 });
       case 'app:palette':
         return setModal({ kind: 'palette', context, query: '', cursor: 0 });
+      case 'app:select':
+        return setSelecting(true);
       case 'focus:toggle':
         return setFocus((f) => (f === 'side' ? 'main' : 'side'));
       case 'focus:main':
@@ -1190,8 +1306,9 @@ export function App({
           label:
             'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit)',
           input: '',
+          paths: { dirsOnly: true },
           submit: async (raw) => {
-            const source = raw.trim();
+            const source = /^https:\/\//.test(raw.trim()) ? raw.trim() : localPath(raw.trim());
             const guess = source.replace(/\/+$/, '').split('/').at(-1)?.toLowerCase() ?? '';
             setModal({
               kind: 'text',
@@ -1270,25 +1387,42 @@ export function App({
         if (sid === 'notion' || sid === 'slack') {
           return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
         }
-        if (!setup?.googleClient) {
-          return setModal({
-            kind: 'text',
-            title: 'Google OAuth client',
-            label:
-              'Path of the Desktop app OAuth client JSON from Google Cloud (needed once for Gmail and Drive)',
-            input: '',
-            submit: async (path) => {
-              const text = await readClientFile(path.trim());
-              await client.call('services.googleClient', { json: text });
-              refreshSetup();
-              say('Google client stored; press Enter again to sign in');
-            },
-          });
-        }
-        return runAction(async () => {
-          const { url } = await client.call('services.googleLogin', { id: sid! });
-          say(`sign in to Google in your browser (${url.slice(0, 60)}…)`);
-        }, `opened Google sign-in for ${sid}`);
+        if (!setup?.googleClient) return importGoogleClient();
+        // Enter signs in again the account that needs it, else the default one.
+        return googleLogin(
+          sid!,
+          status?.accounts.find((a) => a.reauthRequired)?.name ?? DEFAULT_ACCOUNT,
+        );
+      case 'connectors:account':
+        if (sid !== 'gmail' && sid !== 'drive') return say('select gmail or drive first');
+        if (!setup?.googleClient) return importGoogleClient();
+        return setModal({
+          kind: 'text',
+          title: `Another Google account for ${sid}`,
+          label: `A name for the account (lowercase letters, digits, "-" or "_"), e.g. work. Agents pick it with accounts: { ${sid}: <name> }. Connected: ${
+            status?.accounts.map((a) => a.name).join(', ') || 'none'
+          }.`,
+          input: '',
+          submit: async (name) => {
+            if (!ACCOUNT_NAME.test(name.trim()))
+              throw new Error(`"${name}" is not an account name`);
+            await googleLogin(sid, name.trim());
+          },
+        });
+      case 'connectors:googleClient':
+        if (setup?.googleClientSource !== 'user') return importGoogleClient();
+        return setModal({
+          kind: 'confirm',
+          title: 'Remove your Google OAuth client',
+          body:
+            "Gmail and Drive go back to Anchi's built-in client when this version ships one, " +
+            'otherwise to none until you import one again. Disconnect every Google account first: ' +
+            'their tokens belong to this client.',
+          action: async () => {
+            await client.call('services.removeGoogleClient');
+            refreshSetup();
+          },
+        });
       case 'connectors:ghImport':
         if (id !== 'github') return say('select github first');
         return setModal({
@@ -1321,12 +1455,34 @@ export function App({
       }
       case 'connectors:disconnect':
         if (sid) {
-          if (!status?.connected) return;
+          // Google services: one of their accounts (connected, or a revocation to retry).
+          const accounts = (status?.accounts ?? []).filter(
+            (a) => a.connected || a.revocationPending,
+          );
+          if (accounts.length > 1) {
+            return setModal({
+              kind: 'text',
+              title: `Disconnect a ${sid} account`,
+              label: `Which account to remove from the vault and revoke at Google: ${accounts
+                .map((a) => `${a.name}${a.account ? ` (${sanitizeLine(a.account)})` : ''}`)
+                .join(', ')}`,
+              input: '',
+              submit: async (name) => {
+                if (!accounts.some((a) => a.name === name.trim()))
+                  throw new Error(`${sid} has no account "${name}"`);
+                await client.call('services.disconnect', { id: sid, account: name.trim() });
+                refreshSetup();
+              },
+            });
+          }
+          const account = accounts[0]?.name;
+          if (!status?.connected && !account) return;
           return setModal({
             kind: 'confirm',
-            title: `Disconnect ${sid}`,
+            title: `Disconnect ${sid}${account && account !== DEFAULT_ACCOUNT ? ` (${account})` : ''}`,
             body: `Remove the ${sid} credential from the vault${sid === 'gmail' || sid === 'drive' ? ' and revoke it at Google' : ''}.`,
-            action: () => client.call('services.disconnect', { id: sid }),
+            action: () =>
+              client.call('services.disconnect', account ? { id: sid, account } : { id: sid }),
           });
         }
         return setModal({
@@ -1340,7 +1496,20 @@ export function App({
 
   usePaste((text) => {
     if (modal?.kind === 'secret' || modal?.kind === 'text') editModalInput((v) => v + text.trim());
-    else if (modal?.kind === 'palette')
+    else if (modal?.kind === 'settings' && modal.editing) {
+      const { field } = modal.editing;
+      setModal((m) =>
+        m?.kind === 'settings' && m.editing
+          ? {
+              ...m,
+              editing: {
+                field,
+                input: (m.editing.input + sanitizeLine(text.trim())).slice(0, TEXT_FIELDS[field]),
+              },
+            }
+          : m,
+      );
+    } else if (modal?.kind === 'palette')
       setModal({ ...modal, query: modal.query + text.trim(), cursor: 0 });
     else if (!modal && agent && focus === 'main')
       setDraft((d) => insert(d, sanitize(text).replace(/\r\n?/g, '\n')));
@@ -1349,6 +1518,14 @@ export function App({
   /** One keystroke or a run of text; `useInput` splits mixed chunks into these. */
   const handleInput = (ch: string, key: InkKey) => {
     if (key.ctrl && ch === 'c') return exit();
+    if (selecting) {
+      // Scrolling still works (terminals turn the wheel into arrows here); anything else ends it.
+      if (key.upArrow) return setScroll((s) => s + 1);
+      if (key.downArrow) return setScroll((s) => Math.max(0, s - 1));
+      if (key.pageUp) return setScroll((s) => s + transcriptHeight);
+      if (key.pageDown) return setScroll((s) => Math.max(0, s - transcriptHeight));
+      return setSelecting(false);
+    }
     // ── modals take every key ──
     if (modal?.kind === 'composeReview') {
       if (key.escape) return setModal(null);
@@ -1475,6 +1652,11 @@ export function App({
     }
     if (modal?.kind === 'text') {
       if (key.escape) return setModal(null);
+      if (key.tab && modal.paths) {
+        // A URL (a GitHub skill) is not a path.
+        if (/^[a-z]+:\/\//i.test(modal.input)) return;
+        return setModal({ ...modal, ...completePath(modal.input, modal.paths) });
+      }
       if (key.backspace || key.delete) return editModalInput((v) => [...v].slice(0, -1).join(''));
       if (key.return) {
         if (!modal.input && !modal.allowEmpty) return;
@@ -1514,6 +1696,34 @@ export function App({
         );
       return;
     }
+    if (modal?.kind === 'settings' && modal.editing && modal.state) {
+      const { field } = modal.editing;
+      // From the latest input, as for the other dialogs (fast typing).
+      const typing = (f: (v: string) => string) =>
+        setModal((m) =>
+          m?.kind === 'settings' && m.editing
+            ? {
+                ...m,
+                editing: { field, input: f(m.editing.input).slice(0, TEXT_FIELDS[field]) },
+              }
+            : m,
+        );
+      if (key.escape) return setModal({ ...modal, editing: undefined });
+      if (key.backspace || key.delete) return typing((v) => [...v].slice(0, -1).join(''));
+      if (key.return) {
+        return setModal((m) => {
+          if (m?.kind !== 'settings' || !m.editing || !m.state) return m;
+          const { input } = m.editing;
+          if (field === 'model' && !MODEL.test(input.trim())) {
+            const error = 'a model id has letters, digits, ".", "_" and "-" only';
+            return { ...m, editing: { ...m.editing, error } };
+          }
+          return { ...m, editing: undefined, state: { ...m.state, [field]: input } };
+        });
+      }
+      if (ch && !key.ctrl && !key.meta) typing((v) => v + ch.replace(/[\r\n]/g, ''));
+      return;
+    }
     if (modal?.kind === 'settings') {
       if (key.escape)
         return setModal(modal.proposalId ? (proposalModal(modal.proposalId) ?? null) : null);
@@ -1532,6 +1742,13 @@ export function App({
         return edit((m, items) => ({ cursor: Math.min(items.length - 1, m.cursor + 1) }));
       }
       if (ch === ' ') {
+        const row = settingsRows(modal.data, modal.state).filter((r) => r.kind !== 'header')[
+          modal.cursor
+        ];
+        if (row?.kind === 'field' && row.id === 'prompt') return editPrompt();
+        if (row?.kind === 'field' && isTextField(row.id)) {
+          return setModal({ ...modal, editing: { field: row.id, input: modal.state[row.id] } });
+        }
         return edit((m, items) =>
           items[m.cursor] ? { state: toggleSetting(m.state!, items[m.cursor]!) } : {},
         );
@@ -1834,19 +2051,23 @@ export function App({
         ...hints.map(([a, l]) => hint(a, l)),
         proposals.length ? hint('builder:proposal', 'proposal') : '',
         problem || task?.status === 'failed' ? hint('problem:open', 'resolve problem') : '',
-        hint('app:palette', 'commands'),
-        hint('app:help', 'keys'),
       ]
         .filter(Boolean)
         .join(' · ');
-  const statusLine =
-    approvals.length && !pending.length
+  // Always visible at the right, so a narrow window never cuts off the way to every other key.
+  const menuHint =
+    pending.length || selecting
+      ? ''
+      : [hint('app:palette', 'commands'), hint('app:help', 'keys')].filter(Boolean).join(' · ');
+  const statusLine = selecting
+    ? 'Selection mode: drag to select, copy with your terminal · ↑↓ PgUp PgDn scroll · any other key ends'
+    : approvals.length && !pending.length
       ? `⏸ ${approvals.length} write${approvals.length === 1 ? '' : 's'} waiting for approval (${keyLabel(keysFor(keymap, active, 'approvals:open')[0] ?? '')}) · ${status}`
       : status;
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       <Box flexDirection="row" height={bodyHeight}>
-        {sideWidth > 0 || focus === 'side' ? (
+        {!selecting && (sideWidth > 0 || focus === 'side') ? (
           <Sidebar
             focused={focus === 'side'}
             rows={sideRows}
@@ -1859,12 +2080,13 @@ export function App({
         ) : null}
         <Box
           flexDirection="column"
-          display={sideWidth === 0 && focus === 'side' ? 'none' : 'flex'}
+          display={sideWidth === 0 && focus === 'side' && !selecting ? 'none' : 'flex'}
           width={mainWidth}
           height={bodyHeight}
-          borderStyle="round"
+          borderStyle={selecting ? undefined : 'round'}
           borderColor={focus === 'main' ? 'cyan' : 'gray'}
-          paddingX={1}
+          paddingX={selecting ? 0 : 1}
+          paddingY={selecting ? 1 : 0}
         >
           <Text bold wrap="truncate">
             {header}
@@ -1896,11 +2118,7 @@ export function App({
                 {agent.error ? (
                   <Text color="red">{sanitize(agent.error)}</Text>
                 ) : visible.length ? (
-                  visible.map((l, i) => (
-                    <Text key={i} {...TONE[l.tone]} wrap="truncate">
-                      {l.text || ' '}
-                    </Text>
-                  ))
+                  visible.map((l, i) => <LineText key={i} line={l} />)
                 ) : (
                   <Text dimColor>
                     {current === BUILDER
@@ -1909,7 +2127,13 @@ export function App({
                   </Text>
                 )}
               </Box>
-              <Text dimColor>{offset > 0 ? `↓ ${offset} more lines (PgDn)` : ' '}</Text>
+              {offset > 0 ? (
+                <Text dimColor>{`↓ ${offset} more lines (PgDn)`}</Text>
+              ) : (
+                <Text color="cyan" wrap="truncate">
+                  {working || ' '}
+                </Text>
+              )}
               <Text
                 color="cyan"
                 wrap="truncate"
@@ -1955,16 +2179,18 @@ export function App({
               </Text>
               <Box flexDirection="column" height={transcriptHeight}>
                 {visible.length ? (
-                  visible.map((l, i) => (
-                    <Text key={i} {...TONE[l.tone]} wrap="truncate">
-                      {l.text || ' '}
-                    </Text>
-                  ))
+                  visible.map((l, i) => <LineText key={i} line={l} />)
                 ) : (
                   <Text dimColor>Loading…</Text>
                 )}
               </Box>
-              <Text dimColor>{offset > 0 ? `↓ ${offset} more lines (PgDn)` : ' '}</Text>
+              {offset > 0 ? (
+                <Text dimColor>{`↓ ${offset} more lines (PgDn)`}</Text>
+              ) : (
+                <Text color="cyan" wrap="truncate">
+                  {working || ' '}
+                </Text>
+              )}
             </>
           ) : current === 'connectors' ? (
             <ConnectorsView setup={setup} cursor={connectorCursor} />
@@ -1994,9 +2220,18 @@ export function App({
         </Box>
       </Box>
       {whichKeyRows ? <WhichKey next={next} width={columns} /> : null}
-      <Text dimColor wrap="truncate">
-        {statusLine}
-      </Text>
+      <Box flexDirection="row" width={columns}>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text dimColor wrap="truncate">
+            {statusLine}
+          </Text>
+        </Box>
+        {menuHint ? (
+          <Box flexShrink={0} paddingLeft={1}>
+            <Text color="cyan">{menuHint}</Text>
+          </Box>
+        ) : null}
+      </Box>
     </Box>
   );
 }
@@ -2184,22 +2419,75 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
       <Text bold dimColor>
         SERVICES
       </Text>
-      {(setup.services ?? []).map((c, i) => (
-        <Box key={c.id} flexDirection="column">
-          <Text inverse={i + setup.connectors.length === cursor}>
-            <Text color={c.reauthRequired ? 'red' : c.connected ? 'green' : 'gray'}>
-              {c.connected ? '●' : '○'}
-            </Text>{' '}
-            {c.id.padEnd(8)}
-            {c.reauthRequired
-              ? 'sign in again'
-              : c.connected
-                ? sanitizeLine(c.account ?? 'connected')
-                : 'not connected'}
-            {` · writes ${c.mode === 'ask' ? 'ask' : 'auto'}`}
-          </Text>
-        </Box>
-      ))}
+      <Text dimColor>
+        {`  Google client (Gmail, Drive): ${
+          setup.googleClientSource === 'builtin'
+            ? 'built-in'
+            : setup.googleClientSource === 'user' || setup.googleClient
+              ? 'your own'
+              : 'none yet — Enter on gmail or drive imports one'
+        } · o to change`}
+      </Text>
+      {(setup.services ?? []).map((c, i) => {
+        // Named accounts, or a default one with a revocation to retry, get a row each.
+        const accounts = (c.accounts ?? []).filter((a) => a.connected || a.revocationPending);
+        const listAccounts =
+          accounts.length > 1 || accounts.some((a) => a.name !== 'default' || a.revocationPending);
+        // Gmail and Drive connect in two steps: the OAuth client JSON, then Google sign-in.
+        const signInPending =
+          !c.connected &&
+          !c.reauthRequired &&
+          setup.googleClient &&
+          (c.id === 'gmail' || c.id === 'drive');
+        return (
+          <Box key={c.id} flexDirection="column">
+            <Text inverse={i + setup.connectors.length === cursor}>
+              <Text
+                color={
+                  c.reauthRequired
+                    ? 'red'
+                    : c.connected
+                      ? 'green'
+                      : signInPending
+                        ? 'yellow'
+                        : 'gray'
+                }
+              >
+                {c.connected ? '●' : '○'}
+              </Text>{' '}
+              {c.id.padEnd(8)}
+              {c.reauthRequired
+                ? 'sign in again'
+                : c.connected
+                  ? sanitizeLine(c.account ?? 'connected')
+                  : signInPending
+                    ? setup.googleClientSource === 'builtin'
+                      ? 'press Enter to sign in with Google'
+                      : 'client stored — press Enter to sign in'
+                    : 'not connected'}
+              {` · writes ${c.mode === 'ask' ? 'ask' : 'auto'}`}
+            </Text>
+            {listAccounts
+              ? accounts.map((a) => (
+                  <Text
+                    key={a.name}
+                    dimColor={!a.reauthRequired}
+                    color={a.reauthRequired ? 'red' : undefined}
+                    wrap="truncate"
+                  >
+                    {`  └ ${a.name.padEnd(10)}${
+                      a.revocationPending
+                        ? 'revocation pending — disconnect again'
+                        : a.reauthRequired
+                          ? 'sign in again (Enter)'
+                          : sanitizeLine(a.account ?? 'connected')
+                    }`}
+                  </Text>
+                ))
+              : null}
+          </Box>
+        );
+      })}
       <Text dimColor>
         Secrets go from this screen to the VM vault. They are never stored on this computer or shown
         again. Google tokens are obtained in the VM.
@@ -2208,10 +2496,15 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
   );
 }
 
+/** A path typed in the TUI as an absolute path: `~/` is the home directory, relative is the cwd. */
+function localPath(path: string): string {
+  const home = process.env.HOME ?? '';
+  return resolvePath(path === '~' || path.startsWith('~/') ? `${home}${path.slice(1)}` : path);
+}
+
 /** Reads the Google client JSON the user points at (on this computer). */
 async function readClientFile(path: string): Promise<string> {
-  const home = process.env.HOME ?? '';
-  const file = path.startsWith('~/') ? `${home}${path.slice(1)}` : path;
+  const file = localPath(path);
   if ((await stat(file)).size > 16_384) throw new Error('that file is too large for a client JSON');
   return readFile(file, 'utf8');
 }
@@ -2365,7 +2658,7 @@ export function helpRows(keymap: KeyMap, context: Context): [string, string][] {
     ['Ctrl+C', 'quit'],
     ['y/n then Enter', 'approval: select a decision, then confirm'],
     ['y n Esc', 'confirmation and proposal dialogs'],
-    ['Space Enter', 'agent settings: select, then review the change (s in a proposal)'],
+    ['Space Enter', 'agent settings: change or select, then review the change (s in a proposal)'],
   );
   return rows;
 }
@@ -2604,9 +2897,17 @@ function ModalView({
         <Box borderStyle="single" paddingX={1}>
           <Text>{sanitizeLine(modal.input)}█</Text>
         </Box>
+        {modal.candidates?.length ? (
+          <Text dimColor wrap="wrap">
+            {modal.candidates
+              .slice(0, Math.max(1, (height - 12) * 4))
+              .map(sanitizeLine)
+              .join('   ')}
+          </Text>
+        ) : null}
         <Box flexGrow={1} />
         <Text dimColor>
-          Enter confirm · Esc cancel · this screen is drawn by Anchi, not by an agent
+          {`Enter confirm · ${modal.paths ? 'Tab complete the path · ' : ''}Esc cancel · this screen is drawn by Anchi, not by an agent`}
         </Text>
       </Box>
     );
@@ -2654,6 +2955,7 @@ function ModalView({
     );
     if (!modal.data || !modal.state) return frame(<Text dimColor>Loading…</Text>, 'Esc close');
     const rows = settingsRows(modal.data, modal.state);
+    const { editing } = modal;
     const items = rows.filter((r) => r.kind !== 'header');
     const at = rows.indexOf(items[modal.cursor]!);
     const room = Math.max(3, height - 5);
@@ -2662,20 +2964,25 @@ function ModalView({
       <Box flexDirection="column" height={room}>
         {rows.slice(first, first + room).map((r, i) =>
           r.kind === 'header' ? (
+            // Prompt lines and other values come from the agent file (or the builder).
             <Text key={i} dimColor bold={!r.text.startsWith(' ')} wrap="truncate">
-              {r.text}
+              {truncate(sanitizeLine(r.text), inner)}
             </Text>
           ) : (
             <Text key={i} inverse={first + i === at} wrap="truncate">
               {`${r.mark.padEnd(5)}${truncate(sanitizeLine(r.label), 30).padEnd(31)}`}
-              <Text dimColor={first + i !== at}>
-                {truncate(sanitizeLine(r.note), Math.max(10, inner - 38))}
+              <Text dimColor={first + i !== at && !(editing && r.id === editing.field)}>
+                {editing && r.kind === 'field' && r.id === editing.field
+                  ? `${sanitizeLine(editing.input).slice(-Math.max(10, inner - 39))}█`
+                  : truncate(sanitizeLine(r.note), Math.max(10, inner - 38))}
               </Text>
             </Text>
           ),
         )}
       </Box>,
-      `↑↓ choose · Space select (workspaces: off → ro → rw) · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'}${modal.proposalId ? '' : ' · D delete the agent'} · Esc cancel`,
+      editing
+        ? `${editing.error ? `✗ ${editing.error}` : `Type the ${editing.field}${editing.field === 'model' ? ' (empty: the runtime default)' : ''}`} · Enter keep · Esc undo`
+        : `↑↓ choose · Space change · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'}${modal.proposalId ? '' : ' · D delete the agent'} · Esc cancel`,
     );
   }
   if (modal.kind === 'deleteAgent') {
@@ -2864,7 +3171,13 @@ function ModalView({
     for (const line of sanitize(text).split('\n'))
       body.push({ text: truncate(line, inner), color });
   };
-  add(`Agent @${p.agentId}`);
+  add(
+    p.kind === 'update'
+      ? `Changes to @${p.agentId} (only the + and - lines change; comments and other fields stay)`
+      : p.kind === 'replace'
+        ? `@${p.agentId}: replaces its whole file`
+        : `New agent @${p.agentId}`,
+  );
   for (const l of (p.agentDiff || '(unchanged)').split('\n'))
     add(l, l.startsWith('+') ? 'green' : l.startsWith('-') ? 'red' : undefined);
   if (p.imageYaml) {

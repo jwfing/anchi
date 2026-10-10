@@ -123,6 +123,7 @@ export async function setupStatus(
     claude: { runtime: 'claude-code', connected: false, kind: null },
     services: [],
     googleClient: false,
+    googleClientSource: null,
     workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
   };
@@ -139,6 +140,7 @@ export async function setupStatus(
     const svc = (await services?.status().catch(() => undefined)) ?? {
       services: [],
       googleClient: false,
+      googleClientSource: null,
     };
     return {
       ...empty,
@@ -150,6 +152,7 @@ export async function setupStatus(
       connectors,
       services: svc.services,
       googleClient: svc.googleClient,
+      googleClientSource: svc.googleClientSource,
       workspaces,
     };
   } catch {

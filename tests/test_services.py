@@ -268,6 +268,92 @@ class OAuthTests(unittest.TestCase):
         with self.assertRaises(Denied):
             auth.import_client({'installed': {'client_id': 'other.apps.googleusercontent.com', 'client_secret': 'x'}})
 
+    def connect(self, connector, account, refresh_token):
+        flow = auth.begin(connector, 'http://127.0.0.1:1/callback', account)
+        scope = ' '.join(sorted(auth.GOOGLE[connector]['scopes']))
+        result = {
+            'scope': scope,
+            'refresh_token': refresh_token,
+            'access_token': refresh_token + '-A',
+            'expires_in': 3600,
+        }
+        with patch('auth.google_json', return_value=result):
+            auth.complete(connector, {'state': flow['state'], 'code': 'c'}, account)
+
+    def test_named_accounts_are_separate_and_default_keeps_legacy_files(self):
+        self.connect('gmail', 'default', 'D')
+        self.connect('gmail', 'work', 'W')
+        self.assertTrue((auth.STORE / 'tokens.json.enc').exists())
+        self.assertTrue((auth.STORE / 'tokens.work.json.enc').exists())
+        self.assertEqual(auth.access_token('gmail'), 'D-A')
+        self.assertEqual(auth.access_token('gmail', 'work'), 'W-A')
+        default = auth.handle({'op': 'access_token'}, 'gmail')
+        work = auth.handle({'op': 'access_token', 'account': 'work'}, 'gmail')
+        self.assertEqual(work['access_token'], 'W-A')
+        # Grants bind to the generation, so one account's approval never applies to another.
+        self.assertNotEqual(default['account_generation'], work['account_generation'])
+        with self.assertRaisesRegex(Denied, 'NOT_CONNECTED'):
+            auth.handle({'op': 'access_token', 'account': 'other'}, 'gmail')
+        for bad in ('Work', '../x', '', 'a' * 33, 1):
+            with self.assertRaisesRegex(Denied, 'BAD_ACCOUNT'):
+                auth.handle({'op': 'access_token', 'account': bad}, 'gmail')
+        # Only Google services name accounts.
+        with self.assertRaisesRegex(Denied, 'BAD_REQUEST'):
+            auth.handle({'op': 'status', 'account': 'work'}, 'notion')
+        auth.set_account('gmail', 'me@work.test', 'work')
+        status = auth.status()['gmail']
+        self.assertTrue(status['connected'])
+        self.assertEqual([a['name'] for a in status['accounts']], ['default', 'work'])
+        self.assertEqual(status['accounts'][1]['account'], 'me@work.test')
+        # A service sees its own account, not the labels of the others.
+        own = auth.handle({'op': 'status', 'account': 'work'}, 'gmail')
+        self.assertEqual(list(own), ['gmail'])
+        self.assertEqual(own['gmail']['account'], 'me@work.test')
+        self.assertNotIn('accounts', own['gmail'])
+        with patch('auth.google_json', return_value={}):
+            auth.disconnect('gmail', 'default')
+        status = auth.status()['gmail']
+        self.assertTrue(status['connected'])
+        self.assertEqual(status['account'], 'me@work.test')
+        self.assertEqual([a['name'] for a in status['accounts']], ['work'])
+
+    def test_account_count_is_bounded(self):
+        for n in range(auth.MAX_ACCOUNTS):
+            auth.write(f'tokens.a{n}.json', {'access_token': 'x', 'generation': 'g'})
+        with self.assertRaisesRegex(Denied, 'TOO_MANY_ACCOUNTS'):
+            auth.begin('gmail', 'http://127.0.0.1:1/callback', 'one-more')
+        auth.begin('gmail', 'http://127.0.0.1:1/callback', 'a0')
+        auth.begin('drive', 'http://127.0.0.1:1/callback', 'one-more')
+
+    def test_builtin_client_applies_until_a_user_client_is_imported(self):
+        builtin = Path(self.directory.name) / 'google_client.json'
+        with patch('auth.BUILTIN_CLIENT', builtin):
+            self.assertEqual(auth.status()['client_source'], 'user')
+            auth.remove_client()
+            self.assertEqual((auth.status()['client_source'], auth.status()['client_configured']), (None, False))
+            with self.assertRaisesRegex(Denied, 'GOOGLE_CLIENT_REQUIRED'):
+                auth.begin('gmail', 'http://127.0.0.1:1/callback')
+            builtin.write_text('{"installed": {"client_id": "not-google", "client_secret": "x"}}')
+            self.assertIsNone(auth.status()['client_source'])
+            builtin.write_text(
+                json.dumps({'installed': {'client_id': 'anchi.apps.googleusercontent.com', 'client_secret': 'B'}})
+            )
+            self.assertEqual((auth.status()['client_source'], auth.status()['client_configured']), ('builtin', True))
+            self.assertIn('client_id=anchi.apps', auth.begin('gmail', 'http://127.0.0.1:1/callback')['url'])
+            auth.import_client({'installed': {'client_id': 'mine.apps.googleusercontent.com', 'client_secret': 'U'}})
+            self.assertEqual(auth.status()['client_source'], 'user')
+            self.assertIn('client_id=mine.apps', auth.begin('gmail', 'http://127.0.0.1:1/callback')['url'])
+            # Replacing or removing the client waits until every Google account is disconnected.
+            auth.write('drive-tokens.work.json', {'access_token': 'x'})
+            with self.assertRaisesRegex(Denied, 'DISCONNECT_BEFORE_REPLACING_CLIENT'):
+                auth.remove_client()
+            vault_name = auth.google_file('drive', 'tokens', 'work')
+            auth.vault.remove(auth.STORE, vault_name)
+            auth.remove_client()
+            self.assertEqual(auth.status()['client_source'], 'builtin')
+            # Sign-ins started with the removed client are dropped.
+            self.assertFalse(auth.account_files('gmail', 'pending'))
+
 
 class BoundaryTests(unittest.TestCase):
     def test_token_endpoint_400_is_an_authorization_failure(self):

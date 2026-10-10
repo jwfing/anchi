@@ -71,6 +71,12 @@ export function* mapClaudeMessage(m: SDKMessage): Generator<RuntimeEvent> {
       for (const block of m.message.content as unknown as Block[]) {
         if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
           yield { type: 'message', text: text(block.text) };
+        } else if (
+          block.type === 'thinking' &&
+          typeof block.thinking === 'string' &&
+          block.thinking.trim()
+        ) {
+          yield { type: 'progress', text: text(block.thinking) };
         } else if (block.type === 'tool_use') {
           yield {
             type: 'tool.call',

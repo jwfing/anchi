@@ -4,6 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -27,6 +28,11 @@ NAMES = {
     'linear.json',
     'aws.json',
 }
+# Google files of a named account other than `default`, which keeps the names above. The logical
+# name (the AAD) carries the account, so one account's file cannot stand in for another's.
+ACCOUNT_NAME = re.compile(
+    r'(tokens|pending|revocation|drive-tokens|drive-pending|drive-revocation)\.[a-z0-9][a-z0-9_-]{0,31}\.json'
+)
 
 
 def key():
@@ -40,7 +46,7 @@ def key():
 
 
 def path(store, name):
-    if name not in NAMES:
+    if name not in NAMES and not ACCOUNT_NAME.fullmatch(name):
         raise Denied('VAULT_NAME_DENIED')
     return store / (name + '.enc')
 

@@ -45,25 +45,32 @@ export const SETUP_STEPS: Record<SetupAction, string[][]> = {
   'vault-unlock': [['python3', 'scripts/vault.py', 'unlock']],
 };
 
+/**
+ * `setup.reset`: deletes the VM and everything in it (the vault's encrypted files included).
+ * Lima ignores an instance that does not exist. The vault key and Anchi home are the CLI's.
+ */
+export const RESET_STEPS: string[][] = [['limactl', 'delete', '--force', 'secure-vm']];
+
 const STEP_TIMEOUT_MS = 45 * 60_000;
 
 /** Runs one setup step at a time, streaming its output lines. */
 export class SetupRunner {
-  running: SetupAction | undefined;
+  running: SetupAction | 'reset' | undefined;
 
   constructor(
     private steps: Record<SetupAction, string[][]> = SETUP_STEPS,
     private cwd = REPO_ROOT,
+    private resetSteps: string[][] = RESET_STEPS,
   ) {}
 
-  async run(action: SetupAction, onLine: (line: string) => void): Promise<void> {
+  async run(action: SetupAction | 'reset', onLine: (line: string) => void): Promise<void> {
     if (this.running) throw new Error(`setup step "${this.running}" is already running`);
     if (action === 'workspaces' && process.platform !== 'darwin') {
       throw new Error('workspaces are available on macOS only for now');
     }
     this.running = action;
     try {
-      for (const [cmd, ...args] of this.steps[action]) {
+      for (const [cmd, ...args] of action === 'reset' ? this.resetSteps : this.steps[action]) {
         onLine(`$ ${[cmd, ...args].join(' ')}`);
         const { code, last } = await runLines(cmd!, args, this.cwd, onLine);
         if (code !== 0) {

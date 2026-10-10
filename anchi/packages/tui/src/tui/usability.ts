@@ -8,6 +8,7 @@ import type {
 } from '@anchi/protocol';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
 import { summarizeInput, wrap, type Line } from './lines.ts';
+import { markdownLines } from './markdown.ts';
 
 export type WelcomeStep = 'environment' | 'vault' | 'runtime' | 'agent' | 'task' | 'done';
 export function runtimeReady(setup: SetupStatus, runtime?: string): boolean {
@@ -127,15 +128,41 @@ export function teamActivity(
   if (children.length)
     return `Delegated work in progress: ${children.map((t) => '@' + t.agentId).join(', ')}`;
   if (task.status === 'queued') return `Queued: ${sanitizeLine(task.title)}`;
+  const tool = runningTool(events);
+  return tool
+    ? `${sanitizeLine(tool.name)}: ${summarizeInput(tool.input)}`
+    : `Working: ${sanitizeLine(task.title)}`;
+}
+
+/** The latest tool call without a result yet. */
+function runningTool(events: StoredEvent[]): { name: string; input: string } | undefined {
   const pending = new Map<string, { name: string; input: string }>();
   for (const { event } of events) {
     if (event.type === 'tool.call') pending.set(event.id, event);
     if (event.type === 'tool.result') pending.delete(event.id);
   }
-  const tool = [...pending.values()].at(-1);
-  return tool
-    ? `${sanitizeLine(tool.name)}: ${summarizeInput(tool.input)}`
-    : `Working: ${sanitizeLine(task.title)}`;
+  return [...pending.values()].at(-1);
+}
+
+/**
+ * What a running turn is doing, for the line under its transcript: the running tool call, else
+ * the latest reasoning summary or plan of this turn (its first line), else that it is thinking.
+ */
+export function turnActivity(events: StoredEvent[]): string {
+  const tool = runningTool(events);
+  if (tool) return `${sanitizeLine(tool.name)} ${summarizeInput(tool.input)}`;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const { event } = events[i]!;
+    if (event.type === 'input' || event.type === 'message' || event.type === 'tool.result') break;
+    if (event.type === 'progress') {
+      const first = sanitize(event.text)
+        .split('\n')
+        .map((l) => l.trim().replace(/^\*\*(.*)\*\*$/, '$1'))
+        .find(Boolean);
+      if (first) return sanitizeLine(first);
+    }
+  }
+  return 'thinking…';
 }
 export function resultLines(task: TaskRow, width: number, tasks: TaskRow[]): Line[] {
   const result: Line[] = [];
@@ -151,7 +178,10 @@ export function resultLines(task: TaskRow, width: number, tasks: TaskRow[]): Lin
     task.status === 'failed' ? 'error' : 'system',
   );
   // Keep the complete result (including any next steps), with its original line breaks.
-  add(task.result || 'No result was returned.', task.status === 'failed' ? 'error' : 'assistant');
+  if (task.result && task.status !== 'failed')
+    result.push(...markdownLines(sanitize(task.result), width));
+  else
+    add(task.result || 'No result was returned.', task.status === 'failed' ? 'error' : 'assistant');
   if (task.links.length) {
     add('Artifacts and links', 'system');
     for (const link of task.links) add(sanitizeLine(link), 'assistant');

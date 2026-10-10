@@ -22,6 +22,8 @@ export const runtimeEventSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('session.started'), resumeId: id }),
   z.strictObject({ type: z.literal('text.delta'), text }),
   z.strictObject({ type: z.literal('message'), text }),
+  /** What the agent is doing between messages: a reasoning summary or its current plan. */
+  z.strictObject({ type: z.literal('progress'), text }),
   z.strictObject({ type: z.literal('tool.call'), id, name: z.string().max(200), input: text }),
   z.strictObject({
     type: z.literal('tool.result'),

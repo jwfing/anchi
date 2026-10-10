@@ -2,7 +2,12 @@ import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { ServiceConnectorId, ServiceConnectorStatus } from '@anchi/protocol';
+import type {
+  GoogleClientSource,
+  ServiceAccountStatus,
+  ServiceConnectorId,
+  ServiceConnectorStatus,
+} from '@anchi/protocol';
 import type { Guest } from './guest.ts';
 
 /**
@@ -15,6 +20,19 @@ export const SERVICE_IDS: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 's
 export const GOOGLE_IDS: ServiceConnectorId[] = ['gmail', 'drive'];
 const SERVICES = '/opt/secure-vm/services';
 const LOGIN_TIMEOUT_MS = 590_000;
+/** A named Google account within Gmail or Drive; `default` is the one used when none is named. */
+export const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+export const DEFAULT_ACCOUNT = 'default';
+
+/** Checks an account name for a Google service; Notion and Slack take none. */
+export function accountArg(id: ServiceConnectorId, account: string | undefined): string[] {
+  if (account === undefined) return [];
+  if (!GOOGLE_IDS.includes(id)) throw new Error(`${id} has no named accounts`);
+  if (!ACCOUNT.test(account)) {
+    throw new Error('account names are 1–32 lowercase letters, digits, "-" or "_"');
+  }
+  return [account];
+}
 
 type Exec = Guest['transport']['exec'];
 
@@ -49,12 +67,14 @@ export function openInBrowser(url: string): void {
 }
 
 export class ServiceSetup {
-  private logins = new Map<ServiceConnectorId, Server>();
+  /** Sign-ins in progress, by `<service>:<account>`. */
+  private logins = new Map<string, Server>();
 
   constructor(
     private guest: Guest,
     private onLogin: (r: {
       id: ServiceConnectorId;
+      account?: string;
       ok: boolean;
       error?: string;
     }) => void = () => {},
@@ -65,21 +85,40 @@ export class ServiceSetup {
     return (args, stdin, timeout) => this.guest.transport.exec(args, stdin, timeout);
   }
 
-  async status(): Promise<{ services: ServiceConnectorStatus[]; googleClient: boolean }> {
+  async status(): Promise<{
+    services: ServiceConnectorStatus[];
+    googleClient: boolean;
+    googleClientSource: GoogleClientSource;
+  }> {
     const all = await json(this.exec, [`${SERVICES}/admin.py`, 'status']);
     const rules = ((await json(this.exec, [`${SERVICES}/policy_admin.py`, 'rules'])).rules ??
       {}) as Record<string, string>;
     const services = SERVICE_IDS.map((id) => {
       const s = (all[id] ?? {}) as Record<string, unknown>;
+      const accounts = (Array.isArray(s.accounts) ? s.accounts : []).map(
+        (a: Record<string, unknown>): ServiceAccountStatus => ({
+          name: String(a.name),
+          connected: a.connected === true,
+          account: typeof a.account === 'string' ? a.account : null,
+          reauthRequired: a.reauth_required === true,
+          revocationPending: a.revocation_pending === true,
+        }),
+      );
       return {
         id,
         connected: s.connected === true,
         account: typeof s.account === 'string' ? s.account : null,
         reauthRequired: s.reauth_required === true,
         mode: rules[id] === 'ask' ? ('ask' as const) : ('auto' as const),
+        accounts,
       };
     });
-    return { services, googleClient: all.client_configured === true };
+    const source = all.client_source;
+    return {
+      services,
+      googleClient: all.client_configured === true,
+      googleClientSource: source === 'user' || source === 'builtin' ? source : null,
+    };
   }
 
   /** Notion or Slack token, then the account label from the service itself. */
@@ -89,16 +128,27 @@ export class ServiceSetup {
     await this.probe(id);
   }
 
-  private async probe(id: ServiceConnectorId) {
+  private async probe(id: ServiceConnectorId, account?: string) {
     try {
-      await json(this.exec, [`${SERVICES}/connector_admin.py`, id, 'probe']);
+      await json(this.exec, [
+        `${SERVICES}/connector_admin.py`,
+        id,
+        'probe',
+        ...accountArg(id, account),
+      ]);
     } catch {
       // The label is a convenience; the connection itself is stored.
     }
   }
 
-  async disconnect(id: ServiceConnectorId): Promise<void> {
-    await json(this.exec, [`${SERVICES}/connector_admin.py`, id, 'disconnect']);
+  /** Gmail and Drive: one account (`default` when omitted). */
+  async disconnect(id: ServiceConnectorId, account?: string): Promise<void> {
+    await json(this.exec, [
+      `${SERVICES}/connector_admin.py`,
+      id,
+      'disconnect',
+      ...accountArg(id, account),
+    ]);
   }
 
   /** `auto`: standing authorization. `ask`: every write waits for approval in the TUI. */
@@ -113,13 +163,21 @@ export class ServiceSetup {
     await json(this.exec, [`${SERVICES}/admin.py`, 'import-client', 'gmail'], clientJson);
   }
 
+  /** Drops the imported client; the built-in one applies again when Anchi ships one. */
+  async removeGoogleClient(): Promise<void> {
+    await json(this.exec, [`${SERVICES}/admin.py`, 'remove-client']);
+  }
+
   /**
    * Starts Google sign-in for Gmail or Drive: a loopback callback on 127.0.0.1, the
    * authorization URL from the VM, and the code back to the VM. Returns the URL to open.
+   * `account` names one of several Google accounts (`default` when omitted).
    */
-  async googleLogin(id: ServiceConnectorId): Promise<string> {
+  async googleLogin(id: ServiceConnectorId, account?: string): Promise<string> {
     if (!GOOGLE_IDS.includes(id)) throw new Error(`${id} does not use Google sign-in`);
-    this.logins.get(id)?.close();
+    const named = accountArg(id, account);
+    const key = `${id}:${account ?? DEFAULT_ACCOUNT}`;
+    this.logins.get(key)?.close();
     let expected = { host: '', state: '' };
     let finish: (r: { code: string; state: string } | null) => void = () => {};
     const result = new Promise<{ code: string; state: string } | null>((r) => (finish = r));
@@ -146,12 +204,12 @@ export class ServiceSetup {
       finish(code && !url.searchParams.has('error') ? { code, state } : null);
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-    this.logins.set(id, server);
+    this.logins.set(key, server);
     const { port } = server.address() as AddressInfo;
     expected.host = `127.0.0.1:${port}`;
     const flow = await json(
       this.exec,
-      [`${SERVICES}/admin.py`, 'begin', id],
+      [`${SERVICES}/admin.py`, 'begin', id, ...named],
       JSON.stringify({ redirect_uri: `http://${expected.host}/callback` }),
     ).catch((err: Error) => {
       server.close();
@@ -162,15 +220,20 @@ export class ServiceSetup {
     void result.then(async (callback) => {
       clearTimeout(timer);
       server.close();
-      this.logins.delete(id);
+      if (this.logins.get(key) === server) this.logins.delete(key);
+      const who = account === undefined ? { id } : { id, account };
       if (!callback)
-        return this.onLogin({ id, ok: false, error: 'sign-in cancelled or timed out' });
+        return this.onLogin({ ...who, ok: false, error: 'sign-in cancelled or timed out' });
       try {
-        await json(this.exec, [`${SERVICES}/admin.py`, 'complete', id], JSON.stringify(callback));
-        await this.probe(id);
-        this.onLogin({ id, ok: true });
+        await json(
+          this.exec,
+          [`${SERVICES}/admin.py`, 'complete', id, ...named],
+          JSON.stringify(callback),
+        );
+        await this.probe(id, account);
+        this.onLogin({ ...who, ok: true });
       } catch (err) {
-        this.onLogin({ id, ok: false, error: (err as Error).message });
+        this.onLogin({ ...who, ok: false, error: (err as Error).message });
       }
     });
     const url = String(flow.url);

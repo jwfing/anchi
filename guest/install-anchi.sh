@@ -40,8 +40,8 @@ for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_c
 done
 if ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends python3-venv
+  apt-get -o DPkg::Lock::Timeout=600 update
+  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends python3-venv
 fi
 id anchi-egress >/dev/null 2>&1 ||
   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin anchi-egress

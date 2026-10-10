@@ -743,6 +743,7 @@ export class Hub extends EventEmitter<HubEvents> {
         mode: w.mode,
       })),
       egress: agent.egress,
+      accounts: agent.accounts,
     });
     const session = new CellSession(task.id, child);
     // The cell belongs to this task; its tool calls act as this task's agent.
