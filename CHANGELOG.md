@@ -2,7 +2,7 @@
 
 Follows the Keep a Changelog structure. The version comes from `anchi/package.json`.
 
-## Unreleased
+## 0.2.1 — 2026-10-09
 
 ### Added
 
