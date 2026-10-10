@@ -504,7 +504,7 @@ async function deleteAgentCli(id: string, yes: boolean) {
     console.log(
       styleText(
         'green',
-        `Kept: ${p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') || 'directories of your Mac'} and the audit logs.`,
+        `Kept: ${p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') || 'directories of your computer'} and the audit logs.`,
       ),
     );
     if (!yes && (await ask(`Type ${p.agentId} to confirm: `)).trim() !== p.agentId) {
@@ -578,7 +578,7 @@ setup
 
 setup
   .command('workspaces')
-  .description('Share ~/AnchiWorkspaces with the VM (macOS; restarts the VM once)')
+  .description('Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)')
   .option('-y, --yes', 'do not ask for confirmation')
   .action((opts: { yes?: boolean }) =>
     runSetup(

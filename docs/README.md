@@ -24,7 +24,7 @@ Anchi is a secured agent team: Codex and Claude Code agents in disposable cells 
 | [Agent team phase 2 plan](architecture/AGENT_TEAM_PHASE2_PLAN.md) | Phase 2 (done): Claude Code, delegation, triggers, approvals, connector services; decisions and status |
 | [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Phase 3 (mostly done): containment, automatic checks, remaining acceptance; status |
 | [Host directories](architecture/HOST_DIRECTORIES_PLAN.md) | Workspaces of the Mac in agent cells |
-| [Backlog](architecture/BACKLOG.md) | Open requests and known gaps (file preview plugins, audit log view, token usage and quota, large git pushes, Linux workspaces), and what was delivered from it |
+| [Backlog](architecture/BACKLOG.md) | Open requests and known gaps (file preview plugins, audit log view, token usage and quota, large git pushes), and what was delivered from it |
 | [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md) | Agent configuration, client protocol, guest commands and cell runner protocol |
 
 ## Development and releases

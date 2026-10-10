@@ -1057,7 +1057,7 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write(' '); // ro → rw
     frame = await frameWith(ui, '[rw]');
-    expect(frame).toContain('writes go straight to your Mac');
+    expect(frame).toContain('writes go straight to your computer');
     ui.stdin.write('\r');
     frame = await frameWith(ui, 'save these settings?');
     expect(frame).toContain('+ skills: [review]');

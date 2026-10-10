@@ -1,0 +1,16 @@
+[Unit]
+Description=Anchi workspaces: the host's ~/AnchiWorkspaces mapped to the cell agent (Linux hosts)
+# Lima's 9p share is in fstab once cloud-init has written it (the first boot after the share
+# was added), and mounted by then.
+After=local-fs.target remote-fs.target cloud-config.service
+Before=anchi-egress.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/secure-vm/anchi/workspaces.sh
+# bindfs keeps running in this unit's cgroup; stopping the unit unmounts the share.
+ExecStop=-/usr/bin/umount /mnt/anchi-host
+
+[Install]
+WantedBy=multi-user.target
