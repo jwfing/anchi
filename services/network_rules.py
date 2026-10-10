@@ -11,8 +11,10 @@ import subprocess
 import sys
 import time
 
+import auth
 from common import CELL_AGENT_HOST_UID
 import connectors
+import vault
 
 TARGETS = Path('/run/secure-egress/targets.json')
 # role -> (service user, single allowed host). Connector roles come from the registry.
@@ -83,29 +85,68 @@ def initialize():
     nft('\n'.join(lines))
 
 
+def configured(role):
+    """Whether a role has anything to reach, from vault file names alone (nothing is decrypted).
+    Auth needs oauth2 for sign-in completion, refresh and revocation: with a Google client, and a
+    token, a sign-in in progress or a pending revocation of any account."""
+    if role == 'auth':
+        return auth.client_source() is not None and auth.google_present(('tokens', 'pending', 'revocation'))
+    kind, name = connectors.CONNECTORS[role].credential.split(':', 1)
+    if kind == 'google':
+        return bool(auth.account_files(name, 'tokens'))
+    return vault.exists(auth.STORE, auth.TOKENS[name]['file'])
+
+
+def resolve(host):
+    addresses = sorted({a[4][0] for a in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
+    if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
+        raise RuntimeError('Provider DNS returned a non-public address')
+    return addresses
+
+
+def previous_targets():
+    try:
+        value = json.loads(TARGETS.read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def refresh():
-    result, commands = {}, []
+    """Resolves the configured roles' hosts; unconfigured roles get empty sets. A host that fails
+    to resolve keeps its previous addresses until they expire, without stopping the others."""
+    result, commands, failed = {}, [], []
+    previous = previous_targets()
     for role, (_, host) in ROLES.items():
-        addresses = sorted({a[4][0] for a in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
-        if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
-            raise RuntimeError('Provider DNS returned a non-public address')
-        result[host] = {'addresses': addresses, 'expires_at': time.time() + 240}
+        values = {4: [], 6: []}
+        if configured(role):
+            try:
+                addresses = resolve(host)
+            except (OSError, RuntimeError, UnicodeError):
+                failed.append(host)
+                # Kernel entries and the target file expire on their own; nothing new is added.
+                if host in previous:
+                    result[host] = previous[host]
+                continue
+            result[host] = {'addresses': addresses, 'expires_at': time.time() + 240}
+            for a in addresses:
+                values[ipaddress.ip_address(a).version].append(a)
         for version in (4, 6):
-            values = [a for a in addresses if ipaddress.ip_address(a).version == version]
             commands.append(f'flush set inet secure_vm {role}{version}')
-            if values:
+            if values[version]:
                 commands.append(
                     f'add element inet secure_vm {role}{version} {{ '
-                    + ', '.join(a + ' timeout 5m' for a in values)
+                    + ', '.join(a + ' timeout 5m' for a in values[version])
                     + ' }'
                 )
-    # One atomic nft transaction; failed resolution does not install partial broad rules.
+    # One atomic nft transaction of exact, public addresses; nothing broad is ever installed.
     nft('\n'.join(commands))
     temporary = TARGETS.with_suffix('.new')
     fd = os.open(temporary, os.O_WRONLY | os.O_TRUNC | os.O_CREAT, 0o644)
     with os.fdopen(fd, 'w') as file:
         json.dump(result, file)
     os.replace(temporary, TARGETS)
+    return failed
 
 
 def main():
@@ -118,8 +159,13 @@ def main():
             initialize()
         elif sys.argv[1] != 'refresh':
             raise SystemExit('Unknown action')
-        refresh()
+        failed = refresh()
     print('Provider address sets updated; service DNS/direct destinations remain restricted.')
+    if failed:
+        print('Not resolved (previous addresses kept until they expire): ' + ', '.join(failed), file=sys.stderr)
+        # The rules are installed either way; only the timer's refresh reports the failure.
+        if sys.argv[1] == 'refresh':
+            raise SystemExit(1)
 
 
 if __name__ == '__main__':

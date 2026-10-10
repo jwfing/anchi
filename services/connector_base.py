@@ -9,6 +9,9 @@ from ledger import Ledger
 import policy_client
 
 AUTH_SOCKET = '/run/secure-auth/token.sock'
+# Google account the current request uses. The server sets it from the egress bridge, which pins
+# it per cell from the agent's configuration; a cell cannot name an account itself.
+ACCOUNT = 'default'
 LEDGER_ROOT = Path('/var/lib')
 DAILY_WRITES = 200
 
@@ -21,8 +24,10 @@ def ledger(connector):
 
 def credential(connector):
     """Token and account generation for this service identity; the kernel UID selects the credential."""
-    op = 'access_token' if connector.credential.startswith('google:') else 'token'
-    value = rpc(AUTH_SOCKET, {'op': op})
+    if connector.credential.startswith('google:'):
+        value = rpc(AUTH_SOCKET, {'op': 'access_token', 'account': ACCOUNT})
+    else:
+        value = rpc(AUTH_SOCKET, {'op': 'token'})
     return {'token': value.get('access_token') or value.get('token'), 'generation': value['account_generation']}
 
 

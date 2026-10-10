@@ -193,7 +193,7 @@ def handle(request):
     op = request.get('op')
     if op == 'status':
         fields(request, ('op',), ('op',))
-        return rpc(connector_base.AUTH_SOCKET, {'op': 'status'})['drive']
+        return rpc(connector_base.AUTH_SOCKET, {'op': 'status', 'account': connector_base.ACCOUNT})['drive']
     if op not in ('search', 'read', 'create', 'update'):
         raise Denied('OPERATION_DENIED')
     request_id = request.get('request_id')

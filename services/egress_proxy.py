@@ -36,6 +36,9 @@ CREDENTIAL_TTL = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
 SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+# Services with named Google accounts; the bridge pins one per cell.
+ACCOUNT_SERVICES = ('gmail', 'drive')
+ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
 SERVICE_SOCKET = '/run/secure-{}/api.sock'
 SERVICE_MAX = 256 * 1024
 # Writes held by the policy service return at once; this bounds a slow upstream.
@@ -330,6 +333,8 @@ class Cell:
         self.writers = set()
         # Connector services this cell reaches through the bridge, and their sockets.
         self.services = frozenset()
+        # The Google account per service; `default` when the agent names none.
+        self.accounts = {}
         self.service_servers = []
         # Hosts the cell sent a credential of its own to, already reported to the daemon.
         self.credential_alerts = set()
@@ -367,6 +372,12 @@ class Registry:
         services = request.get('services', [])
         if not isinstance(services, list) or not all(s in SERVICE_CONNECTORS for s in services):
             raise ValueError('BAD_SERVICES')
+        accounts = request.get('accounts', {})
+        if not isinstance(accounts, dict) or not all(
+            s in services and s in ACCOUNT_SERVICES and isinstance(a, str) and ACCOUNT.fullmatch(a)
+            for s, a in accounts.items()
+        ):
+            raise ValueError('BAD_ACCOUNTS')
         egress = request.get('egress')
         if egress is not None and (
             not isinstance(egress, list)
@@ -390,6 +401,9 @@ class Registry:
         # Only this cell has the directory bound in; the agent user must be able to connect.
         os.chmod(path, 0o666)
         cell.services = frozenset(request.get('services', []))
+        cell.accounts = {
+            s: request.get('accounts', {}).get(s, 'default') for s in cell.services if s in ACCOUNT_SERVICES
+        }
         for service in sorted(cell.services):
             directory = cell.directory / 'connectors' / service
             directory.mkdir(parents=True)
@@ -412,19 +426,24 @@ class Registry:
                 'ask': sorted(cell.ask),
                 'egress': None if cell.egress is None else sorted(cell.egress),
                 'services': sorted(cell.services),
+                'accounts': cell.accounts,
             }
         )
         return {'directory': str(cell.directory)}
 
     async def service_bridge(self, cell, service, reader, writer):
-        """One request from the cell to a connector service, naming the cell's agent. The
-        service accepts an agent only from this UID; the cell's own `agent` field is replaced."""
+        """One request from the cell to a connector service, naming the cell's agent and, for
+        Google services, its account. The service accepts both only from this UID; the cell's own
+        `agent` and `account` fields are replaced or dropped."""
         try:
             line = await asyncio.wait_for(reader.readline(), 30)
             request = json.loads(line) if line.endswith(b'\n') else None
             if not isinstance(request, dict):
                 raise ValueError('BAD_REQUEST')
             request['agent'] = cell.agent
+            request.pop('account', None)
+            if service in cell.accounts:
+                request['account'] = cell.accounts[service]
             up_reader, up_writer = await asyncio.open_unix_connection(SERVICE_SOCKET.format(service), limit=SERVICE_MAX)
             try:
                 up_writer.write(json.dumps(request, ensure_ascii=False).encode() + b'\n')
@@ -439,6 +458,7 @@ class Registry:
                     'op': str(request.get('op'))[:40],
                     'task': cell.task,
                     'agent': cell.agent,
+                    **({'account': cell.accounts[service]} if service in cell.accounts else {}),
                 }
             )
             writer.write(answer if answer.endswith(b'\n') else b'{"ok":false,"error":"SERVICE_UNAVAILABLE"}\n')

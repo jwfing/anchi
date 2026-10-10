@@ -27,6 +27,12 @@ fi
 install -d -m 0755 /opt/secure-vm/services
 install -m 0644 "$src/cell.env" /opt/secure-vm/cell.env
 install -m 0644 "$src"/services/*.py /opt/secure-vm/services/
+# Anchi's built-in Google OAuth client, when a release ships one; readable by secure-auth only.
+if [[ -f $src/services/google_client.json ]]; then
+  install -o root -g secure-auth -m 0640 "$src/services/google_client.json" /opt/secure-vm/services/
+else
+  rm -f /opt/secure-vm/services/google_client.json
+fi
 install -d -o secure-auth -g secure-auth -m 0700 /var/lib/secure-auth
 install -d -o secure-policy -g secure-policy -m 0700 /var/lib/secure-policy
 for user in "${connector_users[@]}"; do

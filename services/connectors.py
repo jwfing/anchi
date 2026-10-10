@@ -34,7 +34,7 @@ CONNECTORS = {
         credential='google:gmail',
         module='gmail',
         ops={'gmail.status': READ, 'gmail.list': READ, 'gmail.read': READ},
-        paths=(r'/gmail/v1/users/me/messages(/[A-Za-z0-9_-]{1,128})?(\?.*)?',),
+        paths=(r'/gmail/v1/users/me/messages(/[A-Za-z0-9_-]{1,128})?(\?.*)?', r'/gmail/v1/users/me/profile'),
     ),
     'drive': Connector(
         id='drive',

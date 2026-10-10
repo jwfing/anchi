@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
+import connector_base
 import server
 from common import recv_json, send_json
 
@@ -71,11 +72,28 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(self.request(gmail, uid, {'op': 'x'})['error'], 'CALLER_DENIED')
         # The egress bridge may call connector services, always naming the agent it serves.
         self.assertEqual(self.request(gmail, EGRESS_UID, {'op': 'x'})['error'], 'BAD_AGENT')
+        # Google services also get the cell's account from the bridge, never from the request body.
+        self.assertEqual(self.request(gmail, EGRESS_UID, {'op': 'x', 'agent': 'dev'})['error'], 'BAD_ACCOUNT')
         self.assertEqual(
-            self.request(gmail, EGRESS_UID, {'op': 'x', 'agent': 'dev'}), {'ok': True, 'result': {'echo': {'op': 'x'}}}
+            self.request(gmail, EGRESS_UID, {'op': 'x', 'agent': 'dev', 'account': '../x'})['error'], 'BAD_ACCOUNT'
         )
-        # A cell cannot claim an agent: the field reaches the handler untouched and is rejected there.
-        self.assertEqual(self.request(gmail, CELL_UID, {'op': 'x', 'agent': 'dev'})['result']['echo']['agent'], 'dev')
+        seen = []
+        gmail.handler = lambda request: seen.append(connector_base.ACCOUNT) or {'echo': request}
+        self.assertEqual(
+            self.request(gmail, EGRESS_UID, {'op': 'x', 'agent': 'dev', 'account': 'work'}),
+            {'ok': True, 'result': {'echo': {'op': 'x'}}},
+        )
+        self.request(gmail, CELL_UID, {'op': 'x'})
+        self.assertEqual(seen, ['work', 'default'])
+        self.assertEqual(connector_base.ACCOUNT, 'default')
+        # A cell cannot claim an agent or an account: the fields reach the handler untouched and are
+        # rejected there.
+        echo = self.request(gmail, CELL_UID, {'op': 'x', 'agent': 'dev', 'account': 'work'})['result']['echo']
+        self.assertEqual((echo['agent'], echo['account']), ('dev', 'work'))
+        notion = self.service('notion', lambda request: {'echo': request})
+        self.assertEqual(
+            self.request(notion, EGRESS_UID, {'op': 'x', 'agent': 'dev'}), {'ok': True, 'result': {'echo': {'op': 'x'}}}
+        )
         policy = self.service('policy', lambda request, caller: {'caller': caller})
         self.assertEqual(self.request(policy, EGRESS_UID, {'op': 'x'})['result'], {'caller': 'egress'})
         self.assertEqual(self.request(policy, CELL_UID, {'op': 'x'})['error'], 'CALLER_DENIED')

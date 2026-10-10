@@ -88,6 +88,10 @@ export const ACTIONS = {
   'builder:proposal': { title: 'Reopen the pending builder proposal', contexts: ['global'] },
   'transcript:tools': { title: 'Expand or collapse tool calls', contexts: ['global'] },
   'transcript:verbose': { title: 'Verbose tool output', contexts: ['global'] },
+  'app:select': {
+    title: 'Selection mode: select and copy text with the mouse (Esc ends)',
+    contexts: ['global'],
+  },
   'scroll:up': { title: 'Scroll up', contexts: ['chat', 'task', 'usage', 'access', 'welcome'] },
   'scroll:down': { title: 'Scroll down', contexts: ['chat', 'task', 'usage', 'access', 'welcome'] },
   'scroll:pageUp': { title: 'Scroll up a page', contexts: ['chat', 'task'] },
@@ -121,6 +125,14 @@ export const ACTIONS = {
   'connectors:awsProfile': { title: 'AWS: connect through a profile', contexts: ['connectors'] },
   'connectors:mode': { title: 'Service writes: automatic or ask', contexts: ['connectors'] },
   'connectors:disconnect': { title: 'Disconnect', contexts: ['connectors'] },
+  'connectors:account': {
+    title: 'Gmail, Drive: sign in another Google account',
+    contexts: ['connectors'],
+  },
+  'connectors:googleClient': {
+    title: 'Google OAuth client: use your own, or go back to the built-in one',
+    contexts: ['connectors'],
+  },
 } as const satisfies Record<string, ActionInfo>;
 export type ActionId = keyof typeof ACTIONS;
 export const isAction = (s: string): s is ActionId => Object.hasOwn(ACTIONS, s);
@@ -174,6 +186,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     '<leader> o': 'builder:proposal',
     '<leader> t': 'transcript:tools',
     '<leader> v': 'transcript:verbose',
+    '<leader> m': 'app:select',
   },
   welcome: {
     ...VIEW,
@@ -283,6 +296,8 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     p: 'connectors:awsProfile',
     m: 'connectors:mode',
     d: 'connectors:disconnect',
+    a: 'connectors:account',
+    o: 'connectors:googleClient',
     r: 'setup:refresh',
   },
 };

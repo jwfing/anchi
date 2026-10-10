@@ -1,6 +1,15 @@
 #!/usr/bin/env -S node --import tsx
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
@@ -666,46 +675,140 @@ const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack'] as const;
 type ServiceId = (typeof SERVICE_IDS)[number];
 const isService = (id: string): id is ServiceId => (SERVICE_IDS as readonly string[]).includes(id);
 
-setup.command('disconnect <id>').action(async (id: string) => {
-  await withClient((client) =>
-    isService(id)
-      ? client.call('services.disconnect', { id })
-      : client.call('connectors.remove', { id: id as ConnectorId }),
-  );
-});
+setup
+  .command('disconnect <id>')
+  .option('--account <name>', 'gmail or drive: the account to disconnect (default: default)')
+  .action(async (id: string, opts: { account?: string }) => {
+    if (opts.account && id !== 'gmail' && id !== 'drive')
+      fail('--account applies to gmail and drive');
+    await withClient((client) =>
+      isService(id)
+        ? client.call('services.disconnect', { id, account: opts.account })
+        : client.call('connectors.remove', { id: id as ConnectorId }),
+    );
+  });
 
 setup
   .command('service <id>')
   .description('Connect gmail or drive (Google sign-in) or notion or slack (token, without echo)')
-  .action((id: string) =>
+  .option(
+    '--account <name>',
+    'gmail or drive: name this Google account (e.g. work) to connect more than one; agents pick it with accounts: { gmail: work }',
+  )
+  .action((id: string, opts: { account?: string }) =>
     withClient(async (client) => {
       if (!isService(id)) fail('service must be gmail, drive, notion or slack');
       if (id === 'notion' || id === 'slack') {
+        if (opts.account) fail('--account applies to gmail and drive');
         const token = process.stdin.isTTY ? await askSecret(`${id} token: `) : await readStdin();
         await client.call('services.setToken', { id, token });
         return console.log(`${id} connected`);
       }
+      const account = opts.account ?? 'default';
       const done = new Promise<{ ok: boolean; error?: string }>((resolve) => {
-        client.on('oauth', (r) => r.id === id && resolve(r));
+        client.on(
+          'oauth',
+          (r) => r.id === id && (r.account ?? 'default') === account && resolve(r),
+        );
       });
-      const { url } = await client.call('services.googleLogin', { id });
+      const { url } = await client.call('services.googleLogin', { id, account: opts.account });
       console.log(`Sign in to Google in your browser. If it did not open:\n${url}`);
       const r = await done;
       if (!r.ok) fail(r.error ?? 'sign-in failed');
-      console.log(`${id} connected`);
+      console.log(`${id} connected${opts.account ? ` (account ${opts.account})` : ''}`);
     }),
   );
 
 setup
-  .command('google-client <path>')
-  .description('Store the Google Cloud Desktop app OAuth client JSON (needed for Gmail and Drive)')
-  .action((path: string) =>
+  .command('google-client [path]')
+  .description(
+    'Store your own Google Cloud Desktop app OAuth client JSON (Gmail and Drive); it overrides the built-in client',
+  )
+  .option('--remove', 'remove your client and use the built-in one, when Anchi ships one')
+  .action((path: string | undefined, opts: { remove?: boolean }) =>
     withClient(async (client) => {
+      if (opts.remove) {
+        if (path) fail('--remove takes no path');
+        await client.call('services.removeGoogleClient');
+        const s = await client.call('setup.status');
+        return console.log(
+          s.googleClientSource === 'builtin'
+            ? 'Your Google client is removed; the built-in client applies'
+            : 'Your Google client is removed; there is no built-in client, so Gmail and Drive need one again',
+        );
+      }
+      if (!path) fail('usage: setup google-client <path> | --remove');
       if (statSync(path).size > 16_384) fail('that file is too large for a client JSON');
       await client.call('services.googleClient', { json: readFileSync(path, 'utf8') });
       console.log('Google client stored');
     }),
   );
+
+/** Deletes the Anchi home for `setup reset --all`, keeping keybindings.json (a preference). */
+function deleteHome(root: string) {
+  const full = resolvePath(root);
+  if (full === '/' || full === resolvePath(homedir()) || !existsSync(full)) return;
+  for (const name of readdirSync(full)) {
+    if (name !== 'keybindings.json') rmSync(join(full, name), { recursive: true, force: true });
+  }
+}
+
+setup
+  .command('reset')
+  .description(
+    'Back to a first launch: delete the VM with everything in it (--all: also the vault key and the Anchi home)',
+  )
+  .option('--all', 'also delete the vault key and ~/.anchi (agents, tasks, settings, logs)')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action(async (opts: { all?: boolean; yes?: boolean }) => {
+    let home = '';
+    let vaultKey = '';
+    await withClient(async (client) => {
+      const p = await client.call('setup.resetPreview');
+      if (p.busy) fail(`${p.busy} task(s) running or queued; cancel them or let them finish first`);
+      ({ home, vaultKey } = p);
+      console.log('Reset deletes, and nothing can bring back:');
+      console.log(
+        `  the secure-vm VM (${p.vm}) and everything in it: the vault's credentials (Codex, ` +
+          'Claude Code, Google, Notion, Slack, GitHub, AWS, Linear), agent homes, images and the audit log',
+      );
+      if (p.cells) console.log(`  ${p.cells} idle cell(s): closed first`);
+      if (opts.all) {
+        console.log(`  the vault key ${vaultKey}`);
+        console.log(
+          `  ${home}: agents, templates, images, skills, settings, the task database and logs`,
+        );
+        console.log(styleText('green', `Kept: ${join(home, 'keybindings.json')}.`));
+      } else {
+        console.log(
+          styleText(
+            'green',
+            `Kept: the vault key and ${home} (agents, tasks, settings). After \`anchi setup install\` ` +
+              'and `anchi setup vault init`, the vault is new and empty, with the same key.',
+          ),
+        );
+      }
+      if (!opts.yes && (await ask('Type reset to confirm: ')) !== 'reset') fail('not reset');
+      const off = client.on('reset', (n) => console.log(sanitizeLine(n.line)));
+      await client.call('setup.reset', { confirm: 'reset' });
+      off();
+      if (opts.all) await client.call('daemon.shutdown');
+    });
+    if (!opts.all) {
+      return console.log('VM deleted. Next: `anchi setup install`, then `anchi setup vault init`.');
+    }
+    // The daemon holds the database; its home goes only once it has exited.
+    for (let i = 0; i < 100; i++) {
+      const c = await tryConnect(layout);
+      if (!c) break;
+      c.close();
+      if (i === 99) fail('the daemon did not stop; run `anchi daemon stop` and reset again');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    rmSync(vaultKey, { force: true });
+    deleteHome(home);
+    console.log('Reset done. The next `anchi` starts from the first launch.');
+  });
 
 setup
   .command('service-mode <id> <mode>')

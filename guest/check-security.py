@@ -72,11 +72,19 @@ for host, port, family, kind in [('1.1.1.1',443,socket.AF_INET,socket.SOCK_STREA
 print(json.dumps(results))'''
     for label, passed in zip(('public_tcp', 'private_tcp', 'dns_udp', 'ipv6'), as_user(user, probe)):
         check(user + '_blocks_' + label, passed)
-# A TLS handshake proves the allow rule works without transmitting any credential.
-for user, host in [
-    ('secure-auth', 'oauth2.googleapis.com'),
-    *((c.user, c.hosts[0]) for c in connectors.CONNECTORS.values()),
-]:
+import network_rules
+
+# A TLS handshake proves the allow rule works without transmitting any credential. Only configured
+# roles (a credential or sign-in exists) are resolved; the others must have no target at all.
+for role, (user, host) in network_rules.ROLES.items():
+    if not network_rules.configured(role):
+        unreachable = (
+            "from common import target_ips, Denied; import json\ntry:\n target_ips("
+            + repr(host)
+            + ")\n print('false')\nexcept Denied:\n print('true')"
+        )
+        check(user + '_' + host + '_unconfigured_has_no_target', as_user(user, unreachable))
+        continue
     probe = (
         "from common import target_ips; import socket, ssl, json; host="
         + repr(host)

@@ -51,3 +51,22 @@ class AuditRowsTests(unittest.TestCase):
         self.assertEqual((found['total'], found['truncated']), (3, False))
         limited = anchi_cell.audit_rows('t-a', [old, cur], limit=2)
         self.assertEqual(([r['n'] for r in limited['rows']], limited['truncated']), ([3, 4], True))
+
+
+class AccountArgumentTests(unittest.TestCase):
+    def test_accounts_name_google_services_of_the_agent_only(self):
+        self.assertEqual(anchi_cell.parse_accounts('-', ['gmail']), {})
+        self.assertEqual(
+            anchi_cell.parse_accounts('gmail=work,drive=personal', ['gmail', 'drive']),
+            {'gmail': 'work', 'drive': 'personal'},
+        )
+        for arg, connectors in (
+            ('gmail=work', ['drive']),
+            ('notion=work', ['notion']),
+            ('gmail=Work', ['gmail']),
+            ('gmail=', ['gmail']),
+            ('gmail=a,gmail=b', ['gmail']),
+            ('gmail', ['gmail']),
+        ):
+            with self.assertRaises(anchi_cell.Failure):
+                anchi_cell.parse_accounts(arg, connectors)

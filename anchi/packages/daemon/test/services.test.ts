@@ -80,4 +80,78 @@ describe('service connectors', () => {
     expect(results).toEqual([{ id: 'drive', ok: true }]);
     await expect(s.googleLogin('notion')).rejects.toThrow(/Google sign-in/);
   });
+
+  it('lists Google accounts, reports the client source and names accounts in VM commands', async () => {
+    let redirect = '';
+    const { guest, execs } = fakeGuest((args, stdin) => {
+      if (args[1]!.endsWith('policy_admin.py')) return { rules: {} };
+      if (args[2] === 'begin') {
+        redirect = JSON.parse(stdin).redirect_uri;
+        return { url: 'https://accounts.google.com/o/oauth2/auth?x', state: 'st' };
+      }
+      return {
+        gmail: {
+          connected: true,
+          account: 'me@home.test',
+          accounts: [
+            { name: 'default', connected: true, account: 'me@home.test' },
+            { name: 'work', connected: false, revocation_pending: true },
+          ],
+        },
+        client_configured: true,
+        client_source: 'builtin',
+      };
+    });
+    const results: unknown[] = [];
+    const s = new ServiceSetup(
+      guest,
+      (r) => results.push(r),
+      () => {},
+    );
+    const st = await s.status();
+    expect(st.googleClientSource).toBe('builtin');
+    expect(st.services.find((x) => x.id === 'gmail')!.accounts).toEqual([
+      {
+        name: 'default',
+        connected: true,
+        account: 'me@home.test',
+        reauthRequired: false,
+        revocationPending: false,
+      },
+      {
+        name: 'work',
+        connected: false,
+        account: null,
+        reauthRequired: false,
+        revocationPending: true,
+      },
+    ]);
+    expect(st.services.find((x) => x.id === 'notion')!.accounts).toEqual([]);
+    await s.googleLogin('gmail', 'work');
+    expect(execs.find((e) => e.args[2] === 'begin')!.args.slice(2)).toEqual([
+      'begin',
+      'gmail',
+      'work',
+    ]);
+    expect((await fetch(`${redirect}?state=st&code=c`)).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(execs.find((e) => e.args[2] === 'complete')!.args.slice(2)).toEqual([
+      'complete',
+      'gmail',
+      'work',
+    ]);
+    expect(execs.find((e) => e.args[3] === 'probe')!.args.slice(1)).toEqual([
+      '/opt/secure-vm/services/connector_admin.py',
+      'gmail',
+      'probe',
+      'work',
+    ]);
+    expect(results).toEqual([{ id: 'gmail', account: 'work', ok: true }]);
+    await s.disconnect('drive', 'personal');
+    expect(execs.at(-1)!.args.slice(2)).toEqual(['drive', 'disconnect', 'personal']);
+    await s.removeGoogleClient();
+    expect(execs.at(-1)!.args.slice(2)).toEqual(['remove-client']);
+    await expect(s.googleLogin('gmail', 'Work')).rejects.toThrow(/account names/);
+    await expect(s.disconnect('notion', 'work')).rejects.toThrow(/no named accounts/);
+  });
 });

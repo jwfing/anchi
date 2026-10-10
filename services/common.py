@@ -122,7 +122,9 @@ def google_json(host, method, path, body=None, token=None):
         raise Denied('DESTINATION_DENIED')
     if host == 'oauth2.googleapis.com' and path not in ('/token', '/revoke'):
         raise Denied('DESTINATION_DENIED')
-    if host == 'gmail.googleapis.com' and not path.startswith('/gmail/v1/users/me/messages'):
+    if host == 'gmail.googleapis.com' and not (
+        path.startswith('/gmail/v1/users/me/messages') or path == '/gmail/v1/users/me/profile'
+    ):
         raise Denied('DESTINATION_DENIED')
     # Services cannot use DNS. A root-maintained, expiring allowlist pins the address.
     addresses = target_ips(host)

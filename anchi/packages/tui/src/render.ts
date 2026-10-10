@@ -55,6 +55,8 @@ export class TerminalRenderer {
         if (event.isError) this.failed++;
         return;
       }
+      // Reasoning and plans only with --verbose; a line here would break the live tool line.
+      if (event.type === 'progress') return;
       if (
         event.type !== 'usage' &&
         event.type !== 'text.delta' &&
@@ -89,6 +91,8 @@ export class TerminalRenderer {
         );
       case 'notice':
         return this.line(styleText('blue', `ℹ ${sanitize(event.text)}`));
+      case 'progress':
+        return this.line(styleText('dim', `✻ ${sanitizeLine(event.text)}`));
       case 'usage':
         if (this.verbose)
           this.line(

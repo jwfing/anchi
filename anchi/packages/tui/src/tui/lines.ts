@@ -1,12 +1,27 @@
 import type { RuntimeEvent, StoredEvent } from '@anchi/protocol';
 import stringWidth from 'string-width';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { markdownLines } from './markdown.ts';
 
 export type Tone = 'user' | 'assistant' | 'tool' | 'toolOut' | 'error' | 'warn' | 'dim' | 'system';
 
+/** A styled run of text in a line (markdown). */
+export interface Span {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  code?: boolean;
+  dim?: boolean;
+}
+
 export interface Line {
+  /** The row's plain text; with `spans`, their texts joined. */
   text: string;
   tone: Tone;
+  /** Styled runs of the row (rendered markdown); without them, `text` in the tone's style. */
+  spans?: Span[];
   /** Set on the summary line of a tool-call group; clicking it toggles the group. */
   group?: string;
 }
@@ -101,7 +116,7 @@ function eventLines(event: RuntimeEvent, width: number, lines: Line[], verbose: 
       push(lines, `› ${event.text}`, 'user', width);
       return;
     case 'message':
-      push(lines, event.text, 'assistant', width);
+      lines.push(...markdownLines(sanitize(event.text), width));
       return;
     case 'tool.call':
       lines.push({
@@ -135,6 +150,9 @@ function eventLines(event: RuntimeEvent, width: number, lines: Line[], verbose: 
     case 'notice':
       push(lines, `ℹ ${event.text}`, 'system', width);
       return;
+    case 'progress':
+      push(lines, `✻ ${event.text}`, 'dim', width);
+      return;
     case 'usage':
     case 'session.started':
     case 'turn.completed':
@@ -144,9 +162,13 @@ function eventLines(event: RuntimeEvent, width: number, lines: Line[], verbose: 
 }
 
 const isTool = (e: RuntimeEvent) => e.type === 'tool.call' || e.type === 'tool.result';
-// Events that neither show anything nor end a run of tool calls.
-const isSilent = (e: RuntimeEvent) =>
-  e.type === 'usage' || e.type === 'session.started' || e.type === 'text.delta';
+// Events that neither show anything nor end a run of tool calls. Progress (reasoning, plans)
+// shows only in the verbose transcript; while a turn runs, the working line shows the latest.
+const isSilent = (e: RuntimeEvent, verbose: boolean) =>
+  e.type === 'usage' ||
+  e.type === 'session.started' ||
+  e.type === 'text.delta' ||
+  (e.type === 'progress' && !verbose);
 
 function callLabel(event: RuntimeEvent & { type: 'tool.call' }): string {
   return `${sanitizeLine(event.name)} ${summarizeInput(event.input, 200)}`;
@@ -201,7 +223,7 @@ export function transcriptLines(
   };
   for (const stored of events) {
     if (isTool(stored.event)) group.push(stored);
-    else if (isSilent(stored.event)) continue;
+    else if (isSilent(stored.event, Boolean(opts.verbose))) continue;
     else {
       flush(false);
       eventLines(stored.event, width, lines, Boolean(opts.verbose));

@@ -323,7 +323,7 @@ class ConnectorAdminTests(unittest.TestCase):
                 connector_admin.disconnect('notion')['manual_step'], 'remove the integration in Notion settings'
             )
             connector_admin.disconnect('drive')
-            google.assert_called_once_with('drive')
+            google.assert_called_once_with('drive', 'default')
         self.assertFalse(self.auth.status()['slack']['connected'])
         self.assertFalse(self.auth.status()['notion']['connected'])
         with self.assertRaises(Denied):

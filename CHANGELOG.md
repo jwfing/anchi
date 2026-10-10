@@ -8,9 +8,27 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 - `anchi update` installs the latest release; `anchi update --check` checks without installing. Updates preserve custom installation paths, running daemons and configuration, verify the checksum and version before switching, and skip reinstalling or downgrading.
 - Packaged self-update uses its bundled installer, so it does not need a checkout or download and execute a new installer script.
+- Selection mode (**^X m**): mouse reporting off and the transcript full width without borders, so the terminal selects and copies text natively; any key but the arrows and PgUp/PgDn ends it.
+- Agent replies and task results render Markdown: headings, emphasis, inline and fenced code, lists, task lists, quotes, rules and tables.
+- A running turn shows a working line under its transcript (elapsed time, the running tool or the latest reasoning summary or plan). Codex reasoning summaries and plan updates and Claude thinking are recorded as `progress` events, shown in the verbose transcript.
+- Tab completes paths in path inputs (Google OAuth client JSON, skill directories).
+- The agent builder sees which runtimes are connected, and proposals warn about an unconnected runtime.
+- The agent settings panel shows and edits name, description, runtime, model, effort and prompt (prompt text in `$EDITOR`). It also shows the settings it cannot edit, and which values an agent inherits from its template. Changes go through the same diff review.
+- The agent builder can change existing agents. It gets a summary of every agent and the files of the agents your message names. It proposes `anchi-agent-patch` blocks that change only the fields given and keep the rest of the file, comments included. The patch is refused if the file changed since it was proposed.
+- Several Google accounts per Gmail and Drive: `anchi setup service gmail --account work`, and `accounts: { gmail: work }` in an agent file picks one (`default` otherwise). The egress bridge pins the account to the agent's cells; approvals bind to that account. Accounts connected before are `default`; `anchi setup disconnect gmail --account work` disconnects one.
+- A built-in Google OAuth client, used when a release ships one (none yet: Anchi has not passed Google's verification for the restricted `gmail.readonly` scope). An imported client takes precedence; `anchi setup google-client --remove` falls back to the built-in one. `setup.status` reports `googleClientSource`.
+- `anchi setup reset` deletes the VM and its vault contents for a first launch, after showing what goes and a typed confirmation; `--all` also deletes the vault key and `~/.anchi` (keeping `keybindings.json`). Refused while tasks run.
+- Gmail's account label is read from its profile, like Drive's and Slack's.
+
+### Changed
+
+- The status line always shows the command palette and key list hints at its right, whatever the width.
+- Connectors shows Gmail and Drive as waiting for sign-in once the Google client is stored, instead of "not connected".
+- The VM resolves provider hosts only for configured roles: auth once a Google client is available and a sign-in, token or pending revocation exists; a connector once it has a credential. A fresh VM makes no provider lookups, and sign-in, token import and disconnect update the allowlists at once instead of within two minutes.
 
 ### Fixed
 
+- One failed provider lookup no longer stops the refresh of the others; that host keeps its previous addresses until they expire.
 - VM installation waits up to 10 minutes for the dpkg lock instead of failing when a fresh VM's `unattended-upgrades` holds it.
 
 ## 0.2.1 — 2026-10-09

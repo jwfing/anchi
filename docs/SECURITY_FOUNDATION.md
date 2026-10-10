@@ -17,7 +17,7 @@ python3 scripts/vault.py lock
 
 Plaintext migration encrypts, decrypts to verify, then removes the old file, with no plaintext fallback. A wrong key cannot replace an already-unlocked correct one. Protect a separate key backup; losing it requires reauthorization.
 
-Auth returns Google access tokens only to the appropriate connector identity, and proxy connector and runtime credentials only to the `anchi-egress` identity, using kernel `SO_PEERCRED`, not self-declared roles. Refresh is serialized by auth. Reauthorization creates a new account generation, so old exact approvals cannot apply to a different account.
+Auth returns Google access tokens only to the appropriate connector identity, for the account the egress bridge pinned to the cell (Gmail and Drive may hold several named Google accounts; each has its own vault files, whose AAD names the account, and its own generation), and proxy connector and runtime credentials only to the `anchi-egress` identity, using kernel `SO_PEERCRED`, not self-declared roles. Refresh is serialized by auth. Reauthorization creates a new account generation, so old exact approvals cannot apply to a different account.
 
 Disconnect removes locally usable tokens before attempting Google `/revoke`. Failure retains encrypted retry material and reports `remote_revoked:false, revocation_pending:true`; it is never returned as an active account token. Repeat disconnect to retry. Lock/disconnect cannot retract in-flight calls.
 
@@ -68,7 +68,7 @@ The cell has a separate network namespace without external routes. Guest nftable
 | Policy and mapped agent UID 525288 | No IP egress |
 | `anchi-egress` (agent-team proxy) | Any public destination; private, loopback and link-local ranges rejected |
 
-Connector destinations come from `services/connectors.py`. Each controlled UID has a final reject covering all other TCP/UDP/DNS/private/host/IPv6 paths. Guest management users/root retain networking and must not be exposed to the agent.
+Connector destinations come from `services/connectors.py`. Only configured roles are resolved: auth when a Google client is available and a Google sign-in, token or pending revocation exists; a connector when it has a stored credential (by vault file name; nothing is decrypted). Other roles keep empty sets, so their traffic stays rejected. Connecting or disconnecting refreshes the sets at once; a failed or non-public lookup of one host keeps that host's previous addresses until they expire and does not stop the others. Each controlled UID has a final reject covering all other TCP/UDP/DNS/private/host/IPv6 paths. Guest management users/root retain networking and must not be exposed to the agent.
 
 Only a root updater resolves fixed provider domains. Every resolved address must be public. It atomically updates nft sets and `/run/secure-egress/targets.json`. Services connect to numeric targets without DNS while using the original hostname for TLS SNI/certificate verification. Egress initialization is a startup dependency.
 

@@ -691,6 +691,70 @@ class RegistryTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_connector_bridge_pins_the_cell_google_account(self):
+        async def scenario():
+            seen = []
+
+            async def service(reader, writer):
+                seen.append(json.loads(await reader.readline()))
+                writer.write(b'{"ok": true, "result": {}}\n')
+                await writer.drain()
+                writer.close()
+
+            servers = [
+                await asyncio.start_unix_server(service, path=str(Path(self.tmp, f'{name}.sock')))
+                for name in ('gmail', 'drive', 'notion')
+            ]
+            short = tempfile.mkdtemp(prefix='ae', dir='/tmp')
+            self.addCleanup(shutil.rmtree, short, True)
+            with (
+                patch.object(self.module, 'SERVICE_SOCKET', str(Path(self.tmp, '{}.sock'))),
+                patch.object(self.module, 'CELLS', Path(short)),
+            ):
+                registry = self.module.Registry(('127.0.0.1', 1))
+                result = await registry.register(
+                    {
+                        'task': 'ta',
+                        'agent': 'dev',
+                        'connectors': [],
+                        'services': ['gmail', 'drive', 'notion'],
+                        'accounts': {'gmail': 'work'},
+                    }
+                )
+                for name in ('gmail', 'drive', 'notion'):
+                    reader, writer = await asyncio.open_unix_connection(
+                        str(Path(result['directory'], 'connectors', name, 'api.sock'))
+                    )
+                    writer.write(b'{"op": "status", "account": "personal"}\n')
+                    await writer.drain()
+                    await reader.readline()
+                    writer.close()
+                # The cell's own choice never reaches a service; unnamed Google accounts are `default`.
+                self.assertEqual(
+                    seen,
+                    [
+                        {'op': 'status', 'agent': 'dev', 'account': 'work'},
+                        {'op': 'status', 'agent': 'dev', 'account': 'default'},
+                        {'op': 'status', 'agent': 'dev'},
+                    ],
+                )
+                for accounts in ({'notion': 'work'}, {'drive': 'work'}, {'gmail': 'Work'}, {'gmail': 'a/b'}, ['gmail']):
+                    with self.assertRaises(ValueError):
+                        registry.validate(
+                            {
+                                'task': 'tz',
+                                'agent': 'dev',
+                                'connectors': [],
+                                'services': ['gmail'],
+                                'accounts': accounts,
+                            }
+                        )
+                await registry.unregister('ta')
+            for server in servers:
+                server.close()
+
+        asyncio.run(scenario())
+
     def test_register_validates_names_and_connectors(self):
         registry = self.module.Registry(('127.0.0.1', 1))
         for request in (

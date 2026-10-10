@@ -7,6 +7,7 @@ import pwd
 import resource
 import sys
 
+import admin
 import auth
 import connectors
 from common import Denied, rpc
@@ -16,11 +17,13 @@ def module_for(connector):
     return importlib.import_module(connectors.CONNECTORS[connector].module)
 
 
-def credential_for(connector):
+def credential_for(connector, account=auth.DEFAULT_ACCOUNT):
     """Runs as the connector user: the auth socket returns only that identity's token."""
     spec = connectors.CONNECTORS[connector]
-    op = 'access_token' if spec.credential.startswith('google:') else 'token'
-    value = rpc('/run/secure-auth/token.sock', {'op': op})
+    if spec.credential.startswith('google:'):
+        value = rpc('/run/secure-auth/token.sock', {'op': 'access_token', 'account': account})
+    else:
+        value = rpc('/run/secure-auth/token.sock', {'op': 'token'})
     return value.get('access_token') or value.get('token')
 
 
@@ -63,17 +66,17 @@ def check(connector):
     return connectors.CONNECTORS[connector]
 
 
-def probe(connector):
+def probe(connector, account=auth.DEFAULT_ACCOUNT):
     spec = check(connector)
-    label = run_as(spec.user, lambda: module_for(connector).probe(credential_for(connector)))
-    as_auth(lambda: auth.set_account(connector, label))
+    label = run_as(spec.user, lambda: module_for(connector).probe(credential_for(connector, account)))
+    as_auth(lambda: auth.set_account(connector, label, account))
     return {'connector': connector, 'account': label}
 
 
-def disconnect(connector):
+def disconnect(connector, account=auth.DEFAULT_ACCOUNT):
     spec = check(connector)
     if spec.credential.startswith('google:'):
-        result = as_auth(lambda: auth.disconnect(connector))
+        result = as_auth(lambda: auth.disconnect(connector, account))
         return {'connector': connector, **result}
     module = module_for(connector)
     revoke = getattr(module, 'revoke', None)
@@ -95,10 +98,19 @@ def main():
     if os.getuid() != 0:
         raise Denied('GUEST_ADMIN_REQUIRED')
     connector, action = sys.argv[1], sys.argv[2]
+    # An account names one of a Google connector's accounts; other connectors have one credential.
+    account = sys.argv[3] if len(sys.argv) > 3 else auth.DEFAULT_ACCOUNT
+    if len(sys.argv) > 4 or (len(sys.argv) > 3 and connector not in auth.GOOGLE):
+        raise Denied('UNKNOWN_ADMIN_ACTION')
+    auth.account_name(account)
     if action == 'probe':
-        print(json.dumps(probe(connector)))
+        print(json.dumps(probe(connector, account)))
     elif action == 'disconnect':
-        print(json.dumps(disconnect(connector)))
+        try:
+            print(json.dumps(disconnect(connector, account)))
+        finally:
+            # The connector's provider role is no longer configured: close its allowlist now.
+            admin.refresh_egress()
     else:
         raise Denied('UNKNOWN_ADMIN_ACTION')
 

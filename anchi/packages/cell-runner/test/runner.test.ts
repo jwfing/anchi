@@ -126,6 +126,36 @@ describe('codex mapping', () => {
     expect(events.map((e) => e.type)).toEqual(['tool.call', 'tool.result']);
   });
 
+  it('reports Codex reasoning summaries and changed plans as progress', () => {
+    const state = { calls: new Set<string>(), warnings: new Set<string>() };
+    const todo = (completed: boolean) => ({
+      id: 't1',
+      type: 'todo_list' as const,
+      items: [
+        { text: 'read', completed: true },
+        { text: 'fix', completed },
+      ],
+    });
+    const events = [
+      { type: 'item.completed', item: { id: 'r1', type: 'reasoning', text: '**Reading**' } },
+      { type: 'item.completed', item: { id: 'r2', type: 'reasoning', text: '  ' } },
+      { type: 'item.started', item: todo(false) },
+      { type: 'item.updated', item: todo(false) },
+      { type: 'item.updated', item: todo(true) },
+      { type: 'item.completed', item: todo(true) },
+    ].flatMap((ev) => [...mapCodexEvent(ev as never, state)]);
+    expect(events).toEqual([
+      { type: 'progress', text: '**Reading**' },
+      { type: 'progress', text: 'Plan: ✓ read · ○ fix' },
+      { type: 'progress', text: 'Plan: ✓ read · ✓ fix' },
+    ]);
+    for (const e of events) {
+      expect(cellMessageSchema.safeParse({ type: 'event', turn: 't', event: e }).success).toBe(
+        true,
+      );
+    }
+  });
+
   it('reports cached, cache-write and reasoning tokens of a Codex turn', () => {
     const state = { calls: new Set<string>(), warnings: new Set<string>() };
     const events = [
@@ -249,6 +279,7 @@ describe('Claude Code mapping', () => {
         type: 'assistant',
         message: {
           content: [
+            { type: 'thinking', thinking: 'List the files first.' },
             { type: 'text', text: 'Running it.' },
             { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls' } },
           ],
@@ -301,6 +332,7 @@ describe('Claude Code mapping', () => {
     ].flatMap((m) => [...mapClaudeMessage(m as never)]);
     expect(events).toEqual([
       { type: 'session.started', resumeId: 'sess-1' },
+      { type: 'progress', text: 'List the files first.' },
       { type: 'message', text: 'Running it.' },
       { type: 'tool.call', id: 'tu1', name: 'Bash', input: '{"command":"ls"}' },
       { type: 'tool.result', id: 'tu1', output: 'a.txt', isError: false },

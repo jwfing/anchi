@@ -122,6 +122,13 @@ function toolResult(item: ThreadItem): RuntimeEvent | undefined {
 export interface MapState {
   calls: Set<string>;
   warnings: Set<string>;
+  /** The last plan reported, so an unchanged to-do list is not repeated on every update. */
+  plan?: string;
+}
+
+/** The to-do list as one line: done steps checked. */
+function planText(items: { text: string; completed: boolean }[]): string {
+  return `Plan: ${items.map((i) => `${i.completed ? '✓' : '○'} ${i.text}`).join(' · ')}`;
 }
 
 export function* mapCodexEvent(ev: ThreadEvent, state: MapState): Generator<RuntimeEvent> {
@@ -129,7 +136,17 @@ export function* mapCodexEvent(ev: ThreadEvent, state: MapState): Generator<Runt
     case 'thread.started':
       yield { type: 'session.started', resumeId: ev.thread_id.slice(0, 200) };
       return;
-    case 'item.started': {
+    case 'item.started':
+    case 'item.updated': {
+      if (ev.item.type === 'todo_list') {
+        const plan = planText(ev.item.items);
+        if (ev.item.items.length && plan !== state.plan) {
+          state.plan = plan;
+          yield { type: 'progress', text: text(plan) };
+        }
+        return;
+      }
+      if (ev.type === 'item.updated') return;
       const call = toolCall(ev.item);
       if (call) {
         state.calls.add(ev.item.id);
@@ -143,6 +160,11 @@ export function* mapCodexEvent(ev: ThreadEvent, state: MapState): Generator<Runt
         yield { type: 'message', text: text(item.text) };
         return;
       }
+      if (item.type === 'reasoning') {
+        if (item.text.trim()) yield { type: 'progress', text: text(item.text) };
+        return;
+      }
+      if (item.type === 'todo_list') return;
       if (item.type === 'error') {
         // Codex repeats config warnings once per config layer it loads.
         if (state.warnings.has(item.message)) return;

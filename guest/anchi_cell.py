@@ -58,6 +58,9 @@ startup_timeout_sec = 10
 tool_timeout_sec = 3600
 '''
 SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+# Google services an agent may name an account of (`accounts:` in its file).
+ACCOUNT_SERVICES = ('gmail', 'drive')
+ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
 CONNECTORS = PROXY_CONNECTORS + SERVICE_CONNECTORS
 SANDBOXES = ('cell', 'codex-workspace-write')
 BASE_IMAGE = 'codex'
@@ -726,6 +729,21 @@ def parse_egress(arg):
     return value  # the proxy validates each pattern
 
 
+def parse_accounts(arg, connectors):
+    """The agent's Google account per service, `gmail=work,drive=personal`, or `-` for none."""
+    if arg == '-':
+        return {}
+    accounts = {}
+    for entry in arg.split(','):
+        service, _, account = entry.partition('=')
+        if service not in ACCOUNT_SERVICES or service not in connectors or service in accounts:
+            raise Failure('BAD_ACCOUNTS')
+        if not ACCOUNT.fullmatch(account):
+            raise Failure('BAD_ACCOUNTS')
+        accounts[service] = account
+    return accounts
+
+
 def workspace_masks(full):
     """Existing paths under a writable workspace to mount read-only: git hooks, config and
     info of repositories near the top, and editor and shell configuration that runs commands."""
@@ -760,6 +778,7 @@ def cell_start(
     ask_arg='-',
     workspaces_arg='-',
     egress_arg='-',
+    accounts_arg='-',
 ):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
@@ -778,6 +797,7 @@ def cell_start(
     ask = [] if ask_arg == '-' else ask_arg.split(',')
     if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
         raise Failure('BAD_APPROVALS')
+    accounts = parse_accounts(accounts_arg, connectors)
     env = cell_env()
     uid = int(env['SECURE_CELL_UID_BASE']) + int(env['SECURE_CELL_AGENT_UID'])
     work = CELLS / task
@@ -801,6 +821,7 @@ def cell_start(
                     'sandbox': sandbox,
                     'runtime': runtime,
                     'workspaces': [{'name': n, 'path': str(f), 'mode': m} for n, f, m in workspaces],
+                    'accounts': accounts,
                     'started_at': time.time(),
                 }
             )
@@ -819,8 +840,10 @@ def cell_start(
                 'runtime': RUNTIMES[runtime],
                 'ask': [c for c in ask if c in PROXY_CONNECTORS],
                 'egress': egress_hosts,
-                # Connector services reached through the proxy's bridge, which names the agent.
+                # Connector services reached through the proxy's bridge, which names the agent
+                # and pins the agent's Google account per service.
                 'services': [c for c in connectors if c in SERVICE_CONNECTORS],
+                'accounts': accounts,
             }
         )
         identifiers = registration.get('identifiers', {})
@@ -1089,7 +1112,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) in (6, 7, 8, 9, 10):
+    if command == 'start' and len(rest) in (6, 7, 8, 9, 10, 11):
         return cell_start(*rest)
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.

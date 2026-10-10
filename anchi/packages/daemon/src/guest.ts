@@ -154,6 +154,8 @@ export interface CellStart {
   workspaces: { name: string; path: string; mode: 'ro' | 'rw' }[];
   /** Allowed hosts, or undefined for open egress. */
   egress?: string[];
+  /** Google account per service (gmail, drive); `default` for the others. */
+  accounts?: Record<string, string>;
 }
 
 export interface PollItem {
@@ -182,6 +184,18 @@ export class Guest {
     if (!/^(base|[0-9a-f]{16})$/.test(c.hash)) throw new Error('invalid image hash');
     const connectors = c.connectors.length ? c.connectors.join(',') : '-';
     if (!/^(-|[a-z]+(,[a-z]+)*)$/.test(connectors)) throw new Error('invalid connectors');
+    const accounts =
+      Object.entries(c.accounts ?? {})
+        .filter(([service]) => c.connectors.includes(service))
+        .map(([service, account]) => `${service}=${account}`)
+        .join(',') || '-';
+    if (
+      !/^(-|(gmail|drive)=[a-z0-9][a-z0-9_-]{0,31}(,(gmail|drive)=[a-z0-9][a-z0-9_-]{0,31})*)$/.test(
+        accounts,
+      )
+    ) {
+      throw new Error('invalid accounts');
+    }
     return this.transport.spawn([
       'anchi-cell',
       'start',
@@ -195,6 +209,7 @@ export class Guest {
       c.ask.filter((x) => c.connectors.includes(x)).join(',') || '-',
       c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
       c.egress ? Buffer.from(JSON.stringify(c.egress)).toString('base64url') : '-',
+      accounts,
     ]);
   }
 

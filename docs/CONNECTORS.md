@@ -6,12 +6,14 @@ Gmail, Google Drive, Notion and Slack are registered in `services/connectors.py`
 
 | Connector | Preparation | Connect |
 |---|---|---|
-| Gmail | Enable Gmail API in Google Cloud; import a Desktop OAuth client JSON | `scripts/anchi setup google-client <json>` once, then `scripts/anchi setup service gmail` (read-only scope) |
-| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `scripts/anchi setup service drive`; tokens are stored independently from Gmail |
+| Gmail | Without a built-in client: enable Gmail API in Google Cloud and import a Desktop OAuth client JSON | `scripts/anchi setup google-client <json>` once, then `scripts/anchi setup service gmail [--account <name>]` (read-only scope) |
+| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `scripts/anchi setup service drive [--account <name>]`; tokens are stored independently from Gmail |
 | Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | `scripts/anchi setup service notion`, then enter the `ntn_` token without echo |
 | Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | `scripts/anchi setup service slack`, then enter the `xoxb-` Bot User OAuth Token |
 
 The TUI's **Connectors → Services** does the same with masked input in a full-screen dialog that agent output cannot draw over. Tokens go from the client to the daemon and over stdin to the encrypted vault; they are never logged or stored on the Mac. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
+
+Gmail and Drive can hold several Google accounts each, by name (`default` without `--account`). An agent's file picks one per service with `accounts: { gmail: work, drive: personal }`; the bridge pins it to the agent's cells, and grants bind to that account's generation. The client and the choice between Anchi's built-in client and your own are described in [Gmail setup](GMAIL_SETUP.md#1-prepare-google-oauth).
 
 ## Authorization modes
 
@@ -43,7 +45,7 @@ The in-cell tool keeps the same request ID while waiting and times out after ten
 
 ## Disconnecting
 
-- Gmail/Drive: revoke local access, remove tokens and attempt Google revocation. Failed remote revocation is shown as pending retry.
+- Gmail/Drive: revoke local access, remove tokens and attempt Google revocation, per account (`--account <name>`, `default` otherwise). Failed remote revocation is shown as pending retry.
 - Slack: revoke local access, call `auth.revoke`, then remove the token.
 - Notion: revoke local access and remove the token. No remote revoke API is available; remove the integration in Notion settings yourself.
 

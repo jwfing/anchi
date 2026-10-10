@@ -14,6 +14,14 @@ export const SERVICE_CONNECTORS = ['gmail', 'drive', 'notion', 'slack'] as const
 export const connectorSchema = z.enum([...PROXY_CONNECTORS, ...SERVICE_CONNECTORS]);
 export type Connector = z.infer<typeof connectorSchema>;
 
+/** Google services with named accounts; an agent may pick one of each with `accounts:`. */
+export const ACCOUNT_CONNECTORS = ['gmail', 'drive'] as const;
+/** A Google account name, as given to `anchi setup service gmail --account <name>`. */
+export const accountNameSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/, 'use 1–32 lowercase letters, digits, "-" or "_"');
+const accountsSchema = z.partialRecord(z.enum(ACCOUNT_CONNECTORS), accountNameSchema);
+
 export const approvalModeSchema = z.enum(['auto', 'ask']);
 export type ApprovalMode = z.infer<typeof approvalModeSchema>;
 
@@ -137,6 +145,11 @@ export const agentLayerSchema = z.strictObject({
    * aws and linear, through the policy service (per agent) for gmail, drive, notion and slack.
    */
   approvals: z.partialRecord(connectorSchema, approvalModeSchema).optional(),
+  /**
+   * The Google account the agent's gmail or drive uses, such as `{gmail: work}`; `default`
+   * otherwise. Pinned to the agent's cells by the trusted bridge; the agent cannot switch.
+   */
+  accounts: accountsSchema.optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
   /** Hosts the agent's cells may reach (plus its runtime and connectors); omitted: any. */
   egress: z.array(egressPattern).max(100).optional(),
@@ -166,6 +179,7 @@ export const resolvedAgentSchema = z
     triggers: z.array(triggerSchema).default([]),
     skills: z.array(idSchema).default([]),
     approvals: z.partialRecord(connectorSchema, approvalModeSchema).default({}),
+    accounts: accountsSchema.default({}),
     workspaces: z.array(workspaceSchema).max(10).default([]),
     egress: z.array(egressPattern).max(100).optional(),
   })
@@ -180,6 +194,10 @@ export const resolvedAgentSchema = z
   .refine((a) => !a.delegates.includes(a.id), {
     message: 'an agent cannot delegate to itself',
     path: ['delegates'],
+  })
+  .refine((a) => Object.keys(a.accounts).every((c) => a.connectors.includes(c as Connector)), {
+    message: 'an account needs its connector in connectors',
+    path: ['accounts'],
   });
 export type ResolvedAgentConfig = z.infer<typeof resolvedAgentSchema>;
 

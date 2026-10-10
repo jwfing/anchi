@@ -12,6 +12,7 @@ from collections import deque
 import importlib
 
 import auth
+import connector_base
 import connectors
 import policy_client
 import policy
@@ -44,8 +45,6 @@ def recover_connector(mode):
     connector = connectors.CONNECTORS.get(mode)
     if connector is None or connectors.WRITE not in connector.ops.values():
         return True
-    import connector_base
-
     try:
         connector_base.ledger(connector).recover()
         return True
@@ -95,12 +94,18 @@ class Service:
                 raise Denied('CALLER_DENIED')
             self.throttle()
             request = recv_json(conn)
-            agent = None
-            if uid in self.bridge_uids and self.mode in connectors.CONNECTORS and isinstance(request, dict):
+            agent, account = None, 'default'
+            connector = connectors.CONNECTORS.get(self.mode)
+            if uid in self.bridge_uids and connector and isinstance(request, dict):
                 agent = request.pop('agent', None)
                 if not isinstance(agent, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', agent):
                     raise Denied('BAD_AGENT')
-            connector = connectors.CONNECTORS.get(self.mode)
+                # The bridge pins the cell's Google account; from anyone else the field is refused
+                # by the handler's strict request fields.
+                if connector.credential.startswith('google:'):
+                    account = request.pop('account', None)
+                    if not isinstance(account, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,31}', account):
+                        raise Denied('BAD_ACCOUNT')
             if (
                 connector
                 and not self.writes_ready
@@ -111,10 +116,12 @@ class Service:
             if self.mode == 'auth' and request.get('op') not in credential_ops(caller):
                 raise Denied('CREDENTIAL_SCOPE_DENIED')
             policy_client.AGENT = agent
+            connector_base.ACCOUNT = account
             try:
                 result = self.handler(request, caller) if self.mode in ('auth', 'policy') else self.handler(request)
             finally:
                 policy_client.AGENT = None
+                connector_base.ACCOUNT = 'default'
             send_json(conn, {'ok': True, 'result': result})
         except Denied as exc:
             self.reply_error(conn, str(exc))

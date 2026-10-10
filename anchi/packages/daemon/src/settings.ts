@@ -7,25 +7,43 @@ import {
   listAgentIds,
   parseYamlAs,
   type AgentPatch,
+  BASE_IMAGE,
   ConfigError,
   connectorSchema,
   type HomeLayout,
   idSchema,
   patchAgentYaml,
   resolveAgent,
+  type Trigger,
   workspaceSchema,
 } from '@anchi/core';
-import type { AgentUpdate, Inventory, WorkspaceSetting } from '@anchi/protocol';
+import type { AgentSettings, AgentUpdate, WorkspaceSetting } from '@anchi/protocol';
 import { z } from 'zod';
-import { lineDiff } from './builder.ts';
-import { checkReferences } from './inventory.ts';
+import { checkReferences, type ReferenceInventory } from './inventory.ts';
+
+const field = agentLayerSchema.shape;
 
 /** A settings patch from a client, checked against the agent schema's own field rules. */
 const patchSchema = z.strictObject({
+  name: field.name,
+  description: field.description,
+  runtime: field.runtime,
+  // '' removes the key: the template's value, or the runtime default.
+  model: field.model.unwrap().or(z.literal('')).optional(),
+  effort: field.effort.unwrap().or(z.literal('')).optional(),
+  prompt: z
+    .strictObject({
+      mode: z.enum(['replace', 'append']).optional(),
+      text: z.string().max(100_000).optional(),
+    })
+    .optional(),
   skills: z.array(idSchema).max(50).optional(),
   connectors: z.array(connectorSchema).max(7).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
 });
+
+/** The fields a patch may change, for messages. */
+export const PATCH_FIELDS = Object.keys(patchSchema.shape);
 
 export function parsePatch(raw: unknown): AgentPatch {
   const parsed = patchSchema.safeParse(raw);
@@ -38,20 +56,120 @@ export function parsePatch(raw: unknown): AgentPatch {
   return parsed.data;
 }
 
-/** The settings the panel edits, from an agent or a proposal's layer. */
-export function settingsOf(agent: Pick<AgentLayer, 'skills' | 'connectors' | 'workspaces'>) {
+const EDITABLE = [
+  'name',
+  'description',
+  'runtime',
+  'model',
+  'effort',
+  'prompt',
+  'skills',
+  'connectors',
+  'workspaces',
+] as const;
+
+/** One line per trigger, for display. */
+function triggerLine(t: Trigger): string {
+  if ('schedule' in t) return `schedule ${t.schedule}`;
+  const p = t.poll;
+  const what =
+    p.type === 'github-issues' ? p.query : [p.team, p.label, p.state].filter(Boolean).join(' ');
+  return `poll ${p.type}${what ? ` ${what}` : ''} every ${t.every ?? 5} min`;
+}
+
+/**
+ * What the settings panel shows of an agent: `agent` as resolved (or a proposal's layer), `own`
+ * the agent's own file and `templates` the layers it extends, to tell which values are inherited.
+ */
+export function settingsView(
+  agent: AgentLayer,
+  own: AgentLayer = agent,
+  templates: AgentLayer[] = [],
+): Pick<AgentSettings, 'current' | 'inherited' | 'fixed'> {
+  const inherited = EDITABLE.filter(
+    (k) => own[k] === undefined && templates.some((t) => t[k] !== undefined),
+  );
   return {
-    skills: agent.skills ?? [],
-    connectors: agent.connectors ?? [],
-    workspaces: (agent.workspaces ?? []).map((w): WorkspaceSetting => ({
-      path: w.path,
-      mode: w.mode ?? 'ro',
-      ...(w.name ? { name: w.name } : {}),
-    })),
+    current: {
+      name: agent.name ?? agent.id ?? '',
+      description: agent.description ?? '',
+      runtime: agent.runtime ?? 'codex',
+      model: agent.model ?? '',
+      effort: agent.effort ?? '',
+      prompt: { mode: agent.prompt?.mode ?? 'append', text: agent.prompt?.text ?? '' },
+      skills: agent.skills ?? [],
+      connectors: agent.connectors ?? [],
+      workspaces: (agent.workspaces ?? []).map((w): WorkspaceSetting => ({
+        path: w.path,
+        mode: w.mode ?? 'ro',
+        ...(w.name ? { name: w.name } : {}),
+      })),
+    },
+    inherited,
+    fixed: {
+      ...(own.extends ? { extends: own.extends } : {}),
+      ...(own.prompt?.file ? { promptFile: own.prompt.file } : {}),
+      image: agent.image ?? BASE_IMAGE,
+      sandbox: agent.sandbox ?? 'cell',
+      delegates: agent.delegates ?? [],
+      triggers: (agent.triggers ?? []).map(triggerLine),
+      approvals: { ...agent.approvals },
+      egress: agent.egress ?? null,
+      ...(agent.accounts && Object.keys(agent.accounts).length
+        ? { accounts: { ...agent.accounts } as Record<string, string> }
+        : {}),
+    },
   };
 }
 
-const digest = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+/** The settings view of an agent's file, or of the file as it would be with `override`. */
+export function agentSettingsView(layout: HomeLayout, id: string, override?: string) {
+  const agent = resolveAgent(id, layout, override);
+  const layers = agent.sourceFiles.map((f, i, all) =>
+    parseYamlAs(
+      i === all.length - 1 && override !== undefined ? override : readFileSync(f, 'utf8'),
+      agentLayerSchema,
+      f,
+    ),
+  );
+  return settingsView(agent, layers.at(-1)!, layers.slice(0, -1));
+}
+
+/** Minimal line diff (LCS) in unified style, for the confirmation dialogs. */
+export function lineDiff(before: string, after: string): string {
+  if (before === after) return '';
+  const a = before ? before.replace(/\n$/, '').split('\n') : [];
+  const b = after.replace(/\n$/, '').split('\n');
+  const n = a.length;
+  const m = b.length;
+  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i]![j] =
+        a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+  const lines: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      lines.push(`  ${a[i]}`);
+      i++;
+      j++;
+    } else if (j < m && (i >= n || lcs[i]![j + 1]! > lcs[i + 1]![j]!)) {
+      lines.push(`+ ${b[j]}`);
+      j++;
+    } else {
+      lines.push(`- ${a[i]}`);
+      i++;
+    }
+  }
+  return lines.join('\n');
+}
+
+export const digest = (text: string) =>
+  createHash('sha256').update(text).digest('hex').slice(0, 16);
 
 /**
  * The change a patch makes to an agent's file, checked as the whole agent (templates included)
@@ -65,8 +183,9 @@ export function updateAgentFile(
   opts: {
     apply?: boolean;
     base?: string;
-    inventory: Pick<Inventory, 'skills' | 'connectors' | 'agents'>;
-    workspaceRoot: string;
+    /** Without it, only the agent schema is checked, not what it refers to. */
+    inventory?: ReferenceInventory;
+    workspaceRoot?: string;
   },
 ): AgentUpdate {
   const file = agentFile(layout, id);
@@ -78,9 +197,11 @@ export function updateAgentFile(
   const warnings: string[] = [];
   try {
     const agent = resolveAgent(id, layout, next);
-    const found = checkReferences(agent, opts.inventory, opts.workspaceRoot);
-    errors.push(...found.errors);
-    warnings.push(...found.warnings);
+    if (opts.inventory) {
+      const found = checkReferences(agent, opts.inventory, opts.workspaceRoot ?? '');
+      errors.push(...found.errors);
+      warnings.push(...found.warnings);
+    }
   } catch (err) {
     errors.push(err instanceof ConfigError ? err.message.trim() : String(err));
   }
@@ -102,7 +223,7 @@ export function allowEgressHost(
   layout: HomeLayout,
   id: string,
   host: string,
-  opts: { inventory: Pick<Inventory, 'skills' | 'connectors' | 'agents'>; workspaceRoot: string },
+  opts: { inventory: ReferenceInventory; workspaceRoot: string },
 ): { egress: string[] } {
   const h = host.trim().toLowerCase().replace(/\.$/, '');
   if (!HOST.test(h) || h.length > 253) {

@@ -15,8 +15,10 @@ import {
   type ResolvedAgent,
   resolvedAgentSchema,
 } from '@anchi/core';
-import type { BuilderProposal, Inventory } from '@anchi/protocol';
-import { checkReferences } from './inventory.ts';
+import type { BuilderProposal } from '@anchi/protocol';
+import { parse as parseYaml } from 'yaml';
+import { checkReferences, type ReferenceInventory } from './inventory.ts';
+import { digest, lineDiff, PATCH_FIELDS, parsePatch, updateAgentFile } from './settings.ts';
 
 export const BUILDER_ID = 'builder';
 
@@ -27,6 +29,8 @@ the user reviews your proposal in a confirmation dialog, and only then is it wri
 An agent is a YAML file. Fields:
 - name: display name; description: one line.
 - runtime: codex or claude-code (required). Use claude-code when the user asks for Claude.
+  The inventory lists both and whether each is connected; one that is not connected can still
+  be proposed (the user connects it in Runtimes), but say so.
 - model (optional; e.g. gpt-5.5 for codex, claude-opus-5-5 or claude-sonnet-5-5 for
   claude-code) and effort (low | medium | high | xhigh; codex only).
 - prompt: { mode: append, text: | ... } — the agent's system instructions. Be specific about
@@ -34,9 +38,11 @@ An agent is a YAML file. Fields:
 - connectors: any of github, aws, linear (credentials injected outside the agent's cell) and
   gmail, drive, notion, slack (served by trusted services). Never put tokens anywhere. Grant
   only what the job needs.
+- accounts (optional): which signed-in Google account gmail or drive use, e.g.
+  { gmail: work }; the inventory lists them. Without it, the account named default.
 - skills: ids of installed skills the agent can use (optional), e.g. [code-review]. Each turn
-  starts with an <anchi-inventory> block listing the installed skills, connectors (and whether
-  they are connected), directories under ~/AnchiWorkspaces, agents and images. Propose only
+  starts with an <anchi-inventory> block listing the runtimes and connectors (and whether
+  they are connected), installed skills, directories under ~/AnchiWorkspaces, agents and images. Propose only
   what it lists; if something is missing, tell the user how to add it instead.
 - triggers: start tasks without the user (optional): { schedule: '0 9 * * 1-5', text: ... }
   (cron, local time), or { poll: { type: linear-issues, team?, label?, state? } or
@@ -74,7 +80,22 @@ agent block and, if the agent needs tools beyond the base image, one image block
 \`\`\`
 
 Ids use lowercase letters, digits and "-". Never use the id "${BUILDER_ID}". If the user asks
-for changes, send a complete new proposal.`;
+for changes to your proposal, send a complete new proposal.
+
+To change an existing agent (listed under Agents in the inventory), prefer a patch with only
+the fields to change; the rest of its file, comments included, stays as it is:
+
+\`\`\`anchi-agent-patch id=<agent-id>
+model: claude-sonnet-5-5
+skills: [code-review, test]
+\`\`\`
+
+A patch may set name, description, runtime, model, effort, prompt ({ mode, text }), skills,
+connectors and workspaces. Lists replace the whole list: repeat the entries to keep. An empty
+model, effort or description ('') removes it. For any other field (triggers, approvals,
+egress, delegates, image), send a complete anchi-agent block with the whole agent instead.
+The inventory shows each agent's file when the user's message names its id; otherwise it
+shows a summary, so ask the user to name the agent if you need to see its prompt.`;
 
 /** The builder itself: a Codex agent with no connectors, in a base-image cell. */
 export function builderAgent(): ResolvedAgent {
@@ -90,56 +111,32 @@ export function builderAgent(): ResolvedAgent {
   return { ...agent, sourceFiles: [] };
 }
 
-const BLOCK = /```anchi-(agent|image) id=([a-z0-9][a-z0-9-]{0,39})[ \t]*\n([\s\S]*?)\n```/g;
+const BLOCK =
+  /```anchi-(agent-patch|agent|image) id=([a-z0-9][a-z0-9-]{0,39})[ \t]*\n([\s\S]*?)\n```/g;
 
 export interface ParsedBlocks {
   agent?: { id: string; yaml: string };
+  /** Only the fields to change in an existing agent's file. */
+  patch?: { id: string; yaml: string };
   image?: { id: string; yaml: string };
 }
 
-/** Finds proposal blocks in builder output. The last block of each kind wins. */
+/** Finds proposal blocks in builder output. The last agent (or patch) and image block win. */
 export function parseBlocks(text: string): ParsedBlocks {
   const out: ParsedBlocks = {};
   for (const m of text.matchAll(BLOCK)) {
     const block = { id: m[2]!, yaml: `${m[3]!.trimEnd()}\n` };
-    if (m[1] === 'agent') out.agent = block;
-    else out.image = block;
+    if (m[1] === 'image') out.image = block;
+    else {
+      delete out.agent;
+      delete out.patch;
+      out[m[1] === 'agent' ? 'agent' : 'patch'] = block;
+    }
   }
   return out;
 }
 
-/** Minimal line diff (LCS) in unified style, for the confirmation dialog. */
-export function lineDiff(before: string, after: string): string {
-  if (before === after) return '';
-  const a = before ? before.replace(/\n$/, '').split('\n') : [];
-  const b = after.replace(/\n$/, '').split('\n');
-  const n = a.length;
-  const m = b.length;
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i]![j] =
-        a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
-    }
-  }
-  const lines: string[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n || j < m) {
-    if (i < n && j < m && a[i] === b[j]) {
-      lines.push(`  ${a[i]}`);
-      i++;
-      j++;
-    } else if (j < m && (i >= n || lcs[i]![j + 1]! > lcs[i + 1]![j]!)) {
-      lines.push(`+ ${b[j]}`);
-      j++;
-    } else {
-      lines.push(`- ${a[i]}`);
-      i++;
-    }
-  }
-  return lines.join('\n');
-}
+export { lineDiff };
 
 function read(file: string): string {
   return existsSync(file) ? readFileSync(file, 'utf8') : '';
@@ -149,7 +146,7 @@ const MAX_YAML = 100_000;
 
 /** What proposals are checked against: installed skills, agents, connectors, directories. */
 export interface ProposalRefs {
-  inventory: Pick<Inventory, 'skills' | 'connectors' | 'agents'>;
+  inventory: ReferenceInventory;
   workspaceRoot: string;
 }
 
@@ -159,6 +156,9 @@ export function makeProposal(
   blocks: ParsedBlocks,
   refs?: ProposalRefs,
 ): BuilderProposal | undefined {
+  if (blocks.patch) {
+    return makeUpdate(layout, blocks.patch.id, blocks.patch.yaml, refs, { image: blocks.image });
+  }
   if (!blocks.agent) return undefined;
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -207,18 +207,101 @@ export function makeProposal(
       errors.push(err instanceof ConfigError ? err.message.trim() : String(err));
     }
   }
+  const before = read(agentFile(layout, id));
   return {
     id: `p-${randomBytes(4).toString('hex')}`,
     agentId: id,
+    kind: before ? 'replace' : 'create',
     agentYaml: yaml,
     imageYaml: blocks.image?.yaml ?? null,
-    agentDiff: lineDiff(read(agentFile(layout, id)), yaml),
+    agentDiff: lineDiff(before, yaml),
     imageDiff: blocks.image
       ? lineDiff(read(imageFile(layout, blocks.image.id)), blocks.image.yaml)
       : '',
     errors,
     warnings,
   };
+}
+
+/** A patch in builder output: YAML whose `null` removes a field, as `''` does. */
+function readPatch(id: string, yaml: string): AgentPatch {
+  if (yaml.length > MAX_YAML) throw new Error('proposal is too large');
+  let raw: unknown;
+  try {
+    raw = parseYaml(yaml) ?? {};
+  } catch (err) {
+    throw new Error(`invalid YAML: ${(err as Error).message}`);
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('the patch is not a mapping');
+  const { id: named, ...fields } = raw as Record<string, unknown>;
+  if (named !== undefined && named !== id) throw new Error(`id "${named}" does not match "${id}"`);
+  for (const k of ['description', 'model', 'effort']) if (fields[k] === null) fields[k] = '';
+  try {
+    return parsePatch(fields);
+  } catch (err) {
+    throw new Error(
+      `${(err as Error).message.trim()}\na patch changes only ${PATCH_FIELDS.join(', ')}; send a complete anchi-agent block to change other fields`,
+    );
+  }
+}
+
+/**
+ * A patch to an existing agent's file, checked as the settings panel's changes are. `base` is
+ * the file's digest when the proposal was first made: a file changed since then is refused.
+ */
+export function makeUpdate(
+  layout: HomeLayout,
+  id: string,
+  patch: AgentPatch | string,
+  refs?: ProposalRefs,
+  opts: { image?: ParsedBlocks['image']; base?: string } = {},
+): BuilderProposal {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const file = agentFile(layout, id);
+  const text = read(file);
+  const proposal: BuilderProposal = {
+    id: `p-${randomBytes(4).toString('hex')}`,
+    agentId: id,
+    kind: 'update',
+    agentYaml: text,
+    imageYaml: null,
+    agentDiff: '',
+    imageDiff: '',
+    errors,
+    warnings,
+    patch: {},
+    base: opts.base ?? digest(text),
+  };
+  if (id === BUILDER_ID) errors.push(`"${BUILDER_ID}" is reserved`);
+  else if (!existsSync(file)) {
+    errors.push(`agent "${id}" does not exist; propose it with an anchi-agent block`);
+  }
+  if (opts.image) errors.push('a patch cannot add an image; send a complete anchi-agent block');
+  if (errors.length) return proposal;
+  try {
+    const parsed = typeof patch === 'string' ? readPatch(id, patch) : patch;
+    proposal.patch = parsed;
+    proposal.agentYaml = patchAgentYaml(text, parsed);
+    const update = updateAgentFile(layout, id, parsed, { ...refs });
+    proposal.agentDiff = update.diff;
+    errors.push(...update.errors);
+    warnings.push(...update.warnings);
+    if (!update.diff) errors.push('the patch changes nothing');
+    if (update.base !== proposal.base) {
+      errors.push(`@${id}'s file changed since this proposal; ask the builder again`);
+    }
+  } catch (err) {
+    errors.push(err instanceof ConfigError ? err.message.trim() : (err as Error).message);
+  }
+  return proposal;
+}
+
+/** A revision's fields over the patch's; prompt fields merge one by one. */
+function mergePatch(base: AgentPatch, over: AgentPatch): AgentPatch {
+  const merged = { ...base, ...over };
+  if (base.prompt && over.prompt) merged.prompt = { ...base.prompt, ...over.prompt };
+  return merged;
 }
 
 function writeAtomic(file: string, text: string) {
@@ -258,7 +341,21 @@ export class Proposals {
   revise(id: string, patch: AgentPatch): BuilderProposal {
     const item = this.items.get(id);
     if (!item) throw new Error(`unknown proposal "${id}"`);
-    const yaml = patchAgentYaml(item.proposal.agentYaml, patch);
+    const { proposal: old } = item;
+    if (old.kind === 'update') {
+      // Still against the file as it was when the builder proposed the patch.
+      const revised = makeUpdate(
+        this.layout,
+        old.agentId,
+        mergePatch(parsePatch(old.patch ?? {}), patch),
+        this.refs?.(),
+        { base: old.base },
+      );
+      const proposal = { ...revised, id };
+      this.items.set(id, { ...item, proposal });
+      return proposal;
+    }
+    const yaml = patchAgentYaml(old.agentYaml, patch);
     const revised = makeProposal(
       this.layout,
       {
@@ -279,6 +376,28 @@ export class Proposals {
   apply(id: string): { agentId: string; imageId?: string } {
     const item = this.items.get(id);
     if (!item) throw new Error(`unknown proposal "${id}"`);
+    const { proposal } = item;
+    if (proposal.kind === 'update') {
+      const patch = parsePatch(proposal.patch ?? {});
+      const fresh = makeUpdate(this.layout, proposal.agentId, patch, this.refs?.(), {
+        base: proposal.base,
+      });
+      if (fresh.errors.length) throw new Error(`proposal is invalid: ${fresh.errors.join('; ')}`);
+      try {
+        updateAgentFile(this.layout, proposal.agentId, patch, {
+          ...this.refs?.(),
+          apply: true,
+          base: proposal.base,
+        });
+      } catch (err) {
+        if (!/changed since/.test((err as Error).message)) throw err;
+        throw new Error(
+          `@${proposal.agentId}'s file changed since this proposal; ask the builder again`,
+        );
+      }
+      this.items.delete(id);
+      return { agentId: proposal.agentId };
+    }
     // Validate again against the files and what exists now.
     const fresh = makeProposal(
       this.layout,

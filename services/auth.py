@@ -4,6 +4,7 @@ import base64
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -20,7 +21,7 @@ SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 DRIVE_SCOPES = frozenset(
     {'https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.file'}
 )
-# Google connectors: one PKCE flow and one token file each; scopes must come back exactly as requested.
+# Google connectors: one PKCE flow and one token file per account; scopes must come back exactly as requested.
 GOOGLE = {
     'gmail': {
         'scopes': frozenset({SCOPE}),
@@ -44,6 +45,14 @@ TOKENS = {
     'linear': {'file': 'linear.json', 'pattern': r'lin_api_[A-Za-z0-9]{20,100}'},
 }
 AWS_FILE = 'aws.json'
+# Named Google accounts within one connector. `default` keeps the file names above, so tokens from
+# before accounts existed stay where they are; other accounts get `<file>.<account>.json`.
+ACCOUNT = re.compile(r'[a-z0-9][a-z0-9_-]{0,31}')
+DEFAULT_ACCOUNT = 'default'
+MAX_ACCOUNTS = 8
+# Anchi's own Desktop OAuth client, shipped with the services when there is one. A client the
+# user imported into the vault takes precedence.
+BUILTIN_CLIENT = Path(__file__).resolve().with_name('google_client.json')
 # Connectors whose credentials the egress proxy may read; never exposed to any other caller.
 EGRESS_CONNECTORS = {'github': 'github.json', 'linear': 'linear.json', 'aws': AWS_FILE}
 
@@ -72,24 +81,76 @@ def google(connector):
     return GOOGLE[connector]
 
 
-def connector_status(connector):
+def account_name(account):
+    if not isinstance(account, str) or not ACCOUNT.fullmatch(account):
+        raise Denied('BAD_ACCOUNT')
+    return account
+
+
+def google_file(connector, kind, account=DEFAULT_ACCOUNT):
+    name = google(connector)[kind]
+    return name if account_name(account) == DEFAULT_ACCOUNT else f'{name[:-5]}.{account}.json'
+
+
+def account_files(connector, kind):
+    """(account, logical name) of every stored file of one kind, by name only (no decryption)."""
+    name = google(connector)[kind]
+    found = [(DEFAULT_ACCOUNT, name)] if vault.exists(STORE, name) else []
+    stem = name[:-5] + '.'
+    for path in STORE.glob(stem + '*.json.enc'):
+        account = path.name[len(stem) : -len('.json.enc')]
+        if ACCOUNT.fullmatch(account) and account != DEFAULT_ACCOUNT:
+            found.append((account, path.name[:-4]))
+    return sorted(found)
+
+
+def accounts(connector):
+    """Accounts with tokens or a pending revocation; a sign-in in progress is not an account yet."""
+    return sorted({a for kind in ('tokens', 'revocation') for a, _ in account_files(connector, kind)})
+
+
+def google_present(kinds=('tokens',)):
+    return any(account_files(connector, kind) for connector in GOOGLE for kind in kinds)
+
+
+def account_status(connector, account):
+    name = google_file(connector, 'tokens', account)
+    connected = vault.exists(STORE, name)
+    reauth, label = False, None
+    if connected and vault.KEY.exists():
+        try:
+            tokens = read(name)
+            reauth, label = bool(tokens.get('reauth_required')), tokens.get('account')
+        except Denied:
+            pass
+    return {
+        'name': account,
+        'connected': connected,
+        'reauth_required': reauth,
+        'account': label,
+        'revocation_pending': vault.exists(STORE, google_file(connector, 'revocation', account)),
+    }
+
+
+def connector_status(connector, account=None):
     if connector in GOOGLE:
         spec = GOOGLE[connector]
-        connected = vault.exists(STORE, spec['tokens'])
-        reauth, account = False, None
-        if connected and vault.KEY.exists():
-            try:
-                tokens = read(spec['tokens'])
-                reauth, account = bool(tokens.get('reauth_required')), tokens.get('account')
-            except Denied:
-                pass
+        common = {'scope_text': ' '.join(sorted(spec['scopes'])), 'auth': 'google'}
+        if account is not None:
+            # One account's view, for the connector service serving a cell pinned to it.
+            entry = account_status(connector, account)
+            return {**{k: v for k, v in entry.items() if k != 'name'}, **common}
+        entries = [account_status(connector, a) for a in accounts(connector)]
+        connected = [e for e in entries if e['connected']]
+        # The single-account fields describe the default account, else the first connected one.
+        primary = next((e for e in connected if e['name'] == DEFAULT_ACCOUNT), connected[0] if connected else {})
         return {
-            'connected': connected,
-            'reauth_required': reauth,
-            'account': account,
-            'scope_text': ' '.join(sorted(spec['scopes'])),
-            'revocation_pending': vault.exists(STORE, spec['revocation']),
-            'auth': 'google',
+            'connected': bool(connected),
+            'reauth_required': primary.get('reauth_required', False),
+            'account': primary.get('account'),
+            'revocation_pending': any(e['revocation_pending'] for e in entries),
+            'accounts': entries,
+            **common,
         }
     if connector not in TOKENS:
         raise Denied('UNKNOWN_CONNECTOR')
@@ -137,7 +198,8 @@ def status(connector=None):
         return connector_status(connector)
     value = {name: connector_status(name) for name in (*GOOGLE, *TOKENS)}
     value['aws'] = aws_status()
-    value['client_configured'] = vault.exists(STORE, 'client.json')
+    value['client_source'] = client_source()
+    value['client_configured'] = value['client_source'] is not None
     value['vault_unlocked'] = vault.KEY.exists()
     # Top-level Gmail fields stay for one release so older desktop builds keep working.
     value.update({k: value['gmail'][k] for k in ('connected', 'reauth_required', 'revocation_pending')})
@@ -145,10 +207,8 @@ def status(connector=None):
     return value
 
 
-def import_client(value):
-    if any(vault.exists(STORE, spec['tokens']) for spec in GOOGLE.values()):
-        raise Denied('DISCONNECT_BEFORE_REPLACING_CLIENT')
-    client = value.get('installed')
+def desktop_client(value):
+    client = value.get('installed') if isinstance(value, dict) else None
     if (
         not isinstance(client, dict)
         or not isinstance(client.get('client_id'), str)
@@ -157,26 +217,73 @@ def import_client(value):
         raise Denied('DESKTOP_OAUTH_CLIENT_REQUIRED')
     if not isinstance(client.get('client_secret'), str) or not client['client_secret']:
         raise Denied('CLIENT_SECRET_REQUIRED')
-    write('client.json', {k: client[k] for k in ('client_id', 'client_secret')})
-    for spec in GOOGLE.values():
-        vault.remove(STORE, spec['pending'])
+    return {k: client[k] for k in ('client_id', 'client_secret')}
+
+
+def builtin_client():
+    """The shipped client in Google's download format, or None when absent or malformed."""
+    try:
+        return desktop_client(json.loads(BUILTIN_CLIENT.read_text()))
+    except (OSError, ValueError, Denied):
+        return None
+
+
+def client_source():
+    if vault.exists(STORE, 'client.json'):
+        return 'user'
+    return 'builtin' if builtin_client() else None
+
+
+def client():
+    if vault.exists(STORE, 'client.json'):
+        return read('client.json')
+    value = builtin_client()
+    if value is None:
+        raise Denied('GOOGLE_CLIENT_REQUIRED')
+    return value
+
+
+def remove_pending():
+    for connector in GOOGLE:
+        for _, name in account_files(connector, 'pending'):
+            vault.remove(STORE, name)
+
+
+def import_client(value):
+    # Tokens are bound to the client that obtained them; refreshing with another one fails.
+    if google_present():
+        raise Denied('DISCONNECT_BEFORE_REPLACING_CLIENT')
+    write('client.json', desktop_client(value))
+    remove_pending()
     return status()
 
 
-def begin(connector, redirect_uri):
+def remove_client():
+    """Drops the user's client, so the built-in one (when shipped) applies again."""
+    if google_present():
+        raise Denied('DISCONNECT_BEFORE_REPLACING_CLIENT')
+    vault.remove(STORE, 'client.json')
+    remove_pending()
+    return status()
+
+
+def begin(connector, redirect_uri, account=DEFAULT_ACCOUNT):
+    pending = google_file(connector, 'pending', account)
     spec = google(connector)
+    if account not in accounts(connector) and len(accounts(connector)) >= MAX_ACCOUNTS:
+        raise Denied('TOO_MANY_ACCOUNTS')
     if not isinstance(redirect_uri, str) or not re.fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}/callback', redirect_uri):
         raise Denied('BAD_REDIRECT_URI')
-    client = read('client.json')
+    oauth_client = client()
     verifier = secrets.token_urlsafe(48)
     state = secrets.token_urlsafe(32)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
     write(
-        spec['pending'],
+        pending,
         {'verifier': verifier, 'state': state, 'redirect_uri': redirect_uri, 'expires': time.time() + 600},
     )
     params = {
-        'client_id': client['client_id'],
+        'client_id': oauth_client['client_id'],
         'redirect_uri': redirect_uri,
         'response_type': 'code',
         'scope': ' '.join(sorted(spec['scopes'])),
@@ -189,10 +296,11 @@ def begin(connector, redirect_uri):
     return {'url': 'https://accounts.google.com/o/oauth2/v2/auth?' + urlencode(params), 'state': state}
 
 
-def complete(connector, value):
+def complete(connector, value, account=DEFAULT_ACCOUNT):
     spec = google(connector)
+    pending_name = google_file(connector, 'pending', account)
     fields(value, ('code', 'state'), ('code', 'state'))
-    pending = read(spec['pending'])
+    pending = read(pending_name)
     if (
         not isinstance(value['state'], str)
         or not secrets.compare_digest(value['state'], pending['state'])
@@ -202,15 +310,14 @@ def complete(connector, value):
     if not isinstance(value['code'], str) or not 1 <= len(value['code']) <= 4096:
         raise Denied('BAD_REQUEST')
     # Consume before exchange: ambiguous failures require a new login.
-    vault.remove(STORE, spec['pending'])
-    client = read('client.json')
+    vault.remove(STORE, pending_name)
     result = google_json(
         'oauth2.googleapis.com',
         'POST',
         '/token',
         urlencode(
             {
-                **client,
+                **client(),
                 'grant_type': 'authorization_code',
                 'code': value['code'],
                 'redirect_uri': pending['redirect_uri'],
@@ -222,13 +329,14 @@ def complete(connector, value):
         raise Denied('EXPECTED_EXACT_SCOPES_AND_REFRESH_TOKEN')
     result['expires_at'] = time.time() + int(result['expires_in'])
     result['generation'] = uuid.uuid4().hex
-    write(spec['tokens'], result)
+    write(google_file(connector, 'tokens', account), result)
     return status()
 
 
-def access_token(connector):
+def access_token(connector, account=DEFAULT_ACCOUNT):
     spec = google(connector)
-    tokens = read(spec['tokens'])
+    name = google_file(connector, 'tokens', account)
+    tokens = read(name)
     reauth_code = f'{connector.upper()}_REAUTH_REQUIRED'
     if tokens.get('reauth_required'):
         # The refresh token is dead; do not hammer Google, the user must reconnect.
@@ -239,35 +347,33 @@ def access_token(connector):
                 'oauth2.googleapis.com',
                 'POST',
                 '/token',
-                urlencode(
-                    {**read('client.json'), 'grant_type': 'refresh_token', 'refresh_token': tokens['refresh_token']}
-                ),
+                urlencode({**client(), 'grant_type': 'refresh_token', 'refresh_token': tokens['refresh_token']}),
             )
         except Denied as exc:
             if str(exc) == 'GOOGLE_AUTH_REQUIRED':
                 tokens['reauth_required'] = True
-                write(spec['tokens'], tokens)
+                write(name, tokens)
                 raise Denied(reauth_code) from None
             raise
         if result.get('scope') and set(result['scope'].split()) != set(spec['scopes']):
             raise Denied('UNEXPECTED_SCOPE')
         tokens.update(result)
         tokens['expires_at'] = time.time() + int(result['expires_in'])
-        write(spec['tokens'], tokens)
+        write(name, tokens)
     return tokens['access_token']
 
 
-def disconnect(connector):
-    spec = google(connector)
-    if vault.exists(STORE, spec['tokens']):
-        tokens = read(spec['tokens'])
-        write(spec['revocation'], {'token': tokens.get('refresh_token', tokens['access_token'])})
-        vault.remove(STORE, spec['tokens'])
-    vault.remove(STORE, spec['pending'])
-    if vault.exists(STORE, spec['revocation']):
+def disconnect(connector, account=DEFAULT_ACCOUNT):
+    tokens_name, revocation = google_file(connector, 'tokens', account), google_file(connector, 'revocation', account)
+    if vault.exists(STORE, tokens_name):
+        tokens = read(tokens_name)
+        write(revocation, {'token': tokens.get('refresh_token', tokens['access_token'])})
+        vault.remove(STORE, tokens_name)
+    vault.remove(STORE, google_file(connector, 'pending', account))
+    if vault.exists(STORE, revocation):
         try:
-            google_json('oauth2.googleapis.com', 'POST', '/revoke', urlencode(read(spec['revocation'])))
-            vault.remove(STORE, spec['revocation'])
+            google_json('oauth2.googleapis.com', 'POST', '/revoke', urlencode(read(revocation)))
+            vault.remove(STORE, revocation)
         except Exception:
             return {'connected': False, 'remote_revoked': False, 'revocation_pending': True}
     return {'connected': False, 'remote_revoked': True, 'revocation_pending': False}
@@ -326,11 +432,11 @@ def remove_aws():
     return aws_status()
 
 
-def set_account(connector, label):
+def set_account(connector, label, account=DEFAULT_ACCOUNT):
     if connector == 'aws':
         name = AWS_FILE
     else:
-        name = GOOGLE[connector]['tokens'] if connector in GOOGLE else TOKENS[connector]['file']
+        name = google_file(connector, 'tokens', account) if connector in GOOGLE else TOKENS[connector]['file']
     if not isinstance(label, str) or not 1 <= len(label) <= 200:
         raise Denied('BAD_ACCOUNT_LABEL')
     value = read(name)
@@ -356,16 +462,22 @@ def egress_credential(connector):
 
 
 def handle(request, caller):
-    fields(request, ('op', 'connector'), ('op',))
+    fields(request, ('op', 'connector', 'account'), ('op',))
+    # A Google connector service names the account of the cell it serves; nobody else names one.
+    if 'account' in request and caller not in GOOGLE:
+        raise Denied('BAD_REQUEST')
+    account = account_name(request.get('account', DEFAULT_ACCOUNT))
     with locked():
         op = request['op']
         if op == 'egress_credential' and caller == 'egress':
             return egress_credential(request.get('connector'))
         if op == 'status':
-            return status()
+            # A Google service sees its own account only, not the labels of the others.
+            return {caller: connector_status(caller, account)} if caller in GOOGLE else status()
         if op == 'access_token' and caller in GOOGLE:
-            token = access_token(caller)
-            return {'access_token': token, 'account_generation': read(GOOGLE[caller]['tokens'])['generation']}
+            token = access_token(caller, account)
+            generation = read(google_file(caller, 'tokens', account))['generation']
+            return {'access_token': token, 'account_generation': generation}
         if op == 'token' and caller in TOKENS:
             value = read(TOKENS[caller]['file'])
             return {'token': value['token'], 'account_generation': value['generation']}
