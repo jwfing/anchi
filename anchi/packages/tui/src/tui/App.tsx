@@ -69,6 +69,7 @@ import type { MouseEvent } from './mouse.ts';
 import { completePath, type PathKind } from './pathcomplete.ts';
 import { WelcomeView, TeamView } from './UsabilityViews.tsx';
 import {
+  agentTaskLines,
   welcomeStep,
   nextSetupAction,
   recoveryFor,
@@ -555,12 +556,15 @@ export function App({
     if (current === 'access') refreshAccess(accessPeriod);
   }, [current, refreshSetup]);
 
-  // The task shown for an agent: the one chosen, else its latest; null means "new task".
   const agentTasks = agent ? tasks.filter((t) => t.agentId === agent.id) : [];
+  // The builder is one conversation: its view continues a task. Every other agent's view lists
+  // its tasks and starts a new one with each message; a task's own view continues it.
+  const chatMode = agent?.id === BUILDER;
+  // The builder's task shown: the one chosen, else its latest; null means "new task".
   const chosen = agent ? focusTask[agent.id] : undefined;
   const task = detail
     ? detail
-    : chosen === null
+    : !chatMode || chosen === null
       ? undefined
       : (agentTasks.find((t) => t.id === chosen) ?? agentTasks[0]);
 
@@ -592,9 +596,11 @@ export function App({
     const ids =
       current === 'team'
         ? tasks.filter((t) => t.status === 'running').map((t) => t.id)
-        : task
-          ? [task.id]
-          : [];
+        : agent && !chatMode
+          ? agentTasks.filter((t) => t.status === 'running').map((t) => t.id)
+          : task
+            ? [task.id]
+            : [];
     for (const id of ids) {
       if (logs[id] || loading.current.has(id)) continue;
       loading.current.add(id);
@@ -615,7 +621,9 @@ export function App({
   /** The context whose bindings apply, before the global ones. */
   const context: Context =
     focus === 'side' ? 'sidebar' : detail ? 'task' : isMenu ? (current as Context) : 'chat';
-  const active: Context[] = [context, 'global'];
+  // A task's view has an input too: text and the input's keys first, then its own bindings.
+  const active: Context[] = context === 'task' ? ['chat', 'task', 'global'] : [context, 'global'];
+  const typing = context === 'chat' || context === 'task';
   // While a chord is pending, the keys that can follow it (which-key), above the status line.
   const next = pending.length ? continuations(keymap, active, pending) : [];
   const whichKeyRows = next.length ? Math.ceil(next.length / 2) + 1 : 0;
@@ -629,7 +637,7 @@ export function App({
     Math.max(2, textWidth - 6),
     Math.max(1, Math.min(5, rows - 14)),
   );
-  const transcriptHeight = Math.max(1, bodyHeight - (detail ? 7 : 9 + composer.rows.length));
+  const transcriptHeight = Math.max(1, bodyHeight - (detail ? 11 : 9) - composer.rows.length);
   const transcriptFirstRow = TRANSCRIPT_FIRST_ROW + (detail ? 2 : 0);
 
   // Task pages fill the sidebar below the fixed rows (header, page rows, pager).
@@ -666,15 +674,17 @@ export function App({
   sideRowsRef.current = sideRows;
   const lines = useMemo<Line[]>(
     () =>
-      isFinished && !showHistory
-        ? resultLines(task, textWidth, tasks)
-        : transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
-            verbose,
-            expanded,
-            live: task?.status === 'running',
-            prefix: task ? `${task.id}:` : '',
-          }),
-    [logs, task, tasks, showHistory, textWidth, verbose, expanded],
+      agent && !chatMode
+        ? agentTaskLines(agentTasks, logs, textWidth)
+        : isFinished && !showHistory
+          ? resultLines(task, textWidth, tasks)
+          : transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
+              verbose,
+              expanded,
+              live: task?.status === 'running',
+              prefix: task ? `${task.id}:` : '',
+            }),
+    [agent, chatMode, logs, task, tasks, showHistory, textWidth, verbose, expanded],
   );
   // Input box: border and padding take four columns, the prompt two.
   const maxScroll = Math.max(0, lines.length - transcriptHeight);
@@ -750,10 +760,13 @@ export function App({
 
   const submit = (raw = draftRef.current.text, reviewed = false) => {
     const text = raw.trim();
-    if (!text || !agent || sending.current.has(draftKey.current)) return;
+    // A task's view replies to the task; an agent's view starts a task (the builder's continues).
+    const agentId = detail?.agentId ?? agent?.id;
+    if (!text || !agentId || sending.current.has(draftKey.current)) return;
     if (text === '/new') {
       setDraft(EMPTY_DRAFT);
-      startNewTask(agent.id);
+      if (chatMode) startNewTask(agentId);
+      else if (detail) setSelected(agentId);
       return;
     }
     if (text === '/verbose') {
@@ -761,7 +774,7 @@ export function App({
       return setVerbose((v) => !v);
     }
     if (text === '/quit') return exit();
-    const shown = newTaskFor.current === agent.id ? undefined : task;
+    const shown = detail ?? (chatMode && newTaskFor.current !== agentId ? task : undefined);
     if (shown && ['running', 'queued'].includes(shown.status))
       return reportProblem(
         new Error(
@@ -772,7 +785,7 @@ export function App({
       return setModal({
         kind: 'composeReview',
         text,
-        target: `@${agent.id} · ${shown ? 'Continue: ' + shown.title : 'New task'}`,
+        target: `@${agentId} · ${shown ? 'Continue: ' + shown.title : 'New task'}`,
         send: () => submit(raw, true),
         scroll: 0,
       });
@@ -781,16 +794,18 @@ export function App({
     sending.current.add(key);
     const call = shown
       ? client.call('tasks.send', { taskId: shown.id, text })
-      : client.call('tasks.create', { agentId: agent.id, text });
+      : client.call('tasks.create', { agentId, text });
     void call
       .then((t) => {
         // Do not erase edits made while sending, or a draft in another conversation.
         const latest = drafts.current[key] ?? saved;
         if (latest.text === saved.text) drafts.current[key] = EMPTY_DRAFT;
-        else drafts.current[`${agent.id}:${t.id}`] = latest;
+        else if (chatMode) drafts.current[`${agentId}:${t.id}`] = latest;
         setTasks((all) => [t, ...all.filter((x) => x.id !== t.id)]);
-        setFocusTask((f) => (f[agent.id] === chosen ? { ...f, [agent.id]: t.id } : f));
-        if (newTaskFor.current === agent.id) newTaskFor.current = null;
+        if (chatMode) {
+          setFocusTask((f) => (f[agentId] === chosen ? { ...f, [agentId]: t.id } : f));
+          if (newTaskFor.current === agentId) newTaskFor.current = null;
+        } else if (!shown) say(`${t.id} started for @${agentId}`);
         setProblem(null);
       })
       .catch((e) => reportProblem(e))
@@ -1155,6 +1170,7 @@ export function App({
         if (!id) return say('select an agent first');
         setSelected(id);
         setFocus('main');
+        if (id !== BUILDER) return say(`each message here starts a new task for @${id}`);
         startNewTask(id);
         return say(`the next message starts a new task (a new session) for @${id}`);
       }
@@ -1209,10 +1225,6 @@ export function App({
         }
         return setModal({ kind: 'retry', taskId: t.id, agentId: t.agentId, status: t.status });
       }
-      case 'task:continue':
-        if (!detail) return;
-        setFocusTask((f) => ({ ...f, [detail.agentId]: detail.id }));
-        return setSelected(detail.agentId);
       case 'task:delete':
         if (!detail || running(detail))
           return say('a running task cannot be deleted; cancel it first');
@@ -1828,9 +1840,11 @@ export function App({
       return void client
         .call('tasks.retry', { taskId: id, fresh: ch === 'n' })
         .then((t) => {
-          // Watch it run in the agent's chat.
-          setFocusTask((f) => ({ ...f, [agentId]: t.id }));
-          setSelected(agentId);
+          // Watch it run: in the task's view (the builder's in its chat).
+          if (agentId === BUILDER) {
+            setFocusTask((f) => ({ ...f, [agentId]: t.id }));
+            setSelected(agentId);
+          } else setSelected(TASK_ITEM + t.id);
           setFocus('main');
           say(t.id === id ? `${id} continues` : `${id} started again as ${t.id}`);
         })
@@ -1878,7 +1892,7 @@ export function App({
         `${keyLabel(seq.join(' '))} is not bound here (${keyLabel(keymap.leader)} ? lists the keys)`,
       );
     }
-    if (context === 'chat') {
+    if (typing) {
       // The input keeps standard line editing, and printable keys are always text.
       if (stroke && LINE_EDIT_KEYS.has(stroke)) {
         return setDraft((d) => edit(d, stroke) ?? d);
@@ -1921,6 +1935,7 @@ export function App({
       if (!side) {
         const line = visibleRef.current[e.y - firstRowRef.current];
         if (line?.group) toggleGroup(line.group);
+        if (line?.task) setSelected(TASK_ITEM + line.task);
         return;
       }
       const row = sideRowsRef.current[e.y - SIDEBAR_FIRST_ROW];
@@ -1954,7 +1969,7 @@ export function App({
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
         }${
           agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
-        }${agent.skills?.length ? ` · 🧩 ${agent.skills.join(', ')}` : ''}${task ? ` · ${task.id} (${task.status})` : ' · new task'}`
+        }${agent.skills?.length ? ` · 🧩 ${agent.skills.join(', ')}` : ''}${chatMode ? (task ? ` · ${task.id} (${task.status})` : ' · new task') : ''}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
   /** `key label` for an action in this view, from the effective bindings (shortest first). */
@@ -1989,21 +2004,21 @@ export function App({
             ]
           : context === 'task'
             ? [
-                ['task:continue', `continue in @${detail?.agentId}`],
+                ['chat:submit', 'reply'],
                 ['task:history', showHistory ? 'result' : 'history'],
                 ['task:access', 'access'],
                 ...((detail?.status === 'failed' || detail?.status === 'cancelled'
                   ? [['task:retry', 'retry']]
                   : []) as [ActionId, string][]),
                 busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
-                ['scroll:pageUp', 'scroll'],
-                ['focus:sidebar', 'sidebar'],
+                ['task:new', `new task for @${detail?.agentId}`],
+                ['chat:escape', 'sidebar'],
               ]
             : context === 'chat'
               ? [
-                  ['chat:submit', 'send'],
+                  ['chat:submit', chatMode ? 'send' : 'start task'],
                   ['chat:newline', 'newline'],
-                  ['task:new', 'new task'],
+                  ...((chatMode ? [['task:new', 'new task']] : []) as [ActionId, string][]),
                   ['chat:escape', 'sidebar'],
                   ['agent:settings', 'settings'],
                   ['chat:editor', 'editor'],
@@ -2123,7 +2138,7 @@ export function App({
                   <Text dimColor>
                     {current === BUILDER
                       ? 'Describe the agent you want: its job, the services it needs, the tools it uses.'
-                      : `Give @${agent.id} a task. It runs in a fresh cell; credentials stay outside.`}
+                      : `Give @${agent.id} a task. Each message starts a new task in a fresh cell; credentials stay outside. Open a task (click it, or in the sidebar) to talk to it.`}
                   </Text>
                 )}
               </Box>
@@ -2131,13 +2146,14 @@ export function App({
                 <Text dimColor>{`↓ ${offset} more lines (PgDn)`}</Text>
               ) : (
                 <Text color="cyan" wrap="truncate">
-                  {working || ' '}
+                  {(chatMode && working) || ' '}
                 </Text>
               )}
-              <Text
-                color="cyan"
-                wrap="truncate"
-              >{`To @${agent.id} · ${task ? `Continue: ${sanitizeLine(task.title)}` : 'New task (new session)'} · ${hint('task:new', 'new task')}`}</Text>
+              <Text color="cyan" wrap="truncate">
+                {chatMode
+                  ? `To @${agent.id} · ${task ? `Continue: ${sanitizeLine(task.title)}` : 'New task (new session)'} · ${hint('task:new', 'new task')}`
+                  : `New task for @${agent.id} · ${agentTasks.filter((t) => t.status === 'running').length} running · ${agentTasks.filter((t) => t.status === 'queued').length} queued (up to ${agent.maxTasks ?? 3} at once) · click a task to open it`}
+              </Text>
               <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
                 {composer.rows.map((row, i) => (
                   <Text key={i} wrap="truncate">
@@ -2191,6 +2207,31 @@ export function App({
                   {working || ' '}
                 </Text>
               )}
+              <Text color="cyan" wrap="truncate">
+                {busy
+                  ? `Reply to ${detail.id} · send it when this turn ends (your draft is kept)`
+                  : `Reply to ${detail.id} · continues its session · ${hint('task:new', 'new task')}`}
+              </Text>
+              <Box
+                borderStyle="round"
+                borderColor={busy ? 'gray' : 'cyan'}
+                paddingX={1}
+                flexDirection="column"
+              >
+                {composer.rows.map((row, i) => (
+                  <Text key={i} wrap="truncate">
+                    <Text color="cyan">{i ? '  ' : '› '}</Text>
+                    {row.before}
+                    {row.cursor ? <Text inverse>{row.at}</Text> : row.at}
+                    {row.after}
+                  </Text>
+                ))}
+              </Box>
+              <Text dimColor wrap="truncate">
+                {sending.current.has(conversationKey)
+                  ? 'Sending…'
+                  : `${hint('chat:submit', input.includes('\n') ? 'preview & send' : 'send')} · ${hint('chat:newline', 'newline')} · ${hint('chat:editor', 'editor')} · ${hint('task:cancel', 'cancel')} · ${hint('task:access', 'access')}${composer.hiddenAbove || composer.hiddenBelow ? ' · more draft lines above/below' : ''}`}
+              </Text>
             </>
           ) : current === 'connectors' ? (
             <ConnectorsView setup={setup} cursor={connectorCursor} />
@@ -2613,8 +2654,8 @@ const CONTEXT_LABEL: Record<Context, string> = {
   welcome: 'Getting started',
   team: 'Team overview',
   sidebar: 'Sidebar',
-  chat: 'Agent chat',
-  task: 'Task',
+  chat: 'Agent view (each message starts a task; the builder continues one)',
+  task: 'Task (the input replies to the task)',
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
@@ -2632,15 +2673,22 @@ export function helpRows(keymap: KeyMap, context: Context): [string, string][] {
     }
     return [...byAction].map(([a, keys]) => [keys.join('  '), ACTIONS[a].title]);
   };
-  const own = context === 'global' ? [] : group(context, new Set());
-  const ownActions = new Set([...keymap.contexts[context].values()]);
+  // A task's view has the chat's input; its own bindings come after the input's.
+  const own = [
+    ...(context === 'task' ? group('chat', new Set()) : []),
+    ...(context === 'global' ? [] : group(context, new Set())),
+  ];
+  const ownActions = new Set([
+    ...keymap.contexts[context].values(),
+    ...(context === 'task' ? keymap.contexts.chat.values() : []),
+  ]);
   const rows: [string, string][] = [];
   if (own.length) rows.push([CONTEXT_LABEL[context], ''], ...own, ['', '']);
   rows.push(
     [`Everywhere (leader ${keyLabel(keymap.leader)}, then a key)`, ''],
     ...group('global', context === 'global' ? new Set() : ownActions),
   );
-  if (context === 'chat') {
+  if (context === 'chat' || context === 'task') {
     rows.push(
       ['', ''],
       ['Text input (fixed)', ''],

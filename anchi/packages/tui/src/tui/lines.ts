@@ -24,6 +24,8 @@ export interface Line {
   spans?: Span[];
   /** Set on the summary line of a tool-call group; clicking it toggles the group. */
   group?: string;
+  /** Set on a task's row in an agent's task list; clicking it opens the task. */
+  task?: string;
 }
 
 export interface TranscriptOptions {

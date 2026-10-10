@@ -7,7 +7,7 @@ import type {
   TaskRow,
 } from '@anchi/protocol';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
-import { summarizeInput, wrap, type Line } from './lines.ts';
+import { summarizeInput, truncate, wrap, type Line } from './lines.ts';
 import { markdownLines } from './markdown.ts';
 
 export type WelcomeStep = 'environment' | 'vault' | 'runtime' | 'agent' | 'task' | 'done';
@@ -164,6 +164,48 @@ export function turnActivity(events: StoredEvent[]): string {
   }
   return 'thinking…';
 }
+const TASK_MARK: Record<TaskRow['status'], [string, Line['tone']]> = {
+  running: ['●', 'tool'],
+  queued: ['◇', 'system'],
+  done: ['✓', 'assistant'],
+  failed: ['✗', 'error'],
+  cancelled: ['–', 'dim'],
+};
+
+/**
+ * An agent's view: its latest finished tasks, oldest first, then the queued and running ones
+ * just above the input, one row each; a running task adds what it is doing. Rows carry the task
+ * id, so a click opens it.
+ */
+export function agentTaskLines(
+  tasks: TaskRow[],
+  logs: Record<string, StoredEvent[]>,
+  width: number,
+  finished = 30,
+): Line[] {
+  const live = (t: TaskRow) => t.status === 'running' || t.status === 'queued';
+  const byAge = (a: TaskRow, b: TaskRow) => a.createdAt - b.createdAt;
+  const rows = [
+    ...tasks
+      .filter((t) => !live(t))
+      .sort(byAge)
+      .slice(-finished),
+    ...tasks.filter((t) => t.status === 'queued').sort(byAge),
+    ...tasks.filter((t) => t.status === 'running').sort(byAge),
+  ];
+  const out: Line[] = [];
+  for (const t of rows) {
+    const [mark, tone] = TASK_MARK[t.status];
+    const text = `${mark} ${t.status.padEnd(9)} ${t.id}  ${sanitizeLine(t.title)}`;
+    out.push({ text: truncate(text, width), tone, task: t.id });
+    if (t.status === 'running') {
+      const doing = turnActivity(logs[t.id] ?? []);
+      out.push({ text: truncate(`    ${doing}`, width), tone: 'dim', task: t.id });
+    }
+  }
+  return out;
+}
+
 export function resultLines(task: TaskRow, width: number, tasks: TaskRow[]): Line[] {
   const result: Line[] = [];
   const add = (text: string, tone: Line['tone']) => {

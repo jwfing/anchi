@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   agentFile,
   BASE_IMAGE,
+  DEFAULT_MAX_TASKS,
   type HomeLayout,
   listAgentIds,
   loadImage,
@@ -33,7 +34,8 @@ interface AgentState {
   agent?: ResolvedAgent;
   error?: string;
   queue: Job[];
-  running?: { job: Job; controller: AbortController };
+  /** Turns running now, by task: up to the agent's `maxTasks`, one per task. */
+  running: Map<string, { job: Job; controller: AbortController }>;
 }
 
 interface LiveCell {
@@ -106,8 +108,8 @@ function cellKey(agent: ResolvedAgent, imageHash: string): string {
 }
 
 /**
- * Owns agents, tasks and cells: one turn at a time per agent, a FIFO queue behind it, a cell
- * per task that stays alive between turns until the idle timeout.
+ * Owns agents, tasks and cells: up to `maxTasks` turns of an agent at a time (one per task), a
+ * FIFO queue behind them, a cell per task that stays alive between turns until the idle timeout.
  */
 export class Hub extends EventEmitter<HubEvents> {
   private states = new Map<string, AgentState>();
@@ -150,10 +152,10 @@ export class Hub extends EventEmitter<HubEvents> {
     const builtinIds = (this.opts.builtins ?? []).map((a) => a.id);
     const ids = [...new Set([...builtinIds, ...listAgentIds(this.opts.layout)])];
     for (const [id, s] of this.states) {
-      if (!ids.includes(id) && !s.running && !s.queue.length) this.states.delete(id);
+      if (!ids.includes(id) && !s.running.size && !s.queue.length) this.states.delete(id);
     }
     for (const id of ids) {
-      const state = this.states.get(id) ?? { id, queue: [] };
+      const state: AgentState = this.states.get(id) ?? { id, queue: [], running: new Map() };
       try {
         state.agent = this.resolve(id);
         state.error = undefined;
@@ -162,6 +164,8 @@ export class Hub extends EventEmitter<HubEvents> {
         state.error = (err as Error).message;
       }
       this.states.set(id, state);
+      // A higher maxTasks lets queued tasks start now.
+      void this.pump(state);
     }
     return this.emitAgents();
   }
@@ -175,7 +179,7 @@ export class Hub extends EventEmitter<HubEvents> {
     return [...this.states.values()]
       .sort((a, b) => a.id.localeCompare(b.id))
       .map((s) => {
-        const status: AgentStatus = s.running ? 'working' : s.error ? 'error' : 'idle';
+        const status: AgentStatus = s.running.size ? 'working' : s.error ? 'error' : 'idle';
         return {
           id: s.id,
           name: s.agent?.name ?? s.id,
@@ -186,7 +190,9 @@ export class Hub extends EventEmitter<HubEvents> {
           connectors: s.agent?.connectors ?? [],
           sandbox: s.agent?.sandbox,
           status,
+          running: s.running.size,
           queued: s.queue.length,
+          maxTasks: this.maxTasks(s),
           triggers: s.agent?.triggers.length ?? 0,
           workspaces: s.agent?.workspaces.map((w) => `${workspaceName(w)} (${w.mode})`) ?? [],
           delegates: s.agent?.delegates ?? [],
@@ -247,7 +253,7 @@ export class Hub extends EventEmitter<HubEvents> {
     const task = this.getTask(taskId);
     const state = this.state(task.agentId);
     if (!state.agent) throw new Error(`agent "${task.agentId}" has a config error: ${state.error}`);
-    if (state.running?.job.taskId === taskId || state.queue.some((j) => j.taskId === taskId)) {
+    if (state.running.has(taskId) || state.queue.some((j) => j.taskId === taskId)) {
       throw new Error('this task already has a turn in progress');
     }
     const row = this.opts.store.setStatus(taskId, 'queued');
@@ -363,12 +369,13 @@ export class Hub extends EventEmitter<HubEvents> {
     if (state) {
       const before = state.queue.length;
       state.queue = state.queue.filter((j) => j.taskId !== taskId);
-      if (state.running?.job.taskId === taskId) state.running.controller.abort();
+      const turn = state.running.get(taskId);
+      if (turn) turn.controller.abort();
       else if (before !== state.queue.length) this.finish(taskId, 'cancelled', 'cancelled');
     }
     this.closeCell(taskId, 'task cancelled');
     if (task.status === 'done' || task.status === 'failed') return;
-    if (!state?.running || state.running.job.taskId !== taskId) {
+    if (!state?.running.has(taskId)) {
       this.finish(taskId, 'cancelled', 'cancelled');
     }
   }
@@ -461,21 +468,29 @@ export class Hub extends EventEmitter<HubEvents> {
     void this.pump(state);
   }
 
-  private async pump(state: AgentState): Promise<void> {
-    if (state.running) return;
-    const job = state.queue.shift();
-    if (!job) return;
+  private maxTasks(state: AgentState): number {
+    return state.agent?.maxTasks ?? DEFAULT_MAX_TASKS;
+  }
+
+  /** Starts queued turns while the agent has free slots. */
+  private pump(state: AgentState): void {
+    while (state.running.size < this.maxTasks(state) && state.queue.length) {
+      void this.run(state, state.queue.shift()!);
+    }
+  }
+
+  private async run(state: AgentState, job: Job): Promise<void> {
     const controller = new AbortController();
-    state.running = { job, controller };
+    state.running.set(job.taskId, { job, controller });
     this.emitAgents();
     try {
       await this.execute(state, job, controller.signal);
     } catch (err) {
       this.log(`task ${job.taskId}: ${(err as Error).message}`);
     }
-    state.running = undefined;
+    state.running.delete(job.taskId);
     this.emitAgents();
-    void this.pump(state);
+    this.pump(state);
   }
 
   private record(task: TaskRow, event: RuntimeEvent): void {

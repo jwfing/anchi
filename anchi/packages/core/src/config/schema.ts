@@ -22,6 +22,9 @@ export const accountNameSchema = z
   .regex(/^[a-z0-9][a-z0-9_-]{0,31}$/, 'use 1–32 lowercase letters, digits, "-" or "_"');
 const accountsSchema = z.partialRecord(z.enum(ACCOUNT_CONNECTORS), accountNameSchema);
 
+/** Tasks of one agent that run at the same time unless its `maxTasks` says otherwise. */
+export const DEFAULT_MAX_TASKS = 3;
+
 export const approvalModeSchema = z.enum(['auto', 'ask']);
 export type ApprovalMode = z.infer<typeof approvalModeSchema>;
 /** Ids of the egress proxy's high-risk entries, as in `HIGH_RISK` of services/egress_rules.py. */
@@ -186,6 +189,8 @@ export const agentLayerSchema = z.strictObject({
    */
   accounts: accountsSchema.optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
+  /** Tasks of this agent that run at the same time; the others queue (default 3). */
+  maxTasks: z.number().int().min(1).max(10).optional(),
   /** Hosts the agent's cells may reach (plus its runtime and connectors); omitted: any. */
   egress: z.array(egressPattern).max(100).optional(),
 });
@@ -219,6 +224,7 @@ export const resolvedAgentSchema = z
       .strictObject({ disable: z.array(highRiskIdSchema).max(30).default([]) })
       .default({ disable: [] }),
     workspaces: z.array(workspaceSchema).max(10).default([]),
+    maxTasks: z.number().int().min(1).max(10).default(DEFAULT_MAX_TASKS),
     egress: z.array(egressPattern).max(100).optional(),
   })
   .refine((a) => new Set(a.workspaces.map(workspaceName)).size === a.workspaces.length, {

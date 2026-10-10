@@ -65,8 +65,12 @@ export interface AgentSummary {
   connectors: string[];
   sandbox?: string;
   status: AgentStatus;
-  /** Tasks waiting behind the running one. */
+  /** Turns running now, up to `maxTasks`. */
+  running: number;
+  /** Turns waiting for one of the agent's `maxTasks` slots. */
   queued: number;
+  /** How many of the agent's tasks run at the same time. */
+  maxTasks: number;
   /** Directories of the Mac bound into the agent's cells, as `name (ro|rw)`. */
   workspaces?: string[];
   /** Number of schedule and polling triggers. */
