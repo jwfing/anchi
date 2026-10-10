@@ -31,8 +31,8 @@ is live text so it stays crisp and accessible.
 
 ## Terminal design
 
-The page introduces safe agent collaboration with a responsive character-style architecture
-figure, followed by workflow, security boundaries, platforms/runtimes, and a TUI
+The page introduces safe agent collaboration with a looping hero animation,
+followed by workflow, security boundaries, platforms/runtimes, and a TUI
 preview. Keep the platform status and security claims aligned with the root README.
 
 `terminal.js` enhances the static page with keyboard-accessible tabs (teamwork,
@@ -40,9 +40,12 @@ agent builder, approvals) and simulated approval outcomes. The demo never connec
 to the daemon or executes operations. Without JavaScript, the default session and
 documentation links remain available.
 
-The architecture figure uses HTML/CSS nodes and connectors to keep lines aligned
-across fonts and screen sizes. Its accessible description explains both delegation
-and credential flow.
+The hero animation is the vertical export from `hero-animation/hero-v.html`
+(`dist/anchi-hero-vertical-{zh,en}-dark.mp4`, 880×1000, 10.6s loop). The matching
+`.jpg` is its first frame, used as the poster. Re-export both from
+`hero-animation/` when the diagram changes (see its README). Each language page
+loads its own video, and its `aria-label` explains the credential flow.
+`terminal.js` pauses the video on the poster frame under `prefers-reduced-motion`.
 
 Keep the demo aligned with the real TUI and its key bindings. On small screens the
 illustrative sidebar is hidden so the transcript remains readable. Animations and
@@ -53,10 +56,17 @@ smooth scrolling honor `prefers-reduced-motion`.
 The six feature icons in `dist/icons/` are original SVG drawings for Anchi:
 `agent`, `team`, `task`, `isolation`, `credentials`, and `authorization`.
 
+## Color
+
+The lime accent (`--lime`) marks actions and keywords only: buttons, links, the
+install prompt and copy control, hover/focus/selected states, and the highlighted
+second line of headings. Section labels, notes, and all icons use the neutral
+text colors (`--muted` / `--ink`). The TUI preview keeps the real TUI's colors.
+
 The four active platform/runtime icons (`*-ascii.svg`) are custom, monochrome
 character-grid illustrations for this page: an apple silhouette, a penguin,
 the six-loop OpenAI knot for Codex, and a radial star for Claude. They share
-the page's green accent and a pixel grid treatment. Codex uses a 28×28 grid
+the page's muted text color and a pixel grid treatment. Codex uses a 28×28 grid
 to preserve its interwoven loops and central hexagon. These are stylized identifiers, not official
 brand assets; platform and runtime names remain plain text alongside them.
 

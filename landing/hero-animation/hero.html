@@ -1,0 +1,165 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+:root{
+  --bg:#10120f; --vm:#141810; --vmbd:#3a4530; --card:#171c13; --cardbd:#2f3a27; --line:#2c3524;
+  --fg:#e6e9dd; --dim:#8f9785; --dim2:#b4bca9; --lime:#c0e889; --lime-rgb:192,232,137;
+  --amber:#e4bc78; --amber-rgb:228,188,120; --hub:#1a2214; --hubbd:#4f6340; --row:#12160f;
+}
+.light{
+  --bg:#f6f7f2; --vm:#eef1e7; --vmbd:#c9d1bb; --card:#ffffff; --cardbd:#dde3d3; --line:#d3dac7;
+  --fg:#1d2318; --dim:#7a8270; --dim2:#566050; --lime:#5c8a1c; --lime-rgb:92,138,28;
+  --amber:#b7812a; --amber-rgb:183,129,42; --hub:#ffffff; --hubbd:#a9bf8a; --row:#f4f6ef;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);font-family:"Inter","DejaVu Sans","Noto Sans CJK SC",sans-serif;color:var(--fg);-webkit-font-smoothing:antialiased}
+.mono{font-family:"DejaVu Sans Mono","Noto Sans Mono CJK SC",monospace}
+#stage{position:relative;width:960px;height:420px;background:var(--bg);overflow:hidden}
+.a{position:absolute}
+svg{position:absolute;left:0;top:0;overflow:visible}
+#h1{left:0;top:18px;width:960px;text-align:center;font-size:21px;font-weight:700;letter-spacing:-.2px}
+#h2{left:0;top:50px;width:960px;text-align:center;font-size:12px;color:var(--dim2)}
+#h2 b{color:var(--lime);font-weight:600}
+#vm{left:24px;top:92px;width:576px;height:310px;border:1px dashed var(--vmbd);border-radius:14px;background:var(--vm)}
+#vmlab{left:40px;top:84px;padding:0 8px;background:var(--bg);font-size:9px;letter-spacing:1.5px;color:var(--dim)}
+.cell{width:220px;height:78px;border:1px solid var(--cardbd);border-radius:10px;background:var(--card);padding:10px 12px;left:46px}
+.cell .r1{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600}
+.cell .tag{margin-left:auto;font-size:8px;letter-spacing:1.2px;color:var(--dim);font-weight:400}
+.cell .r2{font-size:10px;color:var(--dim);margin-top:2px;padding-left:22px}
+.cell .r3{white-space:nowrap;font-size:10px;margin-top:9px;display:flex;align-items:center;color:var(--dim2)}
+.cell .r3 .car{color:var(--lime);margin-right:6px}
+.cell .cur{display:inline-block;width:5px;height:11px;background:var(--lime);opacity:.5;margin-left:3px}
+.fk{margin-left:auto;font-size:8.5px;color:var(--dim);border:1px dashed var(--vmbd);border-radius:4px;padding:1px 5px;display:flex;gap:4px;align-items:center}
+.done{position:absolute;right:12px;top:30px;font-size:10px;color:var(--lime);opacity:0}
+.av{width:15px;height:15px;border-radius:4px;border:1px solid var(--lime);display:flex;align-items:center;justify-content:center}
+.av i{width:5px;height:5px;background:var(--lime);border-radius:1px}
+#hub{left:356px;top:132px;width:218px;height:236px;border:1px solid var(--hubbd);border-radius:12px;background:var(--hub);padding:14px 14px}
+#hubglow{left:265px;top:50px;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(var(--lime-rgb),.10),rgba(var(--lime-rgb),0) 65%)}
+#hub .hd{display:flex;align-items:center;gap:9px;justify-content:center;font-size:15px;font-weight:700}
+#hub .sub{text-align:center;font-size:9.5px;color:var(--dim);margin-top:3px}
+#hub .vl{font-size:8px;letter-spacing:1.5px;color:var(--amber);margin:14px 0 6px;display:flex;align-items:center;gap:6px}
+#hub .vl:after{content:"";flex:1;height:1px;background:var(--cardbd)}
+.row{height:24px;border:1px solid var(--cardbd);border-radius:5px;background:var(--row);margin-top:5px;display:flex;align-items:center;padding:0 8px;font-size:9px;gap:6px;color:var(--dim2)}
+.row .st{margin-left:auto;font-size:8.5px;color:var(--dim)}
+.ft{margin-top:12px;padding-top:9px;border-top:1px dashed var(--cardbd);display:flex;justify-content:space-between;font-size:9px;color:var(--dim)}
+.ft b{color:var(--lime)}
+.svc{left:724px;width:176px;height:34px;border:1px solid var(--cardbd);border-radius:8px;background:var(--card);display:flex;align-items:center;gap:10px;padding:0 12px;font-size:11.5px;font-weight:500}
+.svc .ic{width:18px;height:18px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:#1d2318;background:var(--dim)}
+.svc .ar{margin-left:auto;font-size:9px;color:var(--dim)}
+#chip{left:465px;top:110px;transform:translateX(-50%);white-space:nowrap;font-size:9.5px;padding:4px 10px;border-radius:999px;border:1px solid rgba(var(--amber-rgb),.6);background:var(--bg);color:var(--amber);opacity:0;display:flex;gap:6px;align-items:center}
+</style></head><body>
+<div id="stage">
+  <div id="h1" class="a" data-t="h1"></div>
+  <div id="h2" class="a"></div>
+  <div id="vm" class="a"></div><div id="vmlab" class="a mono" data-t="vm"></div>
+  <div id="hubglow" class="a"></div>
+  <svg id="lines" width="960" height="420"></svg>
+  <div id="cells"></div>
+  <div id="hub" class="a">
+    <div class="hd"><svg width="18" height="18" viewBox="0 0 18 18" style="position:static"><path d="M2 16 L9 2 L16 16 M9 2 V16 M5.5 10 H12.5" fill="none" stroke="var(--lime)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg><span data-t="gw"></span></div>
+    <div class="sub" data-t="gwSub"></div>
+    <div class="vl mono"><svg width="9" height="10" viewBox="0 0 9 10" style="position:static"><rect x="1" y="4.5" width="7" height="5" rx="1" fill="var(--amber)"/><path d="M2.5 4.5V3a2 2 0 0 1 4 0v1.5" fill="none" stroke="var(--amber)" stroke-width="1.2"/></svg><span data-t="vault"></span></div>
+    <div id="rows"></div>
+    <div class="ft mono"><span data-t="ft"></span><b>0</b></div>
+  </div>
+  <div id="svcs"></div>
+  <svg id="fx" width="960" height="420"></svg>
+  <div id="chip" class="a mono"></div>
+</div>
+<script>
+const q=new URLSearchParams(location.search), LANG=q.get('lang')||'zh';
+if(q.get('theme')==='light')document.body.classList.add('light');
+const T={
+ zh:{h1:'每个 agent，都在自己的隔离 cell 里工作',h2:'所有外部访问都经过可信网关。<b>真实凭据，永不进入沙箱。</b>',vm:'LOCAL VM · ANCHI',
+   gw:'可信网关',gwSub:'在这里，且只在这里使用真实凭据',vault:'VAULT · 真实凭据',fake:'假凭据',sealed:'封存',inuse:'使用中',done:'✓ 完成',
+   swap:'假凭据 → 真实凭据',ft:'cell 内的真实凭据',tasks:['修复登录 bug','审查 PR #42','检查本月 AWS 账单']},
+ en:{h1:'Every agent works in its own isolated cell',h2:'All outbound access goes through one trusted gateway. <b>Real secrets never enter the sandbox.</b>',vm:'LOCAL VM · ANCHI',
+   gw:'Trusted Gateway',gwSub:'real secrets are used here, and only here',vault:'VAULT · REAL SECRETS',fake:'fake key',sealed:'sealed',inuse:'in use',done:'✓ done',
+   swap:'fake key → real secret',ft:'real secrets inside cells',tasks:['fix the login bug','review PR #42','check the AWS bill']}
+}[LANG];
+document.querySelectorAll('[data-t]').forEach(e=>e.textContent=T[e.dataset.t]);
+document.getElementById('h2').innerHTML=T.h2;
+
+const KEY='<svg width="10" height="10" viewBox="0 0 10 10" style="position:static"><circle cx="3" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M5.2 5H9.5M8 5V7" stroke="currentColor" stroke-width="1.1" fill="none"/></svg>';
+const CELLS=[{n:'@developer',a:'Codex',y:118},{n:'@reviewer',a:'Claude Code',y:212},{n:'@ops',a:'OpenClaw',y:306}];
+CELLS.forEach((c,i)=>{c.cy=c.y+39;document.getElementById('cells').insertAdjacentHTML('beforeend',
+ `<div class="a cell" id="cell${i}" style="top:${c.y}px"><div class="r1"><span class="av"><i></i></span>${c.n}<span class="tag mono">CELL 0${i+1}</span></div>
+  <div class="r2 mono">${c.a}</div><div class="r3 mono"><span class="car">❯</span>${T.tasks[i]}<span class="cur"></span><span class="fk">${KEY}${T.fake}</span></div>
+  <div class="done mono" id="done${i}">${T.done}</div></div>`)});
+const ROWS=['GITHUB_TOKEN','GMAIL_OAUTH','SLACK_BOT_TOKEN','TRELLO_KEY','POSTHOG_API_KEY','AWS_ACCESS_KEY'];
+const ROWSHOW=[0,2,5,4]; // rows displayed in hub (4 rows fit)
+ROWSHOW.forEach(r=>document.getElementById('rows').insertAdjacentHTML('beforeend',
+ `<div class="row mono" id="row${r}"><span style="color:var(--amber)">${KEY}</span>${ROWS[r]}<span class="st" id="rst${r}">${T.sealed}</span></div>`));
+const SVC=[['GitHub','#c9d1c0'],['Gmail','#e8a090'],['Slack','#c6a6e0'],['Trello','#8fb8e6'],['PostHog','#f0c070'],['AWS','#f2a65a']];
+SVC.forEach((s,i)=>{const y=126+i*42;s.y=y;s.cy=y+17;document.getElementById('svcs').insertAdjacentHTML('beforeend',
+ `<div class="a svc" id="svc${i}" style="top:${y}px"><span class="ic" style="background:${s[1]}">${s[0][0]}</span>${s[0]}<span class="ar mono">API</span></div>`)});
+
+// paths
+const NS='http://www.w3.org/2000/svg', L=document.getElementById('lines'), FX=document.getElementById('fx');
+const HUBX0=356, HUBX1=574, HUBY=250;
+const inP=CELLS.map((c,i)=>`M266 ${c.cy} C 314 ${c.cy}, 312 ${HUBY-14+i*14}, ${HUBX0} ${HUBY-14+i*14}`);
+const outP=SVC.map(s=>`M${HUBX1} ${HUBY} C 650 ${HUBY}, 650 ${s.cy}, 724 ${s.cy}`);
+function mk(d,parent,stroke,w,extra=''){const p=document.createElementNS(NS,'path');p.setAttribute('d',d);p.setAttribute('fill','none');p.setAttribute('stroke',stroke);p.setAttribute('stroke-width',w);if(extra)p.setAttribute('stroke-dasharray',extra);parent.appendChild(p);return p}
+const inBase=inP.map(d=>mk(d,L,'var(--line)',1.2)), outBase=outP.map(d=>mk(d,L,'var(--line)',1.2));
+const inTr=inP.map(d=>mk(d,FX,'var(--lime)',2)), outTr=outP.map(d=>mk(d,FX,'var(--amber)',2));
+[...inTr,...outTr].forEach(p=>p.style.opacity=0);
+function dot(){const g=document.createElementNS(NS,'g');g.innerHTML='<circle r="11" class="halo"/><circle r="4.5" class="core"/>';FX.appendChild(g);return g}
+
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const ease=x=>x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;
+const seg=(t,a,b)=>ease(clamp((t-a)/(b-a)));
+const win=(t,a,b,f=.25)=>Math.max(0,Math.min(seg(t,a,a+f),1-seg(t,b-f,b)));
+const css=v=>getComputedStyle(document.body).getPropertyValue(v).trim();
+
+// flows: cell -> svc
+const FLOWS=[{c:0,s:0,t0:0.3},{c:1,s:2,t0:2.9},{c:2,s:5,t0:5.5},{c:0,s:4,t0:8.1}];
+const TOTAL=10.6;
+const dots=FLOWS.map(()=>dot());
+function trail(p,s,tl,o){const Ln=p.getTotalLength();p.style.opacity=o;p.setAttribute('stroke-dasharray',`${tl} ${Ln+tl+10}`);p.setAttribute('stroke-dashoffset',`${-(s-tl)}`)}
+function place(g,p,frac,kind,o){
+  const Ln=p.getTotalLength(),pt=p.getPointAtLength(clamp(frac)*Ln);g.setAttribute('transform',`translate(${pt.x},${pt.y})`);g.style.opacity=o;
+  const core=g.querySelector('.core'),halo=g.querySelector('.halo');
+  if(kind==='fake'){core.setAttribute('r',4.5);core.setAttribute('fill',css('--bg'));core.setAttribute('stroke',css('--dim2'));core.setAttribute('stroke-width',1.6);core.setAttribute('stroke-dasharray','2.2 1.8');halo.setAttribute('fill','transparent')}
+  if(kind==='real'){core.setAttribute('r',5);core.setAttribute('fill',css('--amber'));core.setAttribute('stroke','none');core.removeAttribute('stroke-dasharray');halo.setAttribute('fill',`rgba(${css('--amber-rgb')},.22)`)}
+  if(kind==='resp'){core.setAttribute('r',3.6);core.setAttribute('fill',css('--lime'));core.setAttribute('stroke','none');core.removeAttribute('stroke-dasharray');halo.setAttribute('fill',`rgba(${css('--lime-rgb')},.2)`)}
+  return Ln*clamp(frac);
+}
+function glowEl(el,k,rgb){el.style.boxShadow=k>0.01?`0 0 ${22*k}px ${2*k}px rgba(${rgb},${.28*k}), 0 0 0 ${1}px rgba(${rgb},${.9*k})`:''}
+
+function render(t){
+  t=((t%TOTAL)+TOTAL)%TOTAL;
+  const LR=css('--lime-rgb'),AR=css('--amber-rgb');
+  const cellK=[0,0,0],svcK=SVC.map(()=>0),rowK={},doneK=[0,0,0];let hubK=0,chipK=0;
+  inTr.forEach(p=>p.style.opacity=0);outTr.forEach(p=>p.style.opacity=0);
+  FLOWS.forEach((f,i)=>{
+    const g=dots[i],u=t-f.t0;g.style.opacity=0;
+    const pin=inTr[f.c],pout=outTr[f.s];
+    // timings (relative)
+    const A0=0,A1=.85, B1=1.45, C1=2.15, D0=2.25, D1=2.75, E1=3.25;
+    if(u<0||u>3.9)return;
+    cellK[f.c]=Math.max(cellK[f.c],win(u,-.1,1.0),win(u,E1-.15,E1+.6));
+    if(u<A1){ const s=place(g,pin,seg(u,A0,A1),'fake',seg(u,0,.15)); pin.setAttribute('stroke',css('--dim2')); trail(pin,s,60,.55); }
+    else if(u<B1){ hubK=Math.max(hubK,1); chipK=Math.max(chipK,win(u,A1,B1+.35,.15)); rowK[f.s]=Math.max(rowK[f.s]||0,1);}
+    else if(u<C1){ const s=place(g,pout,seg(u,B1,C1),'real',1); pout.setAttribute('stroke',css('--amber')); trail(pout,s,70,.9); rowK[f.s]=Math.max(rowK[f.s]||0,1-seg(u,B1,C1)*.6); chipK=Math.max(chipK,1-seg(u,B1+.2,B1+.45));}
+    else if(u<D0){ svcK[f.s]=1; }
+    else if(u<E1){
+      if(u<D1){const s=place(g,pout,1-seg(u,D0,D1),'resp',1);pout.setAttribute('stroke',css('--lime'));const Ln=pout.getTotalLength();pout.style.opacity=.85;pout.setAttribute('stroke-dasharray',`50 ${Ln+60}`);pout.setAttribute('stroke-dashoffset',`${-s}`)}
+      else {const s=place(g,pin,1-seg(u,D1,E1),'resp',1);pin.setAttribute('stroke',css('--lime'));const Ln=pin.getTotalLength();pin.style.opacity=.85;pin.setAttribute('stroke-dasharray',`45 ${Ln+60}`);pin.setAttribute('stroke-dashoffset',`${-s}`)}
+    }
+    hubK=Math.max(hubK,win(u,A1-.15,C1-.2)*.9);
+    svcK[f.s]=Math.max(svcK[f.s],win(u,C1-.1,D0+.6));
+    doneK[f.c]=Math.max(doneK[f.c],win(u,E1-.05,E1+.65,.15));
+  });
+  CELLS.forEach((c,i)=>{glowEl(document.getElementById('cell'+i),cellK[i],LR);document.getElementById('done'+i).style.opacity=doneK[i];
+    document.querySelector(`#cell${i} .cur`).style.opacity=(Math.floor(t*2)%2)?.15:.6});
+  SVC.forEach((s,i)=>glowEl(document.getElementById('svc'+i),svcK[i],AR));
+  glowEl(document.getElementById('hub'),hubK*.9,LR);
+  document.getElementById('hubglow').style.opacity=.6+.4*hubK;
+  ROWSHOW.forEach(r=>{const k=rowK[r]||0,el=document.getElementById('row'+r),st=document.getElementById('rst'+r);
+    el.style.borderColor=k>.05?`rgba(${AR},${.4+.6*k})`:'';el.style.background=k>.05?`rgba(${AR},${.12*k})`:'';
+    st.textContent=k>.3?T.inuse:T.sealed;st.style.color=k>.3?css('--amber'):''});
+  const chip=document.getElementById('chip');chip.innerHTML=KEY+T.swap;chip.style.opacity=chipK;chip.style.transform=`translateX(-50%) translateY(${(1-chipK)*4}px)`;
+}
+window.render=render;window.TOTAL=TOTAL;
+if(!navigator.webdriver){const s=performance.now();(function f(){render((performance.now()-s)/1000);requestAnimationFrame(f)})()}else render(0);
+</script></body></html>

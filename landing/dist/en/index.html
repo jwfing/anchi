@@ -71,10 +71,6 @@
     <main id="main">
       <section class="hero wrap fleet-hero">
         <div class="hero-copy">
-          <p class="eyebrow">
-            <span class="status-dot" aria-hidden="true"></span>ANCHI / A SECURED
-            AGENT TEAM
-          </p>
           <h1>Build agent team.<br /><span>Let it work safely.</span></h1>
           <p class="intro">
             Anchi lets agents work like colleagues. Create different roles,
@@ -95,62 +91,19 @@
           </p>
         </div>
         <figure class="fleet-figure">
-          <div
-            class="fleet-console"
-            role="img"
-            aria-label="You assign tasks and approve writes through Anchi. Anchi coordinates developer and reviewer tasks in separate cells inside a local VM. Requests reach services through a trusted gateway. Vault credentials stay outside task cells."
-          >
-            <div class="fleet-console-title" aria-hidden="true">
-              <span><span class="lime">❯</span> anchi / team</span
-              ><span class="fleet-local"
-                ><span class="status-dot"></span> local</span
-              >
-            </div>
-            <div class="fleet-flow" aria-hidden="true">
-              <div class="fleet-owner">
-                <span>[ you ]</span
-                ><span class="fleet-owner-action">tasks / approvals</span>
-              </div>
-              <div class="fleet-stem"></div>
-              <div class="fleet-coordinator">
-                <span>ANCHI</span><span>coordinate / delegate</span>
-              </div>
-              <div class="fleet-stem fleet-stem-entry"></div>
-              <div class="fleet-vm">
-                <span class="fleet-vm-label">LOCAL VM</span>
-                <div class="fleet-fork"><i></i><i></i></div>
-                <div class="fleet-agents">
-                  <div class="fleet-cell">
-                    <div class="fleet-cell-label">task cell / 01</div>
-                    <strong>@developer</strong><span>Codex</span>
-                  </div>
-                  <div class="fleet-cell fleet-cell-reviewer">
-                    <div class="fleet-cell-label">task cell / 02</div>
-                    <strong>@reviewer</strong><span>Claude Code</span>
-                  </div>
-                </div>
-                <div class="fleet-merge"><i></i><i></i></div>
-                <p class="fleet-isolation">
-                  Separate cells. No real credentials.
-                </p>
-                <div class="fleet-stem fleet-request-stem"></div>
-                <div class="fleet-trusted">
-                  <div class="fleet-vault">
-                    <span><b>[k]</b> vault</span><small>real keys</small>
-                  </div>
-                  <span class="fleet-key-arrow">─▶</span>
-                  <div class="fleet-gateway">
-                    <strong>trusted gateway</strong
-                    ><small>credentials used here</small>
-                  </div>
-                </div>
-              </div>
-              <div class="fleet-stem fleet-exit"></div>
-              <div class="fleet-services">
-                <span>your services</span><span>GitHub · AWS · …</span>
-              </div>
-            </div>
-          </div>
+          <video
+            class="fleet-video"
+            src="/anchi-hero-vertical-en-dark.mp4"
+            poster="/anchi-hero-vertical-en-dark.jpg"
+            width="880"
+            height="1000"
+            autoplay
+            muted
+            loop
+            playsinline
+            preload="auto"
+            aria-label="Three agents work in isolated cells inside a local VM and hold only placeholder credentials. The trusted gateway swaps in real credentials from the vault before requests reach GitHub, AWS, and other services. Real credentials inside cells: zero."
+          ></video>
           <figcaption>
             Anchi coordinates the team. Credentials stay outside the cells.
           </figcaption>
