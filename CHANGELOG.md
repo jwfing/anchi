@@ -2,6 +2,13 @@
 
 Follows the Keep a Changelog structure. The version comes from `anchi/package.json`.
 
+## Unreleased
+
+### Added
+
+- `anchi update` installs the latest release; `anchi update --check` checks without installing. Updates preserve custom installation paths, running daemons and configuration, verify the checksum and version before switching, and skip reinstalling or downgrading.
+- Packaged self-update uses its bundled installer, so it does not need a checkout or download and execute a new installer script.
+
 ## 0.2.1 — 2026-10-09
 
 ### Added

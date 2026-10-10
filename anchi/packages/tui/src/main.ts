@@ -16,6 +16,7 @@ import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow } from '@anchi/
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeLine } from './sanitize.ts';
+import { selfUpdate } from './update.ts';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
@@ -125,7 +126,16 @@ const program = new Command('anchi').description('Anchi (安栖): a secured agen
 const versionFile = existsSync(join(REPO_ROOT, 'manifest.json'))
   ? join(REPO_ROOT, 'manifest.json')
   : join(REPO_ROOT, 'anchi/package.json');
-program.version((JSON.parse(readFileSync(versionFile, 'utf8')) as { version: string }).version);
+const appVersion = (JSON.parse(readFileSync(versionFile, 'utf8')) as { version: string }).version;
+program.version(appVersion);
+
+program
+  .command('update')
+  .description('Update this installation to the latest release')
+  .option('--check', 'Check for a newer version without installing')
+  .action(async (options: { check?: boolean }) => {
+    await selfUpdate(REPO_ROOT, appVersion, options.check).catch((e: Error) => fail(e.message));
+  });
 
 program
   .command('tui', { isDefault: true })

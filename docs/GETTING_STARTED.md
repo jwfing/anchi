@@ -55,7 +55,17 @@ and, through the proxy, any public host.
 
 ## Update or remove the app
 
-Rerun the same installer to update. Existing daemon processes keep using the old version
+Run `anchi update` to check GitHub and install the latest release. Use `anchi update --check`
+to check without changing anything. Updates verify the archive's SHA-256 and requested version,
+then atomically switch the active package. An up-to-date or newer local version is left alone;
+failed downloads or checks leave the current installation intact. Custom install roots and
+launchers are preserved, and updating does not rewrite shell configuration.
+
+Versions through 0.2.1 do not include this command: rerun the installer once after a release
+with self-update is available. Source checkouts and manually extracted archives should use
+the installer to obtain a managed installation; self-update does not modify a checkout.
+
+Existing daemon processes keep using the old version
 so installation does not interrupt running tasks. Once tasks finish, run `anchi daemon stop`,
 then reopen `anchi`. If you enabled login startup, rerun `anchi daemon install` too so its
 service points to the new version. Run `anchi setup install` when the release notes require
