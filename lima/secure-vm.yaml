@@ -30,5 +30,5 @@ provision:
       #!/bin/bash
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y --no-install-recommends systemd-container debootstrap debian-archive-keyring python3 python3-cryptography nftables
+      apt-get -o DPkg::Lock::Timeout=600 update
+      apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends systemd-container debootstrap debian-archive-keyring python3 python3-cryptography nftables

@@ -3,8 +3,8 @@
 # The file name is kept stable because deployed hosts call it by path.
 set -euo pipefail
 if ! python3 -c 'import cryptography' 2>/dev/null || ! command -v nft >/dev/null; then
-  apt-get update
-  apt-get install -y --no-install-recommends python3-cryptography nftables
+  apt-get -o DPkg::Lock::Timeout=600 update
+  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends python3-cryptography nftables
 fi
 src=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=guest/cell.env

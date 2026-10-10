@@ -12,8 +12,8 @@ install -d -m 0755 /opt/secure-vm
 install -m 0644 "$src/cell.env" /opt/secure-vm/cell.env
 if [[ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]]; then
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends debian-archive-keyring
+  apt-get -o DPkg::Lock::Timeout=600 update
+  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends debian-archive-keyring
 fi
 if [[ ! -f "$base/rootfs-ready" ]]; then
   if [[ -e "$root" ]]; then

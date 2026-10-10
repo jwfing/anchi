@@ -9,6 +9,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 - `anchi update` installs the latest release; `anchi update --check` checks without installing. Updates preserve custom installation paths, running daemons and configuration, verify the checksum and version before switching, and skip reinstalling or downgrading.
 - Packaged self-update uses its bundled installer, so it does not need a checkout or download and execute a new installer script.
 
+### Fixed
+
+- VM installation waits up to 10 minutes for the dpkg lock instead of failing when a fresh VM's `unattended-upgrades` holds it.
+
 ## 0.2.1 — 2026-10-09
 
 ### Added
