@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sys
@@ -1019,6 +1020,60 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual((flow.request.headers, flow.response), (late, None))
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertEqual([r['decision'] for r in rows], ['pass:streamed', 'held-denied', 'pass:streamed'])
+
+    def test_agent_files_know_the_same_high_risk_ids(self):
+        schema = (Path(__file__).parent.parent / 'anchi/packages/core/src/config/schema.ts').read_text()
+        block = re.search(r'HIGH_RISK_IDS = \[(.*?)\] as const', schema, re.S).group(1)
+        self.assertEqual(re.findall(r"'([a-z0-9-]+)'", block), [entry[0] for entry in rules.HIGH_RISK])
+
+    def test_an_agent_can_skip_approval_for_its_own_high_risk_ids(self):
+        def merge(cell_disabled=(), settings=()):
+            proxy = self.proxy_with_cell()
+            proxy.settings = {'high_risk_disabled': list(settings)}
+            cell = self.module.Cell('t1', 'dev', {'github'}, high_risk_disabled=cell_disabled)
+            proxy.registry.client_cell = lambda client: cell
+            asked = []
+
+            async def denied(request):
+                asked.append(request['reason'])
+                return 'denied'
+
+            flow, _ = self.proxy_flow(
+                'PUT', 'api.github.com', '/repos/o/r/pulls/7/merge', {'authorization': 'x'}, False, b'{}'
+            )
+            respond = staticmethod(lambda f, *a: None)
+            with (
+                patch.object(proxy.approvals, 'ask', denied),
+                patch.object(self.module.EgressProxy, 'respond', respond),
+            ):
+                asyncio.run(proxy.requestheaders(flow))
+                asyncio.run(proxy.request(flow))
+            return asked, flow.request.headers.get('authorization', '')
+
+        asked, auth = merge()
+        self.assertEqual(asked, ['high-risk: merge a pull request'])
+        self.assertNotIn(GITHUB['token'], auth)
+        for disabled in ({'cell_disabled': {'github-merge'}}, {'settings': ['github-merge']}):
+            asked, auth = merge(**disabled)
+            self.assertEqual(asked, [])
+            self.assertIn(GITHUB['token'], auth)
+        # Another agent's exception, or another id, does not apply.
+        self.assertEqual(merge(cell_disabled={'git-default-branch'})[0], ['high-risk: merge a pull request'])
+
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            await registry.register(
+                {'task': 'th', 'agent': 'a', 'connectors': ['github'], 'high_risk_disabled': ['github-merge']}
+            )
+            self.assertEqual(registry.cells['th'].high_risk_disabled, frozenset({'github-merge'}))
+            for bad in (['everything'], 'github-merge', [7]):
+                with self.assertRaises(ValueError):
+                    registry.validate({'task': 'tg', 'agent': 'a', 'connectors': [], 'high_risk_disabled': bad})
+            await registry.unregister('th')
+
+        asyncio.run(scenario())
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertIn(['github-merge'], [r.get('high_risk_disabled') for r in rows if r.get('event') == 'register'])
 
     def test_quota_headers_of_runtime_responses_are_kept(self):
         from types import SimpleNamespace as NS

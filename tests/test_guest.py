@@ -70,3 +70,24 @@ class AccountArgumentTests(unittest.TestCase):
         ):
             with self.assertRaises(anchi_cell.Failure):
                 anchi_cell.parse_accounts(arg, connectors)
+
+
+class StartCommandTests(unittest.TestCase):
+    def test_start_takes_the_high_risk_argument_and_checks_it(self):
+        from unittest.mock import patch
+
+        seen = []
+        args = ['anchi-cell', 'start', 't-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', '-']
+        with (
+            patch.object(anchi_cell.os, 'getuid', lambda: 0),
+            patch.object(anchi_cell, 'cell_start', lambda *a: seen.append(a)),
+        ):
+            anchi_cell.main(args)
+            anchi_cell.main([*args, 'github-merge'])
+            with self.assertRaises(anchi_cell.Failure):
+                anchi_cell.main([*args, 'github-merge', 'extra'])
+        self.assertEqual([len(a) for a in seen], [11, 12])
+        self.assertEqual(seen[1][-1], 'github-merge')
+        with self.assertRaises(anchi_cell.Failure) as refused:
+            anchi_cell.cell_start('t-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', '-', 'a b')
+        self.assertEqual(str(refused.exception), 'BAD_HIGH_RISK')

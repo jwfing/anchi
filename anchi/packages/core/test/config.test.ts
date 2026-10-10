@@ -138,6 +138,14 @@ describe('loadImage', () => {
     expect(lead.triggers).toHaveLength(2);
     write('agents/ap.yaml', 'runtime: codex\nconnectors: [notion]\napprovals: { notion: ask }\n');
     expect(resolveAgent('ap', layout()).approvals).toEqual({ notion: 'ask' });
+    expect(lead.highRisk).toEqual({ disable: [] });
+    write(
+      'agents/hr.yaml',
+      'runtime: codex\nconnectors: [github]\nhighRisk: { disable: [github-merge] }\n',
+    );
+    expect(resolveAgent('hr', layout()).highRisk).toEqual({ disable: ['github-merge'] });
+    write('agents/hr2.yaml', 'runtime: codex\nhighRisk: { disable: [everything] }\n');
+    expect(() => resolveAgent('hr2', layout())).toThrow(ConfigError);
     write('agents/self.yaml', 'runtime: codex\ndelegates: [self]\n');
     expect(() => resolveAgent('self', layout())).toThrow(/delegate to itself/);
     write('agents/sb.yaml', 'runtime: claude-code\nsandbox: codex-workspace-write\n');

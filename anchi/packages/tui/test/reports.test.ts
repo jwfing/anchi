@@ -51,6 +51,10 @@ describe('reports', () => {
     const text = lines.map((l) => l.text).join('\n');
     expect(text).toContain('egress       any public host');
     expect(text).toContain('writes held  high-risk only');
+    const own = { ...audit.registration!, ask: ['github'], highRiskDisabled: ['github-merge'] };
+    expect(accessLines({ ...audit, registration: own }, 200).map((l) => l.text)).toContain(
+      '  writes held  github and high-risk, except github-merge',
+    );
     expect(text).toContain('! sent its own credential');
     // Agent-originated hosts are rendered without escape sequences.
     expect(text).not.toContain('\u001b');

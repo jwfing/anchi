@@ -56,7 +56,11 @@ export function accessLines(a: TaskAudit, width: number): ReportLine[] {
       { text: fit(`  connectors   ${r.connectors.join(', ') || 'none'}`) },
       { text: fit(`  services     ${r.services.join(', ') || 'none'} (through the bridge)`) },
       { text: fit(`  egress       ${r.egress ? r.egress.join(', ') : 'any public host'}`) },
-      { text: fit(`  writes held  ${r.ask.length ? r.ask.join(', ') : 'high-risk only'}`) },
+      {
+        text: fit(
+          `  writes held  ${r.ask.length ? `${r.ask.join(', ')} and high-risk` : 'high-risk only'}${r.highRiskDisabled ? `, except ${r.highRiskDisabled.map(clean).join(', ')}` : ''}`,
+        ),
+      },
       gap,
     );
   }

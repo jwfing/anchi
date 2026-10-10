@@ -156,6 +156,8 @@ export interface CellStart {
   egress?: string[];
   /** Google account per service (gmail, drive); `default` for the others. */
   accounts?: Record<string, string>;
+  /** High-risk entries that do not wait for approval in this cell, by id. */
+  highRiskDisabled?: string[];
 }
 
 export interface PollItem {
@@ -196,6 +198,10 @@ export class Guest {
     ) {
       throw new Error('invalid accounts');
     }
+    const highRisk = c.highRiskDisabled?.join(',') ?? '';
+    if (!/^([a-z0-9-]{1,40}(,[a-z0-9-]{1,40})*)?$/.test(highRisk)) {
+      throw new Error('invalid high-risk ids');
+    }
     return this.transport.spawn([
       'anchi-cell',
       'start',
@@ -210,6 +216,8 @@ export class Guest {
       c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
       c.egress ? Buffer.from(JSON.stringify(c.egress)).toString('base64url') : '-',
       accounts,
+      // Only when set, so a guest installed before high-risk exceptions per agent still starts.
+      ...(highRisk ? [highRisk] : []),
     ]);
   }
 

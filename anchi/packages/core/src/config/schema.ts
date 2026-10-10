@@ -24,6 +24,24 @@ const accountsSchema = z.partialRecord(z.enum(ACCOUNT_CONNECTORS), accountNameSc
 
 export const approvalModeSchema = z.enum(['auto', 'ask']);
 export type ApprovalMode = z.infer<typeof approvalModeSchema>;
+/** Ids of the egress proxy's high-risk entries, as in `HIGH_RISK` of services/egress_rules.py. */
+export const HIGH_RISK_IDS = [
+  'github-merge',
+  'github-repo-delete',
+  'github-repo-settings',
+  'github-repo-transfer',
+  'github-protection',
+  'github-access',
+  'github-ref-delete',
+  'github-graphql',
+  'git-default-branch',
+  'git-ref-delete',
+  'aws-destroy',
+  'aws-s3-delete',
+  'aws-s3-access',
+  'linear-delete',
+] as const;
+export const highRiskIdSchema = z.enum(HIGH_RISK_IDS);
 
 /** Five-field cron expression (minute hour day-of-month month day-of-week). */
 const cronSchema = z
@@ -146,6 +164,11 @@ export const agentLayerSchema = z.strictObject({
    */
   approvals: z.partialRecord(connectorSchema, approvalModeSchema).optional(),
   /**
+   * High-risk operations that do not wait for approval for this agent, by id (`github-merge`),
+   * besides those the user's settings disable for every agent.
+   */
+  highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30).optional() }).optional(),
+  /**
    * The Google account the agent's gmail or drive uses, such as `{gmail: work}`; `default`
    * otherwise. Pinned to the agent's cells by the trusted bridge; the agent cannot switch.
    */
@@ -180,6 +203,9 @@ export const resolvedAgentSchema = z
     skills: z.array(idSchema).default([]),
     approvals: z.partialRecord(connectorSchema, approvalModeSchema).default({}),
     accounts: accountsSchema.default({}),
+    highRisk: z
+      .strictObject({ disable: z.array(highRiskIdSchema).max(30).default([]) })
+      .default({ disable: [] }),
     workspaces: z.array(workspaceSchema).max(10).default([]),
     egress: z.array(egressPattern).max(100).optional(),
   })

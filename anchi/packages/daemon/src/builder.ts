@@ -6,6 +6,7 @@ import {
   agentFile,
   agentLayerSchema,
   BASE_IMAGE,
+  HIGH_RISK_IDS,
   ConfigError,
   type HomeLayout,
   imageFile,
@@ -48,10 +49,15 @@ An agent is a YAML file. Fields:
   (cron, local time), or { poll: { type: linear-issues, team?, label?, state? } or
   { type: github-issues, query: 'repo:o/r is:issue is:open label:agent' }, text: ...,
   every?: minutes } where text may use {title}, {url} and {id}. Outside content then reaches
-  the agent: prefer approvals for its writes.
+  the agent: tell the user, who may want approvals for its writes.
 - delegates: ids of agents this agent may hand tasks to (optional).
-- approvals: per connector, ask to hold its writes for the user's approval (optional), e.g.
-  { github: ask }.
+- approvals: per connector, ask to hold every write for the user's approval (optional), e.g.
+  { github: ask }. Without it, writes go straight through; high-risk operations (merging a pull
+  request, pushing to main or master, deleting a branch or repository, AWS deletions, ...) wait
+  for the user anyway. Add it only when the user wants to approve the agent's writes.
+- highRisk: high-risk operations this agent does without approval (optional), by id, e.g.
+  { disable: [github-merge] } for an agent whose job is merging pull requests. Ids:
+  ${HIGH_RISK_IDS.join(', ')}. Only when the user asks for it.
 - workspaces: directories of the user's Mac under ~/AnchiWorkspaces, e.g.
   [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
   /home/agent/workspaces/<name>). Use rw only when the agent must change files there.

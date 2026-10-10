@@ -140,7 +140,7 @@ class PushInspector:
         if parsed is None:
             return []
         risk = rules.high_risk(
-            self.decision, 'POST', self.entry['path'], head, self.proxy.settings['high_risk_disabled']
+            self.decision, 'POST', self.entry['path'], head, self.proxy.high_risk_disabled(self.cell)
         )
         if risk:
             return self.refuse(*parsed, risk)
@@ -323,10 +323,12 @@ class Approvals:
 
 
 class Cell:
-    def __init__(self, task, agent, grants, ask=(), egress=None):
+    def __init__(self, task, agent, grants, ask=(), egress=None, high_risk_disabled=()):
         self.task, self.agent, self.grants = task, agent, frozenset(grants)
         # Connectors whose writes wait for the user's approval.
         self.ask = frozenset(ask)
+        # High-risk entries that do not wait for approval for this agent (its `highRisk`).
+        self.high_risk_disabled = frozenset(high_risk_disabled)
         # Hosts the cell may reach; None is open egress.
         self.egress = rules.egress_allowlist(egress, self.grants)
         self.server = None
@@ -378,6 +380,10 @@ class Registry:
             for s, a in accounts.items()
         ):
             raise ValueError('BAD_ACCOUNTS')
+        high_risk = request.get('high_risk_disabled', [])
+        known = {entry[0] for entry in rules.HIGH_RISK}
+        if not isinstance(high_risk, list) or not all(h in known for h in high_risk):
+            raise ValueError('BAD_HIGH_RISK')
         egress = request.get('egress')
         if egress is not None and (
             not isinstance(egress, list)
@@ -392,7 +398,9 @@ class Registry:
 
     async def register(self, request):
         task, agent, grants = self.validate(request)
-        cell = Cell(task, agent, grants, request.get('ask', []), request.get('egress'))
+        cell = Cell(
+            task, agent, grants, request.get('ask', []), request.get('egress'), request.get('high_risk_disabled', [])
+        )
         cell.directory.mkdir(parents=True, exist_ok=False)
         # The service runs with UMask=0077; the cell's agent user must traverse this directory.
         os.chmod(cell.directory, 0o755)
@@ -424,6 +432,7 @@ class Registry:
                 'agent': agent,
                 'grants': sorted(grants),
                 'ask': sorted(cell.ask),
+                'high_risk_disabled': sorted(cell.high_risk_disabled),
                 'egress': None if cell.egress is None else sorted(cell.egress),
                 'services': sorted(cell.services),
                 'accounts': cell.accounts,
@@ -622,6 +631,11 @@ class EgressProxy:
             raise ValueError('VERIFY_UNREACHABLE') from None
         audit({'event': 'verify', 'connector': connector, 'status': status})
         return {'connector': connector, 'account': rules.verify_account(connector, status, content)}
+
+    def high_risk_disabled(self, cell):
+        """High-risk entries that do not wait for approval in this cell: the user's settings for
+        every agent, and the agent's own `highRisk`."""
+        return frozenset(self.settings['high_risk_disabled']) | cell.high_risk_disabled
 
     def set_settings(self, value):
         """Settings the daemon owns (the user's high-risk exceptions), kept across restarts."""
@@ -943,9 +957,7 @@ class EgressProxy:
             return None
         # High-risk operations wait for the user for every agent (phase 3, F1); other writes
         # wait when the agent's approvals ask for its connector.
-        risk = (
-            None if push else rules.high_risk(decision, req.method, req.path, body, self.settings['high_risk_disabled'])
-        )
+        risk = None if push else rules.high_risk(decision, req.method, req.path, body, self.high_risk_disabled(cell))
         if not push and (
             risk or (decision.rule.grant in cell.ask and rules.is_write(decision, req.method, req.path, body))
         ):

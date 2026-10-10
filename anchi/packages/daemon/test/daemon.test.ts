@@ -825,6 +825,20 @@ describe('daemon tasks', () => {
     ]);
   });
 
+  it("passes an agent's high-risk exceptions to its cells, and nothing extra otherwise", async () => {
+    write(
+      'agents/merger.yaml',
+      'runtime: codex\nconnectors: [github]\nhighRisk: { disable: [github-merge] }\n',
+    );
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'merger', text: 'merge it' });
+    await client.call('tasks.wait', { taskId: t.id });
+    expect(transport.starts.at(-1)!.slice(-2)).toEqual(['-', 'github-merge']);
+    const plain = await client.call('tasks.create', { agentId: 'dev', text: 'hi' });
+    await client.call('tasks.wait', { taskId: plain.id });
+    expect(transport.starts.at(-1)).toHaveLength(13);
+  });
+
   it('scans every cell before closing it and reports findings', async () => {
     const { client, daemon } = await start(100);
     const found: unknown[] = [];

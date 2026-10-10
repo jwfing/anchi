@@ -743,6 +743,7 @@ export class Hub extends EventEmitter<HubEvents> {
         mode: w.mode,
       })),
       egress: agent.egress,
+      highRiskDisabled: agent.highRisk.disable,
       accounts: agent.accounts,
     });
     const session = new CellSession(task.id, child);
