@@ -16,6 +16,7 @@ import type {
   SkillInfo,
   ConnectorSecret,
   SetupStatus,
+  SetupAction,
   StoredEvent,
   TaskRow,
   TaskStatus,
@@ -40,7 +41,7 @@ import {
   splitChunk,
   strokeOf,
 } from './keys.ts';
-import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputWindow } from './lineedit.ts';
+import { type Draft, draftOf, EMPTY_DRAFT, edit, insert, inputRows } from './lineedit.ts';
 import {
   accessLines,
   accessSummaryLines,
@@ -58,14 +59,19 @@ import {
   settingsRows,
   toggleSetting,
 } from './settings.ts';
-import { type Line, type Tone, transcriptLines, truncate } from './lines.ts';
+import { type Line, type Tone, transcriptLines, truncate, wrap } from './lines.ts';
 import type { MouseEvent } from './mouse.ts';
+import { WelcomeView, TeamView } from './UsabilityViews.tsx';
+import { welcomeStep, nextSetupAction, recoveryFor, resultLines, setupPhase } from './usability.ts';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
+const HOME = ['welcome', 'team'] as const;
 const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
-type ConfigItem = (typeof CONFIG)[number];
+type ConfigItem = (typeof CONFIG)[number] | (typeof HOME)[number];
 const CONFIG_LABEL: Record<ConfigItem, string> = {
+  welcome: 'Getting started',
+  team: 'Team overview',
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
@@ -85,7 +91,7 @@ type SideRow =
 
 /** Rows above the task list: title, three headers, config items, builder, agents. */
 function sidebarFixedRows(agentCount: number): number {
-  return 1 + 3 + CONFIG.length + 1 + Math.max(1, agentCount);
+  return 1 + 4 + HOME.length + CONFIG.length + 1 + Math.max(1, agentCount);
 }
 /** Screen row (1-based) of the first transcript line: border, header and rule above it. */
 export const TRANSCRIPT_FIRST_ROW = 4;
@@ -140,6 +146,15 @@ const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
 };
 
 type Modal =
+  | {
+      kind: 'problem';
+      message: string;
+      retry?: () => Promise<unknown>;
+      taskId?: string;
+      scroll: number;
+    }
+  | { kind: 'setupLog'; scroll: number }
+  | { kind: 'composeReview'; text: string; target: string; send: () => void; scroll: number }
   | { kind: 'proposal'; proposal: BuilderProposal; scroll: number }
   | {
       kind: 'secret';
@@ -151,7 +166,7 @@ type Modal =
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
   | { kind: 'help'; context: Context; scroll: number }
   | { kind: 'palette'; context: Context; query: string; cursor: number }
-  | { kind: 'approval'; approval: Approval }
+  | { kind: 'approval'; approval: Approval; decision?: boolean }
   | {
       kind: 'settings';
       agentId: string;
@@ -201,6 +216,7 @@ export interface AppProps {
   client: DaemonClient;
   initialAgents: AgentSummary[];
   initialTasks: TaskRow[];
+  initialView?: string;
   onMouse?(handler: (e: MouseEvent) => void): void;
   /** Opens $EDITOR on a draft and returns the edited text (CJK input fallback). */
   compose?(draft: string): string;
@@ -260,6 +276,7 @@ export function App({
   client,
   initialAgents,
   initialTasks,
+  initialView,
   onMouse,
   compose,
   keymap = DEFAULT_KEYMAP,
@@ -271,7 +288,7 @@ export function App({
   const { columns, rows } = useWindowSize();
   const [agents, setAgents] = useState(initialAgents);
   const [tasks, setTasks] = useState(initialTasks);
-  const [selected, setSelected] = useState<string | undefined>(undefined);
+  const [selected, setSelected] = useState<string | undefined>(initialView);
   // Which pane takes the keys: the sidebar or the main pane (chat, task, settings).
   const [focus, setFocus] = useState<'side' | 'main'>('main');
   const [taskPage, setTaskPage] = useState(0);
@@ -279,19 +296,17 @@ export function App({
   const [taskFilter, setTaskFilter] = useState('');
   const [focusTask, setFocusTask] = useState<Record<string, string | null>>({});
   const [logs, setLogs] = useState<Record<string, StoredEvent[]>>({});
-  const [draft, setDraftState] = useState<Draft>(EMPTY_DRAFT);
-  // Mirrors the draft synchronously: keys and text from one input chunk build on each other.
-  const draftRef = useRef<Draft>(EMPTY_DRAFT);
-  const setDraft = (next: Draft | ((d: Draft) => Draft)) => {
-    draftRef.current = typeof next === 'function' ? next(draftRef.current) : next;
-    setDraftState(draftRef.current);
-  };
-  const input = draft.text;
   // Keys of a chord typed so far (the leader, then more); a ref so one input chunk sees them all.
   const [pending, setPendingState] = useState<string[]>([]);
   const pendingRef = useRef<string[]>([]);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [scroll, setScroll] = useState(0);
+  const drafts = useRef<Record<string, Draft>>({});
+  const draftRef = useRef<Draft>(EMPTY_DRAFT);
+  const [, renderDraft] = useState(0);
+  const [scrolls, setScrolls] = useState<Record<string, number>>({});
+  const [history, setHistory] = useState<Record<string, boolean>>({});
+  const [teamCursor, setTeamCursor] = useState(0);
+  const sending = useRef(new Set<string>());
   const [connectorCursor, setConnectorCursor] = useState(0);
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [skillCursor, setSkillCursor] = useState(0);
@@ -323,7 +338,7 @@ export function App({
       void client
         .call('access.summary', { since: Date.now() - PERIODS[period]!.ms })
         .then(setAccess)
-        .catch((e: Error) => say(e.message));
+        .catch((e: Error) => reportProblem(e));
     },
     [client],
   );
@@ -342,7 +357,18 @@ export function App({
   const [proposals, setProposals] = useState<BuilderProposal[]>([]);
   // Writes the egress proxy holds for the user, oldest first.
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const seenApprovals = useRef(new Set<string>());
+  const [problem, setProblem] = useState<{
+    message: string;
+    retry?: () => Promise<unknown>;
+    taskId?: string;
+  } | null>(null);
+  const [setupProgress, setSetupProgress] = useState<{
+    action: SetupAction;
+    phase: string;
+    running: boolean;
+    failed?: boolean;
+  } | null>(null);
+  const setupRunning = useRef(false);
   // A notification is newer than the initial list; a late list answer must not undo it.
   const approvalsNotified = useRef(false);
   const [flash, setFlash] = useState('');
@@ -351,6 +377,7 @@ export function App({
   const userAgents = agents.filter((a) => a.id !== BUILDER);
   const shownTasks = useMemo(() => filterTasks(tasks, taskFilter), [tasks, taskFilter]);
   const items: string[] = [
+    ...HOME,
     ...CONFIG,
     BUILDER,
     ...userAgents.map((a) => a.id),
@@ -358,35 +385,44 @@ export function App({
   ];
   // Selection is by item, so new tasks arriving at the top do not move it.
   const current = selected && items.includes(selected) ? selected : (userAgents[0]?.id ?? BUILDER);
-  const isMenu = (CONFIG as readonly string[]).includes(current);
+  const isMenu = ([...HOME, ...CONFIG] as readonly string[]).includes(current);
   const detail = current.startsWith(TASK_ITEM)
     ? tasks.find((t) => TASK_ITEM + t.id === current)
     : undefined;
   const agent = isMenu || detail ? undefined : agents.find((a) => a.id === current);
-  const frame = useSpinner(tasks.some((t) => t.status === 'running'));
+  const frame = useSpinner(
+    tasks.some((t) => t.status === 'running') || Boolean(setupProgress?.running),
+  );
 
   const say = useCallback((msg: string) => {
     setFlash(sanitizeLine(msg));
     setTimeout(() => setFlash((f) => (f === sanitizeLine(msg) ? '' : f)), 5000);
   }, []);
 
+  const reportProblem = useCallback(
+    (error: unknown, retry?: () => Promise<unknown>, taskId?: string) => {
+      const message = sanitize(error instanceof Error ? error.message : String(error));
+      setProblem((previous) => ({
+        message,
+        retry: retry ?? (previous?.message === message ? previous.retry : undefined),
+        taskId: taskId ?? (previous?.message === message ? previous.taskId : undefined),
+      }));
+    },
+    [],
+  );
+
   const refreshSetup = useCallback(() => {
     void client
       .call('setup.status')
       .then(setSetup)
-      .catch((e: Error) => say(e.message));
-  }, [client, say]);
+      .catch((e: Error) => reportProblem(e, () => client.call('setup.status')));
+  }, [client, reportProblem]);
+  useEffect(refreshSetup, [refreshSetup]);
 
-  // A new held write opens its dialog once no other dialog is up; approvals:open reopens it.
+  // Pending approvals never steal input focus. Only an explicit review action opens one.
   useEffect(() => {
-    const fresh = approvals.find((a) => !seenApprovals.current.has(a.id));
-    if (fresh && !modal) {
-      seenApprovals.current.add(fresh.id);
-      setModal({ kind: 'approval', approval: fresh });
-    }
-    if (modal?.kind === 'approval' && !approvals.some((a) => a.id === modal.approval.id)) {
+    if (modal?.kind === 'approval' && !approvals.some((a) => a.id === modal.approval.id))
       setModal(null);
-    }
   }, [approvals, modal]);
   useEffect(() => {
     void client
@@ -415,7 +451,19 @@ export function App({
           return { ...all, [taskId]: [...cur, { seq, ts: Date.now(), event }] };
         });
       }),
-      client.on('setup', ({ line }) => setSetupLog((log) => [...log, line].slice(-8))),
+      client.on('setup', ({ action, line }) => {
+        setSetupLog((log) => [...log, sanitizeLine(line)].slice(-500));
+        setSetupProgress((p) => ({
+          action,
+          running: true,
+          phase:
+            /download|fetch|pulling|anchi-image|base image|rootfs|debootstrap|install-anchi|bootstrap|trusted|egress|services/i.test(
+              line,
+            ) || line.startsWith('$ ')
+              ? setupPhase(action, line)
+              : (p?.phase ?? setupPhase(action, line)),
+        }));
+      }),
       client.on('approvals', ({ approvals: next }) => {
         approvalsNotified.current = true;
         setApprovals(next);
@@ -442,11 +490,10 @@ export function App({
   }, [client, exit]);
 
   useEffect(() => {
-    if (current === 'runtimes' || current === 'connectors') refreshSetup();
+    if (current === 'runtimes' || current === 'connectors' || current === 'welcome') refreshSetup();
     if (current === 'skills') refreshSkills();
     if (current === 'usage') refreshUsage(usagePeriod, usageGroup);
     if (current === 'access') refreshAccess(accessPeriod);
-    setScroll(0);
   }, [current, refreshSetup]);
 
   // The task shown for an agent: the one chosen, else its latest; null means "new task".
@@ -458,19 +505,52 @@ export function App({
       ? undefined
       : (agentTasks.find((t) => t.id === chosen) ?? agentTasks[0]);
 
+  const conversationKey = `${current}:${task?.id ?? 'new'}`;
+  const draftKey = useRef(conversationKey);
+  draftKey.current = conversationKey;
+  const draft = drafts.current[conversationKey] ?? EMPTY_DRAFT;
+  draftRef.current = draft;
+  const input = draft.text;
+  const setDraft = (next: Draft | ((d: Draft) => Draft)) => {
+    const value =
+      typeof next === 'function' ? next(drafts.current[draftKey.current] ?? EMPTY_DRAFT) : next;
+    drafts.current[draftKey.current] = value;
+    draftRef.current = value;
+    renderDraft((n) => n + 1);
+  };
+  const scroll = scrolls[conversationKey] ?? 0;
+  const setScroll = (next: number | ((n: number) => number)) =>
+    setScrolls((all) => ({
+      ...all,
+      [conversationKey]: typeof next === 'function' ? next(all[conversationKey] ?? 0) : next,
+    }));
+  const scrollRef = useRef(setScroll);
+  scrollRef.current = setScroll;
+  const showHistory = history[conversationKey] ?? !detail;
+  const isFinished = task && ['done', 'failed', 'cancelled'].includes(task.status);
+
   useEffect(() => {
-    const id = task?.id;
-    if (!id || logs[id] || loading.current.has(id)) return;
-    loading.current.add(id);
-    void client.call('tasks.events', { taskId: id }).then((events) => {
-      loading.current.delete(id);
-      setLogs((all) => {
-        const streamed = all[id] ?? [];
-        const last = events.at(-1)?.seq ?? 0;
-        return { ...all, [id]: [...events, ...streamed.filter((e) => e.seq > last)] };
-      });
-    });
-  }, [client, task?.id, logs]);
+    const ids =
+      current === 'team'
+        ? tasks.filter((t) => t.status === 'running').map((t) => t.id)
+        : task
+          ? [task.id]
+          : [];
+    for (const id of ids) {
+      if (logs[id] || loading.current.has(id)) continue;
+      loading.current.add(id);
+      void client
+        .call('tasks.events', { taskId: id })
+        .then((events) => {
+          setLogs((all) => {
+            const last = events.at(-1)?.seq ?? 0;
+            return { ...all, [id]: [...events, ...(all[id] ?? []).filter((e) => e.seq > last)] };
+          });
+        })
+        .catch((e) => reportProblem(e))
+        .finally(() => loading.current.delete(id));
+    }
+  }, [client, current, tasks, task?.id]);
 
   // ── layout ──────────────────────────────────────────────
   /** The context whose bindings apply, before the global ones. */
@@ -480,11 +560,17 @@ export function App({
   // While a chord is pending, the keys that can follow it (which-key), above the status line.
   const next = pending.length ? continuations(keymap, active, pending) : [];
   const whichKeyRows = next.length ? Math.ceil(next.length / 2) + 1 : 0;
-  const mainWidth = Math.max(30, columns - SIDEBAR_WIDTH);
+  const sideWidth = columns < 72 ? 0 : SIDEBAR_WIDTH;
+  const mainWidth = Math.max(20, columns - sideWidth);
   const textWidth = mainWidth - 4;
   const bodyHeight = rows - 1 - whichKeyRows;
   // The chat has an input box below the transcript; a task's detail has two meta lines above it.
-  const transcriptHeight = Math.max(3, bodyHeight - (detail ? 7 : 8));
+  const composer = inputRows(
+    draft,
+    Math.max(2, textWidth - 6),
+    Math.max(1, Math.min(5, rows - 14)),
+  );
+  const transcriptHeight = Math.max(1, bodyHeight - (detail ? 7 : 9 + composer.rows.length));
   const transcriptFirstRow = TRANSCRIPT_FIRST_ROW + (detail ? 2 : 0);
 
   // Task pages fill the sidebar below the fixed rows (header, page rows, pager).
@@ -497,6 +583,8 @@ export function App({
   );
   const sideRows: SideRow[] = [
     { kind: 'title', text: '安栖 Anchi' },
+    { kind: 'header', text: 'HOME' },
+    ...HOME.map((item) => ({ kind: 'item' as const, item })),
     { kind: 'header', text: 'CONFIGURE' },
     ...CONFIG.map((item) => ({ kind: 'item' as const, item })),
     { kind: 'header', text: 'AGENTS' },
@@ -519,16 +607,17 @@ export function App({
   sideRowsRef.current = sideRows;
   const lines = useMemo<Line[]>(
     () =>
-      transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
-        verbose,
-        expanded,
-        live: task?.status === 'running',
-        prefix: task ? `${task.id}:` : '',
-      }),
-    [logs, task?.id, task?.status, textWidth, verbose, expanded],
+      isFinished && !showHistory
+        ? resultLines(task, textWidth, tasks)
+        : transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
+            verbose,
+            expanded,
+            live: task?.status === 'running',
+            prefix: task ? `${task.id}:` : '',
+          }),
+    [logs, task, tasks, showHistory, textWidth, verbose, expanded],
   );
   // Input box: border and padding take four columns, the prompt two.
-  const inputView = inputWindow(draft, textWidth - 6);
   const maxScroll = Math.max(0, lines.length - transcriptHeight);
   const offset = Math.min(scroll, maxScroll);
   const visible = lines.slice(
@@ -561,7 +650,7 @@ export function App({
   };
 
   // ── actions ─────────────────────────────────────────────
-  const fallback = userAgents[0]?.id ?? BUILDER;
+  const fallback = current;
   // From the previous selection, so several keys in one input chunk all count.
   const move = (d: number) =>
     setSelected((prev) => {
@@ -586,30 +675,61 @@ export function App({
   const newTaskFor = useRef<string | null>(null);
   const startNewTask = (id: string) => {
     newTaskFor.current = id;
+    draftKey.current = `${id}:new`;
+    draftRef.current = drafts.current[draftKey.current] ?? EMPTY_DRAFT;
     setFocusTask((f) => ({ ...f, [id]: null }));
   };
 
-  const submit = (raw = draftRef.current.text) => {
+  const submit = (raw = draftRef.current.text, reviewed = false) => {
     const text = raw.trim();
-    if (!text || !agent) return;
-    setDraft(EMPTY_DRAFT);
-    setScroll(0);
+    if (!text || !agent || sending.current.has(draftKey.current)) return;
     if (text === '/new') {
+      setDraft(EMPTY_DRAFT);
       startNewTask(agent.id);
-      return say('the next message starts a new task');
+      return;
     }
-    if (text === '/verbose') return setVerbose((v) => !v);
+    if (text === '/verbose') {
+      setDraft(EMPTY_DRAFT);
+      return setVerbose((v) => !v);
+    }
     if (text === '/quit') return exit();
     const shown = newTaskFor.current === agent.id ? undefined : task;
-    newTaskFor.current = null;
-    const followUp = shown && shown.status !== 'running' && shown.status !== 'queued';
-    if (shown && !followUp) return say('wait for the current turn to finish, or Esc to cancel it');
-    const call = followUp
+    if (shown && ['running', 'queued'].includes(shown.status))
+      return reportProblem(
+        new Error(
+          'This task is still running. Wait for it to finish or explicitly stop it. Your draft is kept.',
+        ),
+      );
+    if (text.includes('\n') && !reviewed)
+      return setModal({
+        kind: 'composeReview',
+        text,
+        target: `@${agent.id} · ${shown ? 'Continue: ' + shown.title : 'New task'}`,
+        send: () => submit(raw, true),
+        scroll: 0,
+      });
+    const key = draftKey.current;
+    const saved = draftRef.current;
+    sending.current.add(key);
+    const call = shown
       ? client.call('tasks.send', { taskId: shown.id, text })
       : client.call('tasks.create', { agentId: agent.id, text });
     void call
-      .then((t) => setFocusTask((f) => ({ ...f, [agent.id]: t.id })))
-      .catch((e: Error) => say(e.message));
+      .then((t) => {
+        // Do not erase edits made while sending, or a draft in another conversation.
+        const latest = drafts.current[key] ?? saved;
+        if (latest.text === saved.text) drafts.current[key] = EMPTY_DRAFT;
+        else drafts.current[`${agent.id}:${t.id}`] = latest;
+        setTasks((all) => [t, ...all.filter((x) => x.id !== t.id)]);
+        setFocusTask((f) => (f[agent.id] === chosen ? { ...f, [agent.id]: t.id } : f));
+        if (newTaskFor.current === agent.id) newTaskFor.current = null;
+        setProblem(null);
+      })
+      .catch((e) => reportProblem(e))
+      .finally(() => {
+        sending.current.delete(key);
+        renderDraft((n) => n + 1);
+      });
   };
 
   const editDraft = () => {
@@ -635,7 +755,7 @@ export function App({
         say(done);
         refreshSetup();
       })
-      .catch((e: Error) => say(e.message));
+      .catch((e: Error) => reportProblem(e));
   };
 
   // ── key bindings ────────────────────────────────────────
@@ -664,9 +784,33 @@ export function App({
   const connectorIds: ConnectorId[] = ['github', 'aws', 'linear'];
   const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
 
-  const setupStep = (step: 'vm-start' | 'install' | 'workspaces' | 'vault-unlock') => {
+  const performSetup = async (step: SetupAction) => {
+    if (setupRunning.current)
+      throw new Error('Environment setup is already running. Open installation progress.');
+    setupRunning.current = true;
+    setSetupLog([]);
+    setSetupProgress({ action: step, phase: setupPhase(step, ''), running: true });
+    try {
+      const status = await client.call('setup.run', { action: step });
+      setSetup(status);
+      setSetupProgress({ action: step, phase: 'Completed', running: false });
+      setProblem(null);
+    } catch (e) {
+      setSetupProgress((p) => p && { ...p, running: false, failed: true });
+      reportProblem(e, () => performSetup(step));
+      throw e;
+    } finally {
+      setupRunning.current = false;
+    }
+  };
+  const setupStep = (step: SetupAction) => {
+    if (setupRunning.current) return setModal({ kind: 'setupLog', scroll: 0 });
     const [title, body] = (
       {
+        'vault-init': [
+          'Initialize the vault',
+          'Create the local master key and unlock the vault. Back up ~/.config/secure-vm/vault.key. Existing encrypted accounts require their original key.',
+        ],
         'vm-start': ['Start the VM', 'Start the secure-vm VM.'],
         install: [
           'Install or update',
@@ -681,7 +825,7 @@ export function App({
         ],
         'vault-unlock': [
           'Unlock the vault',
-          'Send the vault key from ~/.config/secure-vm/vault.key on this Mac to the VM, ' +
+          'Send the vault key from ~/.config/secure-vm/vault.key on this computer to the VM, ' +
             'where it is kept in memory only.',
         ],
       } as const
@@ -690,10 +834,7 @@ export function App({
       kind: 'confirm',
       title,
       body,
-      action: () => {
-        setSetupLog([]);
-        return client.call('setup.run', { action: step });
-      },
+      action: () => performSetup(step),
     });
   };
 
@@ -760,7 +901,7 @@ export function App({
             (r.warnings.length ? ` · ${r.warnings.join(' · ')}` : ''),
         );
       })
-      .catch((e: Error) => say(e.message));
+      .catch((e: Error) => reportProblem(e));
   };
 
   /** Shows what the panel's changes do to the agent file, or revises the proposal. */
@@ -778,14 +919,14 @@ export function App({
           setProposals((p) => p.map((x) => (x.id === proposal.id ? proposal : x)));
           setModal({ kind: 'proposal', proposal, scroll: 0 });
         })
-        .catch((e: Error) => say(e.message));
+        .catch((e: Error) => reportProblem(e));
     }
     void client
       .call('agents.update', { agentId: m.agentId, patch })
       .then((update) =>
         setModal({ kind: 'settingsReview', agentId: m.agentId, patch, update, back: m }),
       )
-      .catch((e: Error) => say(e.message));
+      .catch((e: Error) => reportProblem(e));
   };
   const proposalModal = (id: string): Modal | undefined => {
     const proposal = proposals.find((p) => p.id === id);
@@ -796,6 +937,57 @@ export function App({
   const run = (action: ActionId): void => {
     const running = (t?: TaskRow) => t && (t.status === 'running' || t.status === 'queued');
     switch (action) {
+      case 'nav:welcome':
+        setSelected('welcome');
+        setFocus('main');
+        return;
+      case 'nav:team':
+        setSelected('team');
+        setFocus('main');
+        return;
+      case 'welcome:next': {
+        if (!setup) return refreshSetup();
+        if (setupRunning.current) return setModal({ kind: 'setupLog', scroll: 0 });
+        if (setup.host?.missing.length) return refreshSetup();
+        const action = nextSetupAction(setup);
+        if (action) return setupStep(action);
+        const step = welcomeStep(setup, agents, tasks);
+        if (step === 'runtime') return say('Choose i for Codex or c for Claude Code');
+        if (step === 'agent') return run('nav:builder');
+        if (step === 'done') return run('nav:team');
+        const first = userAgents[0];
+        if (first) {
+          setSelected(first.id);
+          setFocus('main');
+        }
+        return;
+      }
+      case 'team:open': {
+        const agent = userAgents[Math.min(teamCursor, userAgents.length - 1)];
+        if (agent) {
+          setSelected(agent.id);
+          setFocus('main');
+        }
+        return;
+      }
+      case 'problem:open': {
+        const issue =
+          problem ??
+          (task?.status === 'failed'
+            ? { message: task.result ?? 'Task failed', taskId: task.id }
+            : null);
+        if (issue) setModal({ kind: 'problem', ...issue, scroll: 0 });
+        else say('No unresolved problem');
+        return;
+      }
+      case 'setup:logs':
+        return setModal({ kind: 'setupLog', scroll: 0 });
+      case 'task:history':
+        return setHistory((all) => ({ ...all, [conversationKey]: !showHistory }));
+      case 'chat:newline':
+        return setDraft((d) => insert(d, '\n'));
+      case 'setup:init':
+        return setupStep('vault-init');
       case 'app:quit':
         return exit();
       case 'app:help':
@@ -817,7 +1009,7 @@ export function App({
       case 'nav:last':
         return setSelected(items.at(-1));
       case 'nav:configure':
-        return setSelected(CONFIG[0]);
+        return setSelected('runtimes');
       case 'nav:agents':
         return setSelected(userAgents[0]?.id ?? BUILDER);
       case 'nav:tasks':
@@ -853,9 +1045,12 @@ export function App({
       case 'task:cancel': {
         const t = detail ?? task;
         if (!running(t)) return say('no running task here');
-        return void client
-          .call('tasks.cancel', { taskId: t!.id })
-          .catch((e: Error) => say(e.message));
+        return setModal({
+          kind: 'confirm',
+          title: 'Stop this task?',
+          body: `Stop ${t!.id} (@${t!.agentId}). Its work and transcript are kept; you can continue it later.`,
+          action: () => client.call('tasks.cancel', { taskId: t!.id }),
+        });
       }
       case 'task:access': {
         const t = detail ?? task;
@@ -939,11 +1134,12 @@ export function App({
         return setVerbose((v) => !v);
       case 'scroll:up':
         // Report views clamp their own scroll.
-        if (context === 'usage' || context === 'access')
+        if (context === 'usage' || context === 'access' || context === 'welcome')
           return setScroll((s) => Math.max(0, s - 1));
         return setScroll((s) => Math.min(maxScroll, s + 1));
       case 'scroll:down':
-        if (context === 'usage' || context === 'access') return setScroll((s) => s + 1);
+        if (context === 'usage' || context === 'access' || context === 'welcome')
+          return setScroll((s) => s + 1);
         return setScroll((s) => Math.max(0, s - 1));
       case 'scroll:pageUp':
         return setScroll((s) => Math.min(maxScroll, s + halfPage));
@@ -952,19 +1148,15 @@ export function App({
       case 'chat:submit':
         return submit();
       case 'chat:escape':
-        // Esc first cancels a running turn, then clears the draft, then leaves the chat.
-        if (running(task)) {
-          void client.call('tasks.cancel', { taskId: task!.id });
-          return say(`cancelling ${task!.id}`);
-        }
-        if (draftRef.current.text) return setDraft(EMPTY_DRAFT);
         return back();
       case 'chat:editor':
         return editDraft();
       case 'list:up':
+        if (current === 'team') return setTeamCursor((c) => Math.max(0, c - 1));
         if (current === 'skills') return setSkillCursor((c) => Math.max(0, c - 1));
         return setConnectorCursor((c) => Math.max(0, c - 1));
       case 'list:down':
+        if (current === 'team') return setTeamCursor((c) => Math.min(userAgents.length - 1, c + 1));
         if (current === 'skills')
           return setSkillCursor((c) => Math.min((skills ?? []).length - 1, c + 1));
         return setConnectorCursor((c) =>
@@ -975,7 +1167,7 @@ export function App({
       case 'setup:install':
         return setupStep('install');
       case 'setup:unlock':
-        return setupStep('vault-unlock');
+        return setupStep(setup?.vaultKeyPresent === false ? 'vault-init' : 'vault-unlock');
       case 'setup:workspaces':
         return setupStep('workspaces');
       case 'setup:codex':
@@ -983,8 +1175,8 @@ export function App({
           kind: 'confirm',
           title: 'Import Codex login',
           body:
-            'Read the access token and account id from ~/.codex/auth.json on this Mac and store them in the ' +
-            'VM vault. The refresh token stays on this Mac. Cells never receive the token.',
+            'Read the access token and account id from ~/.codex/auth.json on this computer and store them in the ' +
+            'VM vault. The refresh token stays on this computer. Cells never receive the token.',
           action: () => client.call('setup.importCodex'),
         });
       case 'setup:claude':
@@ -1049,7 +1241,7 @@ export function App({
               },
             });
           })
-          .catch((e: Error) => say(e.message));
+          .catch((e: Error) => reportProblem(e));
       }
       case 'skills:remove': {
         const skill = (skills ?? [])[skillCursor];
@@ -1103,7 +1295,7 @@ export function App({
           kind: 'confirm',
           title: 'Import the gh CLI token',
           body:
-            'Read the token the GitHub CLI on this Mac is logged in with (`gh auth token`) and store ' +
+            'Read the token the GitHub CLI on this computer is logged in with (`gh auth token`) and store ' +
             'it in the VM vault. It carries every scope of your gh login, usually broader than a ' +
             'fine-grained token limited to the repositories the agents need.',
           action: () => client.call('connectors.importGh'),
@@ -1114,7 +1306,7 @@ export function App({
           kind: 'text',
           title: 'Connect AWS through a profile',
           label:
-            'AWS profile on this Mac (for SSO, run `aws sso login --profile …` first). Anchi ' +
+            'AWS profile on this computer (for SSO, run `aws sso login --profile …` first). Anchi ' +
             'exports its temporary credentials and refreshes them before they expire.',
           input: '',
           submit: (profile) => client.call('connectors.awsProfile', { profile }),
@@ -1150,21 +1342,77 @@ export function App({
     if (modal?.kind === 'secret' || modal?.kind === 'text') editModalInput((v) => v + text.trim());
     else if (modal?.kind === 'palette')
       setModal({ ...modal, query: modal.query + text.trim(), cursor: 0 });
-    else if (!modal && agent) setDraft((d) => insert(d, text));
+    else if (!modal && agent && focus === 'main')
+      setDraft((d) => insert(d, sanitize(text).replace(/\r\n?/g, '\n')));
   });
 
   /** One keystroke or a run of text; `useInput` splits mixed chunks into these. */
   const handleInput = (ch: string, key: InkKey) => {
+    if (key.ctrl && ch === 'c') return exit();
     // ── modals take every key ──
+    if (modal?.kind === 'composeReview') {
+      if (key.escape) return setModal(null);
+      if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
+      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (key.return) {
+        const send = modal.send;
+        setModal(null);
+        send();
+      }
+      return;
+    }
+    if (modal?.kind === 'setupLog') {
+      if (key.escape) return setModal(null);
+      if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
+      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      return;
+    }
+    if (modal?.kind === 'problem') {
+      if (key.escape) return setModal(null);
+      if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
+      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (ch === 'd') {
+        setProblem(null);
+        return setModal(null);
+      }
+      if (ch === 'r' && modal.retry) {
+        const retry = modal.retry;
+        setModal(null);
+        return runAction(retry, 'Retry completed');
+      }
+      if (key.return) {
+        const issue = modal;
+        const recovery = recoveryFor(issue.message);
+        setModal(null);
+        if (recovery.action === 'setup') return run('nav:welcome');
+        if (recovery.action === 'codex') return run('setup:codex');
+        if (recovery.action === 'claude') return run('setup:claude');
+        if (issue.taskId) {
+          const failed = tasks.find((t) => t.id === issue.taskId);
+          if (failed && recovery.action !== 'access')
+            return setModal({
+              kind: 'retry',
+              taskId: failed.id,
+              agentId: failed.agentId,
+              status: failed.status,
+            });
+        }
+        if (recovery.action === 'access') return run('task:access');
+        return void client.call('tasks.list', { limit: 500 }).then(setTasks).catch(reportProblem);
+      }
+      return;
+    }
     if (modal?.kind === 'approval') {
       const { approval } = modal;
       if (key.escape) return setModal(null);
-      if (ch === 'y' || ch === 'n') {
+      if (ch === 'y' || ch === 'n') return setModal({ ...modal, decision: ch === 'y' });
+      if (key.return && modal.decision !== undefined) {
+        const allow = modal.decision;
         setModal(null);
         return void client
-          .call('approvals.decide', { id: approval.id, allow: ch === 'y' })
-          .then(() => say(`${ch === 'y' ? 'approved' : 'denied'}: ${approval.operation}`))
-          .catch((e: Error) => say(e.message));
+          .call('approvals.decide', { id: approval.id, allow })
+          .then(() => say(`${allow ? 'approved' : 'denied'}: ${approval.operation}`))
+          .catch(reportProblem);
       }
       return;
     }
@@ -1188,7 +1436,7 @@ export function App({
         void client
           .call('builder.apply', { proposalId: proposal.id })
           .then(() => say(`@${proposal.agentId} saved`))
-          .catch((e: Error) => say(e.message));
+          .catch((e: Error) => reportProblem(e));
       }
       return;
     }
@@ -1369,7 +1617,7 @@ export function App({
           setFocus('main');
           say(t.id === id ? `${id} continues` : `${id} started again as ${t.id}`);
         })
-        .catch((e: Error) => say(e.message));
+        .catch((e: Error) => reportProblem(e));
     }
     if (modal?.kind === 'settingsReview') {
       if (ch === 'y' && !modal.update.errors.length) {
@@ -1378,7 +1626,7 @@ export function App({
         return void client
           .call('agents.update', { agentId, patch, apply: true, base: update.base })
           .then(() => say(`@${agentId} settings saved; its next cell uses them`))
-          .catch((e: Error) => say(e.message));
+          .catch((e: Error) => reportProblem(e));
       }
       if (ch === 'n' || key.escape) setModal(modal.back);
       return;
@@ -1422,7 +1670,13 @@ export function App({
       if (ch && (!stroke || stroke === 'space' || [...stroke].length === 1)) {
         // Fast typing or a non-bracketed paste can deliver text and Enter in one chunk.
         const nl = ch.search(/[\r\n]/);
-        if (nl >= 0) return submit(insert(draftRef.current, ch.slice(0, nl)).text);
+        if (nl >= 0) {
+          if (ch.endsWith('\r') && !ch.slice(0, -1).match(/[\r\n]/)) {
+            setDraft((d) => insert(d, ch.slice(0, -1)));
+            return submit();
+          }
+          return setDraft((d) => insert(d, sanitize(ch).replace(/\r\n?/g, '\n')));
+        }
         return setDraft((d) => insert(d, ch));
       }
     }
@@ -1437,12 +1691,13 @@ export function App({
 
   useEffect(() => {
     onMouse?.((e) => {
-      const side = e.x <= SIDEBAR_WIDTH;
+      if (modal) return;
+      const side = sideWidth > 0 ? e.x <= sideWidth : focus === 'side';
       // The wheel scrolls the transcript, or turns task pages over the sidebar.
       if (e.kind === 'wheelUp' || e.kind === 'wheelDown') {
         const up = e.kind === 'wheelUp';
         if (side) return turnPageRef.current(pageRef.current + (up ? -1 : 1));
-        return setScroll((s) => (up ? s + 3 : Math.max(0, s - 3)));
+        return scrollRef.current((s) => (up ? s + 3 : Math.max(0, s - 3)));
       }
       if (e.kind !== 'press' || e.button !== 0) return;
       setFocus(side ? 'side' : 'main');
@@ -1457,13 +1712,20 @@ export function App({
       if (row?.kind === 'pager')
         turnPageRef.current(row.page + (e.x <= SIDEBAR_WIDTH / 2 ? -1 : 1));
     });
-  }, [onMouse]);
+  }, [onMouse, sideWidth, modal, focus]);
 
   // ── render ──────────────────────────────────────────────
   if (modal) {
     return (
       <Box flexDirection="column" width={columns} height={rows}>
-        <ModalView modal={modal} width={columns} height={rows} keymap={keymap} />
+        <ModalView
+          modal={modal}
+          width={columns}
+          height={rows}
+          keymap={keymap}
+          setupLog={setupLog}
+          progress={setupProgress?.phase}
+        />
       </Box>
     );
   }
@@ -1480,79 +1742,98 @@ export function App({
   const busy = detail?.status === 'running' || detail?.status === 'queued';
   /** `key label` for an action in this view, from the effective bindings (shortest first). */
   const hint = (action: ActionId, label: string) => {
-    const keys = keysFor(keymap, active, action).sort(
-      (a, b) => a.split(' ').length - b.split(' ').length,
-    );
+    const keys = keysFor(
+      keymap,
+      action.startsWith('chat:') ? ['chat', 'global'] : active,
+      action,
+    ).sort((a, b) => a.split(' ').length - b.split(' ').length);
     return keys[0] ? `${keyLabel(keys[0])} ${label}` : '';
   };
   const hints: [ActionId, string][] =
-    context === 'sidebar'
+    context === 'welcome'
       ? [
-          ['focus:main', 'open'],
-          ['tasks:pageNext', 'task page'],
-          ['tasks:filter', 'filter'],
-          ['focus:toggle', 'pane'],
+          ['welcome:next', 'continue'],
+          ['setup:codex', 'Codex'],
+          ['setup:claude', 'Claude'],
+          ['setup:logs', 'logs'],
         ]
-      : context === 'task'
+      : context === 'team'
         ? [
-            ['task:continue', `continue in @${detail?.agentId}`],
-            ['task:access', 'access'],
-            ...((detail?.status === 'failed' || detail?.status === 'cancelled'
-              ? [['task:retry', 'retry']]
-              : []) as [ActionId, string][]),
-            busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
-            ['scroll:pageUp', 'scroll'],
-            ['focus:sidebar', 'sidebar'],
+            ['team:open', 'open'],
+            ['list:down', 'choose'],
+            ['approvals:open', 'review approvals'],
           ]
-        : context === 'chat'
+        : context === 'sidebar'
           ? [
-              ['chat:submit', 'send'],
-              ['task:new', 'new task'],
-              ['chat:escape', 'cancel/sidebar'],
-              ['agent:settings', 'settings'],
-              ['chat:editor', 'editor'],
-              ['transcript:tools', 'tools'],
+              ['focus:main', 'open'],
+              ['tasks:pageNext', 'task page'],
+              ['tasks:filter', 'filter'],
+              ['focus:toggle', 'pane'],
             ]
-          : context === 'connectors'
+          : context === 'task'
             ? [
-                ['connectors:connect', 'connect'],
-                ['connectors:ghImport', 'github from gh'],
-                ['connectors:awsProfile', 'aws profile'],
-                ['connectors:mode', 'service writes'],
-                ['connectors:disconnect', 'disconnect'],
+                ['task:continue', `continue in @${detail?.agentId}`],
+                ['task:history', showHistory ? 'result' : 'history'],
+                ['task:access', 'access'],
+                ...((detail?.status === 'failed' || detail?.status === 'cancelled'
+                  ? [['task:retry', 'retry']]
+                  : []) as [ActionId, string][]),
+                busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
+                ['scroll:pageUp', 'scroll'],
+                ['focus:sidebar', 'sidebar'],
               ]
-            : context === 'usage'
+            : context === 'chat'
               ? [
-                  ['usage:period', PERIODS[usagePeriod]!.label],
-                  ['usage:group', `by ${GROUPS[usageGroup]}`],
-                  ['usage:refresh', 'refresh'],
+                  ['chat:submit', 'send'],
+                  ['chat:newline', 'newline'],
+                  ['task:new', 'new task'],
+                  ['chat:escape', 'sidebar'],
+                  ['agent:settings', 'settings'],
+                  ['chat:editor', 'editor'],
+                  ['transcript:tools', 'tools'],
                 ]
-              : context === 'access'
+              : context === 'connectors'
                 ? [
-                    ['access:period', PERIODS[accessPeriod]!.label],
-                    ['access:refresh', 'refresh'],
+                    ['connectors:connect', 'connect'],
+                    ['connectors:ghImport', 'github from gh'],
+                    ['connectors:awsProfile', 'aws profile'],
+                    ['connectors:mode', 'service writes'],
+                    ['connectors:disconnect', 'disconnect'],
                   ]
-                : context === 'skills'
+                : context === 'usage'
                   ? [
-                      ['skills:add', 'add'],
-                      ['skills:update', 'update'],
-                      ['skills:remove', 'remove'],
-                      ['focus:sidebar', 'sidebar'],
+                      ['usage:period', PERIODS[usagePeriod]!.label],
+                      ['usage:group', `by ${GROUPS[usageGroup]}`],
+                      ['usage:refresh', 'refresh'],
                     ]
-                  : [
-                      ['setup:vmStart', 'start VM'],
-                      ['setup:install', 'install'],
-                      ['setup:unlock', 'unlock'],
-                      ['setup:workspaces', 'workspaces'],
-                      ['setup:codex', 'Codex'],
-                      ['setup:claude', 'Claude'],
-                    ];
+                  : context === 'access'
+                    ? [
+                        ['access:period', PERIODS[accessPeriod]!.label],
+                        ['access:refresh', 'refresh'],
+                      ]
+                    : context === 'skills'
+                      ? [
+                          ['skills:add', 'add'],
+                          ['skills:update', 'update'],
+                          ['skills:remove', 'remove'],
+                          ['focus:sidebar', 'sidebar'],
+                        ]
+                      : [
+                          ['setup:vmStart', 'start VM'],
+                          ['setup:install', 'install'],
+                          ['setup:unlock', 'unlock'],
+                          ['setup:workspaces', 'workspaces'],
+                          ['setup:codex', 'Codex'],
+                          ['setup:claude', 'Claude'],
+                        ];
   const status = pending.length
     ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
-    : flash ||
+    : (problem ? `! ${hint('problem:open', 'resolve')} · ${sanitizeLine(problem.message)}` : '') ||
+      flash ||
       [
         ...hints.map(([a, l]) => hint(a, l)),
         proposals.length ? hint('builder:proposal', 'proposal') : '',
+        problem || task?.status === 'failed' ? hint('problem:open', 'resolve problem') : '',
         hint('app:palette', 'commands'),
         hint('app:help', 'keys'),
       ]
@@ -1565,17 +1846,20 @@ export function App({
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       <Box flexDirection="row" height={bodyHeight}>
-        <Sidebar
-          focused={focus === 'side'}
-          rows={sideRows}
-          agents={agents}
-          tasks={tasks}
-          current={current}
-          height={bodyHeight}
-          frame={frame}
-        />
+        {sideWidth > 0 || focus === 'side' ? (
+          <Sidebar
+            focused={focus === 'side'}
+            rows={sideRows}
+            agents={agents}
+            tasks={tasks}
+            current={current}
+            height={bodyHeight}
+            frame={frame}
+          />
+        ) : null}
         <Box
           flexDirection="column"
+          display={sideWidth === 0 && focus === 'side' ? 'none' : 'flex'}
           width={mainWidth}
           height={bodyHeight}
           borderStyle="round"
@@ -1586,7 +1870,27 @@ export function App({
             {header}
           </Text>
           <Text dimColor>{'─'.repeat(textWidth)}</Text>
-          {agent ? (
+          {current === 'welcome' ? (
+            <WelcomeView
+              setup={setup}
+              agents={agents}
+              tasks={tasks}
+              width={textWidth}
+              height={bodyHeight - 4}
+              scroll={scroll}
+              busy={setupProgress?.running ? `${SPINNER[frame]} ${setupProgress.phase}` : ''}
+              nextKey={hint('welcome:next', 'continue')}
+            />
+          ) : current === 'team' ? (
+            <TeamView
+              agents={userAgents}
+              tasks={tasks}
+              approvals={approvals}
+              logs={logs}
+              cursor={Math.min(teamCursor, userAgents.length - 1)}
+              height={bodyHeight - 4}
+            />
+          ) : agent ? (
             <>
               <Box flexDirection="column" height={transcriptHeight}>
                 {agent.error ? (
@@ -1606,14 +1910,25 @@ export function App({
                 )}
               </Box>
               <Text dimColor>{offset > 0 ? `↓ ${offset} more lines (PgDn)` : ' '}</Text>
-              <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-                <Text wrap="truncate">
-                  <Text color="cyan">› </Text>
-                  {inputView.before}
-                  <Text inverse>{inputView.at}</Text>
-                  {inputView.after}
-                </Text>
+              <Text
+                color="cyan"
+                wrap="truncate"
+              >{`To @${agent.id} · ${task ? `Continue: ${sanitizeLine(task.title)}` : 'New task (new session)'} · ${hint('task:new', 'new task')}`}</Text>
+              <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
+                {composer.rows.map((row, i) => (
+                  <Text key={i} wrap="truncate">
+                    <Text color="cyan">{i ? '  ' : '› '}</Text>
+                    {row.before}
+                    {row.cursor ? <Text inverse>{row.at}</Text> : row.at}
+                    {row.after}
+                  </Text>
+                ))}
               </Box>
+              <Text dimColor wrap="truncate">
+                {sending.current.has(conversationKey)
+                  ? 'Sending…'
+                  : `${hint('chat:submit', input.includes('\n') ? 'preview & send' : 'send')} · ${hint('chat:newline', 'newline')} · ${hint('chat:editor', 'editor')}${composer.hiddenAbove || composer.hiddenBelow ? ' · more draft lines above/below' : ''}`}
+              </Text>
             </>
           ) : detail ? (
             <>
@@ -1654,7 +1969,7 @@ export function App({
           ) : current === 'connectors' ? (
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
-            <RuntimesView setup={setup} log={setupLog} />
+            <RuntimesView setup={setup} log={setupLog.slice(-6)} progress={setupProgress?.phase} />
           ) : current === 'access' ? (
             <Report
               lines={accessSummaryLines(access, accessPeriod, textWidth)}
@@ -1754,7 +2069,7 @@ function Sidebar(props: {
   const spin = SPINNER[frame % SPINNER.length]!;
   const running = (id: string) => tasks.some((t) => t.agentId === id && t.status === 'running');
   const item = (key: string) => {
-    if ((CONFIG as readonly string[]).includes(key)) {
+    if (([...HOME, ...CONFIG] as readonly string[]).includes(key)) {
       return { glyph: '·', color: undefined, text: CONFIG_LABEL[key as ConfigItem] };
     }
     if (key.startsWith(TASK_ITEM)) {
@@ -1851,7 +2166,9 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
   return (
     <Box flexDirection="column">
       {!setup.vaultUnlocked ? (
-        <Text color="red">The vault is locked: run scripts/vault.py unlock.</Text>
+        <Text color="red">
+          The vault is locked. Open Getting started to initialize or unlock it.
+        </Text>
       ) : null}
       {setup.connectors.map((c, i) => (
         <Box key={c.id} flexDirection="column">
@@ -1884,14 +2201,14 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
         </Box>
       ))}
       <Text dimColor>
-        Secrets go from this screen to the VM vault. They are never stored on this Mac or shown
+        Secrets go from this screen to the VM vault. They are never stored on this computer or shown
         again. Google tokens are obtained in the VM.
       </Text>
     </Box>
   );
 }
 
-/** Reads the Google client JSON the user points at (on this Mac). */
+/** Reads the Google client JSON the user points at (on this computer). */
 async function readClientFile(path: string): Promise<string> {
   const home = process.env.HOME ?? '';
   const file = path.startsWith('~/') ? `${home}${path.slice(1)}` : path;
@@ -1922,7 +2239,15 @@ function SkillsView({ skills, cursor }: { skills: SkillInfo[] | null; cursor: nu
   );
 }
 
-function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[] }) {
+function RuntimesView({
+  setup,
+  log,
+  progress,
+}: {
+  setup: SetupStatus | null;
+  log: string[];
+  progress?: string;
+}) {
   if (!setup) return <Text dimColor>Loading…</Text>;
   const c = setup.codex;
   const expired = c.expiresAt !== null && c.expiresAt < Date.now();
@@ -1947,7 +2272,9 @@ function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[]
               : `connected, token valid until ${new Date(c.expiresAt!).toLocaleString()}`}
           </Text>
         ) : (
-          <Text color="yellow">not connected — run `codex login` on this Mac, then press i</Text>
+          <Text color="yellow">
+            not connected — run `codex login` on this computer, then press i
+          </Text>
         )}
       </Text>
       <Text>
@@ -1966,10 +2293,15 @@ function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[]
           </Text>
         ) : (
           <Text color="yellow">
-            not connected — run `claude setup-token` on this Mac, then press c
+            not connected — run `claude setup-token` on this computer, then press c
           </Text>
         )}
       </Text>
+      {progress ? (
+        <Text color="cyan">
+          {progress} · use the command palette for Installation progress and logs
+        </Text>
+      ) : null}
       {log.length ? (
         <Box flexDirection="column" marginTop={1}>
           {log.map((line, i) => (
@@ -1985,6 +2317,8 @@ function RuntimesView({ setup, log }: { setup: SetupStatus | null; log: string[]
 
 const CONTEXT_LABEL: Record<Context, string> = {
   global: 'Everywhere',
+  welcome: 'Getting started',
+  team: 'Team overview',
   sidebar: 'Sidebar',
   chat: 'Agent chat',
   task: 'Task',
@@ -2029,7 +2363,8 @@ export function helpRows(keymap: KeyMap, context: Context): [string, string][] {
     ['', ''],
     ['Fixed', ''],
     ['Ctrl+C', 'quit'],
-    ['y n Esc', 'approval, confirmation and proposal dialogs'],
+    ['y/n then Enter', 'approval: select a decision, then confirm'],
+    ['y n Esc', 'confirmation and proposal dialogs'],
     ['Space Enter', 'agent settings: select, then review the change (s in a proposal)'],
   );
   return rows;
@@ -2062,7 +2397,11 @@ function ModalView({
   width,
   height,
   keymap,
+  setupLog,
+  progress,
 }: {
+  setupLog: string[];
+  progress?: string;
   modal: Modal;
   width: number;
   height: number;
@@ -2070,6 +2409,49 @@ function ModalView({
 }) {
   const inner = width - 6;
   const label = (action: ActionId) => keyLabel(keysFor(keymap, ['global'], action)[0] ?? '');
+  if (modal.kind === 'composeReview' || modal.kind === 'setupLog' || modal.kind === 'problem') {
+    const recovery = modal.kind === 'problem' ? recoveryFor(modal.message) : undefined;
+    const title =
+      modal.kind === 'composeReview'
+        ? `Review message · ${modal.target}`
+        : modal.kind === 'setupLog'
+          ? `Installation · ${progress ?? 'Not started'}`
+          : recovery!.title;
+    const content =
+      modal.kind === 'composeReview'
+        ? modal.text
+        : modal.kind === 'setupLog'
+          ? setupLog.join('\n') || 'No installation logs yet.'
+          : `${recovery!.explanation}\n\nDetails\n${modal.message}`;
+    const lines = wrap(sanitize(content), Math.max(2, inner));
+    const heightInside = Math.max(1, height - 5);
+    const footer =
+      modal.kind === 'composeReview'
+        ? 'Enter send · Esc keep editing · ↑↓ scroll'
+        : modal.kind === 'setupLog'
+          ? '↑↓ scroll · Esc close (installation continues)'
+          : `Enter ${recovery!.label}${modal.retry ? ' · r retry failed setup step' : ''} · d dismiss · Esc close · ↑↓ details`;
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold wrap="truncate">
+          {sanitizeLine(title)}
+        </Text>
+        <Report
+          lines={lines.map((text) => ({ text }))}
+          height={heightInside}
+          scroll={modal.scroll}
+        />
+        <Text wrap="truncate">{footer}</Text>
+      </Box>
+    );
+  }
   if (modal.kind === 'secret') {
     const fields = SECRET_FIELDS[modal.connector];
     const field = fields[modal.index]!;
@@ -2131,7 +2513,11 @@ function ModalView({
         </Box>
         <Box flexGrow={1} />
         <Text dimColor>The content above comes from the agent. This dialog is drawn by Anchi.</Text>
-        <Text bold>{`[y] approve · [n] deny · Esc decide later (${label('approvals:open')})`}</Text>
+        <Text bold>
+          {modal.decision === undefined
+            ? `[y] select approve · [n] select deny · Esc decide later (${label('approvals:open')})`
+            : `${modal.decision ? 'Approve' : 'Deny'} selected · Enter confirm · Esc decide later`}
+        </Text>
       </Box>
     );
   }

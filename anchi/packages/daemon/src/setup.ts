@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -43,7 +43,7 @@ export function readHostCodexLogin(file = HOST_CODEX_LOGIN): {
   try {
     raw = readFileSync(file, 'utf8');
   } catch {
-    throw new Error(`no Codex login at ${file}; run \`codex login\` on this Mac first`);
+    throw new Error(`no Codex login at ${file}; run \`codex login\` on this computer first`);
   }
   const value = JSON.parse(raw) as { tokens?: { access_token?: unknown; account_id?: unknown } };
   const accessToken = value.tokens?.access_token;
@@ -78,6 +78,35 @@ export async function connectorStatuses(guest: Guest): Promise<ConnectorStatus[]
   }));
 }
 
+export function hostReadiness(): NonNullable<SetupStatus['host']> {
+  const executable = (name: string) =>
+    (process.env.PATH ?? '').split(':').some((dir) => {
+      try {
+        accessSync(join(dir, name), constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const missing = ['limactl', 'python3'].filter((name) => !executable(name));
+  if (process.platform === 'linux') {
+    if (!executable('qemu-system-x86_64')) missing.push('qemu-system-x86_64');
+    try {
+      accessSync('/dev/kvm', constants.R_OK | constants.W_OK);
+    } catch {
+      missing.push('/dev/kvm access');
+    }
+  }
+  return {
+    platform: process.platform,
+    missing,
+    installHint:
+      process.platform === 'darwin'
+        ? 'brew install lima python'
+        : 'Install Lima (https://lima-vm.io), Python 3.11+ and QEMU. Ubuntu/Debian: sudo apt-get install python3 qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.',
+  };
+}
+
 export async function setupStatus(
   guest: Guest,
   lima: LimaTransport,
@@ -86,6 +115,8 @@ export async function setupStatus(
   const vm = await lima.vmStatus();
   const empty: SetupStatus = {
     vm,
+    host: hostReadiness(),
+    vaultKeyPresent: existsSync(join(homedir(), '.config/secure-vm/vault.key')),
     vaultUnlocked: false,
     installed: false,
     codex: { runtime: 'codex', connected: false, accountId: null, expiresAt: null },
@@ -110,6 +141,7 @@ export async function setupStatus(
       googleClient: false,
     };
     return {
+      ...empty,
       vm,
       vaultUnlocked: vault.unlocked,
       installed: base,

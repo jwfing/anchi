@@ -2,6 +2,19 @@
 
 Follows the Keep a Changelog structure. The version comes from `anchi/package.json`.
 
+## 0.2.1 — 2026-10-09
+
+### Added
+
+- Resumable TUI getting-started guide with host prerequisite checks, vault initialization, setup progress and retained logs; persistent errors with recovery actions.
+- Team overview showing active tools, queued tasks, held approvals and delegated work; completed task details prioritize results and artifact links with a history toggle.
+- Per-conversation drafts and scroll positions, a growing multiline composer with paste review, and grapheme-aware Chinese/emoji editing.
+
+### Changed
+
+- Esc returns to navigation without clearing drafts or cancelling work. Cancelling requires confirmation. Held write approvals no longer steal focus and require a selected decision followed by Enter.
+- Failed sends retain the draft; the composer explicitly labels new tasks versus follow-ups. Narrow terminals show one pane at a time.
+
 ## 0.2.0 — 2026-10-09
 
 The agent team replaces the desktop app and Pi. Run `scripts/anchi setup install` to update an existing VM; it disables the Pi inference gateway and removes Pi from the cell root filesystem. Credentials in the vault are kept.
