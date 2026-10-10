@@ -31,6 +31,7 @@ node anchi/scripts/bundle-release.mjs "$root"
 cp -R guest services systemd lima "$root/"
 mkdir -p "$root/scripts"
 cp scripts/up.sh scripts/install-anchi.sh scripts/vault.py "$root/scripts/"
+cp landing/dist/install.sh "$root/scripts/update.sh"
 # Exclude Python caches even when packaging a developer's checkout.
 find "$root" -type d -name __pycache__ -exec rm -rf {} +
 cp license.md "$root/LICENSE"

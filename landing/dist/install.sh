@@ -24,6 +24,11 @@ main() {
   fi
 
   base=${ANCHI_INSTALL_ROOT:-$HOME/.local/share/anchi}
+  update_only=${ANCHI_UPDATE_ONLY:-0}
+  case "$update_only" in 0|1) ;; *) die 'Invalid update mode.' ;; esac
+  if [ "$update_only" = 1 ]; then
+    [ -n "${ANCHI_INSTALL_ROOT:-}" ] && [ -L "$base/current" ] || die 'Self-update requires an existing managed installation.'
+  fi
   bin=${ANCHI_BIN_DIR:-$HOME/.local/bin}
   # Prefer a writable directory already on PATH so `anchi` works in this shell.
   if [ -z "${ANCHI_BIN_DIR:-}" ]; then
@@ -38,12 +43,15 @@ main() {
 '*) die 'Install paths cannot contain line breaks.' ;; esac
   case "$base" in /*) ;; *) die 'ANCHI_INSTALL_ROOT must be absolute.' ;; esac
   case "$bin" in /*) ;; *) die 'ANCHI_BIN_DIR must be absolute.' ;; esac
-  mkdir -p "$base/versions" "$bin"
+  mkdir -p "$base/versions"
+  if [ "$update_only" = 0 ]; then mkdir -p "$bin"; fi
   base=$(CDPATH='' cd -- "$base" && pwd)
-  bin=$(CDPATH='' cd -- "$bin" && pwd)
-  if [ -e "$bin/anchi" ] || [ -L "$bin/anchi" ]; then
-    [ -f "$bin/anchi" ] && grep -q '^# Anchi release launcher$' "$bin/anchi" \
-      || die "$bin/anchi already exists and is not managed by this installer. Set ANCHI_BIN_DIR."
+  if [ "$update_only" = 0 ]; then
+    bin=$(CDPATH='' cd -- "$bin" && pwd)
+    if [ -e "$bin/anchi" ] || [ -L "$bin/anchi" ]; then
+      [ -f "$bin/anchi" ] && grep -q '^# Anchi release launcher$' "$bin/anchi" \
+        || die "$bin/anchi already exists and is not managed by this installer. Set ANCHI_BIN_DIR."
+    fi
   fi
   mkdir "$base/.install-lock" 2>/dev/null || die "Another installation is running (lock: $base/.install-lock)."
   tmp=$(mktemp -d "$base/versions/.install.XXXXXX")
@@ -71,12 +79,19 @@ main() {
     [ -f "$tmp/anchi/$file" ] || die "Incomplete release: $file"
   done
   version=$("$tmp/anchi/bin/anchi" --version) || die 'This release cannot run on this system.'
+  if [ "$release" != latest ]; then
+    [ "$version" = "${release#v}" ] || die 'Release version does not match the requested tag.'
+  fi
   dest=$(mktemp -d "$base/versions/release.XXXXXX")
   # The version directory is never overwritten: existing daemons can finish their work.
   mv "$tmp/anchi" "$dest/app"
   ln -s "$dest/app" "$tmp/current"
   # rename(2) replaces a symlink atomically on both supported operating systems.
   "$dest/app/runtime/node" -e 'require("fs").renameSync(process.argv[1], process.argv[2])' "$tmp/current" "$base/current"
+  if [ "$update_only" = 1 ]; then
+    printf 'Installed Anchi %s.\n' "$version"
+    return
+  fi
   {
     printf '#!/bin/sh\n# Anchi release launcher\n'
     printf 'exec %s %s "$@"\n' "$(quote "$base/current/runtime/node")" "$(quote "$base/current/lib/cli.mjs")"
@@ -111,14 +126,14 @@ main() {
       printf 'PATH configured in %s. Open a new terminal, or run:\n  %s\n' "$rc" "$line"
       ;;
   esac
-  printf '\nFirst use: open Runtimes in the TUI to install the VM and connect a runtime.\n'
+  printf '\nFirst use: follow Getting started in the TUI to prepare your environment.\n'
   if ! command -v limactl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
     case "$target" in
       darwin-*) printf 'VM prerequisites: brew install lima python\n' ;;
       *) printf 'VM prerequisites: Lima, Python 3.11+, QEMU and access to /dev/kvm.\n' ;;
     esac
   fi
-  printf 'To update, rerun this installer. After tasks finish, run anchi daemon stop.\nIf login startup is enabled, also rerun anchi daemon install.\n'
+  printf 'To update, run anchi update (or rerun this installer). After tasks finish, run anchi daemon stop.\nIf login startup is enabled, also rerun anchi daemon install.\n'
   printf '\nRun: anchi\n'
 }
 

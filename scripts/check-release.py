@@ -47,6 +47,9 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
         "import os, pathlib, shutil, sys\n"
         "args = sys.argv[1:]\n"
         "url = next(a for a in args if a.startswith('https://'))\n"
+        "if url.endswith('/releases/latest'):\n"
+        "    print((pathlib.Path(os.environ['FIXTURES']) / 'latest.json').read_text())\n"
+        "    sys.exit(0)\n"
         "shutil.copyfile(pathlib.Path(os.environ['FIXTURES']) / url.rsplit('/', 1)[1], "
         "args[args.index('-o') + 1])\n"
     )
@@ -92,6 +95,29 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
     version = json.loads((current / "manifest.json").read_text())["version"]
     assert run([cli, "--version"], env, root).stdout.strip() == version
     assert "setup" in run([cli, "--help"], env, root).stdout
+    # Exercise the actual bundled updater. Simulate an older installed manifest, while
+    # the download remains the real release archive. Keep the custom launcher unchanged.
+    (fixtures / "latest.json").write_text(json.dumps({"tag_name": "v" + version}))
+    manifest = json.loads((first / "manifest.json").read_text())
+    manifest["version"] = "0.0.0"
+    (first / "manifest.json").write_text(json.dumps(manifest))
+    launcher_before = Path(cli).read_bytes()
+    profile_before = (home / ".profile").read_bytes() if (home / ".profile").exists() else None
+    assert version in run([cli, "update", "--check"], env, root).stdout
+    assert current.resolve() == first
+    checksum.write_text(f"{'0' * 64}  {ARCHIVE.name}\n")
+    assert run([cli, "update"], env, root, ok=False).returncode != 0
+    assert current.resolve() == first
+    checksum.write_text(f"{digest}  {ARCHIVE.name}\n")
+    assert "Updated to Anchi" in run([cli, "update"], env, root).stdout
+    assert current.resolve() != first
+    assert first.exists(), "old binaries must remain for running daemons"
+    assert Path(cli).read_bytes() == launcher_before
+    assert ((home / ".profile").read_bytes() if (home / ".profile").exists() else None) == profile_before
+    assert run([cli, "--version"], env, root).stdout.strip() == version
+    first = current.resolve()
+    assert "up to date" in run([cli, "update"], env, root).stdout
+    assert current.resolve() == first
     # Reject corruption before switching a working installation.
     checksum.write_text(f"{'0' * 64}  {ARCHIVE.name}\n")
     assert install(ok=False).returncode != 0
