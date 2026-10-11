@@ -128,7 +128,7 @@ At the bottom, the panel shows what it cannot change: template, image, sandbox, 
 - removes it from other agents' `delegates`, keeping the rest of their files;
 - in the VM, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
 
-Directories of your Mac in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.
+Directories of your computer in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.
 
 ## Teams, approvals, triggers and skills
 
@@ -155,9 +155,9 @@ triggers:
 - **Triggers.** `schedule` takes a cron expression in local time; a run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `scripts/anchi triggers` lists them.
 - **Skills.** `scripts/anchi skills add <directory or GitHub URL> [--id x]`, or **a** on the **Skills** screen, stores a `SKILL.md` skill; a GitHub skill is pinned to the commit it was fetched at. Give it to agents in their settings panel (**^X s**) or with `skills: [id]`; their cells get it read-only. `scripts/anchi skills update [id]`, or **u** on the Skills screen, shows what the latest commit of the URL changes (files added, changed, removed) and installs exactly that commit after you confirm. Skill content is untrusted, like any other agent input.
 
-## Directories of your Mac (workspaces)
+## Directories of your computer (workspaces)
 
-macOS only for now. Share `~/AnchiWorkspaces` with the VM once (it restarts the VM and unlocks the vault again):
+Share `~/AnchiWorkspaces` with the VM once (it restarts the VM and unlocks the vault again; on Linux it also reinstalls the guest components, see [Linux differences](GETTING_STARTED.md#linux-differences)):
 
 ```bash
 scripts/anchi setup workspaces      # or W on the Runtimes screen
@@ -171,7 +171,7 @@ workspaces:
     mode: rw                # ro by default
 ```
 
-They appear in the agent's cells at `/home/agent/workspaces/<name>`; a cell sees no other directory of the Mac. Writes to an `rw` workspace go straight to the Mac and are owned by you.
+They appear in the agent's cells at `/home/agent/workspaces/<name>`; a cell sees no other directory of your computer. Writes to an `rw` workspace go straight to your computer and are owned by you.
 
 A writable directory lets an agent leave code that your own tools later run. Anchi mounts git hooks, git configuration and info, `.gitattributes`, `.envrc`, `.vscode/` and `.idea/` read-only in the repositories near the top of an `rw` workspace. After each turn it compares the workspace with its state before the turn and notes in the task transcript any new git hook, git configuration that runs commands, symlink pointing outside the workspace, new executable file or changed editor or shell configuration. It never changes your files. Files that tools run by design, such as `package.json` scripts or a `Makefile`, cannot be masked: review an agent's changes before you run them.
 

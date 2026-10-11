@@ -188,7 +188,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
       note: !inv.workspaces.dirs.includes(path)
         ? 'missing'
         : w?.mode === 'rw'
-          ? 'writes go straight to your Mac'
+          ? 'writes go straight to your computer'
           : '',
     });
   }

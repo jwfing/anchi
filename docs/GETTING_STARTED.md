@@ -259,8 +259,10 @@ and, through the proxy, any public host.
 
 ## Linux differences
 
-- **Workspaces** (`~/AnchiWorkspaces`) are macOS only until the Linux mount is verified; agents
-  cannot see directories of a Linux host.
+- **Workspaces** (`~/AnchiWorkspaces`) are shared over 9p instead of virtiofs. The VM maps the
+  share with `bindfs`, so in a cell the agent owns its files, files it creates are yours on the
+  host, and no other user in the VM can write to the share. Sharing (W on the Runtimes screen)
+  also reinstalls the guest components, which bring `bindfs` and the mapping.
 - **Notifications** use `notify-send`; without it they are skipped.
 - **Google sign-in** opens the browser with `xdg-open` and also prints the URL. Google redirects
   to a port on `127.0.0.1`, so the browser must run on the same machine; over SSH, forward the

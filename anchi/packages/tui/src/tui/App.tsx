@@ -907,7 +907,7 @@ export function App({
         ],
         workspaces: [
           'Share ~/AnchiWorkspaces',
-          'Mount ~/AnchiWorkspaces into the VM so agents can be given directories of this Mac ' +
+          'Mount ~/AnchiWorkspaces into the VM so agents can be given directories of this computer ' +
             '(workspaces: in an agent). The VM restarts: running tasks stop, and the vault is ' +
             'unlocked again afterwards.',
         ],
@@ -3015,7 +3015,7 @@ function ModalView({
             : []),
           { text: '' },
           {
-            text: `Kept: ${p.workspaces.length ? p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') : 'directories of your Mac'} (workspaces are never touched), and the audit logs.`,
+            text: `Kept: ${p.workspaces.length ? p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') : 'directories of your computer'} (workspaces are never touched), and the audit logs.`,
             color: 'green',
           },
         ]

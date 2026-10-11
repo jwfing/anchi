@@ -1,5 +1,6 @@
 import { homeLayout } from '@anchi/core';
 import { describe, expect, it } from 'vitest';
+import { workspaceSteps } from '../src/host.ts';
 import { launchdPlist, systemdUnit } from '../src/launch.ts';
 import { notifyCommand } from '../src/notify.ts';
 
@@ -31,5 +32,23 @@ describe('host integration', () => {
     expect(unit).toContain('WantedBy=default.target');
     expect(() => systemdUnit(homeLayout('/home/u/a\nb'))).toThrow(/line breaks/);
     expect(launchdPlist(layout)).toContain('<string>/home/u/my anchi%dir</string>');
+  });
+
+  it('shares workspaces over virtiofs on macOS, and over 9p mapped by the guest on Linux', () => {
+    const mac = workspaceSteps('darwin').map((s) => s.join(' '));
+    expect(mac.find((s) => s.startsWith('limactl edit'))).toContain(
+      '"mountPoint":"/mnt/anchi-host","writable":true}] --set .mountType="virtiofs"',
+    );
+    expect(mac.some((s) => s.includes('install-anchi'))).toBe(false);
+    const linux = workspaceSteps('linux').map((s) => s.join(' '));
+    expect(linux.find((s) => s.startsWith('limactl edit'))).toContain(
+      '"mountPoint":"/mnt/anchi-host-raw/share","writable":true}] --set .mountType="9p"',
+    );
+    // The guest pieces bring the bindfs mapping; then the vault, locked by the restart.
+    expect(linux.slice(-3)).toEqual([
+      'limactl start --tty=false secure-vm',
+      'bash scripts/install-anchi.sh',
+      'python3 scripts/vault.py unlock',
+    ]);
   });
 });

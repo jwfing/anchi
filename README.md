@@ -34,7 +34,7 @@ for Linux prerequisites and the source development workflow.
 | Gmail, Drive, Notion and Slack through trusted services, reached through a per-cell bridge that names the agent | Implemented; Gmail is read-only; per-service and per-agent write approval |
 | Per-agent egress allowlists, high-risk operations always held, held writes with the task's origin chain | Implemented |
 | Credential scan of every cell before it is destroyed | Implemented; a finding raises a notification |
-| Directories of your Mac in agent cells (`~/AnchiWorkspaces`), read-only or writable, with code-running paths masked and audited | Implemented on macOS; Linux hosts not yet |
+| Directories of your computer in agent cells (`~/AnchiWorkspaces`), read-only or writable, with code-running paths masked and audited | Implemented on macOS and Linux |
 | Delegation, schedule and polling triggers, skills (local or pinned GitHub commits, updatable) | Implemented |
 | Agent builder that knows what exists, agent settings panel, deleting agents with their tasks and VM files | Implemented |
 | Task history with search, delegation trees, retry of failed tasks; TUI with leader-key bindings and a command palette | Implemented |

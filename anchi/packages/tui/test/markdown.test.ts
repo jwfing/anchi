@@ -53,4 +53,47 @@ describe('markdown', () => {
       'snake_case_name and a_b_c or **x**',
     ]);
   });
+
+  it('lays out pipe tables in aligned columns with a bold header', () => {
+    const md = '| Name | Count |\n|:-----|------:|\n| **a** | 1 |\n| longer | 12 |\nafter';
+    const lines = markdownLines(md, 40);
+    expect(lines.map((l) => l.text)).toEqual([
+      'Name   │ Count',
+      '───────┼──────',
+      'a      │     1',
+      'longer │    12',
+      'after',
+    ]);
+    expect(lines[0]!.spans![0]).toEqual({ text: 'Name', bold: true });
+    expect(lines[2]!.spans).toContainEqual({ text: 'a', bold: true });
+  });
+
+  it('accepts tables without outer pipes and escaped pipes in cells', () => {
+    expect(texts('a | b\n--- | ---\nx \\| y | `z`')).toEqual([
+      'a     │ b',
+      '──────┼──',
+      'x | y │ z',
+    ]);
+  });
+
+  it('wraps cells of a table wider than the room, and lists rows when columns cannot fit', () => {
+    const md = '| k | description |\n|---|---|\n| id | one two three four five six |';
+    const lines = texts(md, 20);
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(20);
+    expect(lines).toEqual([
+      'k  │ description',
+      '───┼────────────────',
+      'id │ one two three',
+      '   │ four five six',
+    ]);
+    expect(texts('| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |', 12)).toEqual([
+      'a: 1',
+      'b: 2',
+      'c: 3',
+    ]);
+  });
+
+  it('keeps a pipe line without a delimiter row as text', () => {
+    expect(texts('| just | text |')).toEqual(['| just | text |']);
+  });
 });

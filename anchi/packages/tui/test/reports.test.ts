@@ -178,16 +178,27 @@ describe('reports', () => {
           refused: 0,
           held: 0,
           hosts: 2,
+          services: 4,
         },
       ],
       hosts: [{ host: 'api.github.com', requests: 2, agents: ['dev'], decisions: { inject: 2 } }],
+      services: [
+        { service: 'gmail', operation: 'gmail.read', account: 'work', calls: 3, agents: ['dev'] },
+        { service: 'notion', operation: 'notion.search', account: null, calls: 1, agents: ['dev'] },
+      ],
       credentials: [row],
       refused: [],
       partial: false,
     };
     const lines = accessSummaryLines(summary, 0, 200);
     expect(lines[1]).toMatchObject({ color: 'red' });
-    expect(lines.map((l) => l.text).join('\n')).toMatch(/dev\s+1\s+3\s+2\s+0\s+0\s+github 2/);
+    expect(lines.map((l) => l.text).join('\n')).toMatch(/dev\s+1\s+3\s+2\s+4\s+0\s+0\s+github 2/);
+    expect(lines.map((l) => l.text)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/gmail gmail\.read \[work\]\s+3\s+\(@dev\)/),
+        expect.stringMatching(/notion notion\.search\s+1\s+\(@dev\)/),
+      ]),
+    );
     expect(lines.map((l) => l.text).join('\n')).not.toContain('\u001b');
     expect(accessSummaryLines({ ...summary, agents: [] }, 0, 200).at(-1)!.text).toContain(
       'No external access',

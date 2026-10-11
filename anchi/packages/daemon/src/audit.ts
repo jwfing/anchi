@@ -146,6 +146,7 @@ const HOSTS_MAX = 30;
 export function summarizeAccess(rows: Row[], since: number, partial: boolean): AccessSummary {
   const agents = new Map<string, AgentAccess & { taskIds: Set<string>; hostSet: Set<string> }>();
   const hosts = new Map<string, AccessSummary['hosts'][number] & { agentSet: Set<string> }>();
+  const services = new Map<string, AccessSummary['services'][number] & { agentSet: Set<string> }>();
   const credentials: AccessSummary['credentials'] = [];
   const refused: AccessSummary['refused'] = [];
   const tasks = new Set<string>();
@@ -163,6 +164,7 @@ export function summarizeAccess(rows: Row[], since: number, partial: boolean): A
       refused: 0,
       held: 0,
       hosts: 0,
+      services: 0,
       taskIds: new Set<string>(),
       hostSet: new Set<string>(),
     };
@@ -176,6 +178,22 @@ export function summarizeAccess(rows: Row[], since: number, partial: boolean): A
       refused.push({ ...row(r), task, agent });
     }
     if (typeof r.approval === 'string') a.held++;
+    if (r.event === 'service') {
+      a.services++;
+      const account = str(r.account) || null;
+      const key = `${str(r.service)} ${str(r.op)} ${account ?? ''}`;
+      const s = services.get(key) ?? {
+        service: str(r.service),
+        operation: str(r.op),
+        account,
+        calls: 0,
+        agents: [],
+        agentSet: new Set(),
+      };
+      s.calls++;
+      s.agentSet.add(agent);
+      services.set(key, s);
+    }
     if (!isRequest) continue;
     const host = str(r.host);
     a.requests++;
@@ -210,6 +228,9 @@ export function summarizeAccess(rows: Row[], since: number, partial: boolean): A
       .map(({ agentSet, ...h }) => ({ ...h, agents: [...agentSet].sort() }))
       .sort((x, y) => y.requests - x.requests)
       .slice(0, HOSTS_MAX),
+    services: [...services.values()]
+      .map(({ agentSet, ...s }) => ({ ...s, agents: [...agentSet].sort() }))
+      .sort((x, y) => y.calls - x.calls),
     credentials: credentials.reverse().slice(0, LIST_MAX),
     refused: refused.reverse().slice(0, LIST_MAX),
     partial,

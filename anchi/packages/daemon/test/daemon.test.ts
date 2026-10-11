@@ -1193,7 +1193,23 @@ describe('task audit', () => {
       ts: now,
     };
     const old = { ...own, task: one.id, ts: now - 30 * 86_400 }; // outside the period
-    transport.auditRows = [...rows(one.id).map((r) => ({ ...r, ts: now })), own, old];
+    const gmail = {
+      event: 'service',
+      service: 'gmail',
+      op: 'gmail.list',
+      task: two.id,
+      agent: 'dev',
+      account: 'work',
+      ts: now,
+    };
+    transport.auditRows = [
+      ...rows(one.id).map((r) => ({ ...r, ts: now })),
+      own,
+      old,
+      gmail,
+      { ...gmail, op: 'gmail.read', ts: now + 1 },
+      { ...gmail, op: 'gmail.read', ts: now + 2 },
+    ];
     const s = await client.call('access.summary', { since: Date.now() - 86_400_000 });
     expect(s).toMatchObject({ tasks: 2, partial: false });
     expect(s.agents).toEqual([
@@ -1203,7 +1219,13 @@ describe('task audit', () => {
         requests: 5,
         credentialsOther: 1,
         injected: { codex: 1, 'github-api': 1 },
+        services: 4,
       }),
+    ]);
+    expect(s.services).toEqual([
+      { service: 'gmail', operation: 'gmail.read', account: 'work', calls: 2, agents: ['dev'] },
+      { service: 'notion', operation: 'search', account: null, calls: 1, agents: ['dev'] },
+      { service: 'gmail', operation: 'gmail.list', account: 'work', calls: 1, agents: ['dev'] },
     ]);
     expect(s.credentials.map((r) => [r.task, r.host])).toEqual([[two.id, 'api.example.com']]);
     expect(s.hosts[0]).toMatchObject({ host: 'api.github.com', agents: ['dev'] });

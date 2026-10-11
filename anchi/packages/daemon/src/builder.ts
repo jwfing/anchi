@@ -58,7 +58,7 @@ An agent is a YAML file. Fields:
 - highRisk: high-risk operations this agent does without approval (optional), by id, e.g.
   { disable: [github-merge] } for an agent whose job is merging pull requests. Ids:
   ${HIGH_RISK_IDS.join(', ')}. Only when the user asks for it.
-- workspaces: directories of the user's Mac under ~/AnchiWorkspaces, e.g.
+- workspaces: directories of the user's computer under ~/AnchiWorkspaces, e.g.
   [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
   /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
 - egress: hosts the agent may reach besides its runtime and connectors, e.g.
