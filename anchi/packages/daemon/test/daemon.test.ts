@@ -19,6 +19,7 @@ import {
   auditHeadline,
 } from '../src/index.ts';
 import { AUDIT_SAVED_MAX, extractLinks, Store } from '../src/store.ts';
+import { defaultVmSize, hostResources } from '../src/host.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
@@ -221,7 +222,11 @@ const hostRun = async (cmd: string, args: string[]) => {
 const SETUP_STEPS = {
   'vm-start': [[process.execPath, '-e', 'console.log("vm started")']],
   install: [
-    [process.execPath, '-e', 'console.log("step one")'],
+    [
+      process.execPath,
+      '-e',
+      'console.log("step one", process.env.ANCHI_VM_CPUS ?? "-", process.env.ANCHI_VM_MEMORY_GIB ?? "-")',
+    ],
     [process.execPath, '-e', 'console.error("broken"); process.exit(3)'],
   ],
   'vault-init': [],
@@ -573,10 +578,41 @@ describe('daemon tasks', () => {
     await expect(client.call('setup.run', { action: 'install' })).rejects.toThrow(
       /install failed: .* exited with 3: broken/,
     );
-    expect(lines).toContain('step one');
+    expect(lines).toContain('step one - -');
     await expect(client.call('setup.run', { action: 'nope' as never })).rejects.toThrow(
       /unknown setup step/,
     );
+  });
+
+  it('creates the VM with the size picked, half of this computer by default', async () => {
+    const { client } = await start();
+    const host = hostResources();
+    const status = await client.call('setup.status');
+    expect(status.vmSize).toEqual({ default: defaultVmSize(host), host });
+    const lines: string[] = [];
+    client.on('setup', ({ line }) => lines.push(line));
+    await expect(
+      client.call('setup.run', { action: 'install', vmSize: { cpus: 1, memoryGiB: 2 } }),
+    ).rejects.toThrow(/exited with 3/);
+    expect(lines).toContain('step one 1 2');
+    for (const vmSize of [
+      { cpus: 0, memoryGiB: 2 },
+      { cpus: host.cpus + 1, memoryGiB: 2 },
+      { cpus: 1, memoryGiB: 1 },
+      { cpus: 1, memoryGiB: host.memoryGiB + 1 },
+      { cpus: 1.5, memoryGiB: 2 },
+      { cpus: '1', memoryGiB: 2 },
+      { cpus: 1, memoryGiB: 2, disk: 100 },
+      null,
+    ]) {
+      await expect(
+        client.call('setup.run', { action: 'install', vmSize: vmSize as never }),
+      ).rejects.toThrow(/BAD_VM_SIZE/);
+    }
+    await expect(
+      client.call('setup.run', { action: 'vm-start', vmSize: { cpus: 1, memoryGiB: 2 } }),
+    ).rejects.toThrow(/BAD_VM_SIZE: only install/);
+    expect(lines.filter((l) => l.startsWith('step one'))).toEqual(['step one 1 2']);
   });
 
   it('answers Anchi tool calls as the task and agent of the cell', async () => {

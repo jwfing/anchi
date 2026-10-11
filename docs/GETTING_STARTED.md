@@ -232,7 +232,11 @@ and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the g
 
    Installation creates the `anchi-vm` VM, installs the trusted services and prebuilt cell
    runners, and builds the base image. It takes several minutes and can be rerun to update;
-   completed steps are reused.
+   completed steps are reused. A new VM gets half of this computer's CPUs and memory by
+   default; the TUI and `anchi setup install` ask before creating it, with half filled in
+   (`anchi setup install --cpus 6 --memory 16` skips the questions). An existing VM keeps its
+   size: `limactl stop anchi-vm && limactl edit anchi-vm --cpus 6 --memory 16 && limactl start
+   anchi-vm`, then `anchi setup vault unlock`.
 2. **Initialize and unlock the vault:**
 
    ```bash

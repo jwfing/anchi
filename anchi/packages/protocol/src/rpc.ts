@@ -109,6 +109,12 @@ export const SETUP_ACTIONS: readonly SetupAction[] = [
   'workspaces',
 ];
 
+/** CPUs and memory (whole GiB) of a VM. */
+export interface VmSize {
+  cpus: number;
+  memoryGiB: number;
+}
+
 export interface RuntimeAccountStatus {
   runtime: 'codex';
   connected: boolean;
@@ -196,6 +202,11 @@ export interface SetupStatus {
   googleClientSource?: GoogleClientSource;
   /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
   workspaces: boolean;
+  /**
+   * Size choices for the VM `install` creates: half of this computer by default, at most all of
+   * it. Optional for clients connected to an older daemon.
+   */
+  vmSize?: { default: VmSize; host: VmSize };
 }
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */
@@ -616,7 +627,8 @@ export interface Methods {
   /** Stores Hermes's OpenAI-compatible endpoint (base URL, API key, default model) in the vault. */
   'setup.importHermes': [{ baseUrl: string; apiKey: string; model: string }, HermesAccountStatus];
   /** Runs a setup step; the caller has the user's consent. Progress arrives as `setup`. */
-  'setup.run': [{ action: SetupAction }, SetupStatus];
+  /** `vmSize` (install only) sizes a VM the step creates; an existing VM keeps its size. */
+  'setup.run': [{ action: SetupAction; vmSize?: VmSize }, SetupStatus];
   /** What `setup.reset` would delete and whether anything blocks it; changes nothing. */
   'setup.resetPreview': [Record<string, never>, ResetPreview];
   /**

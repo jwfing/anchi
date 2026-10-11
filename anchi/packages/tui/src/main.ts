@@ -21,7 +21,7 @@ import {
   uninstallAutostart,
   REPO_ROOT,
 } from '@anchi/daemon';
-import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow } from '@anchi/protocol';
+import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow, VmSize } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeLine } from './sanitize.ts';
@@ -551,13 +551,22 @@ setup
   );
 
 /** Runs a setup step in the daemon and prints its output as it arrives. */
-function runSetup(action: SetupAction, yes: boolean, consent: string) {
+function runSetup(
+  action: SetupAction,
+  yes: boolean,
+  consent: string,
+  size?: (client: DaemonClient) => Promise<VmSize | undefined>,
+) {
   return withClient(async (client) => {
-    if (!yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+    const vmSize = await size?.(client);
+    const what = vmSize
+      ? `${consent} A new VM gets ${vmSize.cpus} CPUs and ${vmSize.memoryGiB} GiB of memory.`
+      : consent;
+    if (!yes && (await ask(`${what} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
     const off = client.on('setup', (n) => {
       if (n.action === action) console.log(sanitizeLine(n.line));
     });
-    const s = await client.call('setup.run', { action });
+    const s = await client.call('setup.run', { action, vmSize });
     off();
     console.log(
       `VM ${s.vm} · vault ${s.vaultUnlocked ? 'unlocked' : 'locked'} · base image ${s.installed ? 'built' : 'not built'}`,
@@ -620,15 +629,55 @@ setup
   .description('Start the VM')
   .action(() => runSetup('vm-start', true, ''));
 
+/**
+ * The size of the VM `setup install` creates: --cpus and --memory, else asked with half of this
+ * computer as the default (taken as is with --yes or without a terminal). None when a VM exists.
+ */
+async function newVmSize(
+  client: DaemonClient,
+  opts: { yes?: boolean; cpus?: string; memory?: string },
+): Promise<VmSize | undefined> {
+  const s = await client.call('setup.status');
+  if (s.vm !== 'missing' || !s.vmSize) {
+    if (opts.cpus || opts.memory) fail('the VM exists; change its size with limactl edit anchi-vm');
+    return undefined;
+  }
+  const { default: half, host } = s.vmSize;
+  const interactive = !opts.yes && process.stdin.isTTY;
+  const pick = async (given: string | undefined, prompt: string, fallback: number) =>
+    given ?? (interactive ? (await ask(prompt)) || String(fallback) : String(fallback));
+  const whole = (raw: string, min: number, max: number, what: string) => {
+    if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max) {
+      fail(`${what} must be a whole number from ${min} to ${max}`);
+    }
+    return Number(raw);
+  };
+  const cpus = await pick(
+    opts.cpus,
+    `CPUs for the VM (this computer: ${host.cpus}) [${half.cpus}]: `,
+    half.cpus,
+  );
+  const cpuCount = whole(cpus, 1, host.cpus, 'CPUs');
+  const memory = await pick(
+    opts.memory,
+    `Memory in GiB (this computer: ${host.memoryGiB}) [${half.memoryGiB}]: `,
+    half.memoryGiB,
+  );
+  return { cpus: cpuCount, memoryGiB: whole(memory, 2, host.memoryGiB, 'Memory') };
+}
+
 setup
   .command('install')
   .description('Create or update the VM, install the services and build the base image')
   .option('-y, --yes', 'do not ask for confirmation')
-  .action((opts: { yes?: boolean }) =>
+  .option('--cpus <n>', "CPUs of a new VM (default: half of this computer's)")
+  .option('--memory <gib>', "memory of a new VM in GiB (default: half of this computer's)")
+  .action((opts: { yes?: boolean; cpus?: string; memory?: string }) =>
     runSetup(
       'install',
       Boolean(opts.yes),
       'Create or update the anchi-vm VM, install the trusted services and the agent team, and build the base image (several minutes)?',
+      (client) => newVmSize(client, opts),
     ),
   );
 

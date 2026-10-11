@@ -1,10 +1,10 @@
 import { execFile, spawn } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { cpus as hostCpus, homedir, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { SetupAction } from '@anchi/protocol';
+import type { SetupAction, VmSize } from '@anchi/protocol';
 
 /** Both release bundles live in <root>/lib; source modules live in the workspace. */
 export const REPO_ROOT = resolve(
@@ -46,6 +46,33 @@ export function workspaceSteps(platform: NodeJS.Platform = process.platform): st
     ...(linux ? [['bash', 'scripts/install-anchi.sh']] : []),
     ['python3', 'scripts/vault.py', 'unlock'],
   ];
+}
+
+/** This computer's logical CPUs and memory in whole GiB, as scripts/vm-size.sh counts them. */
+export function hostResources(): VmSize {
+  return { cpus: hostCpus().length, memoryGiB: Math.floor(totalmem() / 2 ** 30) };
+}
+
+/** Half of the host, at least 1 CPU and 2 GiB: the size a new VM gets unless the user picks. */
+export function defaultVmSize(host: VmSize): VmSize {
+  return {
+    cpus: Math.max(1, Math.floor(host.cpus / 2)),
+    memoryGiB: Math.max(2, Math.floor(host.memoryGiB / 2)),
+  };
+}
+
+/** The environment that sizes a new VM in scripts/up.sh; refuses a size the host cannot give. */
+export function vmSizeEnv(size: VmSize, host: VmSize): Record<string, string> {
+  const { cpus, memoryGiB } = size;
+  if (!Number.isInteger(cpus) || cpus < 1 || cpus > host.cpus) {
+    throw new Error(`BAD_VM_SIZE: CPUs must be a whole number from 1 to ${host.cpus}`);
+  }
+  if (!Number.isInteger(memoryGiB) || memoryGiB < 2 || memoryGiB > host.memoryGiB) {
+    throw new Error(
+      `BAD_VM_SIZE: memory must be a whole number of GiB from 2 to ${host.memoryGiB}`,
+    );
+  }
+  return { ANCHI_VM_CPUS: String(cpus), ANCHI_VM_MEMORY_GIB: String(memoryGiB) };
 }
 
 /** Fixed host commands per setup step, run from the checkout in order. */
@@ -122,7 +149,12 @@ export class SetupRunner {
     private resetSteps: string[][] = RESET_STEPS,
   ) {}
 
-  async run(action: SetupAction | 'reset', onLine: (line: string) => void): Promise<void> {
+  /** `env` is added to the steps' environment (the size of a VM `install` creates). */
+  async run(
+    action: SetupAction | 'reset',
+    onLine: (line: string) => void,
+    env: Record<string, string> = {},
+  ): Promise<void> {
     if (this.running) throw new Error(`setup step "${this.running}" is already running`);
     if (action === 'workspaces' && process.platform !== 'darwin' && process.platform !== 'linux') {
       throw new Error('workspaces are available on macOS and Linux hosts only');
@@ -131,7 +163,7 @@ export class SetupRunner {
     try {
       for (const [cmd, ...args] of action === 'reset' ? this.resetSteps : this.steps[action]) {
         onLine(`$ ${[cmd, ...args].join(' ')}`);
-        const { code, last } = await runLines(cmd!, args, this.cwd, onLine);
+        const { code, last } = await runLines(cmd!, args, this.cwd, onLine, env);
         if (code !== 0) {
           throw new Error(`${action} failed: ${cmd} exited with ${code}${last ? `: ${last}` : ''}`);
         }
@@ -147,9 +179,14 @@ function runLines(
   args: string[],
   cwd: string,
   onLine: (line: string) => void,
+  env: Record<string, string> = {},
 ): Promise<{ code: number; last: string }> {
   return new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...env },
+    });
     let last = '';
     const timer = setTimeout(() => child.kill('SIGTERM'), STEP_TIMEOUT_MS);
     for (const stream of [child.stdout, child.stderr]) {
