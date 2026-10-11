@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
 import { nextSetupAction, teamActivity, turnActivity, welcomeStep } from '../src/tui/usability.ts';
-import { App, filterTasks } from '../src/tui/App.tsx';
+import { App, filterTasks, skillSource, sortSkills } from '../src/tui/App.tsx';
 import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
 import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
@@ -1340,6 +1340,74 @@ describe('agent settings panel', () => {
       id: 'review',
       commit: '2'.repeat(40),
     });
+    ui.unmount();
+  });
+
+  it('groups skills by where they came from, local ones last', () => {
+    const skill = (id: string, source: string, commit: string | null) => ({
+      id,
+      name: id,
+      description: '',
+      source,
+      commit,
+    });
+    const sorted = sortSkills([
+      skill('triage', '/home/u/skills/triage', null),
+      skill(
+        'tdd',
+        'https://github.com/addyosmani/agent-skills/tree/main/skills/tdd',
+        'b'.repeat(40),
+      ),
+      skill('review', 'https://github.com/acme/s/tree/main/review', 'a'.repeat(40)),
+      skill(
+        'code-review',
+        'https://github.com/addyosmani/agent-skills/tree/main/skills/cr',
+        'b'.repeat(40),
+      ),
+    ]);
+    expect(sorted.map((s) => s.id)).toEqual(['review', 'code-review', 'tdd', 'triage']);
+    expect(skillSource(sorted[1]!)).toBe('addyosmani/agent-skills @ bbbbbbb');
+    expect(skillSource(sorted[3]!)).toBe('local');
+  });
+
+  it('shows one row per skill and scrolls the list with the cursor', async () => {
+    // 25 skills with long descriptions: more than fits, as a GitHub collection gives.
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      id: `skill-${String(i).padStart(2, '0')}`,
+      name: `Skill ${i}`,
+      description: `A description long enough to wrap a terminal line on its own (${i}). `.repeat(
+        2,
+      ),
+      source: 'https://github.com/addyosmani/agent-skills/tree/main/skills',
+      commit: '1be8e34'.padEnd(40, '0'),
+    }));
+    const { client } = fakeClient({}, { 'skills.list': () => many });
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('1'); // Configure
+    await tick();
+    ui.stdin.write('\u000e'); // ^N: Runtimes → Skills
+    const first = await frameWith(ui, '1/25');
+    // Every skill takes one line: its id and where it came from, no description.
+    expect(first).toMatch(/skill-00 +addyosmani\/agent-skills @ 1be8e34/);
+    // Only the selected skill's description is shown, on one line below the list.
+    expect(first.split('\n').filter((l) => l.includes('A description long enough'))).toHaveLength(
+      1,
+    );
+    expect(first).toContain('A description long enough to wrap a terminal line on its own (0).');
+    // The list is windowed, and says how much is left.
+    expect(first).not.toContain('skill-24');
+    expect(first).toContain('↓ more');
+    // The cursor stays visible: a page down and the end of the list scroll it into view.
+    ui.stdin.write('\u001b[6~'); // PgDn
+    const paged = await frameWith(ui, '↑ more');
+    expect(paged).not.toContain('skill-00');
+    ui.stdin.write('G'); // the last skill
+    const last = await frameWith(ui, '25/25');
+    expect(last).toContain('skill-24');
+    expect(last).not.toContain('↓ more');
     ui.unmount();
   });
 });
