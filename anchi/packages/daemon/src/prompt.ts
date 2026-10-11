@@ -61,6 +61,12 @@ function workspaceLines(agent: ResolvedAgent): string[] {
       ? 'Work on the projects and files the user means in these directories, and put repositories ' +
         `you clone or results the user should see in a read-write one, not in ${WORKDIR}.`
       : `Read the user's files there; keep your own work in ${WORKDIR}.`,
+    // Every file operation there crosses into the user's computer; a dependency install of
+    // thousands of small files took many minutes and stalled the other cells' shared directories.
+    'Shared directories are much slower than local disk for many small files. Keep dependencies, ' +
+      `virtual environments, caches and build output in ${WORKDIR}: install and build in a clone ` +
+      `or worktree there (or point node_modules, .venv or target/ there), and keep the sources ` +
+      'you change and the results for the user in the shared directory.',
   ];
 }
 

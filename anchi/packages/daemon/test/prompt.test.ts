@@ -31,6 +31,10 @@ describe('environment note', () => {
       "- /home/agent/workspaces/specs: the user's ~/AnchiWorkspaces/docs/specs, read-only.",
     );
     expect(note).toMatch(/clone .* in a read-write one, not in \/home\/agent\/work/);
+    // Dependencies and builds stay off the slow shared directories.
+    expect(note).toMatch(
+      /Keep dependencies, virtual environments, caches and build output in \/home\/agent\/work/,
+    );
   });
 
   it('keeps work in ~/work when every shared directory is read-only', () => {
@@ -44,6 +48,7 @@ describe('environment note', () => {
     const note = environmentNote(agent('runtime: codex\n'));
     expect(note).toContain('Your persistent working directory is /home/agent/work');
     expect(note).not.toContain('/home/agent/workspaces');
+    expect(note).not.toContain('Shared directories are much slower');
   });
 
   it("comes after the agent's own prompt", () => {

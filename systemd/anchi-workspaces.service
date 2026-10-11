@@ -9,8 +9,9 @@ Before=anchi-egress.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/secure-vm/anchi/workspaces.sh
-# bindfs keeps running in this unit's cgroup; stopping the unit unmounts the share.
-ExecStop=-/usr/bin/umount /mnt/anchi-host
+# bindfs keeps running in this unit's cgroup; stopping the unit unmounts the share (lazily: an
+# idle cell may still hold it).
+ExecStop=-/usr/bin/umount -l /mnt/anchi-host
 
 [Install]
 WantedBy=multi-user.target

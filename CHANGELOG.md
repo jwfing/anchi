@@ -37,6 +37,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Workspaces on Linux hosts are no longer served one file operation at a time: `bindfs` runs multithreaded. Listing a `node_modules` tree in a workspace took 88 s instead of 3.4 s, and one agent installing dependencies stalled every other cell's workspace. `anchi setup install` mounts the share again. Agents are also told to keep dependencies and build output out of workspaces, which are slower than their own work directory for many small files.
 - Agents with workspaces are told where they are (`/home/agent/workspaces/<name>`, the user's `~/AnchiWorkspaces/<path>`, read-write or read-only) and that `/home/agent/work` stays in the VM. Before, Anchi's instructions named only `/home/agent/work`, so an agent could keep cloning and editing there, where the user never sees its files.
 - Tasks waiting for a task they delegated no longer starve it of a cell. The VM's four cells could all be held by leads waiting for their reviewers, which then waited for a cell until they failed with `TOO_MANY_CELLS`. A cell whose turn waits on a delegation no longer counts toward the working cells, and waiting delegated tasks get a free cell first (deepest first, then in order, and only while the tasks before them would take every free cell). Needs `anchi setup install`: the VM now allows up to 16 live cells.
 - One failed provider lookup no longer stops the refresh of the others; that host keeps its previous addresses until they expire.

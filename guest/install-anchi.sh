@@ -85,6 +85,12 @@ systemctl daemon-reload
 systemctl enable anchi-workspaces.service
 if mountpoint -q /mnt/anchi-host-raw/share && ! mountpoint -q /mnt/anchi-host; then
   systemctl restart anchi-workspaces.service
+elif mountpoint -q /mnt/anchi-host-raw/share && mountpoint -q /mnt/anchi-host &&
+  ! pgrep -f -- '^bindfs .*--multithreaded.* /mnt/anchi-host$' >/dev/null; then
+  # Linux, mounted by an earlier version with single-threaded bindfs: mount it again (macOS
+  # mounts virtiofs at /mnt/anchi-host and has no raw share). Installing refuses while tasks
+  # run, so no running task loses its workspace.
+  systemctl restart anchi-workspaces.service
 else
   systemctl start anchi-workspaces.service
 fi

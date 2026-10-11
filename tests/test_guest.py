@@ -209,3 +209,17 @@ class LiveCheckOverlayTests(unittest.TestCase):
     def test_the_manager_is_where_the_installer_puts_it(self):
         install = (self.guest / 'install-anchi.sh').read_text()
         self.assertIn(f'"$src/anchi_cell.py" {self.check.MANAGER}', install)
+
+
+class WorkspaceShareTests(unittest.TestCase):
+    def test_linux_share_is_multithreaded_and_remounted_on_install(self):
+        root = Path(__file__).parents[1]
+        script = (root / 'guest/anchi-workspaces.sh').read_text()
+        # Single-threaded bindfs served every cell's file operations one at a time.
+        self.assertRegex(script, r'bindfs -o [^\n]*--multithreaded')
+        install = (root / 'guest/install-anchi.sh').read_text()
+        # An earlier single-threaded mount is replaced, on Linux hosts only (macOS mounts virtiofs).
+        self.assertIn("mountpoint -q /mnt/anchi-host-raw/share && mountpoint -q /mnt/anchi-host &&", install)
+        self.assertIn("! pgrep -f -- '^bindfs .*--multithreaded.* /mnt/anchi-host$'", install)
+        unit = (root / 'systemd/anchi-workspaces.service').read_text()
+        self.assertIn('ExecStop=-/usr/bin/umount -l /mnt/anchi-host', unit)
