@@ -605,13 +605,13 @@ setup
     runSetup(
       'install',
       Boolean(opts.yes),
-      'Create or update the secure-vm VM, install the trusted services and the agent team, and build the base image (several minutes)?',
+      'Create or update the anchi-vm VM, install the trusted services and the agent team, and build the base image (several minutes)?',
     ),
   );
 
 setup
   .command('vault <action>')
-  .description('init or unlock the VM vault with the key in ~/.config/secure-vm/vault.key')
+  .description('init or unlock the VM vault with the key in ~/.config/anchi/vault.key')
   .action((action: string) => {
     if (action !== 'init' && action !== 'unlock') fail('vault action must be init or unlock');
     return runSetup(action === 'init' ? 'vault-init' : 'vault-unlock', true, '');
@@ -773,7 +773,7 @@ setup
       ({ home, vaultKey } = p);
       console.log('Reset deletes, and nothing can bring back:');
       console.log(
-        `  the secure-vm VM (${p.vm}) and everything in it: the vault's credentials (Codex, ` +
+        `  the anchi-vm VM (${p.vm}) and everything in it: the vault's credentials (Codex, ` +
           'Claude Code, Google, Notion, Slack, GitHub, AWS, Linear), agent homes, images and the audit log',
       );
       if (p.cells) console.log(`  ${p.cells} idle cell(s): closed first`);

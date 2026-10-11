@@ -1,5 +1,5 @@
 PYTHON ?= python3
-VM ?= secure-vm
+VM ?= anchi-vm
 PY_SOURCES = services scripts guest tests
 SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run landing/dist/install.sh
 
@@ -9,7 +9,7 @@ help:
 	@echo 'make lint          Ruff, shellcheck (when installed) and Prettier checks only'
 	@echo 'make test          Python services and anchi unit tests'
 	@echo 'make format        Format Python (ruff) and anchi sources (prettier)'
-	@echo 'make verify-vm     Explicit live isolation verification against secure-vm'
+	@echo 'make verify-vm     Explicit live isolation verification against anchi-vm'
 	@echo 'make verify-anchi  Live agent-team cell and egress proxy checks (no credentials used)'
 
 check: lint
