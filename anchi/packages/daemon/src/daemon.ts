@@ -48,9 +48,11 @@ import {
   ghToken,
   hostConnectorsFile,
   hostOutput,
+  migrateLegacyVm,
   readHostConnectors,
   SetupRunner,
   SETUP_STEPS,
+  VAULT_KEY,
   writeHostConnectors,
 } from './host.ts';
 import { Hub } from './hub.ts';
@@ -121,6 +123,11 @@ export interface DaemonOptions {
   /** Host commands of `setup.reset` (tests replace them; the default deletes the VM). */
   resetSteps?: string[][];
   hostRun?: typeof hostOutput;
+  /**
+   * Rename a VM created as `secure-vm` and move the vault key at start (scripts/vm-name.sh).
+   * Off unless set: only the real daemon may stop and rename the machine's VM.
+   */
+  migrateVm?: boolean;
   /** Keep the vault's Codex token in step with the Mac's login (default true). */
   codexSync?: boolean;
   /** The Mac's Codex login file; tests point it elsewhere. */
@@ -866,7 +873,7 @@ export class Daemon {
       busy,
       cells: this.hub.cellCount(),
       home: this.opts.layout.root,
-      vaultKey: join(homedir(), '.config/secure-vm/vault.key'),
+      vaultKey: VAULT_KEY,
     };
   }
 
@@ -927,6 +934,16 @@ export class Daemon {
     }
   }
 
+  /** Closes cells left behind by a previous daemon. A VM that is not up yet is not an error. */
+  private async reapCells(): Promise<void> {
+    try {
+      const reaped = await this.guest.reap();
+      if (reaped.length) this.log(`reaped orphaned cells: ${reaped.join(', ')}`);
+    } catch (err) {
+      this.log(`cell reap skipped: ${(err as Error).message}`);
+    }
+  }
+
   async start(): Promise<void> {
     const { layout } = this.opts;
     for (const dir of [layout.root, layout.runDir, layout.dataDir, layout.agentsDir]) {
@@ -939,14 +956,14 @@ export class Daemon {
     }
     if (existsSync(layout.socketFile)) rmSync(layout.socketFile);
 
-    // Cells from a previous daemon cannot be reattached: their runner channel was its stdio.
+    // In the background: restarting a running VM takes longer than clients wait for the socket.
+    const migration = this.opts.migrateVm ? migrateLegacyVm((line) => this.log(line)) : undefined;
+    // Cells from a previous daemon cannot be reattached: their runner channel was its stdio. With
+    // a migration under way the reap waits for it: those cells are in the VM being renamed, which
+    // still answers to `secure-vm` until the rename lands.
     if (this.opts.reap !== false) {
-      try {
-        const reaped = await this.guest.reap();
-        if (reaped.length) this.log(`reaped orphaned cells: ${reaped.join(', ')}`);
-      } catch (err) {
-        this.log(`cell reap skipped: ${(err as Error).message}`);
-      }
+      if (migration) void migration.then(() => this.reapCells());
+      else await this.reapCells();
     }
     this.hub.recoverInterrupted();
 

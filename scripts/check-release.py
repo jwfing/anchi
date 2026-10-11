@@ -175,7 +175,7 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
         status = json.loads(run([cli, "daemon", "status"], env, root).stdout)
         assert status
         run([cli, "setup", "vault", "init"], env, root)
-        assert len((home / ".config/secure-vm/vault.key").read_bytes()) == 32
+        assert len((home / ".config/anchi/vault.key").read_bytes()) == 32
         # Render the real full-screen UI using a PTY, from outside the repository.
         master, slave = pty.openpty()
         termios.tcsetwinsize(slave, (40, 120))

@@ -60,7 +60,7 @@ export function WelcomeView({
   } else if (step === 'vault')
     lines.push(
       setup.vaultKeyPresent === false
-        ? 'Initialize the vault. Keep a backup of ~/.config/secure-vm/vault.key.'
+        ? 'Initialize the vault. Keep a backup of ~/.config/anchi/vault.key.'
         : 'Unlock the vault for this VM session.',
       `${nextKey} continue`,
     );

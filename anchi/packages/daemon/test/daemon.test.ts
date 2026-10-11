@@ -233,7 +233,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     layout,
     guest: new Guest(transport),
     // No limactl: the tests never depend on a VM of the machine they run on.
-    lima: new LimaTransport('secure-vm', join(root, 'no-limactl')),
+    lima: new LimaTransport('anchi-vm', join(root, 'no-limactl')),
     log: () => {},
     quiet: true,
     idleMs,
@@ -301,7 +301,7 @@ describe('daemon tasks', () => {
     const { client } = await start();
     const preview = await client.call('setup.resetPreview');
     expect(preview).toMatchObject({ busy: 0, cells: 0, home: root });
-    expect(preview.vaultKey).toMatch(/\.config\/secure-vm\/vault\.key$/);
+    expect(preview.vaultKey).toMatch(/\.config\/anchi\/vault\.key$/);
     await expect(client.call('setup.reset', { confirm: 'yes' })).rejects.toThrow(/type reset/);
     const lines: string[] = [];
     client.on('reset', (n) => lines.push(n.line));

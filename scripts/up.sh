@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
-vm_name=${QISUO_INSTALL_VM:-${ANCHI_INSTALL_VM:-secure-vm}}
-[[ "$vm_name" =~ ^secure-vm(-[a-z0-9-]+)?$ ]] || { echo "Invalid VM name" >&2; exit 1; }
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/vm-name.sh
+source scripts/vm-name.sh
+vm_name=$(anchi_vm_name)
 # shellcheck source=guest/arch.sh
 source guest/arch.sh
 vm_type=$(host_vm_type "$(uname -s)")
@@ -29,13 +30,17 @@ else:
     print('unknown')
 PY
 )
+# A VM created as secure-vm is renamed rather than replaced by a second, empty VM.
+if [[ $vm_name == "$ANCHI_VM_DEFAULT" ]]; then
+  bash scripts/vm-name.sh migrate
+fi
 if limactl list --format '{{.Name}} {{.Status}}' | grep -Fqx "$vm_name Running"; then
   refuse_if_tasks_running "$vm_name"
 fi
 if limactl list --format '{{.Name}}' | grep -Fqx "$vm_name"; then
   limactl start --tty=false "$vm_name"
 else
-  limactl start --tty=false --name="$vm_name" --vm-type="$vm_type" lima/secure-vm.yaml
+  limactl start --tty=false --name="$vm_name" --vm-type="$vm_type" lima/anchi-vm.yaml
 fi
 # Explicit copy, never a host-home or project filesystem mount.
 limactl shell "$vm_name" -- mkdir -p /tmp/secure-vm-bootstrap

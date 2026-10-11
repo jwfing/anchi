@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import type { ConnectorId, ConnectorSecret } from '@anchi/protocol';
+import { VM_NAME } from './host.ts';
 
 /** What the proxy kept of a runtime's limits (snake case, seconds). */
 interface GuestQuota {
@@ -39,10 +40,10 @@ export interface GuestTransport {
 
 export class LimaTransport implements GuestTransport {
   constructor(
-    readonly vm = process.env.ANCHI_VM ?? 'secure-vm',
+    readonly vm = process.env.ANCHI_VM ?? VM_NAME,
     private limactl = process.env.ANCHI_LIMACTL ?? 'limactl',
   ) {
-    if (!/^secure-vm(-[a-z0-9-]+)?$/.test(vm)) throw new Error(`invalid VM name ${vm}`);
+    if (!/^anchi-vm(-[a-z0-9-]+)?$/.test(vm)) throw new Error(`invalid VM name ${vm}`);
   }
 
   private argv(args: string[]): string[] {

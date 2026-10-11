@@ -604,7 +604,7 @@ export interface Methods {
   /** What `setup.reset` would delete and whether anything blocks it; changes nothing. */
   'setup.resetPreview': [Record<string, never>, ResetPreview];
   /**
-   * Deletes the secure-vm VM with everything in it (vault contents included), for a
+   * Deletes the anchi-vm VM with everything in it (vault contents included), for a
    * first-launch state; refused while tasks run. `confirm` is `reset`, typed by the user.
    * Progress arrives as `reset`. The vault key and Anchi home stay (the CLI's `--all` deletes
    * them after stopping the daemon).

@@ -30,7 +30,7 @@ TUI client ──┐
           scheduler · orchestrator · task store · approval queue · agent registry
                 │  Lima SSH (trusted administration)
                 ▼
-          secure-vm (long-running Lima VM)
+          anchi-vm (long-running Lima VM)
           ├─ trusted services: auth, policy, existing connectors, egress proxy
           └─ per-task cells (systemd-nspawn, created on demand, destroyed at task end)
                runtime SDK (Codex / Claude Code) + Anchi MCP server

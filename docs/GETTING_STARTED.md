@@ -230,7 +230,7 @@ and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the g
    anchi setup install          # asks for confirmation; add --yes to skip it
    ```
 
-   Installation creates the `secure-vm` VM, installs the trusted services and prebuilt cell
+   Installation creates the `anchi-vm` VM, installs the trusted services and prebuilt cell
    runners, and builds the base image. It takes several minutes and can be rerun to update;
    completed steps are reused.
 2. **Initialize and unlock the vault:**
@@ -240,7 +240,7 @@ and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the g
    anchi setup vault unlock     # after each VM start
    ```
 
-   The master key is `~/.config/secure-vm/vault.key`. Back it up; a replacement key cannot
+   The master key is `~/.config/anchi/vault.key`. Back it up; a replacement key cannot
    decrypt stored accounts.
 3. **Connect a runtime.** These operations are also available in **Runtimes**.
    - Codex: install its CLI and run `codex login` on this machine, then `anchi setup codex`.
@@ -267,7 +267,7 @@ and, through the proxy, any public host.
 - **Google sign-in** opens the browser with `xdg-open` and also prints the URL. Google redirects
   to a port on `127.0.0.1`, so the browser must run on the same machine; over SSH, forward the
   printed port or sign in on a desktop session.
-- **The VM** lives in `~/.lima/secure-vm`, as on macOS. Where guides say "the Mac", read "this
+- **The VM** lives in `~/.lima/anchi-vm`, as on macOS. Where guides say "the Mac", read "this
   machine".
 
 ## Update or remove the app
@@ -297,14 +297,14 @@ VM are separate and retained. Remove the installer's PATH line from your shell c
 
 `anchi setup reset` returns the machine to a first launch, for example to try the guided setup
 again. It refuses while tasks are running or queued, lists what it deletes and asks you to type
-`reset` (`--yes` skips the question). It deletes the `secure-vm` VM with everything in it:
+`reset` (`--yes` skips the question). It deletes the `anchi-vm` VM with everything in it:
 the vault's encrypted credentials (Codex, Claude Code, Google, Notion, Slack, GitHub, AWS,
 Linear), agent homes, built images and the audit log. Idle cells are closed first.
 
 | | `anchi setup reset` | `anchi setup reset --all` |
 |---|---|---|
 | The VM and the vault contents | deleted | deleted |
-| `~/.config/secure-vm/vault.key` | kept | deleted |
+| `~/.config/anchi/vault.key` | kept | deleted |
 | `~/.anchi` (or `ANCHI_HOME`): agents, templates, images, skills, `settings.yaml`, the task database, logs | kept | deleted (the daemon is stopped first) |
 | `~/.anchi/keybindings.json` | kept | kept (a preference, not setup state) |
 | `~/AnchiWorkspaces`, the installed app, Google/GitHub/AWS accounts themselves | kept | kept |
@@ -330,7 +330,7 @@ are deleted locally only; revoke them at the provider if you no longer want them
 
 ## Inside the VM
 
-`limactl shell secure-vm` opens a shell in the VM over Lima's SSH, which listens on `127.0.0.1` only, with a key in `~/.lima/_config`. You get your own user with passwordless sudo: this is the trusted side, at the level of the host administrator. Useful places:
+`limactl shell anchi-vm` opens a shell in the VM over Lima's SSH, which listens on `127.0.0.1` only, with a key in `~/.lima/_config`. You get your own user with passwordless sudo: this is the trusted side, at the level of the host administrator. Useful places:
 
 - `sudo anchi-cell list`: the running cells.
 - `sudo ls /var/lib/anchi/agents/<agent>/home`: an agent's persistent home, with its work directory and Codex and Claude sessions.
@@ -339,7 +339,7 @@ are deleted locally only; revoke them at the provider if you no longer want them
 Agent cells have no SSH and no interactive shell: nothing runs an SSH server in them, and they reach the network only through the egress proxy. For a look inside a running cell, `anchi-cell exec` runs one command as the agent user, without input:
 
 ```bash
-limactl shell secure-vm -- sudo anchi-cell exec <task> -- /bin/sh -c 'ls -la; env | sort'
+limactl shell anchi-vm -- sudo anchi-cell exec <task> -- /bin/sh -c 'ls -la; env | sort'
 ```
 
 A cell lives until 10 minutes after its task's last turn; after that, look in the agent's home instead.

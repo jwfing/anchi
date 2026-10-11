@@ -912,12 +912,12 @@ export function App({
       {
         'vault-init': [
           'Initialize the vault',
-          'Create the local master key and unlock the vault. Back up ~/.config/secure-vm/vault.key. Existing encrypted accounts require their original key.',
+          'Create the local master key and unlock the vault. Back up ~/.config/anchi/vault.key. Existing encrypted accounts require their original key.',
         ],
-        'vm-start': ['Start the VM', 'Start the secure-vm VM.'],
+        'vm-start': ['Start the VM', 'Start the anchi-vm VM.'],
         install: [
           'Install or update',
-          'Create or update the secure-vm VM, install the trusted services and the agent ' +
+          'Create or update the anchi-vm VM, install the trusted services and the agent ' +
             'team, and build the base image. This takes several minutes.',
         ],
         workspaces: [
@@ -928,7 +928,7 @@ export function App({
         ],
         'vault-unlock': [
           'Unlock the vault',
-          'Send the vault key from ~/.config/secure-vm/vault.key on this computer to the VM, ' +
+          'Send the vault key from ~/.config/anchi/vault.key on this computer to the VM, ' +
             'where it is kept in memory only.',
         ],
       } as const
