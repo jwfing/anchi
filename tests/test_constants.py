@@ -80,6 +80,18 @@ class LimaTemplateTests(unittest.TestCase):
         for script in ('up.sh', 'install-anchi.sh', 'verify.sh', 'cell.sh', 'policy.sh'):
             self.assertIn('anchi_vm_name', (ROOT / 'scripts' / script).read_text(), script)
 
+    def test_release_archive_has_every_script_its_scripts_source(self):
+        # A packaged script that sources one left out fails only after installing the release.
+        text = (ROOT / 'scripts/package-release.sh').read_text()
+        copy = next(line for line in text.splitlines() if line.startswith('cp scripts/up.sh '))
+        packaged = {Path(word).name for word in copy.split()[1:-1]}
+        for name in sorted(packaged):
+            if not name.endswith('.sh'):
+                continue
+            for sourced in re.findall(r'^\s*source scripts/(\S+)', (ROOT / 'scripts' / name).read_text(), re.M):
+                self.assertIn(sourced, packaged, f'{name} sources scripts/{sourced}')
+        self.assertIn('vm-size.sh', packaged)
+
 
 if __name__ == '__main__':
     unittest.main()
