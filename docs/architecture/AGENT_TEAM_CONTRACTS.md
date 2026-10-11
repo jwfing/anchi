@@ -92,6 +92,7 @@ The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`.
 | `python3 /opt/secure-vm/services/admin.py import-token\|import-aws\|disconnect\|status CONNECTOR` | Connector credentials into and out of the vault |
 | `python3 /opt/secure-vm/services/codex_admin.py import-token\|status` | Codex access token and account id into the vault; status without secrets |
 | `python3 /opt/secure-vm/services/claude_admin.py import-token\|status\|disable` | Claude Code token or API key into the vault |
+| `python3 /opt/secure-vm/services/hermes_admin.py import\|status\|disable` | Hermes's OpenAI-compatible endpoint (`{base_url, api_key, model}` on stdin) into the vault; status and disable without the key |
 | `python3 /opt/secure-vm/services/admin.py import-client\|remove-client` | The user's Google OAuth client (stdin), or its removal so the built-in client applies; refused while Google accounts are connected |
 | `python3 /opt/secure-vm/services/admin.py begin\|complete\|cancel\|disconnect gmail\|drive [ACCOUNT]` | Google sign-in of one named account (`default` when omitted; the code arrives on stdin; tokens stay in the VM). Refreshes the provider allowlists afterwards |
 | `python3 /opt/secure-vm/services/connector_admin.py ID probe\|disconnect [ACCOUNT]` | Service connector account label, or disconnect and revoke; `ACCOUNT` for gmail and drive |

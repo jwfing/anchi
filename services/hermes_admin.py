@@ -2,8 +2,8 @@
 
 Hermes talks to an OpenAI-compatible endpoint the user chooses: its base URL, an API key and a
 default model. The key stays in the vault; cells hold a placeholder, and the egress proxy
-substitutes the key on the base URL's host only. The base URL and model are not secret: cells
-get them to configure Hermes.
+substitutes the key under the base URL only: that host, that path prefix. The base URL and model
+are not secret: cells get them to configure Hermes.
 """
 
 import json

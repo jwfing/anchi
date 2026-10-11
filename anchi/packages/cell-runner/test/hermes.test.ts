@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@anchi/protocol';
@@ -108,7 +108,10 @@ describe('Hermes over ACP', () => {
   beforeAll(() => chmodSync(FAKE, 0o755));
   afterEach(() => stopHermes());
 
-  const turn = (input: string, extra: { resumeId?: string; signal?: AbortSignal } = {}) => {
+  const turn = (
+    input: string,
+    extra: { resumeId?: string; signal?: AbortSignal; instructions?: string } = {},
+  ) => {
     dir = dir ?? mkdtempSync(join(tmpdir(), 'hermes-'));
     log = join(dir, 'acp.log');
     return runHermes({
@@ -116,7 +119,7 @@ describe('Hermes over ACP', () => {
       resumeId: extra.resumeId,
       options: {
         workdir: dir,
-        instructions: 'You review code.',
+        instructions: extra.instructions ?? 'You review code.',
         instructionsMode: 'append',
         sandbox: 'cell',
       },
@@ -185,6 +188,17 @@ describe('Hermes over ACP', () => {
     const config = readFileSync(join(dir, '.hermes/config.yaml'), 'utf8');
     expect(config).toContain('default: "nousresearch/hermes-4-405b"');
     expect(readFileSync(join(dir, '.hermes/SOUL.md'), 'utf8')).toBe('You review code.\n');
+  });
+
+  it('drops the persona when the agent prompt is cleared', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'hermes-'));
+    await collect(turn('first'));
+    const soul = join(dir, '.hermes/SOUL.md');
+    expect(readFileSync(soul, 'utf8')).toBe('You review code.\n');
+    // The agent home outlives the turn; a prompt the user emptied leaves no SOUL.md behind.
+    stopHermes();
+    await collect(turn('second', { instructions: '  ' }));
+    expect(existsSync(soul)).toBe(false);
   });
 
   it('resumes a session without repeating its history', async () => {

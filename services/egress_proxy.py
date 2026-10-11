@@ -23,6 +23,7 @@ import socket
 import struct
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import egress_rules as rules
 
@@ -683,15 +684,18 @@ class EgressProxy:
         return {'items': items}
 
     async def runtime_rules(self, request):
-        """Rules a cell's runtime needs from stored settings: the Hermes endpoint's host. None
+        """Rules a cell's runtime needs from stored settings: the Hermes endpoint. None
         when nothing is stored; the cell manager then refuses the cell."""
         if request.get('runtime') != 'hermes':
             return ()
+        # Read the endpoint afresh: a cell registering just after the user changed it must get
+        # the rule and the base URL of the same endpoint, not the one cached minutes ago.
+        self.credentials.invalidate('hermes')
         try:
             credential = await asyncio.get_running_loop().run_in_executor(None, self.credentials.get, 'hermes')
         except (LookupError, OSError, ValueError):
             return ()
-        return (rules.hermes_rule(credential['host']),)
+        return (rules.hermes_rule(credential['host'], urlsplit(credential['base_url']).path),)
 
     def identifiers(self, grants):
         """Non-secret values a cell needs locally, such as the Codex account id."""

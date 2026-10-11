@@ -1263,7 +1263,7 @@ HERMES = {
     'model': 'nousresearch/hermes-4-405b',
     'generation': 'g',
 }
-HERMES_RULE = rules.hermes_rule('openrouter.ai')
+HERMES_RULE = rules.hermes_rule('openrouter.ai', '/api/v1')
 
 
 class HermesTests(unittest.TestCase):
@@ -1325,8 +1325,20 @@ class HermesTests(unittest.TestCase):
         self.assertEqual(
             rules.decide('POST', 'api.openai.com', '/v1/x', placeholder, b'', grants, extra).action, 'pass'
         )
+        # Another service on the same host, outside the base URL, gets the placeholder as sent.
+        for path in ('/api/v2/chat/completions', '/upload', '/api/v1x/chat/completions'):
+            d = rules.decide('POST', 'openrouter.ai', path, placeholder, b'', grants, extra)
+            self.assertEqual((d.action, d.rule), ('pass', None), path)
+        self.assertEqual(
+            rules.decide('GET', 'openrouter.ai', '/api/v1', placeholder, b'', grants, extra).action, 'inject'
+        )
+        # An endpoint at the root of its host keeps the whole host.
+        root = (rules.hermes_rule('openrouter.ai'),)
+        self.assertEqual(
+            rules.decide('POST', 'openrouter.ai', '/upload', placeholder, b'', grants, root).action, 'inject'
+        )
         # Account administration on the endpoint is refused.
-        for path in ('/v1/organization/admin_api_keys', '/api/v1/organizations/o/keys', '/dashboard/billing'):
+        for path in ('/api/v1/organization/admin_api_keys', '/api/v1/organizations/o/keys', '/api/v1/dashboard/x'):
             self.assertEqual(rules.decide('GET', 'openrouter.ai', path, placeholder, b'', grants, extra).action, 'deny')
 
     def test_a_hermes_cell_gets_its_endpoint_rule_and_host_at_registration(self):
@@ -1339,7 +1351,7 @@ class HermesTests(unittest.TestCase):
             await proxy.registry.register(request, await proxy.runtime_rules(request))
             cell = proxy.registry.cells['th']
             self.assertEqual(cell.grants, frozenset({'hermes'}))
-            self.assertEqual([r.hosts for r in cell.extra], [('openrouter.ai',)])
+            self.assertEqual([(r.hosts, r.path) for r in cell.extra], [(('openrouter.ai',), r'^/api/v1(/|$)')])
             self.assertEqual(cell.egress, frozenset({'pypi.org', 'openrouter.ai', 'models.dev'}))
             self.assertEqual(
                 proxy.identifiers(cell.grants),
@@ -1347,6 +1359,31 @@ class HermesTests(unittest.TestCase):
             )
             # Codex cells get no Hermes rule.
             self.assertEqual(await proxy.runtime_rules({'runtime': 'codex'}), ())
+            await proxy.registry.unregister('th')
+
+        asyncio.run(scenario())
+
+    def test_a_cell_registers_on_the_endpoint_stored_now_not_a_cached_one(self):
+        """The credential cache holds a value for a minute; a cell started right after the user
+        changed the endpoint must still get the new host, rule and base URL."""
+        current = dict(HERMES)
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)),
+            credentials=self.module.Credentials(lambda r: dict(current), clock=lambda: 0.0),
+        )
+
+        async def scenario():
+            request = {'task': 'th', 'agent': 'a', 'connectors': [], 'runtime': 'hermes'}
+            await proxy.registry.register(request, await proxy.runtime_rules(request))
+            await proxy.registry.unregister('th')
+            current.update(host='api.together.xyz', base_url='https://api.together.xyz/v2', model='m2')
+            await proxy.registry.register(request, await proxy.runtime_rules(request))
+            cell = proxy.registry.cells['th']
+            self.assertEqual([(r.hosts, r.path) for r in cell.extra], [(('api.together.xyz',), r'^/v2(/|$)')])
+            self.assertEqual(
+                proxy.identifiers(cell.grants),
+                {'hermes_base_url': 'https://api.together.xyz/v2', 'hermes_model': 'm2'},
+            )
             await proxy.registry.unregister('th')
 
         asyncio.run(scenario())

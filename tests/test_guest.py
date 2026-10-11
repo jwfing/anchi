@@ -188,3 +188,24 @@ class RuntimeLayerTests(unittest.TestCase):
             script = (self.lib / f'build-runtime-{runtime}.sh').read_text()
             self.assertNotIn('apt-get', script, runtime)
             self.assertIn('sha256sum -c', script, runtime)
+
+
+class LiveCheckOverlayTests(unittest.TestCase):
+    """The live start-up measurement runs on the overlay a Codex cell gets. Layer names follow
+    the build scripts and their pins, so the check asks the manager for them."""
+
+    def setUp(self):
+        guest = Path(__file__).parents[1] / 'guest'
+        self.guest = guest
+        spec = importlib.util.spec_from_file_location('check_anchi', guest / 'check-anchi.py')
+        self.check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.check)
+
+    def test_the_overlay_comes_from_the_manager_not_a_layer_path(self):
+        script = (self.guest / 'check-anchi.py').read_text()
+        self.assertIn("lowerdirs(cell.BASE_IMAGE, 'base', runtime='codex')", script)
+        self.assertNotIn(str(anchi_cell.LAYERS), script)
+
+    def test_the_manager_is_where_the_installer_puts_it(self):
+        install = (self.guest / 'install-anchi.sh').read_text()
+        self.assertIn(f'"$src/anchi_cell.py" {self.check.MANAGER}', install)

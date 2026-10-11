@@ -30,7 +30,7 @@ for Linux prerequisites and the source development workflow.
 |---|---|
 | Lima VM with trusted services; each task in a disposable systemd-nspawn cell with loopback-only networking | Implemented; `make verify-vm` and `make verify-anchi` run the live isolation checks |
 | Codex and Claude Code in cells, holding placeholders only | Implemented; the proxy substitutes subscription tokens replace-only; the Codex login is re-imported from your machine as it refreshes |
-| Hermes Agent in cells, on an OpenAI-compatible endpoint you choose | Implemented; your API key stays in the vault and the proxy substitutes it on that endpoint's host only; not yet checked against a live endpoint |
+| Hermes Agent in cells, on an OpenAI-compatible endpoint you choose | Implemented; your API key stays in the vault and the proxy substitutes it under that endpoint's base URL only; not yet checked against a live endpoint |
 | Each runtime as its own image layer, installed the first time an agent uses it | Implemented; `anchi setup install` builds only the base layer |
 | GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads) and Linear through the egress proxy | Implemented; credential minting denied; credentials verified at import |
 | Gmail, Drive, Notion and Slack through trusted services, reached through a per-cell bridge that names the agent | Implemented; Gmail is read-only; per-service and per-agent write approval |

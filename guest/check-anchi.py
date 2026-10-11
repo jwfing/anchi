@@ -9,6 +9,7 @@ Covers phase 1 M1/M2 acceptance:
 - credential-minting APIs denied; an agent without a connector gets no injection.
 """
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,17 @@ import time
 
 CELLS = Path('/run/anchi/cells')
 AUDIT = Path('/var/log/anchi-egress/audit.jsonl')
+MANAGER = Path('/opt/secure-vm/anchi/anchi_cell.py')
 results = []
+
+
+def manager():
+    """The installed cell manager. Layers are named from their build scripts and pins, so the
+    overlay a cell runs on is asked for, never guessed."""
+    spec = importlib.util.spec_from_file_location('anchi_cell', MANAGER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def check(name, ok, detail=''):
@@ -123,14 +134,18 @@ def main():
             'ANCHI_CHECK_WITH_TASKS=1 runs anyway, leaving those cells alone.'
         )
     subprocess.run(['anchi-cell', 'reap', *tasks], capture_output=True)
-    # The check cells run Codex, whose layer is built the first time an agent uses it.
+    # The check cells run Codex, whose layer is built the first time an agent uses that runtime.
     status = subprocess.run(['anchi-image', 'status', 'runtime-codex', 'runtime'], capture_output=True, text=True)
     present = status.returncode == 0 and json.loads(status.stdout or '{}').get('present') is True
-    built = present or subprocess.run(
-        ['anchi-image', 'build', 'runtime-codex', 'runtime'], capture_output=True, text=True
-    )
-    if built is not True and built.returncode:
-        raise SystemExit(f'cannot build the Codex runtime layer: {built.stdout[-500:]}')
+    if not present:
+        built = subprocess.run(
+            ['anchi-image', 'build', 'runtime-codex', 'runtime'],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
+        if built.returncode:
+            raise SystemExit(f'cannot build the Codex runtime layer: {built.stdout[-500:]}')
     t0 = time.time()
 
     # ── M1: concurrency and isolation ──
@@ -533,15 +548,14 @@ def check_workspaces():
 
 
 def measure_nspawn():
-    """Median time for nspawn to run `true` in a volatile cell on the base image."""
+    """Median time for nspawn to run `true` in a volatile cell on the image a Codex cell uses:
+    the Codex runtime layer over the base layer over the rootfs."""
     env = dict(re.findall(r'^(\w+)=(.*)$', Path('/opt/secure-vm/cell.env').read_text(), re.M))
     root = Path('/run/anchi/chk-root')
     root.mkdir(parents=True, exist_ok=True)
-    lower = sorted(Path('/var/lib/anchi/layers/codex').glob('codex-*/upper'))[-1]
-    subprocess.run(
-        ['mount', '-t', 'overlay', 'overlay', '-o', f'ro,lowerdir={lower}:/var/lib/secure-vm/rootfs', str(root)],
-        check=True,
-    )
+    cell = manager()
+    lower = cell.lowerdirs(cell.BASE_IMAGE, 'base', runtime='codex')
+    subprocess.run(['mount', '-t', 'overlay', 'overlay', '-o', f'ro,lowerdir={lower}', str(root)], check=True)
     times = []
     try:
         for _ in range(5):

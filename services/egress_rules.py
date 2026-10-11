@@ -137,15 +137,19 @@ def find_rule(host, extra=()):
     return None
 
 
-def hermes_rule(host):
+def hermes_rule(host, base_path=''):
     """The rule for the user's OpenAI-compatible endpoint, which only the vault knows. Its host
-    never has a built-in rule (hermes_admin refuses those), so it cannot shadow one."""
+    never has a built-in rule (hermes_admin refuses those), so it cannot shadow one. The key is
+    injected under the base URL's path only; anything else on that host is left as the cell sent
+    it, placeholder and all."""
+    prefix = base_path.rstrip('/')
     return Rule(
         name='hermes',
         hosts=(host,),
         kind='bearer',
         grant='hermes',
         replace_only=True,
+        path=f'^{re.escape(prefix)}(/|$)' if prefix else None,
         # OpenAI-style administration (organization, projects, API keys) is not an agent's business.
         deny=(r'(?i)^\S+ (/[^ ]*)?/(organization|organizations|dashboard)(/|$)',),
     )

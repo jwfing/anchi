@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MAX_EVENT_TEXT,
@@ -14,7 +14,7 @@ import { ANCHI_MCP, SKILLS_PLUGIN } from './claude.ts';
  * Hermes Agent, driven over ACP (JSON-RPC on the stdio of `hermes acp`). One Hermes process and
  * one ACP session serve the runner's turns; the session id is the resume id. Hermes reaches the
  * user's OpenAI-compatible endpoint with a placeholder key, which the egress proxy replaces on
- * that endpoint's host only.
+ * that endpoint's base URL only.
  */
 
 export const HERMES_PATH = '/opt/hermes/venv/bin/hermes';
@@ -40,8 +40,6 @@ export function hermesConfig(baseUrl: string, model: string, skills: boolean): s
     '  check: false',
     'model_catalog:',
     '  enabled: false',
-    'plugins:',
-    '  auto_update_check_hours: 0',
     'security:',
     '  allow_lazy_installs: false',
     'approvals:',
@@ -289,8 +287,12 @@ async function start(turn: HermesTurn): Promise<AcpClient> {
   mkdirSync(home, { recursive: true, mode: 0o700 });
   writeFileSync(join(home, 'config.yaml'), hermesConfig(baseUrl, model, existsSync(SKILLS_PLUGIN)));
   // The agent's instructions are Hermes's persona (SOUL.md); its own tool guidance stays.
+  // An emptied prompt removes the file: the agent home outlives a turn, and a persona the user
+  // deleted must not keep speaking.
+  const soul = join(home, 'SOUL.md');
   const instructions = turn.options.instructions?.trim();
-  if (instructions) writeFileSync(join(home, 'SOUL.md'), instructions + '\n');
+  if (instructions) writeFileSync(soul, instructions + '\n');
+  else rmSync(soul, { force: true });
   const child = spawn(turn.bin ?? HERMES_PATH, ['acp'], {
     cwd: turn.options.workdir,
     env: turn.env,
