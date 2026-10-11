@@ -51,6 +51,8 @@ An agent is a YAML file. Fields:
   every?: minutes } where text may use {title}, {url} and {id}. Outside content then reaches
   the agent: tell the user, who may want approvals for its writes.
 - delegates: ids of agents this agent may hand tasks to (optional).
+- maxTasks: how many of its tasks run at the same time (optional, 1-10, default 3); the others
+  queue. Use 1 for an agent whose tasks must not overlap.
 - approvals: per connector, ask to hold every write for the user's approval (optional), e.g.
   { github: ask }. Without it, writes go straight through; high-risk operations (merging a pull
   request, pushing to main or master, deleting a branch or repository, AWS deletions, ...) wait
@@ -115,6 +117,8 @@ export function builderAgent(): ResolvedAgent {
     prompt: { mode: 'append', text: SKILL },
     connectors: [],
     image: BASE_IMAGE,
+    // One conversation at a time: proposals build on the previous turn.
+    maxTasks: 1,
   });
   return { ...agent, sourceFiles: [] };
 }

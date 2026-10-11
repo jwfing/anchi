@@ -3,7 +3,7 @@
 The TUI binds named actions to keys per view. Three rules keep it usable inside other terminal programs:
 
 1. **Every action has a leader binding.** Press the leader, **Ctrl+X** by default, then one key: **^X n** starts a new task. Tmux (Ctrl+B), screen (Ctrl+A), zellij and herdr leave Ctrl+X alone. After the leader, a panel lists the keys that can follow it; **Esc** cancels, and so does a three-second pause.
-2. **Views without a text input use plain keys.** The sidebar, task details and the Configure screens bind letters such as **j k / [ ] c D**. In the agent chat, printable keys always type text.
+2. **Views without a text input use plain keys.** The sidebar and the Configure screens bind letters such as **j k / [ ] D**. In an agent's view and a task's view, printable keys always type text; their actions take the leader.
 3. **The chat input keeps standard line editing.** Ctrl+A, Ctrl+E, Ctrl+U and the other editing keys do what they do in a shell. They cannot be rebound in the chat.
 
 **^X Space** (or **^X p**) opens the command palette: type to filter every command of the current view, **Enter** runs it. **?** in views without a text input, or **^X ?** anywhere, lists the keys of the current view.
@@ -36,7 +36,9 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X ? | Keys of this view |
 | ^X q, Ctrl+C | Quit (the daemon and running tasks keep going) |
 
-### Agent chat
+### Agent view and task view
+
+An agent's view lists its tasks; its input starts a new task. A task's view shows the task; its input replies to it. Both inputs take these keys.
 
 | Keys | Action |
 |---|---|
@@ -65,7 +67,7 @@ Team overview lists each agent’s current activity, pending approvals and deleg
 
 ### Task
 
-Enter continues the task in its agent's chat, a shows its external access, R runs a failed or cancelled one again, c asks before cancelling it, D deletes it, [ ] turn task pages, ↑ ↓ (k j) PgUp PgDn scroll, Esc ← (h) back to the sidebar.
+Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a failed or cancelled one again, ^X l shows its external access, ^X h switches between its result and transcript, ^X D deletes it, ^X [ ^X ] turn task pages, ^X n goes to its agent's view for a new task.
 
 ### Configure
 

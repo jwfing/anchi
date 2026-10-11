@@ -104,9 +104,15 @@ describe('key maps', () => {
       kind: 'action',
       action: 'nav:next',
     });
-    expect(resolve(DEFAULT_KEYMAP, ['task', 'global'], ['j'])).toEqual({
+    // A task's view takes text: its own bindings use the leader, before the global ones.
+    expect(resolve(DEFAULT_KEYMAP, ['chat', 'task', 'global'], ['j'])).toEqual({ kind: 'none' });
+    expect(resolve(DEFAULT_KEYMAP, ['chat', 'task', 'global'], ['ctrl+x', 'D'])).toEqual({
       kind: 'action',
-      action: 'scroll:down',
+      action: 'task:delete',
+    });
+    expect(resolve(DEFAULT_KEYMAP, ['chat', 'global'], ['ctrl+x', 'D'])).toEqual({
+      kind: 'action',
+      action: 'agent:delete',
     });
     const next = continuations(DEFAULT_KEYMAP, active, ['ctrl+x']);
     expect(next).toContainEqual(['e', 'chat:editor']);

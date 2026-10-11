@@ -27,7 +27,9 @@ const agent = (id: string, over: Partial<AgentSummary> = {}): AgentSummary => ({
   connectors: ['github'],
   sandbox: 'cell',
   status: 'idle',
+  running: 0,
   queued: 0,
+  maxTasks: 3,
   file: `/agents/${id}.yaml`,
   ...over,
 });
@@ -103,6 +105,20 @@ async function frameWith(ui: { lastFrame: () => string | undefined }, text: stri
   const deadline = Date.now() + ms;
   while (!(ui.lastFrame() ?? '').includes(text) && Date.now() < deadline) await tick(10);
   return ui.lastFrame() ?? '';
+}
+
+/** From an agent's view: to the sidebar, the Tasks section, down `index` tasks, and open it. */
+async function openTask(ui: { stdin: { write: (s: string) => void } }, index = 0) {
+  ui.stdin.write('\u001b'); // Esc with an empty draft: the sidebar
+  await tick();
+  ui.stdin.write('3'); // the first task
+  await tick();
+  for (let i = 0; i < index; i++) {
+    ui.stdin.write('j');
+    await tick();
+  }
+  ui.stdin.write('\r'); // open it: its view, with an input
+  await tick();
 }
 
 describe('sanitize', () => {
@@ -239,10 +255,11 @@ describe('App', () => {
       <App
         client={client}
         initialAgents={[agent('dev')]}
-        initialTasks={[task('t-a000000001', 'dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { status: 'running' })]}
       />,
     );
     await tick();
+    await openTask(ui);
     const frame = ui.lastFrame() ?? '';
     expect(frame).toContain('[y] write these files');
     expect(frame).not.toContain(`${ESC}]52`);
@@ -254,35 +271,42 @@ describe('App', () => {
     ui.unmount();
   });
 
-  it('sends a follow-up to the shown task and starts a new task after ^X n', async () => {
+  it("starts a task with each message in the agent's view, and replies in the task's view", async () => {
     const { client, calls } = fakeClient();
     const ui = render(
       <App
         client={client}
         initialAgents={[agent('dev')]}
-        initialTasks={[task('t-a000000001', 'dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { title: 'earlier job' })]}
       />,
     );
     await tick();
-    ui.stdin.write('more please');
+    // The agent's view lists its tasks; a message starts another one.
+    expect(ui.lastFrame()).toContain('t-a000000001  earlier job');
+    expect(ui.lastFrame()).toContain('New task for @dev · 0 running · 0 queued (up to 3 at once)');
+    ui.stdin.write('new job\r');
     await tick();
-    ui.stdin.write('\r');
+    expect(calls.filter(([m]) => m === 'tasks.create').map(([, p]) => p)).toEqual([
+      { agentId: 'dev', text: 'new job' },
+    ]);
+    expect(calls.some(([m]) => m === 'tasks.send')).toBe(false);
+    // The task's own view replies to it.
+    await openTask(ui, 1);
+    expect(ui.lastFrame()).toContain('Reply to t-a000000001');
+    ui.stdin.write('more please\r');
     await tick();
     expect(calls.find(([m]) => m === 'tasks.send')?.[1]).toEqual({
       taskId: 't-a000000001',
       text: 'more please',
     });
-    ui.stdin.write('\u0018'); // leader…
+    // ^X n goes back to the agent's view for a new task.
+    ui.stdin.write('\u0018');
     await tick();
-    expect(ui.lastFrame()).toContain('New task (a new session) for this agent'); // which-key
-    ui.stdin.write('n'); // …n: new task
-    await tick();
-    ui.stdin.write('new job\r');
-    await tick();
-    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
-      agentId: 'dev',
-      text: 'new job',
-    });
+    expect(ui.lastFrame()).toContain('New task for this agent (from a task');
+    ui.stdin.write('n');
+    expect(await frameWith(ui, 'New task for @dev')).toContain(
+      'each message here starts a new task',
+    );
     ui.unmount();
   });
 
@@ -306,8 +330,8 @@ describe('App', () => {
     await tick();
     ui.stdin.write('，谢谢\r');
     await tick();
-    expect(calls.find(([m]) => m === 'tasks.send')?.[1]).toEqual({
-      taskId: 't-a000000001',
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
       text: '修复登录页的错误，谢谢',
     });
     ui.unmount();
@@ -457,9 +481,15 @@ describe('App', () => {
       />,
     );
     await tick();
+    await openTask(ui);
+    ui.stdin.write('\u0018'); // ^X h: the transcript instead of the result
+    await tick();
+    ui.stdin.write('h');
+    await tick();
     expect(ui.lastFrame()).toContain('2 tool calls');
     expect(ui.lastFrame()).not.toContain('shell pwd\n');
-    mouse!({ kind: 'press', button: 0, x: 40, y: 4 });
+    // A task's view has two lines of details above its transcript.
+    mouse!({ kind: 'press', button: 0, x: 40, y: 6 });
     await tick();
     expect(ui.lastFrame()).toContain('▾ 2 tool calls');
     expect(ui.lastFrame()).toContain('▸ shell ls');
@@ -508,17 +538,24 @@ describe('App', () => {
     await tick();
     ui.stdin.write('\r'); // the click focused the sidebar; Enter opens the task
     await tick();
-    expect(ui.lastFrame()).toContain('c cancel');
+    expect(ui.lastFrame()).toContain('^X c cancel');
+    // Letters go to the reply input; the task's actions take the leader.
     ui.stdin.write('c');
     await tick();
     expect(calls.some(([m]) => m === 'tasks.cancel')).toBe(false);
+    ui.stdin.write('\u007f\u0018');
+    await tick();
+    ui.stdin.write('c');
+    await tick();
     ui.stdin.write('y');
     await tick();
     expect(calls.find(([m]) => m === 'tasks.cancel')?.[1]).toEqual({ taskId: 't-a000000001' });
-    ui.stdin.write('\r'); // continue in the agent's chat
+    ui.stdin.write('\u0018'); // ^X n: the agent's view, listing its tasks
+    await tick();
+    ui.stdin.write('n');
     await tick();
     expect(ui.lastFrame()).toContain('@dev · dev');
-    expect(ui.lastFrame()).toContain('t-a000000001');
+    expect(ui.lastFrame()).toContain('t-a000000001  older task');
     ui.unmount();
   });
 
@@ -549,6 +586,8 @@ describe('App', () => {
     ui.stdin.write('j'); // next task
     await tick();
     ui.stdin.write('\r'); // open it
+    await tick();
+    ui.stdin.write('\u0018'); // ^X c
     await tick();
     ui.stdin.write('c');
     await tick();
@@ -882,15 +921,17 @@ describe('key bindings in the TUI', () => {
     ui.stdin.write(LEADER);
     await tick();
     ui.stdin.write(' ');
-    expect(await frameWith(ui, 'Commands · Agent chat')).toContain('Compose in $EDITOR');
+    expect(await frameWith(ui, 'Commands · Agent view')).toContain('Compose in $EDITOR');
     ui.stdin.write('new task');
     await tick();
     const frame = ui.lastFrame() ?? '';
-    expect(frame).toContain('New task (a new session) for this agent');
+    expect(frame).toContain("New task for this agent (from a task: its agent's view)");
     expect(frame).toContain('^X n');
     expect(frame).not.toContain('Compose in $EDITOR');
     ui.stdin.write('\r');
-    expect(await frameWith(ui, 'the next message starts a new task')).toContain('· new task');
+    expect(await frameWith(ui, 'each message here starts a new task')).toContain(
+      'New task for @dev',
+    );
     ui.unmount();
   });
 
@@ -1426,7 +1467,7 @@ describe('deleting agents', () => {
 });
 
 describe('running a failed task again', () => {
-  it('offers to continue the session or start over, from the task and from the chat', async () => {
+  it("offers to continue the session or start over, from the task's view", async () => {
     const { client, calls } = fakeClient(
       {},
       {
@@ -1444,13 +1485,15 @@ describe('running a failed task again', () => {
       />,
     );
     await tick();
-    ui.stdin.write('\u001b'); // the chat shows the failed task; to the sidebar
+    ui.stdin.write('\u001b'); // to the sidebar
     await tick();
     ui.stdin.write('3'); // the task
     await tick();
-    ui.stdin.write('\t'); // its detail
-    expect(await frameWith(ui, 'R retry')).toContain('R retry');
-    ui.stdin.write('R');
+    ui.stdin.write('\t'); // its view
+    expect(await frameWith(ui, '^X r retry')).toContain('^X r retry');
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('r');
     expect(await frameWith(ui, 'Run t-a000000001 (@dev) again?')).toContain('It failed.');
     ui.stdin.write('c');
     expect(await frameWith(ui, 't-a000000001 continues')).toContain('@dev');
@@ -1458,7 +1501,7 @@ describe('running a failed task again', () => {
       taskId: 't-a000000001',
       fresh: false,
     });
-    ui.stdin.write('\u0018'); // ^X r in the chat
+    ui.stdin.write('\u0018'); // ^X r again, in the task's view it opened
     await tick();
     ui.stdin.write('r');
     await frameWith(ui, 'again?');
@@ -1522,7 +1565,9 @@ describe('access and usage views', () => {
     await tick();
     ui.stdin.write('\t');
     await tick();
-    ui.stdin.write('a');
+    ui.stdin.write('\u0018'); // ^X l: the task's access
+    await tick();
+    ui.stdin.write('l');
     expect(await frameWith(ui, 'e allow a refused host')).toContain('egress-denied');
     ui.stdin.write('e');
     expect(await frameWith(ui, 'Allow a host this task was refused')).toContain('› pypi.org');
@@ -1541,7 +1586,7 @@ describe('access and usage views', () => {
     ui.unmount();
   });
 
-  it("opens a task's external access with a, and the usage screen with its periods and groupings", async () => {
+  it("opens a task's external access with ^X l, and the usage screen with its periods and groupings", async () => {
     const audit = {
       taskId: 't-a000000001',
       total: 1,
@@ -1607,8 +1652,10 @@ describe('access and usage views', () => {
     ui.stdin.write('3');
     await tick();
     ui.stdin.write('\t');
-    expect(await frameWith(ui, 'a access')).toContain('a access');
-    ui.stdin.write('a');
+    expect(await frameWith(ui, '^X l access')).toContain('^X l access');
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('l');
     const frame = await frameWith(ui, '1 with credentials injected by the proxy');
     expect(frame).toContain('1 with credentials injected by the proxy');
     expect(frame).toContain('egress       github.com');
@@ -1713,6 +1760,8 @@ describe('usability workflows', () => {
         setMouse={(on) => mouse.push(on)}
       />,
     );
+    await tick();
+    await openTask(ui);
     await frameWith(ui, 'copy me');
     ui.stdin.write('\u0018'); // ^X
     await tick();
@@ -1753,7 +1802,13 @@ describe('usability workflows', () => {
         ]}
       />,
     );
-    const frame = await frameWith(ui, 'Picking connectors');
+    // The agent's view lists the running task with what it is doing…
+    const list = await frameWith(ui, 'Picking connectors');
+    expect(list).toMatch(/● running\s+t-a000000001  fix it[ │]*\n[^\n]*│ {5}Picking connectors/);
+    expect(ui.lastFrame()).toContain('New task for @dev · 1 running');
+    // …and the task's view shows it under the transcript.
+    await openTask(ui);
+    const frame = await frameWith(ui, 'working 1m');
     expect(frame).toMatch(/working 1m\d+s · Picking connectors/);
     ui.unmount();
   });

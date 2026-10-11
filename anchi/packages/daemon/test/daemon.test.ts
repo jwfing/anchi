@@ -401,6 +401,32 @@ describe('daemon tasks', () => {
     expect(notes).toContain(`↻ started again as ${fresh.id}`);
   });
 
+  it("runs up to the agent's maxTasks turns at once and queues the rest", async () => {
+    write('agents/dev.yaml', 'runtime: codex\nconnectors: [github]\nmaxTasks: 2\n');
+    transport.mode = 'slow';
+    const { client } = await start();
+    const tasks: { id: string }[] = [];
+    for (const text of ['one', 'two', 'three'])
+      tasks.push(await client.call('tasks.create', { agentId: 'dev', text }));
+    await new Promise((r) => setTimeout(r, 300));
+    const status = async () =>
+      Promise.all(
+        tasks.map(async (t) => (await client.call('tasks.get', { taskId: t.id })).status),
+      );
+    expect(await status()).toEqual(['running', 'running', 'queued']);
+    const summary = (await client.call('agents.list')).find((x) => x.id === 'dev')!;
+    expect(summary).toMatchObject({ status: 'working', running: 2, queued: 1, maxTasks: 2 });
+    // One turn per task: a follow-up to a running task is refused, not run beside it.
+    await expect(client.call('tasks.send', { taskId: tasks[0]!.id, text: 'more' })).rejects.toThrow(
+      /turn in progress/,
+    );
+    // A slot that frees up goes to the queued task.
+    await client.call('tasks.cancel', { taskId: tasks[0]!.id });
+    await client.call('tasks.wait', { taskId: tasks[0]!.id });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await status()).toEqual(['cancelled', 'running', 'running']);
+  });
+
   it('cancels a running task', async () => {
     transport.mode = 'slow';
     const { client, daemon } = await start();
