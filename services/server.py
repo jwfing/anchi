@@ -34,7 +34,7 @@ def handler_for(mode):
 def credential_ops(caller):
     """Which auth operations a trusted service identity may request; the kernel UID picks the caller."""
     if caller == 'egress':
-        return ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
+        return ('egress_credential', 'codex_token', 'codex_account', 'claude_token', 'hermes_credential')
     connector = connectors.CONNECTORS.get(caller)
     if connector is None:
         return ()

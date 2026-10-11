@@ -14,7 +14,11 @@ export function windowLabel(w: QuotaWindow): string {
   return `${m}-minute`;
 }
 
-const RUNTIME: Record<string, string> = { codex: 'Codex', 'claude-code': 'Claude Code' };
+const RUNTIME: Record<string, string> = {
+  codex: 'Codex',
+  'claude-code': 'Claude Code',
+  hermes: 'Hermes',
+};
 
 /**
  * Notifies once when a subscription window passes 80% and once past 95% (per window period,

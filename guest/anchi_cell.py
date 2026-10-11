@@ -44,7 +44,7 @@ CELL_ENV = Path('/opt/secure-vm/cell.env')
 APPARMOR_PROFILE = Path('/etc/apparmor.d/anchi-cell-bwrap')
 MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '4'))
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
-HASH = re.compile(r'^(base|[0-9a-f]{16})$')
+HASH = re.compile(r'^(base|runtime|[0-9a-f]{16})$')
 # Credentials injected by the egress proxy, and services reached through per-cell sockets.
 PROXY_CONNECTORS = ('github', 'aws', 'linear')
 # Codex reads its MCP servers from config.toml; `anchi` is the in-cell Anchi tool server.
@@ -64,6 +64,9 @@ ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
 CONNECTORS = PROXY_CONNECTORS + SERVICE_CONNECTORS
 SANDBOXES = ('cell', 'codex-workspace-write')
 BASE_IMAGE = 'codex'
+# Each runtime is a layer on the base, built the first time an agent of that runtime starts a
+# task (build-runtime-<runtime>.sh), and stacked over the agent's recipe layer, if any.
+RUNTIME_IMAGES = {'codex': 'runtime-codex', 'claude-code': 'runtime-claude-code', 'hermes': 'runtime-hermes'}
 PROXY = 'http://127.0.0.1:3128'
 CA_IN_CELL = '/etc/ssl/certs/ca-certificates.crt'
 # Placeholders: recognizable to the proxy, useless anywhere else.
@@ -197,16 +200,30 @@ def approvals_decide(approval_id, verdict):
 # ── images ──────────────────────────────────────────────────
 
 
-def base_version():
-    """Names the base layer; a new runtime pin or a changed build script is a new base."""
+def script_version(path):
+    """A build script's version: its text and the cell.env pins it reads. A changed script or
+    pin names a new layer, which is built again."""
+    text = path.read_bytes()
     env = cell_env()
-    script = hashlib.sha256((LIB / 'build-base.sh').read_bytes()).hexdigest()[:8]
-    return f'codex-{env["ANCHI_CODEX_VERSION"]}-claude-{env["ANCHI_CLAUDE_VERSION"]}-{script}'
+    digest = hashlib.sha256(text)
+    for key in sorted(set(re.findall(rb'\$\{?(ANCHI_[A-Z0-9_]+)', text))):
+        digest.update(b'\n' + key + b'=' + env.get(key.decode(), '').encode())
+    return digest.hexdigest()[:12]
+
+
+def base_version():
+    return f'base-{script_version(LIB / "build-base.sh")}'
+
+
+def runtime_script(image):
+    return LIB / f'build-{image}.sh'
 
 
 def layer_dir(image, digest):
     if image == BASE_IMAGE:
         return LAYERS / BASE_IMAGE / base_version()
+    if image in RUNTIME_IMAGES.values():
+        return LAYERS / image / f'{script_version(runtime_script(image))}-on-{base_version()}'
     return LAYERS / image / digest
 
 
@@ -221,7 +238,8 @@ def layer_meta(image, digest):
     return meta
 
 
-def lowerdirs(image, digest):
+def lowerdirs(image, digest, runtime=None):
+    """Overlay lower directories, top first: the runtime layer, the recipe layer, the base."""
     base = layer_meta(BASE_IMAGE, 'base')
     if base is None:
         raise Failure('BASE_IMAGE_NOT_BUILT')
@@ -230,6 +248,11 @@ def lowerdirs(image, digest):
         if layer_meta(image, digest) is None:
             raise Failure('IMAGE_NOT_BUILT')
         dirs.insert(0, layer_dir(image, digest) / 'upper')
+    if runtime is not None:
+        layer = RUNTIME_IMAGES[runtime]
+        if layer_meta(layer, 'runtime') is None:
+            raise Failure('RUNTIME_IMAGE_NOT_BUILT')
+        dirs.insert(0, layer_dir(layer, 'runtime') / 'upper')
     return ':'.join(str(d) for d in [*dirs, BASE])
 
 
@@ -289,11 +312,15 @@ def proxy_env():
 
 def image_build(image, digest):
     name(image, 'BAD_IMAGE')
-    if not HASH.fullmatch(digest) or (digest == 'base') != (image == BASE_IMAGE):
+    runtime = image in RUNTIME_IMAGES.values()
+    if not HASH.fullmatch(digest) or (digest == 'base') != (image == BASE_IMAGE) or (digest == 'runtime') != runtime:
         raise Failure('BAD_HASH')
     if image == BASE_IMAGE:
         script = (LIB / 'build-base.sh').read_text()
         lower = str(BASE)
+    elif runtime:
+        script = runtime_script(image).read_text()
+        lower = lowerdirs(BASE_IMAGE, 'base')
     else:
         raw = sys.stdin.buffer.read(256 * 1024 + 1)
         if len(raw) > 256 * 1024:
@@ -438,7 +465,7 @@ def image_list():
 
 def image_remove(image):
     name(image, 'BAD_IMAGE')
-    if image == BASE_IMAGE:
+    if image == BASE_IMAGE or image in RUNTIME_IMAGES.values():
         raise Failure('BASE_IMAGE_PROTECTED')
     in_use = [m for m in cell_metas() if m.get('image') == image]
     if in_use:
@@ -602,6 +629,17 @@ def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
         env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
         # Delegation tools wait for another agent's turn (bounded by the daemon at 55 minutes).
         env['MCP_TOOL_TIMEOUT'] = '3600000'
+    if runtime == 'hermes':
+        # The runner writes Hermes's config from these; the key in it is a placeholder the proxy
+        # replaces on this endpoint's host only.
+        env['ANCHI_HERMES_BASE_URL'] = identifiers['hermes_base_url']
+        env['ANCHI_HERMES_MODEL'] = identifiers['hermes_model']
+        env['HERMES_HOME'] = '/home/agent/.hermes'
+        # The cell is the boundary: no command or edit approvals inside it, no MCP servers but
+        # Anchi's, and no package installs at run time (the image is pinned).
+        env['HERMES_YOLO_MODE'] = '1'
+        env['HERMES_ACP_SKIP_CONFIGURED_MCP'] = '1'
+        env['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
     if 'github' in connectors:
         env['GH_TOKEN'] = f'{PLACEHOLDER}-github'
         env['GH_PROMPT_DISABLED'] = '1'
@@ -646,7 +684,7 @@ def cleanup(task):
     shutil.rmtree(work, ignore_errors=True)
 
 
-RUNTIMES = {'codex': 'codex', 'claude-code': 'claude'}  # agent runtime -> proxy grant
+RUNTIMES = {'codex': 'codex', 'claude-code': 'claude', 'hermes': 'hermes'}  # agent runtime -> proxy grant
 CLAUDE_PLACEHOLDERS = {
     'oauth': ('CLAUDE_CODE_OAUTH_TOKEN', 'sk-ant-oat01-anchi-placeholder-' + '0' * 40),
     'api_key': ('ANTHROPIC_API_KEY', 'sk-ant-api03-anchi-placeholder-' + '0' * 40),
@@ -815,7 +853,7 @@ def cell_start(
             raise Failure('TASK_CELL_EXISTS')
         if len([d for d in CELLS.iterdir() if d.is_dir()]) >= MAX_CELLS:
             raise Failure('TOO_MANY_CELLS')
-        lower = lowerdirs(image, digest)
+        lower = lowerdirs(image, digest, runtime)
         work.mkdir(mode=0o700)
         (work / 'meta.json').write_text(
             json.dumps(
@@ -862,6 +900,9 @@ def cell_start(
                 raise Failure('CODEX_NOT_CONFIGURED')
             write_owned(home / '.codex/auth.json', codex_placeholder(identifiers['codex_account_id']), uid)
             write_owned(home / '.codex/config.toml', CODEX_CONFIG, uid)
+        elif runtime == 'hermes':
+            if not identifiers.get('hermes_base_url') or not identifiers.get('hermes_model'):
+                raise Failure('HERMES_NOT_CONFIGURED')
         elif identifiers.get('claude_kind') not in CLAUDE_PLACEHOLDERS:
             raise Failure('CLAUDE_NOT_CONFIGURED')
         if sandbox == 'codex-workspace-write':
@@ -1054,6 +1095,7 @@ def real_secrets():
             ('aws', 'aws.json', ('access_key_id', 'secret_access_key', 'session_token')),
             ('codex', 'codex.json', ('access_token',)),
             ('claude', 'claude.json', ('token',)),
+            ('hermes', 'hermes.json', ('api_key',)),
         ):
             if not vault.exists(auth.STORE, file):
                 continue

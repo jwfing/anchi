@@ -157,8 +157,8 @@ function LineText({ line }: { line: Line }) {
 }
 
 type SecretField = { key: string; label: string; masked: boolean; optional?: boolean };
-/** Masked inputs: connector credentials, and the Claude Code token (`claude`). */
-type SecretTarget = ConnectorId | 'claude' | 'notion' | 'slack';
+/** Masked inputs: connector credentials, the Claude Code token and Hermes's endpoint. */
+type SecretTarget = ConnectorId | 'claude' | 'hermes' | 'notion' | 'slack';
 const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
   notion: [
     { key: 'token', label: 'Notion internal integration secret (ntn_… or secret_…)', masked: true },
@@ -170,6 +170,15 @@ const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
       label: 'Claude Code token from `claude setup-token` (sk-ant-oat01-…), or an API key',
       masked: true,
     },
+  ],
+  hermes: [
+    {
+      key: 'baseUrl',
+      label: 'Base URL of an OpenAI-compatible API, e.g. https://openrouter.ai/api/v1',
+      masked: false,
+    },
+    { key: 'apiKey', label: 'API key for that endpoint (stays in the VM vault)', masked: true },
+    { key: 'model', label: 'Default model, e.g. nousresearch/hermes-4-405b', masked: false },
   ],
   github: [{ key: 'token', label: 'GitHub fine-grained token (github_pat_…)', masked: true }],
   linear: [{ key: 'token', label: 'Linear API key (lin_api_…)', masked: true }],
@@ -1324,6 +1333,8 @@ export function App({
         });
       case 'setup:claude':
         return setModal({ kind: 'secret', connector: 'claude', index: 0, values: {}, input: '' });
+      case 'setup:hermes':
+        return setModal({ kind: 'secret', connector: 'hermes', index: 0, values: {}, input: '' });
       case 'setup:refresh':
         return refreshSetup();
       case 'skills:add':
@@ -1666,6 +1677,17 @@ export function App({
             `${id} connected`,
           );
         }
+        if (modal.connector === 'hermes') {
+          return runAction(
+            () =>
+              client.call('setup.importHermes', {
+                baseUrl: values.baseUrl ?? '',
+                apiKey: values.apiKey ?? '',
+                model: values.model ?? '',
+              }),
+            'Hermes endpoint stored',
+          );
+        }
         if (modal.connector === 'claude') {
           return runAction(
             () => client.call('setup.importClaude', { token: values.token ?? '' }),
@@ -2006,6 +2028,7 @@ export function App({
           ['welcome:next', 'continue'],
           ['setup:codex', 'Codex'],
           ['setup:claude', 'Claude'],
+          ['setup:hermes', 'Hermes'],
           ['setup:logs', 'logs'],
         ]
       : context === 'team'
@@ -2077,6 +2100,7 @@ export function App({
                           ['setup:workspaces', 'workspaces'],
                           ['setup:codex', 'Codex'],
                           ['setup:claude', 'Claude'],
+                          ['setup:hermes', 'Hermes'],
                         ];
   const status = pending.length
     ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
@@ -2694,6 +2718,18 @@ function RuntimesView({
         ) : (
           <Text color="yellow">
             not connected — run `claude setup-token` on this computer, then press c
+          </Text>
+        )}
+      </Text>
+      <Text>
+        Hermes:{' '}
+        {setup.hermes?.connected ? (
+          <Text color="green">
+            {sanitizeLine(setup.hermes.baseUrl ?? '')} · {sanitizeLine(setup.hermes.model ?? '')}
+          </Text>
+        ) : (
+          <Text color="yellow">
+            not set up — press h for an OpenAI-compatible endpoint and API key
           </Text>
         )}
       </Text>

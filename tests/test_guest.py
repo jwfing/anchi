@@ -104,7 +104,7 @@ class BaseImageTests(unittest.TestCase):
             (lib / 'build-base.sh').write_bytes((root / 'anchi-build-base.sh').read_bytes())
             with patch.object(anchi_cell, 'LIB', lib), patch.object(anchi_cell, 'CELL_ENV', root / 'cell.env'):
                 first = anchi_cell.base_version()
-                self.assertRegex(first, r'^codex-[\d.]+-claude-[\d.]+-[0-9a-f]{8}$')
+                self.assertRegex(first, r'^base-[0-9a-f]{12}$')
                 (lib / 'build-base.sh').write_text('#!/bin/sh\necho changed\n')
                 self.assertNotEqual(anchi_cell.base_version(), first)
 
@@ -115,3 +115,97 @@ class BaseImageTests(unittest.TestCase):
         self.assertTrue({'ANCHI_GO_VERSION', 'ANCHI_RUST_VERSION', 'ANCHI_PNPM_VERSION'} <= used)
         for name in used:
             self.assertRegex(env, rf'(?m)^{name}=\S+$', name)
+
+
+class RuntimeLayerTests(unittest.TestCase):
+    """Each runtime is a layer of its own over the base, stacked above an agent's recipe."""
+
+    def setUp(self):
+        import json
+        import tempfile
+        from unittest.mock import patch
+
+        self.json = json
+        root = Path(__file__).parents[1] / 'guest'
+        self.tmp = Path(tempfile.mkdtemp())
+        self.lib = self.tmp / 'lib'
+        self.lib.mkdir()
+        (self.lib / 'build-base.sh').write_bytes((root / 'anchi-build-base.sh').read_bytes())
+        for runtime in ('codex', 'claude-code', 'hermes'):
+            name = f'build-runtime-{runtime}.sh'
+            (self.lib / name).write_bytes((root / f'anchi-{name}').read_bytes())
+        self.env = self.tmp / 'cell.env'
+        self.env.write_text((root / 'cell.env').read_text())
+        for patcher in (
+            patch.object(anchi_cell, 'LIB', self.lib),
+            patch.object(anchi_cell, 'CELL_ENV', self.env),
+            patch.object(anchi_cell, 'LAYERS', self.tmp / 'layers'),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def built(self, image, digest):
+        layer = anchi_cell.layer_dir(image, digest)
+        (layer / 'upper').mkdir(parents=True)
+        (layer / 'meta.json').write_text(self.json.dumps({'ok': True, 'base': anchi_cell.base_version()}))
+        return layer / 'upper'
+
+    def test_layers_stack_runtime_over_recipe_over_base(self):
+        base = self.built('codex', 'base')
+        with self.assertRaises(anchi_cell.Failure) as missing:
+            anchi_cell.lowerdirs('codex', 'base', 'hermes')
+        self.assertEqual(str(missing.exception), 'RUNTIME_IMAGE_NOT_BUILT')
+        hermes = self.built('runtime-hermes', 'runtime')
+        recipe = self.built('node', 'a' * 16)
+        self.assertEqual(
+            anchi_cell.lowerdirs('node', 'a' * 16, 'hermes').split(':'),
+            [str(hermes), str(recipe), str(base), str(anchi_cell.BASE)],
+        )
+        self.assertEqual(anchi_cell.lowerdirs('codex', 'base').split(':'), [str(base), str(anchi_cell.BASE)])
+
+    def test_a_pin_names_a_new_layer_of_the_runtime_that_reads_it(self):
+        hermes = anchi_cell.layer_dir('runtime-hermes', 'runtime')
+        codex = anchi_cell.layer_dir('runtime-codex', 'runtime')
+        base = anchi_cell.base_version()
+        self.env.write_text(self.env.read_text().replace('ANCHI_HERMES_VERSION=', 'ANCHI_HERMES_VERSION=9'))
+        self.assertNotEqual(anchi_cell.layer_dir('runtime-hermes', 'runtime'), hermes)
+        self.assertEqual(anchi_cell.layer_dir('runtime-codex', 'runtime'), codex)
+        self.assertEqual(anchi_cell.base_version(), base)
+        # A new base is a new layer for every runtime built on it.
+        (self.lib / 'build-base.sh').write_text('#!/bin/sh\necho changed\n')
+        self.assertNotEqual(anchi_cell.layer_dir('runtime-codex', 'runtime'), codex)
+
+    def test_runtime_layers_are_built_from_their_script_and_cannot_be_removed(self):
+        for image, digest in (('runtime-hermes', 'base'), ('codex', 'runtime'), ('node', 'runtime')):
+            with self.assertRaises(anchi_cell.Failure, msg=(image, digest)):
+                anchi_cell.image_build(image, digest)
+        with self.assertRaises(anchi_cell.Failure) as removed:
+            anchi_cell.image_remove('runtime-codex')
+        self.assertEqual(str(removed.exception), 'BASE_IMAGE_PROTECTED')
+
+    def test_runtime_build_scripts_never_use_apt(self):
+        for runtime in ('codex', 'claude-code', 'hermes'):
+            script = (self.lib / f'build-runtime-{runtime}.sh').read_text()
+            self.assertNotIn('apt-get', script, runtime)
+            self.assertIn('sha256sum -c', script, runtime)
+
+
+class LiveCheckOverlayTests(unittest.TestCase):
+    """The live start-up measurement runs on the overlay a Codex cell gets. Layer names follow
+    the build scripts and their pins, so the check asks the manager for them."""
+
+    def setUp(self):
+        guest = Path(__file__).parents[1] / 'guest'
+        self.guest = guest
+        spec = importlib.util.spec_from_file_location('check_anchi', guest / 'check-anchi.py')
+        self.check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.check)
+
+    def test_the_overlay_comes_from_the_manager_not_a_layer_path(self):
+        script = (self.guest / 'check-anchi.py').read_text()
+        self.assertIn("lowerdirs(cell.BASE_IMAGE, 'base', runtime='codex')", script)
+        self.assertNotIn(str(anchi_cell.LAYERS), script)
+
+    def test_the_manager_is_where_the_installer_puts_it(self):
+        install = (self.guest / 'install-anchi.sh').read_text()
+        self.assertIn(f'"$src/anchi_cell.py" {self.check.MANAGER}', install)

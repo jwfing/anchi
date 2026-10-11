@@ -23,6 +23,7 @@ import socket
 import struct
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import egress_rules as rules
 
@@ -227,6 +228,8 @@ class Credentials:
             return hit[1]
         if grant == 'claude':
             value = self.fetch({'op': 'claude_token'})
+        elif grant == 'hermes':
+            value = self.fetch({'op': 'hermes_credential'})
         elif grant == 'codex':
             value = self.fetch({'op': 'codex_token'})
             if value.get('expires_at', 0) <= time.time() + 30:
@@ -323,14 +326,16 @@ class Approvals:
 
 
 class Cell:
-    def __init__(self, task, agent, grants, ask=(), egress=None, high_risk_disabled=()):
+    def __init__(self, task, agent, grants, ask=(), egress=None, high_risk_disabled=(), extra=()):
         self.task, self.agent, self.grants = task, agent, frozenset(grants)
+        # Rules from stored settings (the Hermes endpoint), fixed for the cell's life.
+        self.extra = tuple(extra)
         # Connectors whose writes wait for the user's approval.
         self.ask = frozenset(ask)
         # High-risk entries that do not wait for approval for this agent (its `highRisk`).
         self.high_risk_disabled = frozenset(high_risk_disabled)
         # Hosts the cell may reach; None is open egress.
-        self.egress = rules.egress_allowlist(egress, self.grants)
+        self.egress = rules.egress_allowlist(egress, self.grants, self.extra)
         self.server = None
         self.writers = set()
         # Connector services this cell reaches through the bridge, and their sockets.
@@ -396,10 +401,16 @@ class Registry:
         # The cell gets its own runtime's credential only.
         return task, agent, set(connectors) | {runtime}
 
-    async def register(self, request):
+    async def register(self, request, extra=()):
         task, agent, grants = self.validate(request)
         cell = Cell(
-            task, agent, grants, request.get('ask', []), request.get('egress'), request.get('high_risk_disabled', [])
+            task,
+            agent,
+            grants,
+            request.get('ask', []),
+            request.get('egress'),
+            request.get('high_risk_disabled', []),
+            extra,
         )
         cell.directory.mkdir(parents=True, exist_ok=False)
         # The service runs with UMask=0077; the cell's agent user must traverse this directory.
@@ -588,7 +599,7 @@ class EgressProxy:
             if op == 'approvals.decide':
                 result = self.approvals.decide(str(request.get('id', '')), request.get('allow') is True)
             elif op == 'register':
-                result = await self.registry.register(request)
+                result = await self.registry.register(request, await self.runtime_rules(request))
                 result['identifiers'] = self.identifiers(self.registry.cells[request['task']].grants)
             elif op == 'unregister':
                 task = request.get('task')
@@ -672,6 +683,20 @@ class EgressProxy:
         audit({'event': 'poll', 'kind': kind, 'status': status, 'items': len(items)})
         return {'items': items}
 
+    async def runtime_rules(self, request):
+        """Rules a cell's runtime needs from stored settings: the Hermes endpoint. None
+        when nothing is stored; the cell manager then refuses the cell."""
+        if request.get('runtime') != 'hermes':
+            return ()
+        # Read the endpoint afresh: a cell registering just after the user changed it must get
+        # the rule and the base URL of the same endpoint, not the one cached minutes ago.
+        self.credentials.invalidate('hermes')
+        try:
+            credential = await asyncio.get_running_loop().run_in_executor(None, self.credentials.get, 'hermes')
+        except (LookupError, OSError, ValueError):
+            return ()
+        return (rules.hermes_rule(credential['host'], urlsplit(credential['base_url']).path),)
+
     def identifiers(self, grants):
         """Non-secret values a cell needs locally, such as the Codex account id."""
         out = {}
@@ -682,6 +707,13 @@ class EgressProxy:
         if 'claude' in grants:
             try:
                 out['claude_kind'] = self.credentials.get('claude')['kind']
+            except (LookupError, OSError, ValueError, KeyError):
+                pass
+        if 'hermes' in grants:
+            try:
+                credential = self.credentials.get('hermes')
+                out['hermes_base_url'] = credential['base_url']
+                out['hermes_model'] = credential['model']
             except (LookupError, OSError, ValueError, KeyError):
                 pass
         if 'aws' in grants:
@@ -827,7 +859,7 @@ class EgressProxy:
         if 'github' in cell.ask:
             return False
         headers = {k.lower(): v for k, v in req.headers.items()}
-        decision = rules.decide(req.method, req.pretty_host, req.path, headers, b'', cell.grants)
+        decision = rules.decide(req.method, req.pretty_host, req.path, headers, b'', cell.grants, cell.extra)
         return decision.action == 'inject' and decision.rule.name == 'github-git'
 
     def response(self, flow):
@@ -918,7 +950,7 @@ class EgressProxy:
         headers = {k.lower(): v for k, v in req.headers.items()}
         host = req.pretty_host
         path = req.path.split('?', 1)[0]
-        decision = rules.decide(req.method, host, req.path, headers, body, cell.grants)
+        decision = rules.decide(req.method, host, req.path, headers, body, cell.grants, cell.extra)
         entry = {
             'task': cell.task,
             'agent': cell.agent,
@@ -983,6 +1015,9 @@ class EgressProxy:
             credential = await asyncio.get_running_loop().run_in_executor(
                 None, self.credentials.get, decision.rule.grant
             )
+            if decision.rule.name == 'hermes' and credential['host'] not in decision.rule.hosts:
+                # The key now belongs to another endpoint; it must not go to the old host.
+                raise ValueError('the Hermes endpoint changed since this task started; start a new task')
             new = rules.apply(decision, req.method, req.url, headers, body, credential)
             resigner = rules.aws_chunk_resigner(new, credential) if decision.rule.kind == 'aws_sigv4' else None
             if resigner is not None and not streamed:

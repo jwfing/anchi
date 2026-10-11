@@ -24,6 +24,7 @@ NAMES = {
     'model.json',
     'codex.json',
     'claude.json',
+    'hermes.json',
     'github.json',
     'linear.json',
     'aws.json',

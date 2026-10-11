@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
   ClaudeAccountStatus,
+  HermesAccountStatus,
   ConnectorId,
   ConnectorStatus,
   RuntimeAccountStatus,
@@ -58,6 +59,11 @@ export function readHostCodexLogin(file = HOST_CODEX_LOGIN): {
 export async function claudeStatus(guest: Guest): Promise<ClaudeAccountStatus> {
   const s = await guest.claudeStatus();
   return { runtime: 'claude-code', connected: s.configured, kind: s.kind };
+}
+
+export async function hermesStatus(guest: Guest): Promise<HermesAccountStatus> {
+  const s = await guest.hermesStatus();
+  return { runtime: 'hermes', connected: s.configured, baseUrl: s.base_url, model: s.model };
 }
 
 export async function codexStatus(guest: Guest): Promise<RuntimeAccountStatus> {
@@ -122,6 +128,7 @@ export async function setupStatus(
     installed: false,
     codex: { runtime: 'codex', connected: false, accountId: null, expiresAt: null },
     claude: { runtime: 'claude-code', connected: false, kind: null },
+    hermes: { runtime: 'hermes', connected: false, baseUrl: null, model: null },
     services: [],
     googleClient: false,
     googleClientSource: null,
@@ -130,10 +137,12 @@ export async function setupStatus(
   };
   if (vm !== 'running') return empty;
   try {
-    const [vault, codex, claude, connectors, base, workspaces] = await Promise.all([
+    const [vault, codex, claude, hermes, connectors, base, workspaces] = await Promise.all([
       guest.vaultStatus(),
       codexStatus(guest),
       claudeStatus(guest),
+      // A guest installed before Hermes support has no hermes_admin.py.
+      hermesStatus(guest).catch(() => empty.hermes!),
       connectorStatuses(guest),
       guest.imageStatus('codex', 'base').catch(() => false),
       guest.workspacesMounted().catch(() => false),
@@ -150,6 +159,7 @@ export async function setupStatus(
       installed: base,
       codex,
       claude,
+      hermes,
       connectors,
       services: svc.services,
       googleClient: svc.googleClient,

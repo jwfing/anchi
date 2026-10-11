@@ -32,7 +32,12 @@ class FakeTransport implements GuestTransport {
   auditFails = false;
   starts: string[][] = [];
   execs: { args: string[]; stdin: string }[] = [];
-  images = new Set(['codex@base']);
+  images = new Set([
+    'codex@base',
+    'runtime-codex@runtime',
+    'runtime-claude-code@runtime',
+    'runtime-hermes@runtime',
+  ]);
 
   /** Runner processes, standing in for cells; a purge must find them all exited. */
   children: { agent: string; child: ReturnType<typeof spawn> }[] = [];
@@ -447,6 +452,26 @@ describe('daemon tasks', () => {
     expect(build.args[2]).toBe('node');
     expect(JSON.parse(build.stdin)).toEqual({ packages: ['nodejs'], run: [] });
     expect(transport.starts[0]![4]).toBe('node');
+  });
+
+  it("builds a runtime's layer the first time an agent of that runtime runs", async () => {
+    transport.images.delete('runtime-hermes@runtime');
+    write('images/node.yaml', 'packages: [nodejs]\n');
+    write('agents/herm.yaml', 'runtime: hermes\nimage: node\n');
+    const { client } = await start();
+    const task = await client.call('tasks.create', { agentId: 'herm', text: 'x' });
+    await client.call('tasks.wait', { taskId: task.id });
+    // The base, then the runtime layer, then the recipe; only what is missing is built.
+    const builds = transport.execs.filter((e) => e.args[1] === 'build').map((e) => e.args[2]);
+    expect(builds).toEqual(['runtime-hermes', 'node']);
+    const runtimeBuild = transport.execs.find((e) => e.args[2] === 'runtime-hermes')!;
+    expect(runtimeBuild.args[3]).toBe('runtime');
+    expect(runtimeBuild.stdin).toBe('');
+    const events = await client.call('tasks.events', { taskId: task.id });
+    expect(events.map((e) => (e.event.type === 'notice' ? e.event.text : '')).join('\n')).toMatch(
+      /Installing hermes in the cell image/,
+    );
+    expect(transport.starts[0]).toContain('hermes');
   });
 
   it('reaps orphaned cells and fails interrupted tasks on start', async () => {

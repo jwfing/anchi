@@ -493,4 +493,14 @@ def handle(request, caller):
             # A `claude setup-token` token or an API key; no refresh on either side.
             value = read('claude.json')
             return {'token': value['token'], 'kind': value['kind'], 'generation': value['generation']}
+        if op == 'hermes_credential' and caller == 'egress':
+            # The user's OpenAI-compatible endpoint: its key, and the host it may be sent to.
+            value = read('hermes.json')
+            return {
+                'token': value['api_key'],
+                'host': value['host'],
+                'base_url': value['base_url'],
+                'model': value['model'],
+                'generation': value['generation'],
+            }
         raise Denied('OPERATION_DENIED')

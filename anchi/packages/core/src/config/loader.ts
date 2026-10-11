@@ -8,6 +8,7 @@ import {
   type AgentLayer,
   agentLayerSchema,
   BASE_IMAGE,
+  RUNTIME_IMAGE_PREFIX,
   type ImageRecipe,
   imageRecipeSchema,
   type ResolvedAgentConfig,
@@ -163,6 +164,9 @@ export function loadImage(id: string, layout: HomeLayout = homeLayout()): Loaded
   if (id === BASE_IMAGE) {
     const recipe = imageRecipeSchema.parse({});
     return { id, recipe, hash: 'base' };
+  }
+  if (id.startsWith(RUNTIME_IMAGE_PREFIX)) {
+    throw new ConfigError(`image ids starting with "${RUNTIME_IMAGE_PREFIX}" are reserved`);
   }
   const file = findYaml(layout.imagesDir, id);
   if (!file) throw new ConfigError(`image "${id}" not found in ${layout.imagesDir}`);

@@ -9,7 +9,7 @@ import { runtimeEventSchema } from './events.ts';
 
 export const PROTOCOL_VERSION = 2;
 
-export const runtimeIdSchema = z.enum(['codex', 'claude-code']);
+export const runtimeIdSchema = z.enum(['codex', 'claude-code', 'hermes']);
 export type RuntimeId = z.infer<typeof runtimeIdSchema>;
 
 /** Name of an Anchi tool the in-cell MCP server offers (delegation, task status, connectors). */

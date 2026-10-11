@@ -581,6 +581,29 @@ setup
   );
 
 setup
+  .command('hermes')
+  .description(
+    "Store Hermes's OpenAI-compatible endpoint, API key and default model in the VM vault",
+  )
+  .requiredOption('--base-url <url>', 'e.g. https://openrouter.ai/api/v1')
+  .requiredOption('--model <model>', 'the default model, e.g. nousresearch/hermes-4-405b')
+  .action((opts: { baseUrl: string; model: string }) =>
+    withClient(async (client) => {
+      const apiKey = process.stdin.isTTY
+        ? await askSecret('API key for that endpoint: ')
+        : await readStdin();
+      const s = await client.call('setup.importHermes', {
+        baseUrl: opts.baseUrl,
+        apiKey,
+        model: opts.model,
+      });
+      console.log(
+        `Hermes endpoint stored: ${sanitizeLine(s.baseUrl ?? '')} · ${sanitizeLine(s.model ?? '')}`,
+      );
+    }),
+  );
+
+setup
   .command('workspaces')
   .description('Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)')
   .option('-y, --yes', 'do not ask for confirmation')

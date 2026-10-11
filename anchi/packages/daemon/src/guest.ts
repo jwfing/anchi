@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import type { ConnectorId, ConnectorSecret } from '@anchi/protocol';
+import type { ConnectorId, ConnectorSecret, RuntimeId } from '@anchi/protocol';
 import { VM_NAME } from './host.ts';
 
 /** What the proxy kept of a runtime's limits (snake case, seconds). */
@@ -148,7 +148,7 @@ export interface CellStart {
   hash: string;
   connectors: string[];
   sandbox: 'cell' | 'codex-workspace-write';
-  runtime: 'codex' | 'claude-code';
+  runtime: RuntimeId;
   /** Connectors whose writes wait for approval. */
   ask: string[];
   /** Directories under ~/AnchiWorkspaces bound into the cell. */
@@ -434,6 +434,26 @@ export class Guest {
       await this.transport.exec(
         ['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'import-token'],
         JSON.stringify({ token }),
+      ),
+    );
+  }
+
+  async hermesStatus(): Promise<{
+    configured: boolean;
+    base_url: string | null;
+    model: string | null;
+  }> {
+    return parse(
+      await this.transport.exec(['/usr/bin/python3', `${SERVICES}/hermes_admin.py`, 'status']),
+    ) as { configured: boolean; base_url: string | null; model: string | null };
+  }
+
+  /** Hermes's OpenAI-compatible endpoint; the API key goes on stdin only. */
+  async importHermes(baseUrl: string, apiKey: string, model: string): Promise<void> {
+    parse(
+      await this.transport.exec(
+        ['/usr/bin/python3', `${SERVICES}/hermes_admin.py`, 'import'],
+        JSON.stringify({ base_url: baseUrl, api_key: apiKey, model }),
       ),
     );
   }

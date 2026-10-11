@@ -8,7 +8,7 @@ import type {
 
 /** Connectors in the order the panel shows them, also when the VM could not be asked. */
 const CONNECTORS = ['github', 'aws', 'linear', 'gmail', 'drive', 'notion', 'slack'];
-const RUNTIMES = ['codex', 'claude-code'] as const;
+const RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
 const EFFORTS: (Effort | '')[] = ['', 'low', 'medium', 'high', 'xhigh'];
 
 /** What the panel has selected. */
@@ -108,7 +108,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
       'effort',
       'effort',
       state.effort !== cur.effort,
-      `${state.effort || '(runtime default)'}${state.runtime === 'codex' ? '' : ' · codex only: claude-code ignores it'}${inherited('effort', state.effort !== cur.effort)}`,
+      `${state.effort || '(runtime default)'}${state.runtime === 'codex' ? '' : ` · codex only: ${state.runtime} ignores it`}${inherited('effort', state.effort !== cur.effort)}`,
     ),
   ];
   const lines = state.promptText ? state.promptText.replace(/\n$/, '').split('\n') : [];

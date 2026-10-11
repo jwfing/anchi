@@ -15,7 +15,7 @@ Agents are YAML files in `~/.anchi/agents/<id>.yaml`. The file name is the id: 1
 | Field | Default | Meaning |
 |---|---|---|
 | `name`, `description` | id, none | Shown in the TUI |
-| `runtime` | required | `codex` or `claude-code` |
+| `runtime` | required | `codex`, `claude-code` or `hermes` |
 | `model`, `effort` | runtime default | Passed to the runtime |
 | `prompt` | `{mode: append, text: ''}` | `text` or `file` (relative to the declaring file). `replace` replaces the runtime's base instructions |
 | `connectors` | `[]` | `github`, `aws`, `linear`: the proxy injects credentials only for these. `gmail`, `drive`, `notion`, `slack`: reached through per-cell bridge sockets at `/run/anchi/connectors/<id>/api.sock`, which name the agent to the service |
@@ -61,7 +61,7 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
   - `approvals.list`, `approvals.decide` (called only after a full-screen dialog);
   - `triggers.list`;
   - `skills.list`, `skills.add` (local directory or GitHub URL; a collection without a top-level `SKILL.md` adds each skill and returns `{added, skipped}`), `skills.remove`, `skills.checkUpdate` (what the latest commit of the URL changes, nothing written), `skills.update` (installs the commit the user reviewed);
-  - `setup.importClaude`; `services.setToken`, `services.disconnect`, `services.setMode`, `services.googleClient`, `services.googleLogin`.
+  - `setup.importClaude`, `setup.importHermes` (`baseUrl`, `apiKey`, `model`; the key on stdin to `hermes_admin.py`); `services.setToken`, `services.disconnect`, `services.setMode`, `services.googleClient`, `services.googleLogin`.
 - **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`, `setup` (a line of setup output), `approvals`, `oauth`, `tasksDeleted`.
 
 Every string in a runtime event is agent-originated. Clients must strip control characters and escape sequences before display.
@@ -87,18 +87,19 @@ The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`.
 | `anchi-cell quota` | The latest subscription limits the egress proxy saw in runtime responses, as JSON |
 | `anchi-cell exec TASK -- COMMAND...` | Run a command as the agent user in a running cell, for live checks |
 | `anchi-image status ID HASH` | Whether a built layer exists for this recipe hash (and the current base) |
-| `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin (`codex base` builds the built-in image). Prints metadata and the build log path |
+| `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin (`codex base` builds the base layer; `runtime-<runtime> runtime` builds a runtime's layer from `build-runtime-<runtime>.sh`). Prints metadata and the build log path |
 | `anchi-image list` / `anchi-image remove ID` | Image layers and their metadata |
 | `python3 /opt/secure-vm/services/admin.py import-token\|import-aws\|disconnect\|status CONNECTOR` | Connector credentials into and out of the vault |
 | `python3 /opt/secure-vm/services/codex_admin.py import-token\|status` | Codex access token and account id into the vault; status without secrets |
 | `python3 /opt/secure-vm/services/claude_admin.py import-token\|status\|disable` | Claude Code token or API key into the vault |
+| `python3 /opt/secure-vm/services/hermes_admin.py import\|status\|disable` | Hermes's OpenAI-compatible endpoint (`{base_url, api_key, model}` on stdin) into the vault; status and disable without the key |
 | `python3 /opt/secure-vm/services/admin.py import-client\|remove-client` | The user's Google OAuth client (stdin), or its removal so the built-in client applies; refused while Google accounts are connected |
 | `python3 /opt/secure-vm/services/admin.py begin\|complete\|cancel\|disconnect gmail\|drive [ACCOUNT]` | Google sign-in of one named account (`default` when omitted; the code arrives on stdin; tokens stay in the VM). Refreshes the provider allowlists afterwards |
 | `python3 /opt/secure-vm/services/connector_admin.py ID probe\|disconnect [ACCOUNT]` | Service connector account label, or disconnect and revoke; `ACCOUNT` for gmail and drive |
 | `python3 /opt/secure-vm/services/policy_admin.py show\|approve\|deny\|mode\|clear\|rules` | Connector-service requests held by policy; modes per service (`notion`) and per agent (`notion:writer`) |
 | `python3 /opt/secure-vm/services/vault_admin.py status` | Whether the vault is unlocked |
 
-`TASK`, `AGENT` and `IMAGE` match `^[a-z0-9][a-z0-9-]{0,39}$`. `HASH` is `base` or the recipe's 16-hex content hash. `CONNECTORS` is a comma-separated subset of `github,aws,linear,gmail,drive,notion,slack`, or `-` for none. `SANDBOX` is `cell` or `codex-workspace-write`. `RUNTIME` is `codex` or `claude-code`. `ASK` is the subset of the connectors whose writes are held, or `-`; for connector services the cell manager sets or clears the agent's policy rule at start. `WORKSPACES` is base64url JSON `[{name, path, mode}]` or `-`; the cell manager checks again that each path stays under `/mnt/anchi-host` without symlinks or `..`. `EGRESS` is base64url JSON host patterns, or `-` for open egress.
+`TASK`, `AGENT` and `IMAGE` match `^[a-z0-9][a-z0-9-]{0,39}$`. `HASH` is `base`, `runtime` (a runtime layer: `runtime-codex`, `runtime-claude-code`, `runtime-hermes`) or the recipe's 16-hex content hash. A cell's overlay stacks its runtime's layer over its recipe's layer over the base; the base and runtime layers are named by the hash of their build script and the `guest/cell.env` pins it reads, so a change builds them again. `CONNECTORS` is a comma-separated subset of `github,aws,linear,gmail,drive,notion,slack`, or `-` for none. `SANDBOX` is `cell` or `codex-workspace-write`. `RUNTIME` is `codex`, `claude-code` or `hermes`; a Hermes cell is refused (`HERMES_NOT_CONFIGURED`) until its endpoint is stored. `ASK` is the subset of the connectors whose writes are held, or `-`; for connector services the cell manager sets or clears the agent's policy rule at start. `WORKSPACES` is base64url JSON `[{name, path, mode}]` or `-`; the cell manager checks again that each path stays under `/mnt/anchi-host` without symlinks or `..`. `EGRESS` is base64url JSON host patterns, or `-` for open egress.
 
 ## (3) Cell runner ⇄ daemon
 

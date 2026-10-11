@@ -14,7 +14,7 @@ scripts/anchi setup vault unlock   # after each VM start
 make verify-anchi                  # live isolation checks, no credentials used
 ```
 
-`setup install` runs `scripts/up.sh`, `scripts/install-anchi.sh` and the base image build, and is safe to run again to update. It refuses while task cells are live (a cell stays up 10 minutes after its task's last turn), since installing restarts the egress proxy; `make verify-anchi` refuses for the same reason. `scripts/anchi setup vm` starts a stopped VM. In the TUI, **Runtimes** has the same steps: `I` install, `s` start the VM, `u` unlock the vault. Keep a backup of the vault key: without it, the stored credentials cannot be recovered.
+`setup install` runs `scripts/up.sh`, `scripts/install-anchi.sh` and the base image build (runtimes are installed later, by the first task that uses each), and is safe to run again to update. It refuses while task cells are live (a cell stays up 10 minutes after its task's last turn), since installing restarts the egress proxy; `make verify-anchi` refuses for the same reason. `scripts/anchi setup vm` starts a stopped VM. In the TUI, **Runtimes** has the same steps: `I` install, `s` start the VM, `u` unlock the vault. Keep a backup of the vault key: without it, the stored credentials cannot be recovered.
 
 `scripts/anchi` runs the CLI from the checkout. With no arguments it opens the TUI and starts the daemon if needed. `scripts/anchi daemon install` starts the daemon at login.
 
@@ -36,6 +36,17 @@ scripts/anchi setup claude  # paste it, without echo
 ```
 
 Agents with `runtime: claude-code` then run Claude Code in their cells with a placeholder; the proxy substitutes the token on `api.anthropic.com`.
+
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) runs on an OpenAI-compatible endpoint you choose (OpenRouter, Together, a self-hosted vLLM behind HTTPS…): its base URL, an API key and a default model.
+
+```bash
+scripts/anchi setup hermes --base-url https://openrouter.ai/api/v1 --model nousresearch/hermes-4-405b
+# then paste the API key, without echo; or press h in Runtimes
+```
+
+The key stays in the vault. Agents with `runtime: hermes` run Hermes with a placeholder key, and the proxy substitutes the real one under the base URL only — that host, that path prefix; account administration paths there (`/organization`, `/dashboard`) are refused. The endpoint must be HTTPS on a public name that no other rule uses (not `api.anthropic.com`, `api.github.com`, AWS or `chatgpt.com`). `model` in an agent file picks another model of the same endpoint. Hermes's own command and edit approvals are off in cells, as for the other runtimes: the cell is the boundary. Storing a new endpoint applies to new tasks; a running task's cell keeps sending to the endpoint it started with, and the proxy refuses to send the new key there.
+
+Each runtime is installed in the cell image the first time one of its agents starts a task (a notice says so; a few minutes, once), not by `setup install`. A runtime you never use is never downloaded.
 
 Connectors:
 
@@ -106,7 +117,7 @@ prompt:
 
 ### Base image
 
-Every agent's cells start from the built-in `codex` base image: Debian 12 with Codex and Claude Code, and common developer tools so coding agents work without a recipe:
+Every agent's cells start from the built-in base image (`codex`), with its runtime's layer on top (Codex, Claude Code or Hermes, built the first time an agent of that runtime runs). The base is Debian 12 with common developer tools, so coding agents work without a recipe:
 
 | Tools | Notes |
 |---|---|
@@ -117,7 +128,7 @@ Every agent's cells start from the built-in `codex` base image: Debian 12 with C
 | Go | `GOPATH` and the build cache are in the agent's home |
 | Rust (rustc, cargo, clippy, rustfmt) | The toolchain is read-only in `/opt/rustup`; `~/.cargo` holds the registry cache and `cargo install` output. A repository that pins another toolchain needs an image recipe |
 
-Versions are pinned and checked by hash in `guest/cell.env`. Changing a pin or `guest/anchi-build-base.sh` makes a new base: the next task builds it (a few minutes; `scripts/anchi setup install` builds it right away), and image recipes are rebuilt on it. Dependencies are downloaded at task time through the egress proxy, so an agent with an `egress` list needs its registries: `registry.npmjs.org`, `pypi.org` and `files.pythonhosted.org`, `proxy.golang.org` and `sum.golang.org`, `index.crates.io` and `static.crates.io`. Tools beyond these go in an image recipe:
+Versions are pinned and checked by hash in `guest/cell.env`. Changing `guest/anchi-build-base.sh` or a pin it reads makes a new base: the next task builds it (a few minutes; `scripts/anchi setup install` builds it right away), and the runtime layers and image recipes are rebuilt on it. Changing a runtime's script (`guest/anchi-build-runtime-<runtime>.sh`) or its pins rebuilds only that runtime's layer. Dependencies are downloaded at task time through the egress proxy, so an agent with an `egress` list needs its registries: `registry.npmjs.org`, `pypi.org` and `files.pythonhosted.org`, `proxy.golang.org` and `sum.golang.org`, `index.crates.io` and `static.crates.io`. Tools beyond these go in an image recipe:
 
 ```yaml
 # ~/.anchi/images/db.yaml
