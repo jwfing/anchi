@@ -14,7 +14,7 @@ The protocol package is the contract between the TUI/CLI and the daemon (`src/rp
 3. **Call it** from the TUI (`anchi/packages/tui/src/tui/App.tsx`, through `client.call`) and, if it is a user action, from the CLI (`anchi/packages/tui/src/main.ts`, `commander`). Pass agent-provided text through `sanitize`/`sanitizeLine` before printing.
 4. **Key bindings**: a new TUI action gets an id in `tui/src/tui/keys.ts`, a default binding, an entry in the help menu and a line in `docs/KEYBINDINGS.md`.
 5. **Test** the handler in `anchi/packages/daemon/test/daemon.test.ts` (it runs a real daemon over a fake guest) including the refusal path, and the TUI flow in `anchi/packages/tui/test/tui.test.tsx` with a stubbed client.
-6. **Document** the method in `docs/architecture/AGENT_TEAM_CONTRACTS.md` and the user-facing behavior in the guide (`docs/AGENT_TEAM.md` or a sibling), plus a `CHANGELOG.md` line.
+6. **Document** the method in `docs/architecture/AGENT_TEAM_CONTRACTS.md` and the user-facing behavior in the guide (`docs/AGENT_TEAM.md` or a sibling) and in `skills/anchi/` (regenerate its `references/cli.md` with `python3 scripts/gen-skill-cli.py` when a CLI command changes), plus a `CHANGELOG.md` line.
 
 Changing a result shape is a breaking change for every caller: search for `'area.verb'` across `anchi/packages` and update them all.
 

@@ -1,6 +1,6 @@
 # Agent team
 
-Anchi runs a secured team of Codex and Claude Code agents. Each task runs in a disposable cell inside the `anchi-vm` VM, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the VM vault: an egress proxy adds GitHub, AWS, Linear and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion and Slack. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
+Anchi runs a secured team of Codex, Claude Code and Hermes agents. Each task runs in a disposable cell inside the `anchi-vm` VM, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the VM vault: an egress proxy adds GitHub, AWS, Linear and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion and Slack. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
 
 ## Install
 

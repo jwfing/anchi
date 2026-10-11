@@ -149,16 +149,20 @@ export const runtimeImage = (runtime: string) => `${RUNTIME_IMAGE_PREFIX}${runti
  * An agent or template file before `extends` is applied. Every field is optional here;
  * the merged result is validated against `resolvedAgentSchema`.
  */
+/**
+ * A model id as runtimes and providers name them: `gpt-5.5`, `claude-opus-5-5`, and on
+ * OpenAI-compatible endpoints `vendor/model` or `model:variant` (Hermes). It never starts with a
+ * `-`, so a runtime cannot read it as an option; services/hermes_admin.py accepts the same ids.
+ */
+export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$/;
+
 export const agentLayerSchema = z.strictObject({
   id: idSchema.optional(),
   name: z.string().max(100).optional(),
   description: z.string().max(500).optional(),
   extends: idSchema.optional(),
   runtime: runtimeSchema.optional(),
-  model: z
-    .string()
-    .regex(/^[a-zA-Z0-9._-]{1,80}$/)
-    .optional(),
+  model: z.string().regex(MODEL_ID, 'not a model id').optional(),
   effort: effortSchema.optional(),
   prompt: z
     .strictObject({

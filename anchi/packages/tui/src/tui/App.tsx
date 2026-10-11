@@ -1768,7 +1768,7 @@ export function App({
           if (m?.kind !== 'settings' || !m.editing || !m.state) return m;
           const { input } = m.editing;
           if (field === 'model' && !MODEL.test(input.trim())) {
-            const error = 'a model id has letters, digits, ".", "_" and "-" only';
+            const error = 'a model id has letters, digits and . _ - : / @ +';
             return { ...m, editing: { ...m.editing, error } };
           }
           return { ...m, editing: undefined, state: { ...m.state, [field]: input } };

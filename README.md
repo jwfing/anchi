@@ -9,7 +9,7 @@ Anchi runs a team of Codex, Claude Code and Hermes agents on your own machine an
 - **You decide on writes.** High-risk operations of every agent (merges, deletions, pushes to `main`, access changes) always wait for your approval, as do all writes of agents whose `approvals` say `ask`; the dialog shows how the task started.
 - **Checks run by themselves.** Every cell is scanned for real credential values before it is destroyed, and `make verify-anchi` checks the isolation live.
 
-You drive the team from a terminal UI or a CLI (`anchi`): build agents by describing them, give them tasks, let them delegate to each other, start them on a schedule or for new issues. Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md).
+You drive the team from a terminal UI or a CLI (`anchi`): build agents by describing them, give them tasks, let them delegate to each other, start them on a schedule or for new issues. Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md). To let an agent operate Anchi for you, give it the [Anchi skill](skills/README.md).
 
 This is a **development build**: it has not had a security audit and the packaged distribution is a development preview.
 

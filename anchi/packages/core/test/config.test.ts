@@ -274,3 +274,18 @@ describe('patchAgentYaml', () => {
     );
   });
 });
+
+describe('model ids', () => {
+  it('accepts provider ids with a vendor or a variant, and nothing that reads as an option', async () => {
+    const { agentLayerSchema } = await import('../src/config/schema.ts');
+    for (const model of [
+      'gpt-5.5',
+      'claude-opus-5-5',
+      'nousresearch/hermes-4-405b',
+      'qwen/qwen3:free',
+    ])
+      expect(agentLayerSchema.safeParse({ model }).success, model).toBe(true);
+    for (const model of ['-m', '--help', 'a b', 'x;y', '', 'x'.repeat(101)])
+      expect(agentLayerSchema.safeParse({ model }).success, model).toBe(false);
+  });
+});

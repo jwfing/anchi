@@ -11,6 +11,7 @@ Anchi is a secured agent team: Codex and Claude Code agents in disposable cells 
 | [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, and Slack operations, scopes, and authorization |
 | [Gmail setup](GMAIL_SETUP.md) | Create the Google OAuth client for Gmail and Drive |
+| [Anchi skill](../skills/README.md) | A skill that lets Claude Code, Codex or an Anchi agent operate Anchi for you |
 
 ## Security and architecture
 
