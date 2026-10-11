@@ -42,7 +42,9 @@ AUDIT_LOG = Path('/var/log/anchi-egress/audit.jsonl')
 AUDIT_MAX_ROWS = 2000
 CELL_ENV = Path('/opt/secure-vm/cell.env')
 APPARMOR_PROFILE = Path('/etc/apparmor.d/anchi-cell-bwrap')
-MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '4'))
+# A ceiling on live cells; the daemon decides how many work at once (`maxCells`, default 4)
+# and lets cells waiting for a delegated task stay alive beyond that (hub.ts CELL_CEILING).
+MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '16'))
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 HASH = re.compile(r'^(base|runtime|[0-9a-f]{16})$')
 # Credentials injected by the egress proxy, and services reached through per-cell sockets.

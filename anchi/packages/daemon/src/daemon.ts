@@ -55,7 +55,7 @@ import {
   VAULT_KEY,
   writeHostConnectors,
 } from './host.ts';
-import { Hub } from './hub.ts';
+import { CELL_CEILING, DEFAULT_MAX_CELLS, Hub } from './hub.ts';
 import {
   agentSummary,
   type BuilderAgentInfo,
@@ -265,6 +265,35 @@ export class Daemon {
     }
   }
 
+  /**
+   * Cells working at once: `maxCells` in ~/.anchi/settings.yaml (1–16), default 4. Each working
+   * cell can use up to 2 GB of the VM's memory; raise the VM's memory with it. A number outside
+   * the range becomes the nearest one allowed, and anything else the default; both are logged,
+   * so a typo does not silently halve the cells the user asked for.
+   */
+  maxCells(): number {
+    const raw = this.settings().maxCells;
+    if (raw === undefined || raw === null) return DEFAULT_MAX_CELLS;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      this.warnOnce(`settings.yaml: maxCells is not a number; using ${DEFAULT_MAX_CELLS}`);
+      return DEFAULT_MAX_CELLS;
+    }
+    const value = Math.min(Math.max(Math.round(n), 1), CELL_CEILING);
+    if (value !== n) {
+      this.warnOnce(`settings.yaml: maxCells ${n} is outside 1–${CELL_CEILING}; using ${value}`);
+    }
+    return value;
+  }
+
+  /** The same settings warning every time a cell starts would fill the log. */
+  private warned = '';
+  private warnOnce(message: string) {
+    if (this.warned === message) return;
+    this.warned = message;
+    this.log(message);
+  }
+
   /** Days finished tasks are kept: `retentionDays` in ~/.anchi/settings.yaml, default 90. */
   retentionDays(): number {
     const file = join(this.opts.layout.root, 'settings.yaml');
@@ -336,6 +365,7 @@ export class Daemon {
       guest: this.guest,
       idleMs: opts.idleMs,
       roomWaitMs: opts.roomWaitMs,
+      maxCells: () => this.maxCells(),
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
       workspaceRoot: this.workspaceRoot,
@@ -1049,7 +1079,11 @@ export class Daemon {
         watch(layout.root, (_e, name) => {
           if (String(name) !== 'settings.yaml') return;
           clearTimeout(settingsTimer);
-          settingsTimer = setTimeout(() => void this.pushEgressSettings(), 300);
+          settingsTimer = setTimeout(() => {
+            void this.pushEgressSettings();
+            // A higher maxCells lets tasks waiting for a cell start now.
+            this.hub.roomChanged();
+          }, 300);
         }),
       );
     } catch {

@@ -16,6 +16,11 @@ export interface ToolHost {
   getTask(taskId: string): TaskRow;
   children(taskId: string): TaskRow[];
   wait(taskId: string): Promise<TaskRow>;
+  /**
+   * `taskId`'s turn is waiting for a task it delegated until the returned function is called;
+   * its cell does not count as busy meanwhile.
+   */
+  blocked(taskId: string): () => void;
   policyApproval(task: TaskRow, connector: string, id: string): Promise<void>;
 }
 
@@ -54,11 +59,19 @@ function ownChild(ctx: ToolContext, host: ToolHost, id: string): TaskRow {
   return t;
 }
 
-async function waitFor(host: ToolHost, t: TaskRow, wait: boolean, minutes: number) {
+async function waitFor(
+  host: ToolHost,
+  waiter: TaskRow,
+  t: TaskRow,
+  wait: boolean,
+  minutes: number,
+) {
   if (!wait) return { ...summary(t), note: 'started; use anchi_task_status to follow it' };
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<null>((r) => (timer = setTimeout(() => r(null), minutes * 60_000)));
-  const done = await Promise.race([host.wait(t.id), timeout]);
+  // The waiting turn holds its cell but does no work: the delegated task may take its place.
+  const release = host.blocked(waiter.id);
+  const done = await Promise.race([host.wait(t.id), timeout]).finally(release);
   clearTimeout(timer);
   if (done) return summary(done);
   return { ...summary(host.getTask(t.id)), note: 'still running; use anchi_task_status later' };
@@ -131,7 +144,13 @@ export const DELEGATION_TOOLS: AnchiTool[] = [
     }),
     available: delegates,
     run: async (ctx, a, host) =>
-      waitFor(host, host.delegate(ctx.task, ctx.agent, a.agent, a.task), a.wait, a.timeout_minutes),
+      waitFor(
+        host,
+        ctx.task,
+        host.delegate(ctx.task, ctx.agent, a.agent, a.task),
+        a.wait,
+        a.timeout_minutes,
+      ),
   }),
   tool({
     name: 'anchi_task_status',
@@ -147,7 +166,7 @@ export const DELEGATION_TOOLS: AnchiTool[] = [
     available: delegates,
     run: async (ctx, a, host) => {
       ownChild(ctx, host, a.task);
-      return waitFor(host, host.sendTask(a.task, a.message), a.wait, a.timeout_minutes);
+      return waitFor(host, ctx.task, host.sendTask(a.task, a.message), a.wait, a.timeout_minutes);
     },
   }),
   tool({

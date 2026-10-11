@@ -38,6 +38,8 @@ class FakeTransport implements GuestTransport {
     'runtime-claude-code@runtime',
     'runtime-hermes@runtime',
   ]);
+  /** Image builds that wait until the test resolves their promise, by image id. */
+  buildGates = new Map<string, Promise<void>>();
 
   /** Runner processes, standing in for cells; a purge must find them all exited. */
   children: { agent: string; child: ReturnType<typeof spawn> }[] = [];
@@ -111,6 +113,8 @@ class FakeTransport implements GuestTransport {
       return ok({ present: this.images.has(`${args[2]}@${args[3]}`) });
     }
     if (args[0] === 'anchi-image' && args[1] === 'build') {
+      // A build the test holds open, standing in for the minutes a real one takes.
+      await this.buildGates.get(args[2]!);
       this.images.add(`${args[2]}@${args[3]}`);
       return ok({ image: args[2], hash: args[3], ok: true, size: 1e6, seconds: 1, log: '/x' });
     }
@@ -196,6 +200,8 @@ let transport: FakeTransport;
 let daemon: Daemon | undefined;
 let roomWaitMs: number | undefined;
 let client: DaemonClient | undefined;
+/** What the daemon logged, for the tests that check a message instead of a silent fallback. */
+let logs: string[];
 
 function write(rel: string, content: string) {
   const file = join(root, rel);
@@ -239,7 +245,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     guest: new Guest(transport),
     // No limactl: the tests never depend on a VM of the machine they run on.
     lima: new LimaTransport('anchi-vm', join(root, 'no-limactl')),
-    log: () => {},
+    log: (m) => void logs.push(m),
     quiet: true,
     idleMs,
     roomWaitMs,
@@ -254,6 +260,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
 beforeEach(() => {
   hostCalls = [];
   hostAnswers = {};
+  logs = [];
   root = mkdtempSync(join(tmpdir(), 'anchi-daemon-'));
   transport = new FakeTransport();
   write('agents/dev.yaml', 'runtime: codex\nconnectors: [github]\n');
@@ -1856,7 +1863,7 @@ describe('cell limit', () => {
     const notices = (await client.call('tasks.events', { taskId: fifth.id }))
       .filter((e) => e.event.type === 'notice')
       .map((e) => (e.event as { text: string }).text);
-    expect(notices).toContain('waiting for a free cell: 4 are in use');
+    expect(notices).toContain('waiting for a free cell: 4 of 4 are working');
   });
 
   it('fails a task that waited too long for a cell', async () => {
@@ -1866,7 +1873,128 @@ describe('cell limit', () => {
     const fifth = await client.call('tasks.create', { agentId: 'a5', text: 'hello' });
     const done = await client.call('tasks.wait', { taskId: fifth.id });
     expect(done.status).toBe('failed');
-    expect(done.result ?? '').toContain('stayed busy');
+    expect(done.result ?? '').toContain('no cell became free');
+  });
+});
+
+describe('cells and delegation', () => {
+  afterEach(() => {
+    roomWaitMs = undefined;
+  });
+
+  const statusOf = async (client: DaemonClient, id: string) =>
+    (await client.call('tasks.get', { taskId: id })).status;
+  const until = async (check: () => Promise<boolean>) => {
+    for (let i = 0; i < 100 && !(await check()); i++) await new Promise((r) => setTimeout(r, 50));
+  };
+
+  it('a turn waiting for a task it delegated does not hold one of the working cells', async () => {
+    // Four leads fill the four working cells and each waits for a review: before, the reviews
+    // could never start and every task failed once the wait for a cell ran out.
+    roomWaitMs = 2_000;
+    for (let i = 1; i <= 4; i++)
+      write(`agents/lead${i}.yaml`, 'runtime: codex\ndelegates: [rev]\n');
+    write('agents/rev.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const leads = [];
+    for (let i = 1; i <= 4; i++) {
+      leads.push(
+        await client.call('tasks.create', {
+          agentId: `lead${i}`,
+          text: 'call anchi_delegate_task {"agent":"rev","task":"review it"}',
+        }),
+      );
+    }
+    for (const lead of leads) {
+      const done = await client.call('tasks.wait', { taskId: lead.id });
+      expect(done.status).toBe('done');
+      expect(JSON.parse(done.result!).result).toMatchObject({ agent: 'rev', status: 'done' });
+    }
+    // Waiting leads stayed alive beside the working reviews.
+    expect(transport.maxLive).toBeGreaterThan(4);
+  });
+
+  it('gives a free cell to a delegated task before a new task, and honors maxCells', async () => {
+    write('settings.yaml', 'maxCells: 2\n');
+    write('agents/busy.yaml', 'runtime: codex\n');
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    write('agents/other.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const w1 = await client.call('tasks.create', { agentId: 'busy', text: 'hang' });
+    const w2 = await client.call('tasks.create', { agentId: 'busy', text: 'hang' });
+    await until(async () => (await statusOf(client, w2.id)) === 'running');
+    // Both working cells are taken: the lead, then a new task, wait in that order.
+    const lead = await client.call('tasks.create', {
+      agentId: 'lead',
+      text: 'call anchi_delegate_task {"agent":"dev","task":"hang"}',
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const other = await client.call('tasks.create', { agentId: 'other', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(transport.starts).toHaveLength(2);
+    // One cell frees: the lead came first. It delegates and waits, which frees its working
+    // cell, and the delegated task takes it although `other` has waited longer.
+    await client.call('tasks.cancel', { taskId: w2.id });
+    await until(async () => transport.starts.some((s) => s[3] === 'dev'));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(transport.starts.map((s) => s[3])).toEqual(['busy', 'busy', 'lead', 'dev']);
+    expect(await statusOf(client, other.id)).not.toBe('done');
+    const notices = (await client.call('tasks.events', { taskId: other.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices[0]).toMatch(/waiting for a free cell/);
+    // When the busy task ends, `other` gets its cell.
+    await client.call('tasks.cancel', { taskId: w1.id });
+    expect((await client.call('tasks.wait', { taskId: other.id })).status).toBe('done');
+    await client.call('tasks.cancel', { taskId: lead.id });
+  });
+
+  it('a task building its image does not hold back the tasks behind it in the line', async () => {
+    // A task is in line for a cell from before its image checks. The build here takes longer
+    // than the wait for a cell: the task behind it must take one of the free cells instead of
+    // waiting for the build and failing with TOO_MANY_CELLS.
+    roomWaitMs = 500;
+    let built = () => {};
+    transport.buildGates.set('node', new Promise<void>((resolve) => (built = resolve)));
+    write('images/node.yaml', 'packages: [nodejs]\n');
+    write('agents/slow.yaml', 'runtime: codex\nimage: node\n');
+    write('agents/quick.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const building = await client.call('tasks.create', { agentId: 'slow', text: 'hello' });
+    await until(async () => transport.execs.some((e) => e.args[1] === 'build'));
+    const quick = await client.call('tasks.create', { agentId: 'quick', text: 'hello' });
+    expect((await client.call('tasks.wait', { taskId: quick.id })).status).toBe('done');
+    built();
+    expect((await client.call('tasks.wait', { taskId: building.id })).status).toBe('done');
+  });
+
+  it('a raised maxCells in settings.yaml starts a waiting task at once', async () => {
+    roomWaitMs = 5_000;
+    write('settings.yaml', 'maxCells: 1\n');
+    write('agents/busy.yaml', 'runtime: codex\n');
+    write('agents/other.yaml', 'runtime: codex\n');
+    const { daemon, client } = await start();
+    expect(daemon.maxCells()).toBe(1);
+    const w1 = await client.call('tasks.create', { agentId: 'busy', text: 'hang' });
+    await until(async () => (await statusOf(client, w1.id)) === 'running');
+    const other = await client.call('tasks.create', { agentId: 'other', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await statusOf(client, other.id)).not.toBe('done');
+    write('settings.yaml', 'maxCells: 2\n');
+    expect((await client.call('tasks.wait', { taskId: other.id })).status).toBe('done');
+    await client.call('tasks.cancel', { taskId: w1.id });
+  });
+
+  it('takes the nearest allowed maxCells and logs it instead of falling back silently', async () => {
+    write('settings.yaml', 'maxCells: 99\n');
+    const { daemon } = await start();
+    expect(daemon.maxCells()).toBe(16);
+    expect(logs.join('\n')).toMatch(/maxCells 99 is outside 1–16; using 16/);
+    write('settings.yaml', 'maxCells: 0\n');
+    expect(daemon.maxCells()).toBe(1);
+    write('settings.yaml', 'maxCells: plenty\n');
+    expect(daemon.maxCells()).toBe(4);
+    expect(logs.join('\n')).toMatch(/maxCells is not a number; using 4/);
   });
 });
 
