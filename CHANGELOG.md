@@ -6,6 +6,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
+- High-risk exceptions per agent: `highRisk: { disable: [github-merge] }` in an agent file lets that agent do those operations without waiting for approval, while every other agent still asks; unknown ids are an error. `approvals: {<connector>: ask}` still holds every write of its connector, including those operations. A task's access report and the agent's settings panel show the exceptions. Cells of an agent with `highRisk` need the guest components of this release (`scripts/anchi setup install`); an older guest refuses the cell instead of starting it without the exception.
 - `anchi update` installs the latest release; `anchi update --check` checks without installing. Updates preserve custom installation paths, running daemons and configuration, verify the checksum and version before switching, and skip reinstalling or downgrading.
 - Packaged self-update uses its bundled installer, so it does not need a checkout or download and execute a new installer script.
 - Selection mode (**^X m**): mouse reporting off and the transcript full width without borders, so the terminal selects and copies text natively; any key but the arrows and PgUp/PgDn ends it.

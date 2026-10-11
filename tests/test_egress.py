@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sys
@@ -1019,6 +1020,96 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual((flow.request.headers, flow.response), (late, None))
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertEqual([r['decision'] for r in rows], ['pass:streamed', 'held-denied', 'pass:streamed'])
+
+    def test_agent_files_know_the_same_high_risk_ids(self):
+        schema = (Path(__file__).parent.parent / 'anchi/packages/core/src/config/schema.ts').read_text()
+        block = re.search(r'HIGH_RISK_IDS = \[(.*?)\] as const', schema, re.S).group(1)
+        self.assertEqual(re.findall(r"'([a-z0-9-]+)'", block), [entry[0] for entry in rules.HIGH_RISK])
+
+    def test_an_agent_can_skip_approval_for_its_own_high_risk_ids(self):
+        def merge(cell_disabled=(), settings=()):
+            proxy = self.proxy_with_cell()
+            proxy.settings = {'high_risk_disabled': list(settings)}
+            cell = self.module.Cell('t1', 'dev', {'github'}, high_risk_disabled=cell_disabled)
+            proxy.registry.client_cell = lambda client: cell
+            asked = []
+
+            async def denied(request):
+                asked.append(request['reason'])
+                return 'denied'
+
+            flow, _ = self.proxy_flow(
+                'PUT', 'api.github.com', '/repos/o/r/pulls/7/merge', {'authorization': 'x'}, False, b'{}'
+            )
+            respond = staticmethod(lambda f, *a: None)
+            with (
+                patch.object(proxy.approvals, 'ask', denied),
+                patch.object(self.module.EgressProxy, 'respond', respond),
+            ):
+                asyncio.run(proxy.requestheaders(flow))
+                asyncio.run(proxy.request(flow))
+            return asked, flow.request.headers.get('authorization', '')
+
+        asked, auth = merge()
+        self.assertEqual(asked, ['high-risk: merge a pull request'])
+        self.assertNotIn(GITHUB['token'], auth)
+        for disabled in ({'cell_disabled': {'github-merge'}}, {'settings': ['github-merge']}):
+            asked, auth = merge(**disabled)
+            self.assertEqual(asked, [])
+            self.assertIn(GITHUB['token'], auth)
+        # Another agent's exception, or another id, does not apply.
+        self.assertEqual(merge(cell_disabled={'git-default-branch'})[0], ['high-risk: merge a pull request'])
+
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            await registry.register(
+                {'task': 'th', 'agent': 'a', 'connectors': ['github'], 'high_risk_disabled': ['github-merge']}
+            )
+            self.assertEqual(registry.cells['th'].high_risk_disabled, frozenset({'github-merge'}))
+            for bad in (['everything'], 'github-merge', [7]):
+                with self.assertRaises(ValueError):
+                    registry.validate({'task': 'tg', 'agent': 'a', 'connectors': [], 'high_risk_disabled': bad})
+            await registry.unregister('th')
+
+        asyncio.run(scenario())
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertIn(['github-merge'], [r.get('high_risk_disabled') for r in rows if r.get('event') == 'register'])
+
+    def test_a_push_to_main_goes_through_when_that_entry_is_disabled(self):
+        """The streamed push path reads the same exceptions: the agent's and the user's."""
+        pack = b'PACK' + bytes(range(256)) * 64
+        body = git_push((b'2' * 40, b'1' * 40, b'refs/heads/main'), pack=pack)
+        headers = {'transfer-encoding': 'chunked', 'authorization': 'Basic eDphbmNoaS1wbGFjZWhvbGRlcg=='}
+
+        def push(cell_disabled=(), settings=()):
+            proxy = self.proxy_with_cell()
+            proxy.settings = {'high_risk_disabled': list(settings)}
+            cell = self.module.Cell('t1', 'dev', {'github'}, high_risk_disabled=cell_disabled)
+            proxy.registry.client_cell = lambda client: cell
+            flow, _ = self.proxy_flow('POST', 'github.com', '/o/r.git/git-receive-pack', headers, stream=False)
+            asyncio.run(proxy.requestheaders(flow))
+            sent = [flow.request.stream(body[i : i + 4096]) for i in range(0, len(body), 4096)]
+            sent.append(flow.request.stream(b''))
+            out = b''.join(b if isinstance(b, bytes) else b''.join(b) for b in sent)
+            return flow, out
+
+        # A high-risk push cannot wait for approval, so by default nothing of it leaves.
+        flow, out = push()
+        self.assertEqual(out, b'')
+        self.assertIn('anchi-push-refused', flow.metadata)
+        for disabled in ({'cell_disabled': {'git-default-branch'}}, {'settings': ['git-default-branch']}):
+            flow, out = push(**disabled)
+            self.assertEqual(out, body)
+            self.assertNotIn('anchi-push-refused', flow.metadata)
+            self.assertNotEqual(flow.request.headers['authorization'], headers['authorization'])
+        # Another id does not apply.
+        self.assertEqual(push(cell_disabled={'github-merge'})[1], b'')
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        pushes = [(r['decision'], r.get('risk')) for r in rows if r.get('event') == 'push']
+        self.assertEqual(
+            pushes,
+            [('deny', 'git-default-branch'), ('inject', None), ('inject', None), ('deny', 'git-default-branch')],
+        )
 
     def test_quota_headers_of_runtime_responses_are_kept(self):
         from types import SimpleNamespace as NS

@@ -107,6 +107,9 @@ export function summarizeAudit(
           services: Array.isArray(last.services) ? last.services.map(String) : [],
           egress: Array.isArray(last.egress) ? last.egress.map(String) : null,
           ask: Array.isArray(last.ask) ? last.ask.map(String) : [],
+          ...(Array.isArray(last.high_risk_disabled) && last.high_risk_disabled.length
+            ? { highRiskDisabled: last.high_risk_disabled.map(String) }
+            : {}),
         }
       : null,
     requests: requests.length,

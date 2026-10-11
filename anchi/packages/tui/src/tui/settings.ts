@@ -202,6 +202,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
   fixed('delegates', f.delegates.join(', ') || 'none');
   const approvals = Object.entries(f.approvals).map(([c, m]) => `${c}: ${m}`);
   fixed('approvals', approvals.join(', ') || 'none');
+  if (f.highRisk) fixed('no approval', f.highRisk.join(', '));
   fixed(
     'egress',
     f.egress ? f.egress.join(', ') || 'none (runtime and connectors only)' : 'any public host',

@@ -114,6 +114,7 @@ export function settingsView(
       delegates: agent.delegates ?? [],
       triggers: (agent.triggers ?? []).map(triggerLine),
       approvals: { ...agent.approvals },
+      ...(agent.highRisk?.disable?.length ? { highRisk: [...agent.highRisk.disable] } : {}),
       egress: agent.egress ?? null,
       ...(agent.accounts && Object.keys(agent.accounts).length
         ? { accounts: { ...agent.accounts } as Record<string, string> }

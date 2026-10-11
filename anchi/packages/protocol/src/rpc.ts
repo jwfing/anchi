@@ -311,6 +311,8 @@ export interface FixedSettings {
   /** One line per trigger. */
   triggers: string[];
   approvals: Record<string, string>;
+  /** High-risk operations that do not wait for approval for this agent, by id. */
+  highRisk?: string[];
   /** null: any public host. */
   egress: string[] | null;
   /** Named Google accounts of gmail and drive (`default` when absent). */
@@ -388,6 +390,8 @@ export interface TaskAudit {
     services: string[];
     egress: string[] | null;
     ask: string[];
+    /** High-risk entries that did not wait for approval for this agent. */
+    highRiskDisabled?: string[];
   } | null;
   requests: number;
   /** Requests whose credentials the proxy injected, by rule. */

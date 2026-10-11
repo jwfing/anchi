@@ -779,6 +779,7 @@ def cell_start(
     workspaces_arg='-',
     egress_arg='-',
     accounts_arg='-',
+    high_risk_arg='-',
 ):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
@@ -798,6 +799,10 @@ def cell_start(
     if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
         raise Failure('BAD_APPROVALS')
     accounts = parse_accounts(accounts_arg, connectors)
+    # High-risk entries that do not wait for approval in this cell; the proxy checks the ids.
+    high_risk = [] if high_risk_arg == '-' else high_risk_arg.split(',')
+    if len(high_risk) > 30 or not all(re.fullmatch(r'[a-z0-9-]{1,40}', h) for h in high_risk):
+        raise Failure('BAD_HIGH_RISK')
     env = cell_env()
     uid = int(env['SECURE_CELL_UID_BASE']) + int(env['SECURE_CELL_AGENT_UID'])
     work = CELLS / task
@@ -844,6 +849,7 @@ def cell_start(
                 # and pins the agent's Google account per service.
                 'services': [c for c in connectors if c in SERVICE_CONNECTORS],
                 'accounts': accounts,
+                **({'high_risk_disabled': high_risk} if high_risk else {}),
             }
         )
         identifiers = registration.get('identifiers', {})
@@ -1112,7 +1118,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and len(rest) in (6, 7, 8, 9, 10, 11):
+    if command == 'start' and 6 <= len(rest) <= 12:
         return cell_start(*rest)
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.
