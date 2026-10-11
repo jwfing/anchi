@@ -3,13 +3,14 @@ import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { Codex, ThreadEvent } from '@openai/codex-sdk';
 import {
   type CellMessage,
   cellMessageSchema,
   encodeFrame,
   type RuntimeEvent,
 } from '@anchi/protocol';
-import { codexOptions, mapCodexEvent } from '../src/codex.ts';
+import { codexOptions, mapCodexEvent, NEW_SESSION_WARNING, runCodex } from '../src/codex.ts';
 import { claudeOptions, mapClaudeMessage } from '../src/claude.ts';
 import { callConnector, CONNECTOR_TOOLS } from '../src/connectors.ts';
 import { handle } from '../src/mcp.ts';
@@ -82,6 +83,73 @@ describe('cell runner', () => {
     const g = harness(async function* () {});
     g.end();
     expect(g.exits).toEqual([0]);
+  });
+});
+
+describe('codex sessions', () => {
+  const MISSING =
+    'Codex Exec exited with code 1: Error: thread/resume: thread/resume failed: no rollout found ' +
+    'for thread id old (code -32600)';
+  /** A fake Codex client: `resume` fails with `resumeError` after `before` events. */
+  function fakeCodex(resumeError: string, before: ThreadEvent[] = []) {
+    const calls: string[] = [];
+    const thread = (kind: string, events: ThreadEvent[], error?: string) => ({
+      runStreamed: async (input: string) => {
+        calls.push(`${kind}:${input}`);
+        return {
+          events: (async function* () {
+            yield* events;
+            if (error) throw new Error(error);
+          })(),
+        };
+      },
+    });
+    const client = {
+      resumeThread: () => thread('resume', before, resumeError),
+      startThread: () =>
+        thread('start', [
+          { type: 'thread.started', thread_id: 'new' },
+          { type: 'turn.completed', usage: USAGE },
+        ]),
+    } as unknown as Pick<Codex, 'startThread' | 'resumeThread'>;
+    return { client: () => client, calls };
+  }
+  const USAGE = {
+    input_tokens: 1,
+    cached_input_tokens: 0,
+    cache_write_input_tokens: 0,
+    output_tokens: 1,
+    reasoning_output_tokens: 0,
+  };
+  const turn = {
+    input: 'hi',
+    resumeId: 'old',
+    options: { workdir: '/w', sandbox: 'cell' as const, instructionsMode: 'append' as const },
+    env: {},
+    signal: new AbortController().signal,
+  };
+  const collect = async (gen: AsyncGenerator<RuntimeEvent>) => {
+    const out: RuntimeEvent[] = [];
+    for await (const e of gen) out.push(e);
+    return out;
+  };
+
+  it('starts a new session with a warning when the session to resume is gone', async () => {
+    const fake = fakeCodex(MISSING);
+    const events = await collect(runCodex(turn, fake.client));
+    expect(fake.calls).toEqual(['resume:hi', 'start:hi']);
+    expect(events[0]).toEqual({ type: 'error', message: NEW_SESSION_WARNING, fatal: false });
+    expect(events).toContainEqual({ type: 'session.started', resumeId: 'new' });
+    expect(events.some((e) => e.type === 'error' && e.fatal)).toBe(false);
+  });
+
+  it('does not start a new session for other failures or once the turn has begun', async () => {
+    const other = fakeCodex('Codex Exec exited with code 1: usage limit reached');
+    await expect(collect(runCodex(turn, other.client))).rejects.toThrow(/usage limit/);
+    expect(other.calls).toEqual(['resume:hi']);
+    const begun = fakeCodex(MISSING, [{ type: 'turn.started' }]);
+    await expect(collect(runCodex(turn, begun.client))).rejects.toThrow(/no rollout/);
+    expect(begun.calls).toEqual(['resume:hi']);
   });
 });
 
