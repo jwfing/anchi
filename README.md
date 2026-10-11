@@ -2,6 +2,8 @@
 
 > **Anchi — a secured agent team.** Pronounced *AHN-chee*. 安栖 (ān qī) means a safe place to settle and rest: a home where a team can work without being exposed.
 
+Anchi builds a local agent team: each agent works in its own sandbox, never touches your keys, and uses only the accounts you allow. Agents work; you rest easy.
+
 Anchi runs a team of Codex, Claude Code and Hermes agents on your own machine and gives each agent only what its job needs. A misled or compromised agent can still misuse what it was given and leak what it reads, but it never holds a credential, it reaches only the services and directories it was configured with, and with an `egress` list only those hosts:
 
 - **Upstream credentials never enter an agent's sandbox.** Each task runs in a disposable cell inside a Linux VM. A trusted egress proxy injects or re-signs GitHub, AWS, Linear and model credentials on the way out; trusted services in the VM act for agents on Gmail, Drive, Notion and Slack.
