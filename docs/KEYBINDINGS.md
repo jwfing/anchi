@@ -104,4 +104,6 @@ The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** t
 
 Problems are reported, not fatal: the TUI shows how many entries it skipped and keeps the rest.
 
+Modified keys are read in the usual control-character form, in CSI u form and in xterm modifyOtherKeys form.
+
 Terminals deliver no ⌘ keys to terminal programs, so Anchi binds none. Some multiplexers take keys first: zellij uses Ctrl+P, Ctrl+N and Ctrl+G by default, so inside zellij use the leader bindings or rebind.

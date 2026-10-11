@@ -22,13 +22,18 @@ export function parseMouse(data: string): { events: MouseEvent[]; rest: string }
   return { events, rest };
 }
 
-// Ink only treats "\r" as Return. Some terminal setups send Enter as a bare "\n"
-// or, with xterm modifyOtherKeys, as ESC [ 27 ; mod ; 13 ~.
+// Ink only treats "\r" as Return. Some terminal setups send Enter as a bare "\n".
+// With xterm modifyOtherKeys, a modified key arrives as ESC [ 27 ; mod ; code ~, which Ink does
+// not parse: Ctrl+C would not quit and the Ctrl+X leader would type text. The same key in CSI u
+// form (ESC [ code ; mod u) is one Ink parses, so the sequence is rewritten to it.
 // eslint-disable-next-line no-control-regex
-const MODIFIED_ENTER = /\u001b\[27;1;13~/g;
+const MODIFY_OTHER_KEYS = /\u001b\[27;(\d+);(\d+)~/g;
 
-export function normalizeEnter(data: string): string {
-  return data === '\n' ? '\r' : data.replace(MODIFIED_ENTER, '\r');
+export function normalizeKeys(data: string): string {
+  if (data === '\n') return '\r';
+  return data.replace(MODIFY_OTHER_KEYS, (_m, mod: string, code: string) =>
+    mod === '1' && code === '13' ? '\r' : `\u001b[${code};${mod}u`,
+  );
 }
 
 export const MOUSE_ON = '\u001b[?1000h\u001b[?1006h';
@@ -36,7 +41,8 @@ export const MOUSE_OFF = '\u001b[?1000l\u001b[?1006l';
 
 /**
  * Ink drops mouse reports, so they are taken out of stdin before Ink reads it: `read()` is
- * wrapped to strip SGR mouse sequences and hand them to `onMouse` (and to normalize Enter).
+ * wrapped to strip SGR mouse sequences and hand them to `onMouse` (and to normalize Enter and
+ * modified keys).
  * Returns a function that restores stdin and turns mouse reporting off.
  */
 export function captureMouse(
@@ -49,7 +55,7 @@ export function captureMouse(
     const chunk = originalRead(size) as string | Buffer | null;
     if (chunk === null) return null;
     const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-    let rest = normalizeEnter(text);
+    let rest = normalizeKeys(text);
     if (rest.includes('\u001b[<')) {
       const parsed = parseMouse(rest);
       for (const e of parsed.events) onMouse(e);

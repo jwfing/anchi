@@ -39,6 +39,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- The TUI reads keys a terminal sends in xterm modifyOtherKeys form (`ESC [27;mod;code~`). Before, Ctrl+C did not quit and the Ctrl+X leader typed its next key as text, so `^X n`, `^X m` and the other leader bindings did nothing.
 - Workspaces on Linux hosts are no longer served one file operation at a time: `bindfs` runs multithreaded. Listing a `node_modules` tree in a workspace took 88 s instead of 3.4 s, and one agent installing dependencies stalled every other cell's workspace. `anchi setup install` mounts the share again. Agents are also told to keep dependencies and build output out of workspaces, which are slower than their own work directory for many small files.
 - An agent file's `model` accepts provider model ids such as `nousresearch/hermes-4-405b` or `qwen/qwen3:free` (a letter or digit first, then letters, digits and `. _ - : / @ +`), so a Hermes agent can pick another model of its OpenAI-compatible endpoint, as the guide says. The settings panel accepts the same ids.
 - Agents with workspaces are told where they are (`/home/agent/workspaces/<name>`, the user's `~/AnchiWorkspaces/<path>`, read-write or read-only) and that `/home/agent/work` stays in the VM. Before, Anchi's instructions named only `/home/agent/work`, so an agent could keep cloning and editing there, where the user never sees its files.
