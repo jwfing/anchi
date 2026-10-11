@@ -23,7 +23,13 @@ import { instructions, WORKDIR } from './prompt.ts';
 import type { Store } from './store.ts';
 
 export const IDLE_MS = 10 * 60_000;
-export const MAX_CELLS = 4;
+/** Cells doing work at once, unless `maxCells` in settings.yaml says otherwise. */
+export const DEFAULT_MAX_CELLS = 4;
+/**
+ * Cells alive at once, those waiting for a delegated task included; the guest refuses more
+ * (anchi_cell.py MAX_CELLS). A waiting cell still holds its runtime's memory.
+ */
+export const CELL_CEILING = 16;
 
 interface Job {
   taskId: string;
@@ -69,6 +75,8 @@ export interface HubOptions {
   idleMs?: number;
   /** How long a task waits for a free cell (default 10 minutes). */
   roomWaitMs?: number;
+  /** Cells doing work at once (`maxCells` in settings.yaml); DEFAULT_MAX_CELLS otherwise. */
+  maxCells?: () => number;
   /** Scan each cell for real credential values before closing it, and save its audit rows after (default true). */
   scanOnClose?: boolean;
   /** Skills copied into an agent's cells. */
@@ -131,6 +139,7 @@ export class Hub extends EventEmitter<HubEvents> {
       getTask: (id) => this.getTask(id),
       children: (id) => this.children(id),
       wait: (id) => this.wait(id),
+      blocked: (id) => this.block(id),
       policyApproval: async (task, connector, id) => {
         if (!this.opts.onPolicyApproval) throw new Error('approvals are not available');
         await this.opts.onPolicyApproval(task, connector, id);
@@ -563,12 +572,24 @@ export class Hub extends EventEmitter<HubEvents> {
     let failure: string | undefined;
     let timedOut = false;
     let before = new Map<string, Snapshot>();
+    // In line for a cell from now, before the image checks: a cell that frees up meanwhile goes
+    // to whoever is first in line, not to a task that happens to check sooner.
+    const queued = !this.cells.has(task.id);
+    if (queued) this.roomQueue.set(task.id, task.depth);
     try {
-      const hash = await this.ensureImage(agent, task);
-      await this.syncSkills(agent);
-      before = this.snapshotWorkspaces(agent);
-      if (signal.aborted) throw new Error('cancelled');
-      const cell = await this.cellFor(task, agent, hash);
+      let cell: LiveCell;
+      try {
+        const hash = await this.ensureImage(agent, task);
+        await this.syncSkills(agent);
+        before = this.snapshotWorkspaces(agent);
+        if (signal.aborted) throw new Error('cancelled');
+        cell = await this.cellFor(task, agent, hash);
+      } finally {
+        if (queued) {
+          this.roomQueue.delete(task.id);
+          this.roomChanged();
+        }
+      }
       const turnId = `turn-${Date.now().toString(36)}`;
       const onAbort = () => cell.session.cancel(turnId);
       signal.addEventListener('abort', onAbort, { once: true });
@@ -716,36 +737,51 @@ export class Hub extends EventEmitter<HubEvents> {
       return existing;
     }
     if (existing) await this.closeCell(task.id, 'agent settings changed');
-    // The guest limits concurrent cells, counting those still closing: make room by closing
-    // the longest-idle one, or wait until a cell is idle or gone.
+    // At most `maxCells` cells work at once and CELL_CEILING are alive, counting those still
+    // closing. A cell whose turn waits for a task it delegated is alive but not working, so the
+    // delegated task can start. Delegated tasks go before the tasks that wait on them (deeper
+    // first), then first come, first served. Make room by closing the longest-idle cell, or wait.
     let waitingSince = 0;
-    while (this.occupied() >= MAX_CELLS) {
-      const idle = [...this.cells.entries()]
-        .filter(([, c]) => c.idle)
-        .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (idle) {
-        await this.closeCell(idle[0], 'making room for another task');
-        continue;
-      }
-      if (!waitingSince) {
-        waitingSince = Date.now();
-        this.notice(task.id, `waiting for a free cell: ${MAX_CELLS} are in use`);
-      }
-      // Bounded: tasks waiting on each other's delegations must not wait for ever.
-      const left = waitingSince + (this.opts.roomWaitMs ?? ROOM_WAIT_MS) - Date.now();
-      if (left <= 0) {
-        throw new Error(
-          `TOO_MANY_CELLS: ${MAX_CELLS} cells stayed busy for ${Math.round((this.opts.roomWaitMs ?? ROOM_WAIT_MS) / 60_000)} minutes; try again when a task finishes`,
-        );
-      }
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, left);
-        timer.unref();
-        this.roomWaiters.push(() => {
-          clearTimeout(timer);
-          resolve();
+    if (!this.roomQueue.has(task.id)) this.roomQueue.set(task.id, task.depth);
+    try {
+      while (!this.hasRoom(task)) {
+        const idle = [...this.cells.entries()]
+          .filter(([, c]) => c.idle)
+          .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+        if (idle && !this.outranked(task)) {
+          await this.closeCell(idle[0], 'making room for another task');
+          continue;
+        }
+        if (!waitingSince) {
+          waitingSince = Date.now();
+          this.notice(
+            task.id,
+            this.busy() < this.maxCells() && this.occupied() < CELL_CEILING
+              ? 'waiting for a free cell: delegated tasks and earlier tasks go first'
+              : `waiting for a free cell: ${this.busy()} of ${this.maxCells()} are working`,
+          );
+        }
+        // Bounded: tasks waiting on each other's delegations must not wait for ever.
+        const left = waitingSince + (this.opts.roomWaitMs ?? ROOM_WAIT_MS) - Date.now();
+        if (left <= 0) {
+          throw new Error(
+            `TOO_MANY_CELLS: no cell became free for ${Math.round((this.opts.roomWaitMs ?? ROOM_WAIT_MS) / 60_000)} minutes (${this.busy()} working, ${this.occupied()} alive; maxCells ${this.maxCells()}); try again when a task finishes`,
+          );
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, left);
+          timer.unref();
+          this.roomWaiters.push(() => {
+            clearTimeout(timer);
+            resolve();
+          });
         });
-      });
+      }
+    } finally {
+      // Out of line as soon as it has room (or gave up): the cell starts below without a pause,
+      // so no other task can take that room first.
+      this.roomQueue.delete(task.id);
+      this.roomChanged();
     }
     const child = this.opts.guest.startCell({
       task: task.id,
@@ -803,10 +839,53 @@ export class Hub extends EventEmitter<HubEvents> {
     );
   }
 
+  /** Cells doing work: alive, minus those whose turn waits for a task it delegated. */
+  private busy(): number {
+    return this.occupied() - [...this.blocked.keys()].filter((id) => this.cells.has(id)).length;
+  }
+
+  maxCells(): number {
+    return Math.min(this.opts.maxCells?.() ?? DEFAULT_MAX_CELLS, CELL_CEILING);
+  }
+
+  private hasRoom(task: TaskRow): boolean {
+    return this.busy() < this.maxCells() && this.occupied() < CELL_CEILING && !this.outranked(task);
+  }
+
+  /** Another task waiting for a cell goes first: a deeper one, or one as deep that came first. */
+  private outranked(task: TaskRow): boolean {
+    let before = true;
+    for (const [id, depth] of this.roomQueue) {
+      if (id === task.id) before = false;
+      else if (depth > task.depth || (before && depth === task.depth)) return true;
+    }
+    return false;
+  }
+
+  /** Tasks waiting for a cell, with their delegation depth. */
+  private roomQueue = new Map<string, number>();
+  /** Turns waiting for a task they delegated, by task; counted, as one turn may wait twice. */
+  private blocked = new Map<string, number>();
+
+  private block(taskId: string): () => void {
+    this.blocked.set(taskId, (this.blocked.get(taskId) ?? 0) + 1);
+    this.roomChanged();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const n = (this.blocked.get(taskId) ?? 1) - 1;
+      if (n > 0) this.blocked.set(taskId, n);
+      else this.blocked.delete(taskId);
+      this.roomChanged();
+    };
+  }
+
   private roomWaiters: (() => void)[] = [];
 
   /** A cell became idle or went: tasks waiting for one look again. */
-  private roomChanged() {
+  /** Wakes tasks waiting for a cell, to check again (cells or settings changed). */
+  roomChanged() {
     for (const resolve of this.roomWaiters.splice(0)) resolve();
   }
 

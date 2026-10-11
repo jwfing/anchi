@@ -25,7 +25,8 @@ const START_HINTS: Record<string, string> = {
     'set its OpenAI-compatible endpoint and API key: `anchi setup hermes` (Runtimes → h in the TUI)',
   BASE_IMAGE_NOT_BUILT: 'run `anchi setup install`',
   RUNTIME_IMAGE_NOT_BUILT: "the runtime's image layer is missing; start the task again to build it",
-  TOO_MANY_CELLS: 'too many tasks are running; try again when one finishes',
+  TOO_MANY_CELLS:
+    'too many cells are alive in the VM; try again when a task finishes (after updating Anchi, `anchi setup install` raises the VM’s limit)',
   EGRESS_UNAVAILABLE: 'the egress proxy is not running; run `anchi setup install`',
 };
 

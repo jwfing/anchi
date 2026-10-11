@@ -1856,7 +1856,7 @@ describe('cell limit', () => {
     const notices = (await client.call('tasks.events', { taskId: fifth.id }))
       .filter((e) => e.event.type === 'notice')
       .map((e) => (e.event as { text: string }).text);
-    expect(notices).toContain('waiting for a free cell: 4 are in use');
+    expect(notices).toContain('waiting for a free cell: 4 of 4 are working');
   });
 
   it('fails a task that waited too long for a cell', async () => {
@@ -1866,7 +1866,76 @@ describe('cell limit', () => {
     const fifth = await client.call('tasks.create', { agentId: 'a5', text: 'hello' });
     const done = await client.call('tasks.wait', { taskId: fifth.id });
     expect(done.status).toBe('failed');
-    expect(done.result ?? '').toContain('stayed busy');
+    expect(done.result ?? '').toContain('no cell became free');
+  });
+});
+
+describe('cells and delegation', () => {
+  const statusOf = async (client: DaemonClient, id: string) =>
+    (await client.call('tasks.get', { taskId: id })).status;
+  const until = async (check: () => Promise<boolean>) => {
+    for (let i = 0; i < 100 && !(await check()); i++) await new Promise((r) => setTimeout(r, 50));
+  };
+
+  it('a turn waiting for a task it delegated does not hold one of the working cells', async () => {
+    // Four leads fill the four working cells and each waits for a review: before, the reviews
+    // could never start and every task failed once the wait for a cell ran out.
+    roomWaitMs = 2_000;
+    for (let i = 1; i <= 4; i++)
+      write(`agents/lead${i}.yaml`, 'runtime: codex\ndelegates: [rev]\n');
+    write('agents/rev.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const leads = [];
+    for (let i = 1; i <= 4; i++) {
+      leads.push(
+        await client.call('tasks.create', {
+          agentId: `lead${i}`,
+          text: 'call anchi_delegate_task {"agent":"rev","task":"review it"}',
+        }),
+      );
+    }
+    for (const lead of leads) {
+      const done = await client.call('tasks.wait', { taskId: lead.id });
+      expect(done.status).toBe('done');
+      expect(JSON.parse(done.result!).result).toMatchObject({ agent: 'rev', status: 'done' });
+    }
+    // Waiting leads stayed alive beside the working reviews.
+    expect(transport.maxLive).toBeGreaterThan(4);
+  });
+
+  it('gives a free cell to a delegated task before a new task, and honors maxCells', async () => {
+    write('settings.yaml', 'maxCells: 2\n');
+    write('agents/busy.yaml', 'runtime: codex\n');
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    write('agents/other.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const w1 = await client.call('tasks.create', { agentId: 'busy', text: 'hang' });
+    const w2 = await client.call('tasks.create', { agentId: 'busy', text: 'hang' });
+    await until(async () => (await statusOf(client, w2.id)) === 'running');
+    // Both working cells are taken: the lead, then a new task, wait in that order.
+    const lead = await client.call('tasks.create', {
+      agentId: 'lead',
+      text: 'call anchi_delegate_task {"agent":"dev","task":"hang"}',
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const other = await client.call('tasks.create', { agentId: 'other', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(transport.starts).toHaveLength(2);
+    // One cell frees: the lead came first. It delegates and waits, which frees its working
+    // cell, and the delegated task takes it although `other` has waited longer.
+    await client.call('tasks.cancel', { taskId: w2.id });
+    await until(async () => transport.starts.some((s) => s[3] === 'dev'));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(transport.starts.map((s) => s[3])).toEqual(['busy', 'busy', 'lead', 'dev']);
+    expect(await statusOf(client, other.id)).not.toBe('done');
+    const notices = (await client.call('tasks.events', { taskId: other.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices[0]).toMatch(/waiting for a free cell/);
+    // When the busy task ends, `other` gets its cell.
+    await client.call('tasks.cancel', { taskId: w1.id });
+    expect((await client.call('tasks.wait', { taskId: other.id })).status).toBe('done');
+    await client.call('tasks.cancel', { taskId: lead.id });
   });
 });
 

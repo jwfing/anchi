@@ -55,7 +55,7 @@ import {
   VAULT_KEY,
   writeHostConnectors,
 } from './host.ts';
-import { Hub } from './hub.ts';
+import { CELL_CEILING, DEFAULT_MAX_CELLS, Hub } from './hub.ts';
 import {
   agentSummary,
   type BuilderAgentInfo,
@@ -265,6 +265,15 @@ export class Daemon {
     }
   }
 
+  /**
+   * Cells working at once: `maxCells` in ~/.anchi/settings.yaml (1–16), default 4. Each working
+   * cell can use up to 2 GB of the VM's memory; raise the VM's memory with it.
+   */
+  maxCells(): number {
+    const n = Number(this.settings().maxCells);
+    return Number.isInteger(n) && n >= 1 && n <= CELL_CEILING ? n : DEFAULT_MAX_CELLS;
+  }
+
   /** Days finished tasks are kept: `retentionDays` in ~/.anchi/settings.yaml, default 90. */
   retentionDays(): number {
     const file = join(this.opts.layout.root, 'settings.yaml');
@@ -336,6 +345,7 @@ export class Daemon {
       guest: this.guest,
       idleMs: opts.idleMs,
       roomWaitMs: opts.roomWaitMs,
+      maxCells: () => this.maxCells(),
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
       workspaceRoot: this.workspaceRoot,
@@ -1049,7 +1059,11 @@ export class Daemon {
         watch(layout.root, (_e, name) => {
           if (String(name) !== 'settings.yaml') return;
           clearTimeout(settingsTimer);
-          settingsTimer = setTimeout(() => void this.pushEgressSettings(), 300);
+          settingsTimer = setTimeout(() => {
+            void this.pushEgressSettings();
+            // A higher maxCells lets tasks waiting for a cell start now.
+            this.hub.roomChanged();
+          }, 300);
         }),
       );
     } catch {
