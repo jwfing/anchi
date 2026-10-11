@@ -79,7 +79,7 @@ const T={
 }[LANG];
 document.querySelectorAll('[data-t]').forEach(e=>e.textContent=T[e.dataset.t]);
 const KEY='<svg width="9" height="9" viewBox="0 0 10 10" style="position:static"><circle cx="3" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M5.2 5H9.5M8 5V7" stroke="currentColor" stroke-width="1.1" fill="none"/></svg>';
-const CELLS=[{n:'@developer',a:'Codex',x:30},{n:'@reviewer',a:'Claude Code',x:160},{n:'@ops',a:'OpenClaw',x:290}];
+const CELLS=[{n:'@developer',a:'Codex',x:30},{n:'@reviewer',a:'Claude Code',x:160},{n:'@ops',a:'Hermes',x:290}];
 CELLS.forEach((c,i)=>{c.cx=c.x+60;document.getElementById('cells').insertAdjacentHTML('beforeend',
  `<div class="a cell" id="cell${i}" style="left:${c.x}px"><span class="tag">0${i+1}</span><div class="r1"><span class="av"><i></i></span>${c.n}</div>
   <div class="r2">${c.a}</div><div class="r3"><span class="car">❯</span>${T.tasks[i]}<span class="cur"></span></div>

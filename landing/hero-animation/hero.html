@@ -81,7 +81,7 @@ document.querySelectorAll('[data-t]').forEach(e=>e.textContent=T[e.dataset.t]);
 document.getElementById('h2').innerHTML=T.h2;
 
 const KEY='<svg width="10" height="10" viewBox="0 0 10 10" style="position:static"><circle cx="3" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M5.2 5H9.5M8 5V7" stroke="currentColor" stroke-width="1.1" fill="none"/></svg>';
-const CELLS=[{n:'@developer',a:'Codex',y:118},{n:'@reviewer',a:'Claude Code',y:212},{n:'@ops',a:'OpenClaw',y:306}];
+const CELLS=[{n:'@developer',a:'Codex',y:118},{n:'@reviewer',a:'Claude Code',y:212},{n:'@ops',a:'Hermes',y:306}];
 CELLS.forEach((c,i)=>{c.cy=c.y+39;document.getElementById('cells').insertAdjacentHTML('beforeend',
  `<div class="a cell" id="cell${i}" style="top:${c.y}px"><div class="r1"><span class="av"><i></i></span>${c.n}<span class="tag mono">CELL 0${i+1}</span></div>
   <div class="r2 mono">${c.a}</div><div class="r3 mono"><span class="car">❯</span>${T.tasks[i]}<span class="cur"></span><span class="fk">${KEY}${T.fake}</span></div>
