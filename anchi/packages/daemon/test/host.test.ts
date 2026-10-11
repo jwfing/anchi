@@ -46,7 +46,7 @@ describe('host integration', () => {
     );
     // The guest pieces bring the bindfs mapping; then the vault, locked by the restart.
     expect(linux.slice(-3)).toEqual([
-      'limactl start --tty=false secure-vm',
+      'limactl start --tty=false anchi-vm',
       'bash scripts/install-anchi.sh',
       'python3 scripts/vault.py unlock',
     ]);

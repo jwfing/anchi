@@ -2,9 +2,10 @@
 # Installs or updates the agent-team guest components: trusted services (including the egress
 # proxy), the task-cell manager and the cell runner. Explicit copies only, no host mounts.
 set -euo pipefail
-vm_name=${ANCHI_INSTALL_VM:-secure-vm}
-[[ "$vm_name" =~ ^secure-vm(-[a-z0-9-]+)?$ ]] || { echo "Invalid VM name" >&2; exit 1; }
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/vm-name.sh
+source scripts/vm-name.sh
+vm_name=$(anchi_vm_name)
 # shellcheck source=guest/arch.sh
 source guest/arch.sh
 if limactl list --format '{{.Name}} {{.Status}}' 2>/dev/null | grep -Fqx "$vm_name Running"; then

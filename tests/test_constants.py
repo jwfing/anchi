@@ -57,7 +57,7 @@ class CellEnvTests(unittest.TestCase):
 
 class LimaTemplateTests(unittest.TestCase):
     def test_single_template_lists_both_architectures_without_fixed_driver(self):
-        text = (ROOT / 'lima/secure-vm.yaml').read_text()
+        text = (ROOT / 'lima/anchi-vm.yaml').read_text()
         top_level = [
             line.split(':')[0]
             for line in text.splitlines()
@@ -75,7 +75,10 @@ class LimaTemplateTests(unittest.TestCase):
         text = (ROOT / 'scripts/up.sh').read_text()
         self.assertIn('host_vm_type', text)
         self.assertIn('--vm-type="$vm_type"', text)
-        self.assertIn('ANCHI_INSTALL_VM', (ROOT / 'scripts/verify.sh').read_text())
+        # Every host script takes the VM name, ANCHI_INSTALL_VM included, from vm-name.sh.
+        self.assertIn('ANCHI_INSTALL_VM', (ROOT / 'scripts/vm-name.sh').read_text())
+        for script in ('up.sh', 'install-anchi.sh', 'verify.sh', 'cell.sh', 'policy.sh'):
+            self.assertIn('anchi_vm_name', (ROOT / 'scripts' / script).read_text(), script)
 
 
 if __name__ == '__main__':

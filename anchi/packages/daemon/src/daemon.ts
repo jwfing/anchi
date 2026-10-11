@@ -48,9 +48,11 @@ import {
   ghToken,
   hostConnectorsFile,
   hostOutput,
+  migrateLegacyVm,
   readHostConnectors,
   SetupRunner,
   SETUP_STEPS,
+  VAULT_KEY,
   writeHostConnectors,
 } from './host.ts';
 import { Hub } from './hub.ts';
@@ -121,6 +123,11 @@ export interface DaemonOptions {
   /** Host commands of `setup.reset` (tests replace them; the default deletes the VM). */
   resetSteps?: string[][];
   hostRun?: typeof hostOutput;
+  /**
+   * Rename a VM created as `secure-vm` and move the vault key at start (scripts/vm-name.sh).
+   * Off unless set: only the real daemon may stop and rename the machine's VM.
+   */
+  migrateVm?: boolean;
   /** Keep the vault's Codex token in step with the Mac's login (default true). */
   codexSync?: boolean;
   /** The Mac's Codex login file; tests point it elsewhere. */
@@ -866,7 +873,7 @@ export class Daemon {
       busy,
       cells: this.hub.cellCount(),
       home: this.opts.layout.root,
-      vaultKey: join(homedir(), '.config/secure-vm/vault.key'),
+      vaultKey: VAULT_KEY,
     };
   }
 
@@ -966,6 +973,8 @@ export class Daemon {
       this.server!.listen(layout.socketFile, () => resolve());
     });
     chmodSync(layout.socketFile, 0o600);
+    // In the background: restarting a running VM takes longer than clients wait for the socket.
+    if (this.opts.migrateVm) void migrateLegacyVm((line) => this.log(line));
     this.watchConfig();
     if (this.opts.approvals !== false) this.approvals.start();
     if (this.opts.triggers !== false) this.triggers.start();

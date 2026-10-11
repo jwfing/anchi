@@ -11,9 +11,10 @@ import resource
 import subprocess
 
 
-VM = os.environ.get('ANCHI_INSTALL_VM', 'secure-vm')
-if not re.fullmatch(r'secure-vm(-[a-z0-9-]+)?', VM):
-    raise SystemExit('ANCHI_INSTALL_VM must look like secure-vm or secure-vm-<suffix>')
+VM = os.environ.get('ANCHI_INSTALL_VM', 'anchi-vm')
+if not re.fullmatch(r'anchi-vm(-[a-z0-9-]+)?', VM):
+    raise SystemExit('ANCHI_INSTALL_VM must look like anchi-vm or anchi-vm-<suffix>')
+KEY_FILE = Path.home() / '.config/anchi/vault.key'
 
 
 def remote(action, value=None):
@@ -45,8 +46,15 @@ def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('init', 'unlock', 'lock', 'status'))
-    parser.add_argument('--key-file', type=Path, default=Path.home() / '.config/secure-vm/vault.key')
+    parser.add_argument('--key-file', type=Path, default=KEY_FILE)
     args = parser.parse_args()
+    if VM == 'anchi-vm' and os.environ.get('ANCHI_VM_MIGRATING') != '1':
+        # Renames a VM created as secure-vm and moves its key here first (scripts/vm-name.sh).
+        subprocess.run(
+            ['bash', str(Path(__file__).with_name('vm-name.sh')), 'migrate'],
+            env={**os.environ, 'ANCHI_VM_MIGRATING': '1'},
+            check=True,
+        )
     if args.action in ('status', 'lock'):
         print(json.dumps(remote(args.action), indent=2))
         return

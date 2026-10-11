@@ -6,7 +6,7 @@ These trusted services keep credentials, authorization and provider networking o
 
 A separate `secure-auth` UID owns OAuth client configuration, access/refresh tokens, temporary PKCE state, connector tokens and the Codex and Claude Code runtime tokens. `/var/lib/secure-auth/*.json.enc` uses AES-256-GCM with random twelve-byte nonces and the logical filename as AAD, preventing credential-file substitution. Directory mode is 0700; files are 0600 with atomic replacement and fsync.
 
-The 32-byte master key is `~/.config/secure-vm/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled. Restart requires unlocking again.
+The 32-byte master key is `~/.config/anchi/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled. Restart requires unlocking again.
 
 ```bash
 scripts/anchi setup vault init     # Create once; reuses an existing key

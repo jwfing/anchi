@@ -1,3 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-exec limactl shell secure-vm -- sudo /usr/local/sbin/secure-cell-run "$@"
+# shellcheck source=scripts/vm-name.sh
+source "$(dirname "$0")/vm-name.sh"
+exec limactl shell "$(anchi_vm_name)" -- sudo /usr/local/sbin/secure-cell-run "$@"

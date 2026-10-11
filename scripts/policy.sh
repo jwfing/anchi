@@ -1,3 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-exec limactl shell secure-vm -- sudo /usr/bin/python3 /opt/secure-vm/services/policy_admin.py "$@"
+# shellcheck source=scripts/vm-name.sh
+source "$(dirname "$0")/vm-name.sh"
+exec limactl shell "$(anchi_vm_name)" -- sudo /usr/bin/python3 /opt/secure-vm/services/policy_admin.py "$@"

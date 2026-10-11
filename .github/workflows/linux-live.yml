@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      ANCHI_INSTALL_VM: secure-vm-live-test
+      ANCHI_INSTALL_VM: anchi-vm-live-test
       LIMA_VERSION: 2.2.0
       LIMA_SHA256: a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a
     steps:

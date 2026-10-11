@@ -14,6 +14,12 @@ export const REPO_ROOT = resolve(
 
 export const WORKSPACE_MOUNT = '/mnt/anchi-host';
 
+/** The Lima VM (`secure-vm` before 0.3; scripts/vm-name.sh renames it). */
+export const VM_NAME = 'anchi-vm';
+
+/** The vault's master key on this computer; vault.py sends it to the VM over stdin. */
+export const VAULT_KEY = join(homedir(), '.config/anchi/vault.key');
+
 /**
  * How ~/AnchiWorkspaces reaches the VM. macOS: virtiofs at the mount itself, where files show as
  * owned by their reader. Linux: 9p, where the guest checks the host owner's uid, at a raw share
@@ -25,18 +31,18 @@ export function workspaceSteps(platform: NodeJS.Platform = process.platform): st
   const mountPoint = linux ? '/mnt/anchi-host-raw/share' : WORKSPACE_MOUNT;
   return [
     ['mkdir', '-p', join(homedir(), 'AnchiWorkspaces')],
-    ['limactl', 'stop', 'secure-vm'],
+    ['limactl', 'stop', VM_NAME],
     [
       'limactl',
       'edit',
-      'secure-vm',
+      VM_NAME,
       '--tty=false',
       '--set',
       `.mounts=[{"location":"~/AnchiWorkspaces","mountPoint":"${mountPoint}","writable":true}]`,
       '--set',
       `.mountType="${linux ? '9p' : 'virtiofs'}"`,
     ],
-    ['limactl', 'start', '--tty=false', 'secure-vm'],
+    ['limactl', 'start', '--tty=false', VM_NAME],
     ...(linux ? [['bash', 'scripts/install-anchi.sh']] : []),
     ['python3', 'scripts/vault.py', 'unlock'],
   ];
@@ -47,13 +53,13 @@ export const SETUP_STEPS: Record<SetupAction, string[][]> = {
   // Mounts ~/AnchiWorkspaces into the VM once; restarts the VM, which locks the vault, so it is
   // unlocked again at the end.
   workspaces: workspaceSteps(),
-  'vm-start': [['limactl', 'start', '--tty=false', 'secure-vm']],
+  'vm-start': [['limactl', 'start', '--tty=false', VM_NAME]],
   install: [
     ['bash', 'scripts/up.sh'],
     ['bash', 'scripts/install-anchi.sh'],
-    ['limactl', 'shell', 'secure-vm', '--', 'sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
+    ['limactl', 'shell', VM_NAME, '--', 'sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
   ],
-  // vault.py reads the master key from ~/.config/secure-vm and sends it to the VM over stdin.
+  // vault.py reads the master key from ~/.config/anchi and sends it to the VM over stdin.
   'vault-init': [['python3', 'scripts/vault.py', 'init']],
   'vault-unlock': [['python3', 'scripts/vault.py', 'unlock']],
 };
@@ -62,9 +68,31 @@ export const SETUP_STEPS: Record<SetupAction, string[][]> = {
  * `setup.reset`: deletes the VM and everything in it (the vault's encrypted files included).
  * Lima ignores an instance that does not exist. The vault key and Anchi home are the CLI's.
  */
-export const RESET_STEPS: string[][] = [['limactl', 'delete', '--force', 'secure-vm']];
+export const RESET_STEPS: string[][] = [['limactl', 'delete', '--force', VM_NAME]];
 
 const STEP_TIMEOUT_MS = 45 * 60_000;
+
+/**
+ * Renames a VM created as `secure-vm` to `anchi-vm` and moves the vault key to ~/.config/anchi
+ * (`scripts/vm-name.sh migrate`), restarting and unlocking a running VM. Nothing happens when
+ * there is nothing to move. Its messages go to `log`; it never throws.
+ */
+export function migrateLegacyVm(log: (line: string) => void, cwd = REPO_ROOT): Promise<void> {
+  return new Promise((done) => {
+    const child = spawn('bash', ['scripts/vm-name.sh', 'migrate'], {
+      cwd,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const timer = setTimeout(() => child.kill('SIGTERM'), 15 * 60_000);
+    createInterface({ input: child.stderr }).on('line', (line) => log(`vm migration: ${line}`));
+    child.on('error', (err) => log(`vm migration skipped: ${err.message}`));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code) log(`vm migration failed (exit ${code}); scripts/anchi setup install retries it`);
+      done();
+    });
+  });
+}
 
 /** Runs one setup step at a time, streaming its output lines. */
 export class SetupRunner {

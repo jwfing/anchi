@@ -9,6 +9,7 @@ import type {
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
+import { VAULT_KEY } from './host.ts';
 import type { ServiceSetup } from './services.ts';
 
 export const CONNECTOR_IDS: ConnectorId[] = ['github', 'aws', 'linear'];
@@ -116,7 +117,7 @@ export async function setupStatus(
   const empty: SetupStatus = {
     vm,
     host: hostReadiness(),
-    vaultKeyPresent: existsSync(join(homedir(), '.config/secure-vm/vault.key')),
+    vaultKeyPresent: existsSync(VAULT_KEY),
     vaultUnlocked: false,
     installed: false,
     codex: { runtime: 'codex', connected: false, accountId: null, expiresAt: null },
