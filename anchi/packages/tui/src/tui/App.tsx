@@ -395,7 +395,12 @@ export function App({
   const refreshSkills = useCallback(() => {
     void client
       .call('skills.list')
-      .then((list) => setSkills(list ?? []))
+      .then((list) => {
+        const sorted = sortSkills(list ?? []);
+        setSkills(sorted);
+        // Removing the last skill leaves the cursor past the end.
+        setSkillCursor((c) => Math.max(0, Math.min(c, sorted.length - 1)));
+      })
       .catch(() => setSkills([]));
   }, [client]);
   const [verbose, setVerbose] = useState(false);
@@ -884,6 +889,8 @@ export function App({
 
   const back = () => setFocus('side');
   const halfPage = Math.floor(transcriptHeight / 2);
+  // PgUp and PgDn in the skills list move the cursor by what the list shows.
+  const skillPage = skillListRows(bodyHeight - 4);
   const connectorIds: ConnectorId[] = ['github', 'aws', 'linear'];
   const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
 
@@ -1290,6 +1297,14 @@ export function App({
         return setConnectorCursor((c) =>
           Math.min(connectorIds.length + serviceIds.length - 1, c + 1),
         );
+      case 'list:pageUp':
+        return setSkillCursor((c) => Math.max(0, c - skillPage));
+      case 'list:pageDown':
+        return setSkillCursor((c) => Math.min((skills ?? []).length - 1, c + skillPage));
+      case 'list:first':
+        return setSkillCursor(0);
+      case 'list:last':
+        return setSkillCursor(Math.max(0, (skills ?? []).length - 1));
       case 'setup:vmStart':
         return setupStep('vm-start');
       case 'setup:install':
@@ -2049,6 +2064,7 @@ export function App({
                       ]
                     : context === 'skills'
                       ? [
+                          ['list:down', 'choose'],
                           ['skills:add', 'add'],
                           ['skills:update', 'update'],
                           ['skills:remove', 'remove'],
@@ -2260,7 +2276,12 @@ export function App({
               scroll={scroll}
             />
           ) : (
-            <SkillsView skills={skills} cursor={skillCursor} />
+            <SkillsView
+              skills={skills}
+              cursor={skillCursor}
+              width={textWidth}
+              height={bodyHeight - 4}
+            />
           )}
         </Box>
       </Box>
@@ -2554,24 +2575,65 @@ async function readClientFile(path: string): Promise<string> {
   return readFile(file, 'utf8');
 }
 
-function SkillsView({ skills, cursor }: { skills: SkillInfo[] | null; cursor: number }) {
+/** Where a skill came from: `owner/repo @ 1be8e34` for GitHub, `local` for a directory. */
+export function skillSource(skill: SkillInfo): string {
+  if (!skill.commit) return 'local';
+  const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)/.exec(skill.source);
+  const repo = m ? m[1]! : sanitizeLine(skill.source);
+  return `${repo} @ ${skill.commit.slice(0, 7)}`;
+}
+
+/** Skills of one repository sit together, so a whole collection can be updated or removed in turn. */
+export function sortSkills(skills: SkillInfo[]): SkillInfo[] {
+  const group = (s: SkillInfo) => (s.commit ? `0${skillSource(s)}` : '1');
+  return [...skills].sort((a, b) => group(a).localeCompare(group(b)) || a.id.localeCompare(b.id));
+}
+
+/** Rows the skill list gets: the view keeps a counter above it and two lines below. */
+const skillListRows = (height: number) => Math.max(1, height - 3);
+
+/** The first row shown, so that the cursor stays visible with context around it. */
+function listWindow(count: number, cursor: number, rows: number): number {
+  return Math.max(0, Math.min(cursor - Math.floor(rows / 2), count - rows));
+}
+
+function SkillsView({
+  skills,
+  cursor,
+  width,
+  height,
+}: {
+  skills: SkillInfo[] | null;
+  cursor: number;
+  width: number;
+  height: number;
+}) {
   if (!skills) return <Text dimColor>Loading…</Text>;
+  if (!skills.length) return <Text dimColor>No skills yet. Press a to add one.</Text>;
+  const rows = skillListRows(height);
+  const start = listWindow(skills.length, cursor, rows);
+  const shown = skills.slice(start, start + rows);
+  // One line each: the id in a column as wide as the longest id, then where it came from.
+  const idWidth = Math.min(32, Math.max(...skills.map((s) => s.id.length)));
+  const selected = skills[cursor];
   return (
-    <Box flexDirection="column">
-      {skills.length ? null : <Text dimColor>No skills yet. Press a to add one.</Text>}
-      {skills.map((s, i) => (
-        <Box key={s.id} flexDirection="column">
-          <Text inverse={i === cursor} wrap="truncate">
-            {`${s.id.padEnd(20)}${sanitizeLine(s.name)}`}
-          </Text>
-          <Text dimColor wrap="truncate">
-            {`  ${sanitizeLine(s.description)}${s.commit ? ` · ${sanitizeLine(s.source)} @ ${s.commit.slice(0, 10)}` : ' · local'}`}
-          </Text>
-        </Box>
+    <Box flexDirection="column" height={Math.max(1, height)}>
+      <Text dimColor wrap="truncate">
+        {`${Math.min(cursor + 1, skills.length)}/${skills.length}${start > 0 ? ' · ↑ more' : ''}${
+          start + rows < skills.length ? ' · ↓ more' : ''
+        }`}
+      </Text>
+      {shown.map((s, i) => (
+        <Text key={s.id} inverse={start + i === cursor} wrap="truncate">
+          {truncate(`${s.id.padEnd(idWidth)}  ${skillSource(s)}`, width)}
+        </Text>
       ))}
-      <Text dimColor>
-        Agents use skills listed in their `skills:` field. Skill content is untrusted, like any
-        agent input.
+      <Text dimColor wrap="truncate">
+        {selected ? truncate(sanitizeLine(selected.description) || '—', width) : ''}
+      </Text>
+      <Text dimColor wrap="truncate">
+        Agents use skills listed in their `skills:` field · content is untrusted, like any agent
+        input
       </Text>
     </Box>
   );
