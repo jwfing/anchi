@@ -115,6 +115,10 @@ export const ACTIONS = {
   },
   'setup:codex': { title: 'Import the Codex login', contexts: ['runtimes', 'welcome'] },
   'setup:claude': { title: 'Connect Claude Code', contexts: ['runtimes', 'welcome'] },
+  'setup:hermes': {
+    title: "Set Hermes's model endpoint (OpenAI-compatible)",
+    contexts: ['runtimes', 'welcome'],
+  },
   'setup:refresh': { title: 'Refresh', contexts: ['runtimes', 'connectors', 'welcome'] },
   'skills:add': { title: 'Add a skill (local directory or GitHub URL)', contexts: ['skills'] },
   'skills:remove': { title: 'Remove the skill', contexts: ['skills'] },
@@ -198,6 +202,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     enter: 'welcome:next',
     i: 'setup:codex',
     c: 'setup:claude',
+    h: 'setup:hermes',
     r: 'setup:refresh',
   },
   team: { ...VIEW, ...BACK, ...LIST, enter: 'team:open', a: 'approvals:open' },
@@ -253,6 +258,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     W: 'setup:workspaces',
     i: 'setup:codex',
     c: 'setup:claude',
+    h: 'setup:hermes',
     r: 'setup:refresh',
   },
   usage: {

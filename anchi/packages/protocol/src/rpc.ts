@@ -1,3 +1,4 @@
+import type { RuntimeId } from './cell.ts';
 import type { RuntimeEvent } from './events.ts';
 
 /**
@@ -122,6 +123,17 @@ export interface ClaudeAccountStatus {
   kind: 'oauth' | 'api_key' | null;
 }
 
+/**
+ * Hermes's model endpoint in the vault: an OpenAI-compatible base URL, API key and default
+ * model. The key never leaves the vault; the base URL and model are shown.
+ */
+export interface HermesAccountStatus {
+  runtime: 'hermes';
+  connected: boolean;
+  baseUrl: string | null;
+  model: string | null;
+}
+
 /** Connectors served by trusted services in the VM (formerly set up in the desktop app). */
 export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack';
 
@@ -174,6 +186,8 @@ export interface SetupStatus {
   installed: boolean;
   codex: RuntimeAccountStatus;
   claude: ClaudeAccountStatus;
+  /** Optional for clients connected to an older daemon. */
+  hermes?: HermesAccountStatus;
   connectors: ConnectorStatus[];
   services: ServiceConnectorStatus[];
   /** Whether a Google OAuth client is available (needed for Gmail and Drive). */
@@ -287,7 +301,7 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
 export interface AgentPatch {
   name?: string;
   description?: string;
-  runtime?: 'codex' | 'claude-code';
+  runtime?: RuntimeId;
   model?: string;
   effort?: Effort | '';
   prompt?: { mode?: 'append' | 'replace'; text?: string };
@@ -300,7 +314,7 @@ export interface AgentPatch {
 export interface AgentSettingValues {
   name: string;
   description: string;
-  runtime: 'codex' | 'claude-code';
+  runtime: RuntimeId;
   /** '' for the runtime default. */
   model: string;
   effort: Effort | '';
@@ -341,7 +355,7 @@ export interface Inventory {
     accounts?: string[];
   }[];
   /** Runtimes an agent can run on; `connected` is null when the VM could not be asked. */
-  runtimes: { id: 'codex' | 'claude-code'; connected: boolean | null }[];
+  runtimes: { id: RuntimeId; connected: boolean | null }[];
   /** Directories under ~/AnchiWorkspaces (two levels); `shared` once the VM mounts it. */
   workspaces: { shared: boolean | null; dirs: string[] };
   agents: string[];
@@ -599,6 +613,8 @@ export interface Methods {
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
   /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */
   'setup.importClaude': [{ token: string }, ClaudeAccountStatus];
+  /** Stores Hermes's OpenAI-compatible endpoint (base URL, API key, default model) in the vault. */
+  'setup.importHermes': [{ baseUrl: string; apiKey: string; model: string }, HermesAccountStatus];
   /** Runs a setup step; the caller has the user's consent. Progress arrives as `setup`. */
   'setup.run': [{ action: SetupAction }, SetupStatus];
   /** What `setup.reset` would delete and whether anything blocks it; changes nothing. */

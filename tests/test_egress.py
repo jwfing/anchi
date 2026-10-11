@@ -1256,12 +1256,162 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('"ts"', text)
 
 
+HERMES = {
+    'token': 'sk-or-v1-fakefakefakefakefakefakefake',
+    'host': 'openrouter.ai',
+    'base_url': 'https://openrouter.ai/api/v1',
+    'model': 'nousresearch/hermes-4-405b',
+    'generation': 'g',
+}
+HERMES_RULE = rules.hermes_rule('openrouter.ai')
+
+
+class HermesTests(unittest.TestCase):
+    """Hermes's endpoint is the user's: its rule comes from the vault, for that host only."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='anchi-egress-')
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        import egress_proxy
+
+        self.module = egress_proxy
+        patcher = patch.multiple(egress_proxy, CELLS=Path(self.tmp) / 'cells', AUDIT=Path(self.tmp) / 'audit.jsonl')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_import_takes_an_https_endpoint_without_a_rule_of_its_own(self):
+        import hermes_admin
+
+        good = hermes_admin.validate(
+            {'base_url': 'https://OpenRouter.ai/api/v1/', 'api_key': HERMES['token'], 'model': HERMES['model']}
+        )
+        self.assertEqual((good['host'], good['base_url']), ('openrouter.ai', 'https://openrouter.ai/api/v1'))
+        for base_url in (
+            'http://openrouter.ai/api/v1',
+            'https://openrouter.ai:8443/v1',
+            'https://user:pass@openrouter.ai/v1',
+            'https://openrouter.ai/v1?key=x',
+            'https://localhost/v1',
+            'https://*.example.com/v1',
+            'https://api.anthropic.com/v1',
+            'https://api.github.com',
+            'https://bedrock-runtime.us-east-1.amazonaws.com',
+            'https://chatgpt.com/backend-api',
+            'https://example.com/a b',
+        ):
+            with self.assertRaises(Exception, msg=base_url):
+                hermes_admin.validate({'base_url': base_url, 'api_key': HERMES['token'], 'model': 'm'})
+        for key in ('short', rules.PLACEHOLDER_HERMES, 'sk-' + 'x' * 40 + '\n'):
+            with self.assertRaises(Exception):
+                hermes_admin.validate({'base_url': HERMES['base_url'], 'api_key': key, 'model': 'm'})
+        with self.assertRaises(Exception):
+            hermes_admin.validate({'base_url': HERMES['base_url'], 'api_key': HERMES['token'], 'model': 'a b'})
+
+    def test_the_key_replaces_a_placeholder_on_the_endpoint_host_only(self):
+        grants = {'hermes'}
+        placeholder = {'authorization': f'Bearer {rules.PLACEHOLDER_HERMES}'}
+        extra = (HERMES_RULE,)
+        d = rules.decide('POST', 'openrouter.ai', '/api/v1/chat/completions', placeholder, b'', grants, extra)
+        self.assertEqual((d.action, d.rule.name), ('inject', 'hermes'))
+        out = rules.apply(d, 'POST', 'https://openrouter.ai/api/v1/chat/completions', placeholder, b'', HERMES)
+        self.assertEqual(out['authorization'], f'Bearer {HERMES["token"]}')
+        # No placeholder, another agent's cell, or another host: nothing is injected.
+        own = {'authorization': 'Bearer sk-of-its-own'}
+        self.assertEqual(rules.decide('POST', 'openrouter.ai', '/v1/x', own, b'', grants, extra).action, 'pass')
+        self.assertEqual(
+            rules.decide('POST', 'openrouter.ai', '/v1/x', placeholder, b'', {'codex'}, extra).action, 'pass'
+        )
+        self.assertIsNone(rules.decide('POST', 'openrouter.ai', '/v1/x', placeholder, b'', grants).rule)
+        self.assertEqual(
+            rules.decide('POST', 'api.openai.com', '/v1/x', placeholder, b'', grants, extra).action, 'pass'
+        )
+        # Account administration on the endpoint is refused.
+        for path in ('/v1/organization/admin_api_keys', '/api/v1/organizations/o/keys', '/dashboard/billing'):
+            self.assertEqual(rules.decide('GET', 'openrouter.ai', path, placeholder, b'', grants, extra).action, 'deny')
+
+    def test_a_hermes_cell_gets_its_endpoint_rule_and_host_at_registration(self):
+        async def scenario():
+            proxy = self.module.EgressProxy(
+                registry=self.module.Registry(('127.0.0.1', 1)),
+                credentials=self.module.Credentials(lambda r: HERMES if r['op'] == 'hermes_credential' else {}),
+            )
+            request = {'task': 'th', 'agent': 'a', 'connectors': [], 'runtime': 'hermes', 'egress': ['pypi.org']}
+            await proxy.registry.register(request, await proxy.runtime_rules(request))
+            cell = proxy.registry.cells['th']
+            self.assertEqual(cell.grants, frozenset({'hermes'}))
+            self.assertEqual([r.hosts for r in cell.extra], [('openrouter.ai',)])
+            self.assertEqual(cell.egress, frozenset({'pypi.org', 'openrouter.ai', 'models.dev'}))
+            self.assertEqual(
+                proxy.identifiers(cell.grants),
+                {'hermes_base_url': HERMES['base_url'], 'hermes_model': HERMES['model']},
+            )
+            # Codex cells get no Hermes rule.
+            self.assertEqual(await proxy.runtime_rules({'runtime': 'codex'}), ())
+            await proxy.registry.unregister('th')
+
+        asyncio.run(scenario())
+
+    def test_without_an_endpoint_the_cell_gets_no_rule(self):
+        def fetch(request):
+            raise LookupError('NOT_FOUND')
+
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)), credentials=self.module.Credentials(fetch)
+        )
+        self.assertEqual(asyncio.run(proxy.runtime_rules({'runtime': 'hermes'})), ())
+        self.assertEqual(proxy.identifiers(frozenset({'hermes'})), {})
+
+    def test_the_key_never_goes_to_a_host_the_endpoint_moved_away_from(self):
+        from types import SimpleNamespace as NS
+
+        current = dict(HERMES)
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)),
+            credentials=self.module.Credentials(lambda r: current, clock=lambda: 0.0),
+        )
+        cell = self.module.Cell('t1', 'dev', {'hermes'}, extra=(HERMES_RULE,))
+        proxy.registry.client_cell = lambda client: cell
+
+        def send():
+            headers = {'authorization': f'Bearer {rules.PLACEHOLDER_HERMES}'}
+            request = NS(
+                method='POST',
+                path='/api/v1/chat/completions',
+                url='https://openrouter.ai/api/v1/chat/completions',
+                pretty_host='openrouter.ai',
+                headers=dict(headers),
+                stream=None,
+                raw_content=b'{}',
+                get_content=lambda strict=False: b'{}',
+            )
+            flow = NS(request=request, client_conn=NS(id='c1'), metadata={}, response=None)
+            responses = []
+            with patch.object(self.module.EgressProxy, 'respond', staticmethod(lambda f, *a: responses.append(a[0]))):
+                asyncio.run(proxy.request(flow))
+            return flow, responses
+
+        flow, responses = send()
+        self.assertEqual(responses, [])
+        self.assertEqual(flow.request.headers['authorization'], f'Bearer {HERMES["token"]}')
+        # The user points Hermes at another endpoint while the cell lives: its new key must not
+        # be sent to the old host.
+        current.update(
+            host='api.together.xyz', base_url='https://api.together.xyz/v1', token='sk-new-endpoint-key-0000'
+        )
+        proxy.credentials.invalidate('hermes')
+        flow, responses = send()
+        self.assertEqual(responses, [403])
+        self.assertNotIn('sk-new-endpoint-key', flow.request.headers['authorization'])
+        self.assertNotIn(HERMES['token'], Path(self.tmp, 'audit.jsonl').read_text())
+
+
 class AuthEgressScopeTests(unittest.TestCase):
     def test_only_the_egress_caller_reads_connector_credentials(self):
         import server
 
         self.assertEqual(
-            server.credential_ops('egress'), ('egress_credential', 'codex_token', 'codex_account', 'claude_token')
+            server.credential_ops('egress'),
+            ('egress_credential', 'codex_token', 'codex_account', 'claude_token', 'hermes_credential'),
         )
         self.assertNotIn('egress_credential', server.credential_ops('inference'))
         self.assertEqual(server.credential_ops(None), ())

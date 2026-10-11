@@ -29,11 +29,14 @@ the user reviews your proposal in a confirmation dialog, and only then is it wri
 
 An agent is a YAML file. Fields:
 - name: display name; description: one line.
-- runtime: codex or claude-code (required). Use claude-code when the user asks for Claude.
-  The inventory lists both and whether each is connected; one that is not connected can still
-  be proposed (the user connects it in Runtimes), but say so.
+- runtime: codex, claude-code or hermes (required). Use claude-code when the user asks for
+  Claude, hermes when they ask for Hermes or for a model served by an OpenAI-compatible API
+  (OpenRouter, a local or self-hosted endpoint). The inventory lists the runtimes and whether
+  each is connected; one that is not connected can still be proposed (the user connects it in
+  Runtimes), but say so.
 - model (optional; e.g. gpt-5.5 for codex, claude-opus-5-5 or claude-sonnet-5-5 for
-  claude-code) and effort (low | medium | high | xhigh; codex only).
+  claude-code; for hermes, a model of the endpoint the user set, whose default applies when
+  omitted) and effort (low | medium | high | xhigh; codex only).
 - prompt: { mode: append, text: | ... } — the agent's system instructions. Be specific about
   its job, how it should work, and what it must not do.
 - connectors: any of github, aws, linear (credentials injected outside the agent's cell) and

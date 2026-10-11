@@ -1,7 +1,9 @@
 #!/bin/sh
 # Runs inside an image build cell as cell root (user-namespaced, no capabilities on the VM).
-# Builds the built-in `codex` image layer: the runtimes and common developer toolchains. The only network path is the egress proxy with no
-# credential injection; nothing here sees a credential.
+# Builds the base image layer (`codex base`): common developer tools. Each runtime (Codex,
+# Claude Code, Hermes) is a layer of its own on top, built the first time an agent uses it
+# (build-runtime-<runtime>.sh). The only network path is the egress proxy with no credential
+# injection; nothing here sees a credential.
 set -eu
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/node/bin
 export DEBIAN_FRONTEND=noninteractive
@@ -20,40 +22,6 @@ apt-get install -y -qq --no-install-recommends \
 rm -rf /var/lib/apt/lists/* /var/cache/apt/*.bin
 ln -sf /usr/bin/fdfind /usr/local/bin/fd
 echo "base: $(git --version); $(gh --version | head -1); $(gcc --version | head -1)"
-
-case $(uname -m) in
-  aarch64) target=aarch64-unknown-linux-musl sha=$ANCHI_CODEX_SHA256_ARM64 ;;
-  x86_64) target=x86_64-unknown-linux-musl sha=$ANCHI_CODEX_SHA256_X64 ;;
-  *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
-esac
-url="https://github.com/openai/codex/releases/download/rust-v$ANCHI_CODEX_VERSION/codex-package-$target.tar.gz"
-curl -fsSL --retry 3 -o /var/tmp/codex.tgz "$url"
-echo "$sha  /var/tmp/codex.tgz" | sha256sum -c - >/dev/null
-rm -rf /opt/codex && install -d /opt/codex
-tar -xzf /var/tmp/codex.tgz -C /opt/codex
-rm -f /var/tmp/codex.tgz
-# Voice support is unused in cells and is most of the package size.
-rm -rf /opt/codex/codex-resources/voice
-# Codex finds its helpers next to its own path and re-executes itself as codex-linux-sandbox.
-ln -sf codex /opt/codex/bin/codex-linux-sandbox
-ln -sf /opt/codex/bin/codex /usr/local/bin/codex
-ln -sf /opt/codex/bin/codex-linux-sandbox /usr/local/bin/codex-linux-sandbox
-echo "base: $(codex --version)"
-
-# Claude Code: the native binary from its npm platform package, pinned by version and hash.
-case $(uname -m) in
-  aarch64) cc_pkg=claude-code-linux-arm64 cc_sha=$ANCHI_CLAUDE_SHA256_ARM64 ;;
-  x86_64) cc_pkg=claude-code-linux-x64 cc_sha=$ANCHI_CLAUDE_SHA256_X64 ;;
-esac
-curl -fsSL --retry 3 -o /var/tmp/claude.tgz \
-  "https://registry.npmjs.org/@anthropic-ai/$cc_pkg/-/$cc_pkg-$ANCHI_CLAUDE_VERSION.tgz"
-echo "$cc_sha  /var/tmp/claude.tgz" | sha256sum -c - >/dev/null
-rm -rf /opt/claude && install -d /opt/claude/bin
-tar -xzf /var/tmp/claude.tgz -C /var/tmp package/claude
-install -m 0755 /var/tmp/package/claude /opt/claude/bin/claude
-rm -rf /var/tmp/claude.tgz /var/tmp/package
-ln -sf /opt/claude/bin/claude /usr/local/bin/claude
-echo "base: $(claude --version 2>&1 | head -1)"
 
 # pnpm, from its npm package (no dependencies), pinned by version and hash.
 curl -fsSL --retry 3 -o /var/tmp/pnpm.tgz \

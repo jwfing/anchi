@@ -123,6 +123,14 @@ def main():
             'ANCHI_CHECK_WITH_TASKS=1 runs anyway, leaving those cells alone.'
         )
     subprocess.run(['anchi-cell', 'reap', *tasks], capture_output=True)
+    # The check cells run Codex, whose layer is built the first time an agent uses it.
+    status = subprocess.run(['anchi-image', 'status', 'runtime-codex', 'runtime'], capture_output=True, text=True)
+    present = status.returncode == 0 and json.loads(status.stdout or '{}').get('present') is True
+    built = present or subprocess.run(
+        ['anchi-image', 'build', 'runtime-codex', 'runtime'], capture_output=True, text=True
+    )
+    if built is not True and built.returncode:
+        raise SystemExit(f'cannot build the Codex runtime layer: {built.stdout[-500:]}')
     t0 = time.time()
 
     # ── M1: concurrency and isolation ──

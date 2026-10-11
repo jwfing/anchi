@@ -71,7 +71,7 @@ Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a fail
 
 ### Configure
 
-- **Runtimes:** s start the VM, I install, u unlock the vault, V initialize a new vault, W share workspaces, i import Codex, c connect Claude Code, r refresh.
+- **Runtimes:** s start the VM, I install, u unlock the vault, V initialize a new vault, W share workspaces, i import Codex, c connect Claude Code, h set Hermes's endpoint, r refresh.
 - **Skills:** ↑ ↓ (k j) choose, a add, u update to the latest commit of its URL, d remove.
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.

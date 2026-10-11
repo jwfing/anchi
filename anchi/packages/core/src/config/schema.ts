@@ -4,7 +4,7 @@ export const idSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'use 1–40 lowercase letters, digits or "-"');
 
-export const runtimeSchema = z.enum(['codex', 'claude-code']);
+export const runtimeSchema = z.enum(['codex', 'claude-code', 'hermes']);
 export type Runtime = z.infer<typeof runtimeSchema>;
 
 /** Connectors whose credentials the egress proxy injects into the agent's requests. */
@@ -138,6 +138,12 @@ export const effortSchema = z.enum(['low', 'medium', 'high', 'xhigh']);
 
 /** Built-in image every recipe starts from: Debian base, Node, Codex, Claude Code and the runner. */
 export const BASE_IMAGE = 'codex';
+/**
+ * Image ids of the runtime layers, built in the VM the first time an agent of that runtime
+ * starts a task; reserved, so no recipe can take one.
+ */
+export const RUNTIME_IMAGE_PREFIX = 'runtime-';
+export const runtimeImage = (runtime: string) => `${RUNTIME_IMAGE_PREFIX}${runtime}`;
 
 /**
  * An agent or template file before `extends` is applied. Every field is optional here;

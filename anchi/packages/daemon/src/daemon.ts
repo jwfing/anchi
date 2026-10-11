@@ -67,6 +67,7 @@ import { desktopNotify } from './notify.ts';
 import { Peer } from './rpc.ts';
 import {
   claudeStatus,
+  hermesStatus,
   codexStatus,
   HOST_CODEX_LOGIN,
   jwtExpiry,
@@ -445,6 +446,7 @@ export class Daemon {
       runtimes: [
         { id: 'codex', connected: known ? status.codex.connected : null },
         { id: 'claude-code', connected: known ? status.claude.connected : null },
+        { id: 'hermes', connected: known ? (status.hermes?.connected ?? false) : null },
       ],
       workspaces: {
         shared: status?.vm === 'running' ? status.workspaces : null,
@@ -723,6 +725,14 @@ export class Daemon {
     'setup.importClaude': async ({ token }) => {
       await this.guest.importClaude(str(token, 'token', 500).trim());
       return claudeStatus(this.guest);
+    },
+    'setup.importHermes': async ({ baseUrl, apiKey, model }) => {
+      await this.guest.importHermes(
+        str(baseUrl, 'baseUrl', 300).trim(),
+        str(apiKey, 'apiKey', 500).trim(),
+        str(model, 'model', 100).trim(),
+      );
+      return hermesStatus(this.guest);
     },
     'setup.importCodex': async () => {
       const login = readHostCodexLogin();

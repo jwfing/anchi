@@ -19,7 +19,9 @@ PLACEHOLDER_MARK = 'anchi-placeholder'
 PLACEHOLDER_AWS_KEY = 'AKIAANCHIPLACEHOLDER'
 CONNECTORS = ('github', 'aws', 'linear')
 # Runtime credentials an agent of that runtime gets; injected replace-only.
-RUNTIMES = ('codex', 'claude')
+RUNTIMES = ('codex', 'claude', 'hermes')
+# Hermes sends `Authorization: Bearer <key>` to the user's OpenAI-compatible endpoint.
+PLACEHOLDER_HERMES = 'sk-anchi-placeholder-' + '0' * 40
 PLACEHOLDER_CLAUDE_OAUTH = 'sk-ant-oat01-anchi-placeholder-' + '0' * 40
 PLACEHOLDER_CLAUDE_KEY = 'sk-ant-api03-anchi-placeholder-' + '0' * 40
 
@@ -128,11 +130,25 @@ def host_matches(pattern, host):
     return host == pattern
 
 
-def find_rule(host):
-    for rule in RULES:
+def find_rule(host, extra=()):
+    for rule in (*RULES, *extra):
         if any(host_matches(p, host) for p in rule.hosts):
             return rule
     return None
+
+
+def hermes_rule(host):
+    """The rule for the user's OpenAI-compatible endpoint, which only the vault knows. Its host
+    never has a built-in rule (hermes_admin refuses those), so it cannot shadow one."""
+    return Rule(
+        name='hermes',
+        hosts=(host,),
+        kind='bearer',
+        grant='hermes',
+        replace_only=True,
+        # OpenAI-style administration (organization, projects, API keys) is not an agent's business.
+        deny=(r'(?i)^\S+ (/[^ ]*)?/(organization|organizations|dashboard)(/|$)',),
+    )
 
 
 def classify_credential(headers):
@@ -215,9 +231,10 @@ def operation(rule, method, path, headers, body):
     return f'{method} {path.split("?", 1)[0]}'
 
 
-def decide(method, host, path, headers, body, grants):
-    """`headers` has lowercase keys. `grants` holds the agent's connectors and runtime."""
-    rule = find_rule(host)
+def decide(method, host, path, headers, body, grants, extra=()):
+    """`headers` has lowercase keys. `grants` holds the agent's connectors and runtime; `extra`
+    holds the cell's rules that depend on stored settings (the Hermes endpoint)."""
+    rule = find_rule(host, extra)
     if rule is None:
         return Decision('pass')
     clean_path = path.split('?', 1)[0]
@@ -734,19 +751,24 @@ BASE_EGRESS = {
     # links chatgpt.com hands out; chatgpt.com is reachable anyway.
     'codex': ('chatgpt.com', '*.chatgpt.com', '*.oaiusercontent.com'),
     'claude': ('api.anthropic.com',),
+    # Model metadata (context lengths); the endpoint's own host comes from the cell's Hermes rule.
+    'hermes': ('models.dev',),
     'github': ('github.com', 'api.github.com', 'codeload.github.com', '*.githubusercontent.com'),
     'aws': ('*.amazonaws.com',),
     'linear': ('api.linear.app',),
 }
 
 
-def egress_allowlist(patterns, grants):
-    """The cell's allowed host patterns, or None for open egress."""
+def egress_allowlist(patterns, grants, extra=()):
+    """The cell's allowed host patterns, or None for open egress. `extra` holds the hosts of
+    the cell's stored-settings rules, which its runtime needs."""
     if patterns is None:
         return None
     allowed = {p.lower() for p in patterns}
     for grant in grants:
         allowed.update(BASE_EGRESS.get(grant, ()))
+    for rule in extra:
+        allowed.update(rule.hosts)
     return frozenset(allowed)
 
 

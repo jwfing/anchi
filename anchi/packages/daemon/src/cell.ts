@@ -21,7 +21,10 @@ const START_HINTS: Record<string, string> = {
   CODEX_NOT_CONFIGURED: 'run `anchi setup codex` (Runtimes → i in the TUI)',
   CLAUDE_NOT_CONFIGURED:
     'run `claude setup-token` on this Mac, then `anchi setup claude` (Runtimes → c in the TUI)',
+  HERMES_NOT_CONFIGURED:
+    'set its OpenAI-compatible endpoint and API key: `anchi setup hermes` (Runtimes → h in the TUI)',
   BASE_IMAGE_NOT_BUILT: 'run `anchi setup install`',
+  RUNTIME_IMAGE_NOT_BUILT: "the runtime's image layer is missing; start the task again to build it",
   TOO_MANY_CELLS: 'too many tasks are running; try again when one finishes',
   EGRESS_UNAVAILABLE: 'the egress proxy is not running; run `anchi setup install`',
 };

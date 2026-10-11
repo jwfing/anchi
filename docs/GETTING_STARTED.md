@@ -247,6 +247,12 @@ and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the g
      Anchi reads `~/.codex/auth.json`; Codex must store its login in that file, not in a
      keyring.
    - Claude Code: run `claude setup-token`, then `anchi setup claude` and paste the token.
+   - Hermes: `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` and
+     paste the endpoint's API key (or **h** in Runtimes). Any OpenAI-compatible API works; the key
+     stays in the VM vault.
+
+   A runtime is installed in the cell image the first time one of its agents runs a task (a few
+   minutes, once); runtimes you never use are never downloaded.
 4. **Build an agent.** Select **Agent builder** and describe your first agent. **Connectors**
    connects GitHub, AWS, Linear, Gmail, Drive, Notion and Slack. See the
    [agent team guide](AGENT_TEAM.md).

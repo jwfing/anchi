@@ -15,7 +15,11 @@ export function runtimeReady(setup: SetupStatus, runtime?: string): boolean {
   const codex =
     setup.codex.connected && (setup.codex.expiresAt === null || setup.codex.expiresAt > Date.now());
   const claude = Boolean(setup.claude?.connected);
-  return runtime === 'codex' ? codex : runtime === 'claude-code' ? claude : codex || claude;
+  const hermes = Boolean(setup.hermes?.connected);
+  if (runtime === 'codex') return codex;
+  if (runtime === 'claude-code') return claude;
+  if (runtime === 'hermes') return hermes;
+  return codex || claude || hermes;
 }
 export function welcomeStep(
   setup: SetupStatus,

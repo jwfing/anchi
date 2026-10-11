@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   agentFile,
   BASE_IMAGE,
+  runtimeImage,
   DEFAULT_MAX_TASKS,
   type HomeLayout,
   listAgentIds,
@@ -683,7 +684,10 @@ export class Hub extends EventEmitter<HubEvents> {
           if (await this.opts.guest.imageStatus(id, hash)) return;
           this.record(task, {
             type: 'notice',
-            text: `Building image "${id}"; this can take a few minutes.`,
+            text:
+              hash === 'runtime'
+                ? `Installing ${agent.runtime} in the cell image, once; this can take a few minutes.`
+                : `Building image "${id}"; this can take a few minutes.`,
           });
           const meta = await this.opts.guest.buildImage(id, hash, recipe);
           this.record(task, {
@@ -696,6 +700,8 @@ export class Hub extends EventEmitter<HubEvents> {
       await pending;
     };
     await build(BASE_IMAGE, 'base');
+    // Each runtime is a layer of its own, built the first time an agent of that runtime runs.
+    await build(runtimeImage(agent.runtime), 'runtime');
     if (image.id !== BASE_IMAGE) {
       await build(image.id, image.hash, { packages: image.recipe.packages, run: image.recipe.run });
     }

@@ -1,6 +1,6 @@
 ---
 name: anchi-guest-change
-description: Change the Anchi VM side — guest scripts, the cell manager (guest/anchi_cell.py), the base image build (guest/anchi-build-base.sh), version pins in guest/cell.env, systemd units or the Lima config. Use when bumping Codex, Claude Code, Node or a base-image toolchain, adding a tool to cells, or changing how cells start.
+description: Change the Anchi VM side — guest scripts, the cell manager (guest/anchi_cell.py), the base and runtime image layers (guest/anchi-build-base.sh, guest/anchi-build-runtime-*.sh), version pins in guest/cell.env, systemd units or the Lima config. Use when bumping Codex, Claude Code, Hermes, Node or a base-image toolchain, adding a tool to cells, or changing how cells start.
 ---
 
 # Changing the guest
@@ -15,11 +15,13 @@ To bump a pin:
 2. Get the hash from the publisher (`go.dev/dl/?mode=json`, `static.rust-lang.org/rustup/archive/<v>/<target>/rustup-init.sha256`, the GitHub release, or `sha256sum` of the npm tarball) for both `aarch64` and `x86_64`.
 3. Update `cell.env` only. `tests/test_guest.py` checks that every `ANCHI_*` variable the build script uses is defined.
 
-## Base image
+## Base and runtime layers
+
+A cell's root is an overlay of, top first: its runtime's layer (`runtime-codex`, `runtime-claude-code`, `runtime-hermes`, built by `guest/anchi-build-runtime-<runtime>.sh` the first time an agent of that runtime runs), its image recipe's layer if any, and the base layer (`guest/anchi-build-base.sh`, built by `setup install`). Put common tools in the base; put a runtime's files in its own script. Runtime scripts download only and never use apt: they are stacked with recipe layers built on the base alone, and two dpkg databases would clash.
 
 `guest/anchi-build-base.sh` runs as root in a build cell whose only network path is the egress proxy without credentials. Every download is pinned and verified with `sha256sum -c`; apt packages come from Debian 12. Put binaries on `/usr/local/bin` (task cells use `PATH=/usr/local/bin:/usr/bin:/bin:/opt/codex/bin:/opt/node/bin`, plus `/opt/claude/bin` for Claude Code) and keep caches out of the layer.
 
-The base layer is named from the Codex and Claude versions and a hash of the build script (`base_version()` in `guest/anchi_cell.py`), so any edit rebuilds it, and the recipe layers on it, at the next task. Mention the rebuild in the changelog.
+Each layer is named by the hash of its build script and the `guest/cell.env` pins the script reads (`script_version()` in `guest/anchi_cell.py`), so an edit or a pin bump rebuilds that layer at the next task; a new base rebuilds every runtime and recipe layer on it. Mention the rebuild in the changelog.
 
 Test a build script change without a VM in a container that resembles the build cell:
 
