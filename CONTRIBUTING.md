@@ -31,7 +31,7 @@ make check PYTHON=.venv/bin/python
 
 ## Coding agents
 
-Coding agents (Codex, Claude Code and others) read [AGENTS.md](AGENTS.md) and the project skills in `.agents/skills/` (Claude Code through `CLAUDE.md` and the `.claude/skills` link). Keep them in step with this guide when a rule changes.
+Coding agents (Codex, Claude Code and others) read [AGENTS.md](AGENTS.md) and the project skills in `.agents/skills/` (Claude Code through `CLAUDE.md` and the `.claude/skills` link). Keep them in step with this guide when a rule changes. The user-facing skill in `skills/anchi/` documents how to operate Anchi: update it with the behavior it describes, and regenerate `skills/anchi/references/cli.md` with `python3 scripts/gen-skill-cli.py` after changing a command.
 
 ## Daily workflow
 

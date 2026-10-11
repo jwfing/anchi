@@ -15,6 +15,7 @@ description: Documentation and changelog conventions for the Anchi repository â€
 | Release procedure | `docs/engineering/` |
 | Trust model and boundaries | `SECURITY.md` |
 | Contributor process | `CONTRIBUTING.md`; agent-specific rules in `AGENTS.md` and `.agents/skills/` |
+| How to operate Anchi, for users' agents | `skills/anchi/` (`references/cli.md` is generated: `python3 scripts/gen-skill-cli.py`) |
 
 ## Style
 
