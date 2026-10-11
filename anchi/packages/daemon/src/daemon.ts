@@ -36,6 +36,7 @@ import {
   type ResetPreview,
   type ServiceConnectorId,
   type TaskStatus,
+  type VmSize,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
 import { mergeAuditRows, summarizeAccess, summarizeAudit } from './audit.ts';
@@ -48,11 +49,13 @@ import {
   ghToken,
   hostConnectorsFile,
   hostOutput,
+  hostResources,
   migrateLegacyVm,
   readHostConnectors,
   SetupRunner,
   SETUP_STEPS,
   VAULT_KEY,
+  vmSizeEnv,
   writeHostConnectors,
 } from './host.ts';
 import { CELL_CEILING, DEFAULT_MAX_CELLS, Hub } from './hub.ts';
@@ -155,6 +158,18 @@ type Handlers = {
 };
 
 const TASK_ID = /^t-[0-9a-f]{10}$/;
+
+/** `setup.run`'s `vmSize`: two numbers; their range is checked against the host. */
+function vmSizeParam(v: unknown): VmSize {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new Error('BAD_VM_SIZE: vmSize must be {cpus, memoryGiB}');
+  }
+  const { cpus, memoryGiB, ...rest } = v as Record<string, unknown>;
+  if (Object.keys(rest).length || typeof cpus !== 'number' || typeof memoryGiB !== 'number') {
+    throw new Error('BAD_VM_SIZE: vmSize must be {cpus, memoryGiB}');
+  }
+  return { cpus, memoryGiB };
+}
 
 function str(v: unknown, what: string, max: number): string {
   if (typeof v !== 'string' || !v.length || v.length > max) throw new Error(`invalid ${what}`);
@@ -769,10 +784,16 @@ export class Daemon {
       await this.guest.importCodex(login.accessToken, login.accountId);
       return codexStatus(this.guest);
     },
-    'setup.run': async ({ action }) => {
+    'setup.run': async ({ action, vmSize }) => {
       if (!SETUP_ACTIONS.includes(action)) throw new Error('unknown setup step');
-      this.log(`setup ${action} started`);
-      await this.setup.run(action, (line) => this.broadcast('setup', { action, line }));
+      if (vmSize !== undefined && action !== 'install') {
+        throw new Error('BAD_VM_SIZE: only install creates a VM');
+      }
+      const env = vmSize === undefined ? {} : vmSizeEnv(vmSizeParam(vmSize), hostResources());
+      this.log(
+        `setup ${action} started${vmSize ? ` (a new VM: ${env.ANCHI_VM_CPUS} CPUs, ${env.ANCHI_VM_MEMORY_GIB} GiB)` : ''}`,
+      );
+      await this.setup.run(action, (line) => this.broadcast('setup', { action, line }), env);
       this.log(`setup ${action} done`);
       return setupStatus(this.guest, this.lima);
     },

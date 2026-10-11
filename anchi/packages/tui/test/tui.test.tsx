@@ -364,6 +364,14 @@ describe('App', () => {
     await tick();
     expect(ui.lastFrame()).not.toContain('secretvalue');
     expect(ui.lastFrame()).toContain('•••');
+    expect(ui.lastFrame()).toContain('Tab show the input');
+    // Tab shows the input to check it, and hides it again.
+    ui.stdin.write('\t');
+    expect(await frameWith(ui, 'github_pat_secretvalue123')).toContain('Tab hide the input');
+    ui.stdin.write('\t');
+    await tick();
+    expect(ui.lastFrame()).not.toContain('secretvalue');
+    expect(calls.some(([m]) => m === 'connectors.set')).toBe(false);
     ui.stdin.write('\r');
     await tick();
     expect(calls.find(([m]) => m === 'connectors.set')?.[1]).toEqual({
@@ -1914,6 +1922,80 @@ describe('usability workflows', () => {
       agentId: 'dev',
       text: '第一行\nsecond line',
     });
+    ui.unmount();
+  });
+
+  it('asks the size of a new VM, half of this computer by default, before creating it', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'missing',
+          installed: false,
+          vaultUnlocked: false,
+          vaultKeyPresent: false,
+          codex: { connected: false, expiresAt: null },
+          vmSize: { default: { cpus: 5, memoryGiB: 12 }, host: { cpus: 10, memoryGiB: 24 } },
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialView="welcome"
+        initialAgents={[agent('builder')]}
+        initialTasks={[]}
+      />,
+    );
+    await frameWith(ui, 'Prepare local environment');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'New VM: CPUs')).toContain('This computer has 10; half is 5.');
+    ui.stdin.write('\u007f');
+    ui.stdin.write('6');
+    await tick();
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'New VM: memory')).toContain('12');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'with 6 CPUs and 12 GiB')).toContain('Install');
+    expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.find(([m]) => m === 'setup.run')?.[1]).toEqual({
+      action: 'install',
+      vmSize: { cpus: 6, memoryGiB: 12 },
+    });
+    ui.unmount();
+  });
+
+  it('refuses a VM size this computer cannot give', async () => {
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'missing',
+          installed: false,
+          vaultUnlocked: false,
+          codex: { connected: false, expiresAt: null },
+          vmSize: { default: { cpus: 5, memoryGiB: 12 }, host: { cpus: 10, memoryGiB: 24 } },
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialView="welcome"
+        initialAgents={[agent('builder')]}
+        initialTasks={[]}
+      />,
+    );
+    await frameWith(ui, 'Prepare local environment');
+    ui.stdin.write('\r');
+    await frameWith(ui, 'New VM: CPUs');
+    ui.stdin.write('1');
+    await tick();
+    ui.stdin.write('\r'); // 51 CPUs
+    expect(await frameWith(ui, 'from 1 to 10')).toContain('CPUs must be a whole number');
+    expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
     ui.unmount();
   });
 

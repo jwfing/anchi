@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/vm-name.sh
 source scripts/vm-name.sh
 vm_name=$(anchi_vm_name)
+# shellcheck source=scripts/vm-size.sh
+source scripts/vm-size.sh
 # shellcheck source=guest/arch.sh
 source guest/arch.sh
 vm_type=$(host_vm_type "$(uname -s)")
@@ -40,7 +42,10 @@ fi
 if limactl list --format '{{.Name}}' | grep -Fqx "$vm_name"; then
   limactl start --tty=false "$vm_name"
 else
-  limactl start --tty=false --name="$vm_name" --vm-type="$vm_type" lima/anchi-vm.yaml
+  read -r host_cpus host_gib < <(anchi_host_resources)
+  read -r vm_cpus vm_gib < <(anchi_vm_size "$host_cpus" "$host_gib") || exit 1
+  echo "Creating $vm_name with $vm_cpus CPUs and $vm_gib GiB of memory (this computer: $host_cpus CPUs, $host_gib GiB)"
+  limactl start --tty=false --name="$vm_name" --vm-type="$vm_type" --cpus="$vm_cpus" --memory="$vm_gib" lima/anchi-vm.yaml
 fi
 # Explicit copy, never a host-home or project filesystem mount.
 limactl shell "$vm_name" -- mkdir -p /tmp/secure-vm-bootstrap

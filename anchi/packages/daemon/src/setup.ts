@@ -10,7 +10,7 @@ import type {
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
-import { VAULT_KEY } from './host.ts';
+import { defaultVmSize, hostResources, VAULT_KEY } from './host.ts';
 import type { ServiceSetup } from './services.ts';
 
 export const CONNECTOR_IDS: ConnectorId[] = ['github', 'aws', 'linear'];
@@ -120,6 +120,7 @@ export async function setupStatus(
   services?: ServiceSetup,
 ): Promise<SetupStatus> {
   const vm = await lima.vmStatus();
+  const host = hostResources();
   const empty: SetupStatus = {
     vm,
     host: hostReadiness(),
@@ -134,6 +135,7 @@ export async function setupStatus(
     googleClientSource: null,
     workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
+    vmSize: { default: defaultVmSize(host), host },
   };
   if (vm !== 'running') return empty;
   try {

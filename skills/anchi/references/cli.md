@@ -362,7 +362,9 @@ Usage: anchi setup install [options]
 Create or update the VM, install the services and build the base image
 
 Options:
-  -y, --yes   do not ask for confirmation
+  -y, --yes       do not ask for confirmation
+  --cpus <n>      CPUs of a new VM (default: half of this computer's)
+  --memory <gib>  memory of a new VM in GiB (default: half of this computer's)
 ```
 
 ### `anchi setup vault`

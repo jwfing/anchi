@@ -17,6 +17,7 @@ import type {
   ConnectorSecret,
   SetupStatus,
   SetupAction,
+  VmSize,
   StoredEvent,
   TaskRow,
   TaskStatus,
@@ -212,6 +213,8 @@ type Modal =
       index: number;
       values: Record<string, string>;
       input: string;
+      /** Tab shows a masked field's input to check it; the next field starts masked again. */
+      revealed?: boolean;
     }
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
   | { kind: 'help'; context: Context; scroll: number }
@@ -903,27 +906,67 @@ export function App({
   const connectorIds: ConnectorId[] = ['github', 'aws', 'linear'];
   const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
 
-  const performSetup = async (step: SetupAction) => {
+  const performSetup = async (step: SetupAction, vmSize?: VmSize) => {
     if (setupRunning.current)
       throw new Error('Environment setup is already running. Open installation progress.');
     setupRunning.current = true;
     setSetupLog([]);
     setSetupProgress({ action: step, phase: setupPhase(step, ''), running: true });
     try {
-      const status = await client.call('setup.run', { action: step });
+      const status = await client.call('setup.run', { action: step, vmSize });
       setSetup(status);
       setSetupProgress({ action: step, phase: 'Completed', running: false });
       setProblem(null);
     } catch (e) {
       setSetupProgress((p) => p && { ...p, running: false, failed: true });
-      reportProblem(e, () => performSetup(step));
+      reportProblem(e, () => performSetup(step, vmSize));
       throw e;
     } finally {
       setupRunning.current = false;
     }
   };
+  /** A new VM's CPUs, then its memory: half of this computer, changed before it is created. */
+  const askVmSize = ({ default: suggested, host }: NonNullable<SetupStatus['vmSize']>) => {
+    const whole = (raw: string, min: number, max: number, what: string) => {
+      const n = Number(raw.trim());
+      if (!/^\d+$/.test(raw.trim()) || n < min || n > max) {
+        throw new Error(`${what} must be a whole number from ${min} to ${max}`);
+      }
+      return n;
+    };
+    setModal({
+      kind: 'text',
+      title: 'New VM: CPUs',
+      label: `CPUs for the anchi-vm VM. This computer has ${host.cpus}; half is ${suggested.cpus}.`,
+      input: String(suggested.cpus),
+      submit: async (rawCpus) => {
+        const cpus = whole(rawCpus, 1, host.cpus, 'CPUs');
+        setModal({
+          kind: 'text',
+          title: 'New VM: memory',
+          label: `Memory in GiB for the anchi-vm VM. This computer has ${host.memoryGiB} GiB; half is ${suggested.memoryGiB}. Each working cell may use up to 2 GB.`,
+          input: String(suggested.memoryGiB),
+          submit: async (rawGiB) => {
+            const memoryGiB = whole(rawGiB, 2, host.memoryGiB, 'Memory');
+            setModal({
+              kind: 'confirm',
+              title: 'Install',
+              body:
+                `Create the anchi-vm VM with ${cpus} CPUs and ${memoryGiB} GiB of memory, install ` +
+                'the trusted services and the agent team, and build the base image. This takes ' +
+                'several minutes. Later changes: limactl edit anchi-vm --cpus N --memory N.',
+              action: () => performSetup('install', { cpus, memoryGiB }),
+            });
+          },
+        });
+      },
+    });
+  };
   const setupStep = (step: SetupAction) => {
     if (setupRunning.current) return setModal({ kind: 'setupLog', scroll: 0 });
+    if (step === 'install' && setup?.vm === 'missing' && setup.vmSize) {
+      return askVmSize(setup.vmSize);
+    }
     const [title, body] = (
       {
         'vault-init': [
@@ -1662,12 +1705,13 @@ export function App({
     if (modal?.kind === 'secret') {
       const field = SECRET_FIELDS[modal.connector][modal.index]!;
       if (key.escape) return setModal(null);
+      if (key.tab && field.masked) return setModal({ ...modal, revealed: !modal.revealed });
       if (key.backspace || key.delete) return editModalInput((v) => [...v].slice(0, -1).join(''));
       if (key.return) {
         if (!modal.input && !field.optional) return;
         const values = { ...modal.values, ...(modal.input ? { [field.key]: modal.input } : {}) };
         if (modal.index + 1 < SECRET_FIELDS[modal.connector].length) {
-          return setModal({ ...modal, index: modal.index + 1, values, input: '' });
+          return setModal({ ...modal, index: modal.index + 1, values, input: '', revealed: false });
         }
         setModal(null);
         if (modal.connector === 'notion' || modal.connector === 'slack') {
@@ -2913,13 +2957,17 @@ function ModalView({
         <Text>{field.label}</Text>
         <Box borderStyle="round" paddingX={1}>
           <Text>
-            {field.masked ? '•'.repeat(Math.min([...modal.input].length, inner - 4)) : modal.input}
+            {field.masked && !modal.revealed
+              ? '•'.repeat(Math.min([...modal.input].length, inner - 4))
+              : sanitizeLine(modal.input)}
             <Text inverse> </Text>
           </Text>
         </Box>
         <Box flexGrow={1} />
         <Text dimColor>
-          Enter next · Esc cancel · this screen is drawn by Anchi, not by an agent
+          Enter next · Esc cancel
+          {field.masked ? ` · Tab ${modal.revealed ? 'hide' : 'show'} the input` : ''} · this screen
+          is drawn by Anchi, not by an agent
         </Text>
       </Box>
     );
