@@ -50,11 +50,13 @@ def main():
     args = parser.parse_args()
     if VM == 'anchi-vm' and os.environ.get('ANCHI_VM_MIGRATING') != '1':
         # Renames a VM created as secure-vm and moves its key here first (scripts/vm-name.sh).
-        subprocess.run(
+        # A failed migration stops us: the key and the VM may still carry their old names.
+        migration = subprocess.run(
             ['bash', str(Path(__file__).with_name('vm-name.sh')), 'migrate'],
             env={**os.environ, 'ANCHI_VM_MIGRATING': '1'},
-            check=True,
         )
+        if migration.returncode:
+            raise SystemExit('The move from secure-vm to anchi-vm failed; see the messages above.')
     if args.action in ('status', 'lock'):
         print(json.dumps(remote(args.action), indent=2))
         return

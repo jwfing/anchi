@@ -72,24 +72,42 @@ export const RESET_STEPS: string[][] = [['limactl', 'delete', '--force', VM_NAME
 
 const STEP_TIMEOUT_MS = 45 * 60_000;
 
+const MIGRATION_TIMEOUT_MS = 15 * 60_000;
+
 /**
  * Renames a VM created as `secure-vm` to `anchi-vm` and moves the vault key to ~/.config/anchi
  * (`scripts/vm-name.sh migrate`), restarting and unlocking a running VM. Nothing happens when
- * there is nothing to move. Its messages go to `log`; it never throws.
+ * there is nothing to move, and the script's lock keeps it from running next to the migration of
+ * `scripts/up.sh` or vault.py. Its messages go to `log`; it never throws. Resolves `false` when
+ * the migration failed, so a VM created as `secure-vm` may still be there under its old name.
  */
-export function migrateLegacyVm(log: (line: string) => void, cwd = REPO_ROOT): Promise<void> {
+export function migrateLegacyVm(log: (line: string) => void, cwd = REPO_ROOT): Promise<boolean> {
   return new Promise((done) => {
+    // Its own process group: the timeout has to reach limactl, which does the work while bash
+    // only waits for it.
     const child = spawn('bash', ['scripts/vm-name.sh', 'migrate'], {
       cwd,
       stdio: ['ignore', 'ignore', 'pipe'],
+      detached: true,
     });
-    const timer = setTimeout(() => child.kill('SIGTERM'), 15 * 60_000);
+    const timer = setTimeout(() => {
+      log('vm migration: no answer for 15 minutes; stopping it');
+      try {
+        process.kill(-child.pid!, 'SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
+    }, MIGRATION_TIMEOUT_MS);
     createInterface({ input: child.stderr }).on('line', (line) => log(`vm migration: ${line}`));
-    child.on('error', (err) => log(`vm migration skipped: ${err.message}`));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      log(`vm migration skipped: ${err.message}`);
+      done(false);
+    });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code) log(`vm migration failed (exit ${code}); scripts/anchi setup install retries it`);
-      done();
+      done(!code);
     });
   });
 }

@@ -934,6 +934,16 @@ export class Daemon {
     }
   }
 
+  /** Closes cells left behind by a previous daemon. A VM that is not up yet is not an error. */
+  private async reapCells(): Promise<void> {
+    try {
+      const reaped = await this.guest.reap();
+      if (reaped.length) this.log(`reaped orphaned cells: ${reaped.join(', ')}`);
+    } catch (err) {
+      this.log(`cell reap skipped: ${(err as Error).message}`);
+    }
+  }
+
   async start(): Promise<void> {
     const { layout } = this.opts;
     for (const dir of [layout.root, layout.runDir, layout.dataDir, layout.agentsDir]) {
@@ -946,14 +956,14 @@ export class Daemon {
     }
     if (existsSync(layout.socketFile)) rmSync(layout.socketFile);
 
-    // Cells from a previous daemon cannot be reattached: their runner channel was its stdio.
+    // In the background: restarting a running VM takes longer than clients wait for the socket.
+    const migration = this.opts.migrateVm ? migrateLegacyVm((line) => this.log(line)) : undefined;
+    // Cells from a previous daemon cannot be reattached: their runner channel was its stdio. With
+    // a migration under way the reap waits for it: those cells are in the VM being renamed, which
+    // still answers to `secure-vm` until the rename lands.
     if (this.opts.reap !== false) {
-      try {
-        const reaped = await this.guest.reap();
-        if (reaped.length) this.log(`reaped orphaned cells: ${reaped.join(', ')}`);
-      } catch (err) {
-        this.log(`cell reap skipped: ${(err as Error).message}`);
-      }
+      if (migration) void migration.then(() => this.reapCells());
+      else await this.reapCells();
     }
     this.hub.recoverInterrupted();
 
@@ -973,8 +983,6 @@ export class Daemon {
       this.server!.listen(layout.socketFile, () => resolve());
     });
     chmodSync(layout.socketFile, 0o600);
-    // In the background: restarting a running VM takes longer than clients wait for the socket.
-    if (this.opts.migrateVm) void migrateLegacyVm((line) => this.log(line));
     this.watchConfig();
     if (this.opts.approvals !== false) this.approvals.start();
     if (this.opts.triggers !== false) this.triggers.start();
