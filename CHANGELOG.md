@@ -34,6 +34,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Agents with workspaces are told where they are (`/home/agent/workspaces/<name>`, the user's `~/AnchiWorkspaces/<path>`, read-write or read-only) and that `/home/agent/work` stays in the VM. Before, Anchi's instructions named only `/home/agent/work`, so an agent could keep cloning and editing there, where the user never sees its files.
 - One failed provider lookup no longer stops the refresh of the others; that host keeps its previous addresses until they expire.
 - VM installation waits up to 10 minutes for the dpkg lock instead of failing when a fresh VM's `unattended-upgrades` holds it.
 
