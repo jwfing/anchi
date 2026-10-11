@@ -1075,6 +1075,42 @@ class RegistryTests(unittest.TestCase):
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertIn(['github-merge'], [r.get('high_risk_disabled') for r in rows if r.get('event') == 'register'])
 
+    def test_a_push_to_main_goes_through_when_that_entry_is_disabled(self):
+        """The streamed push path reads the same exceptions: the agent's and the user's."""
+        pack = b'PACK' + bytes(range(256)) * 64
+        body = git_push((b'2' * 40, b'1' * 40, b'refs/heads/main'), pack=pack)
+        headers = {'transfer-encoding': 'chunked', 'authorization': 'Basic eDphbmNoaS1wbGFjZWhvbGRlcg=='}
+
+        def push(cell_disabled=(), settings=()):
+            proxy = self.proxy_with_cell()
+            proxy.settings = {'high_risk_disabled': list(settings)}
+            cell = self.module.Cell('t1', 'dev', {'github'}, high_risk_disabled=cell_disabled)
+            proxy.registry.client_cell = lambda client: cell
+            flow, _ = self.proxy_flow('POST', 'github.com', '/o/r.git/git-receive-pack', headers, stream=False)
+            asyncio.run(proxy.requestheaders(flow))
+            sent = [flow.request.stream(body[i : i + 4096]) for i in range(0, len(body), 4096)]
+            sent.append(flow.request.stream(b''))
+            out = b''.join(b if isinstance(b, bytes) else b''.join(b) for b in sent)
+            return flow, out
+
+        # A high-risk push cannot wait for approval, so by default nothing of it leaves.
+        flow, out = push()
+        self.assertEqual(out, b'')
+        self.assertIn('anchi-push-refused', flow.metadata)
+        for disabled in ({'cell_disabled': {'git-default-branch'}}, {'settings': ['git-default-branch']}):
+            flow, out = push(**disabled)
+            self.assertEqual(out, body)
+            self.assertNotIn('anchi-push-refused', flow.metadata)
+            self.assertNotEqual(flow.request.headers['authorization'], headers['authorization'])
+        # Another id does not apply.
+        self.assertEqual(push(cell_disabled={'github-merge'})[1], b'')
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        pushes = [(r['decision'], r.get('risk')) for r in rows if r.get('event') == 'push']
+        self.assertEqual(
+            pushes,
+            [('deny', 'git-default-branch'), ('inject', None), ('inject', None), ('deny', 'git-default-branch')],
+        )
+
     def test_quota_headers_of_runtime_responses_are_kept(self):
         from types import SimpleNamespace as NS
 

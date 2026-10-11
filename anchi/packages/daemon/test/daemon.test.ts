@@ -1582,6 +1582,17 @@ describe('agent settings', () => {
       'delegate "ghost" is not an agent',
     ]);
 
+    // A proposal that gives up approvals says so before the user confirms it.
+    const risky = daemon.proposals.add(
+      parseBlocks(
+        '```anchi-agent id=rev\nruntime: codex\nconnectors: [github]\nhighRisk: { disable: [github-merge, git-ref-delete] }\n```',
+      ),
+    )!;
+    expect(risky.errors).toEqual([]);
+    expect(risky.warnings).toContain(
+      'the agent does github-merge, git-ref-delete without asking you (highRisk)',
+    );
+
     const proposal = daemon.proposals.add(
       parseBlocks('```anchi-agent id=rev\nruntime: codex # ok\n```'),
     )!;

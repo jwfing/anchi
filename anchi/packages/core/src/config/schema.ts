@@ -42,6 +42,18 @@ export const HIGH_RISK_IDS = [
   'linear-delete',
 ] as const;
 export const highRiskIdSchema = z.enum(HIGH_RISK_IDS);
+export type HighRiskId = z.infer<typeof highRiskIdSchema>;
+
+/**
+ * The connector whose `approvals` cover a high-risk id. `approvals: {<connector>: ask}` holds
+ * every write of that connector, so it takes precedence over a `highRisk.disable` entry of the
+ * same connector: the operation still waits for the user.
+ */
+export function highRiskConnector(id: string): Connector {
+  if (id.startsWith('aws-')) return 'aws';
+  if (id.startsWith('linear-')) return 'linear';
+  return 'github';
+}
 
 /** Five-field cron expression (minute hour day-of-month month day-of-week). */
 const cronSchema = z

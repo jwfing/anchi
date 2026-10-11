@@ -51,9 +51,14 @@ describe('reports', () => {
     const text = lines.map((l) => l.text).join('\n');
     expect(text).toContain('egress       any public host');
     expect(text).toContain('writes held  high-risk only');
-    const own = { ...audit.registration!, ask: ['github'], highRiskDisabled: ['github-merge'] };
+    const own = { ...audit.registration!, highRiskDisabled: ['github-merge'] };
     expect(accessLines({ ...audit, registration: own }, 200).map((l) => l.text)).toContain(
-      '  writes held  github and high-risk, except github-merge',
+      '  writes held  high-risk only, except github-merge',
+    );
+    // An exception of a connector that holds every write changes nothing, and says so.
+    const asked = { ...own, ask: ['github'], highRiskDisabled: ['github-merge', 'aws-destroy'] };
+    expect(accessLines({ ...audit, registration: asked }, 200).map((l) => l.text)).toContain(
+      '  writes held  github and high-risk, except aws-destroy; github-merge waits anyway (approvals)',
     );
     expect(text).toContain('! sent its own credential');
     // Agent-originated hosts are rendered without escape sequences.

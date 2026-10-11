@@ -57,7 +57,8 @@ An agent is a YAML file. Fields:
   for the user anyway. Add it only when the user wants to approve the agent's writes.
 - highRisk: high-risk operations this agent does without approval (optional), by id, e.g.
   { disable: [github-merge] } for an agent whose job is merging pull requests. Ids:
-  ${HIGH_RISK_IDS.join(', ')}. Only when the user asks for it.
+  ${HIGH_RISK_IDS.join(', ')}. Only when the user asks for it. approvals for the same connector
+  hold those operations anyway, so do not give an agent both for one connector.
 - workspaces: directories of the user's computer under ~/AnchiWorkspaces, e.g.
   [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
   /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
@@ -99,7 +100,8 @@ skills: [code-review, test]
 A patch may set name, description, runtime, model, effort, prompt ({ mode, text }), skills,
 connectors and workspaces. Lists replace the whole list: repeat the entries to keep. An empty
 model, effort or description ('') removes it. For any other field (triggers, approvals,
-egress, delegates, image), send a complete anchi-agent block with the whole agent instead.
+highRisk, egress, delegates, image), send a complete anchi-agent block with the whole agent
+instead.
 The inventory shows each agent's file when the user's message names its id; otherwise it
 shows a summary, so ask the user to name the agent if you need to see its prompt.`;
 
@@ -185,10 +187,17 @@ export function makeProposal(
       prompt: layer.prompt ?? {},
     });
     if (!resolved.success) errors.push(resolved.error.issues.map((i) => i.message).join('; '));
-    else if (refs) {
-      const found = checkReferences(resolved.data, refs.inventory, refs.workspaceRoot);
-      errors.push(...found.errors);
-      warnings.push(...found.warnings);
+    else {
+      // The user confirms the proposal, so say which approvals it gives up.
+      const disabled = resolved.data.highRisk.disable;
+      if (disabled.length) {
+        warnings.push(`the agent does ${disabled.join(', ')} without asking you (highRisk)`);
+      }
+      if (refs) {
+        const found = checkReferences(resolved.data, refs.inventory, refs.workspaceRoot);
+        errors.push(...found.errors);
+        warnings.push(...found.warnings);
+      }
     }
     const image = layer.image;
     if (

@@ -7,6 +7,7 @@ import type {
   UsageRow,
 } from '@anchi/protocol';
 import { auditHeadline } from '@anchi/daemon';
+import { highRiskConnector } from '@anchi/core';
 import { sanitizeLine } from '../sanitize.ts';
 import { truncate } from './lines.ts';
 
@@ -29,6 +30,23 @@ const n = (x: number) =>
       ? `${(x / 1000).toFixed(1)}k`
       : String(x);
 const time = (ms: number) => new Date(ms).toLocaleTimeString();
+
+/**
+ * What the proxy held for the user in a cell: the connectors whose writes wait, high-risk
+ * operations, and the agent's high-risk exceptions. An exception of a connector that asks for
+ * every write changes nothing, so it is shown as still waiting rather than as an exception.
+ */
+function writesHeld(r: NonNullable<TaskAudit['registration']>): string {
+  const held = r.ask.length ? `${r.ask.join(', ')} and high-risk` : 'high-risk only';
+  const skipped = r.highRiskDisabled ?? [];
+  const through = skipped.filter((id) => !r.ask.includes(highRiskConnector(id)));
+  const asked = skipped.filter((id) => r.ask.includes(highRiskConnector(id)));
+  return [
+    held,
+    through.length ? `, except ${through.map(clean).join(', ')}` : '',
+    asked.length ? `; ${asked.map(clean).join(', ')} waits anyway (approvals)` : '',
+  ].join('');
+}
 
 /** The access report of a task: the headline, the cell's scope, hosts, refusals, then requests. */
 export function accessLines(a: TaskAudit, width: number): ReportLine[] {
@@ -56,11 +74,7 @@ export function accessLines(a: TaskAudit, width: number): ReportLine[] {
       { text: fit(`  connectors   ${r.connectors.join(', ') || 'none'}`) },
       { text: fit(`  services     ${r.services.join(', ') || 'none'} (through the bridge)`) },
       { text: fit(`  egress       ${r.egress ? r.egress.join(', ') : 'any public host'}`) },
-      {
-        text: fit(
-          `  writes held  ${r.ask.length ? `${r.ask.join(', ')} and high-risk` : 'high-risk only'}${r.highRiskDisabled ? `, except ${r.highRiskDisabled.map(clean).join(', ')}` : ''}`,
-        ),
-      },
+      { text: fit(`  writes held  ${writesHeld(r)}`) },
       gap,
     );
   }
