@@ -241,6 +241,13 @@ export interface SkillInfo {
   commit: string | null;
 }
 
+/** What adding a skill source did: one skill, or each skill of a collection. */
+export interface SkillAddResult {
+  added: SkillInfo[];
+  /** Skills of a collection that could not be added, with the reason. */
+  skipped: string[];
+}
+
 export interface BuilderProposal {
   id: string;
   agentId: string;
@@ -648,8 +655,11 @@ export interface Methods {
    * Refused while any Google account is connected (DISCONNECT_BEFORE_REPLACING_CLIENT).
    */
   'services.removeGoogleClient': [Record<string, never>, null];
-  /** Adds a skill from a local directory or a GitHub tree URL (pinned to its commit). */
-  'skills.add': [{ source: string; id?: string }, SkillInfo];
+  /**
+   * Adds a skill from a local directory or a GitHub URL (pinned to its commit); a directory
+   * without a SKILL.md is a collection, and each skill in it is added.
+   */
+  'skills.add': [{ source: string; id?: string }, SkillAddResult];
   'skills.remove': [{ id: string }, null];
   /** Compares a GitHub skill with the latest commit of its ref; changes nothing. */
   'skills.checkUpdate': [{ id: string }, SkillUpdate];

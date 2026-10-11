@@ -86,7 +86,7 @@ The proxy denies credential minting (GitHub keys and installation tokens, AWS ST
 Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, directories under `~/AnchiWorkspaces`, agents and images. It replies with a proposal. A full-screen dialog shows:
 
 - the agent file;
-- an image recipe, if the agent needs tools beyond the base image (git, gh, curl, jq and Codex on Debian 12);
+- an image recipe, if the agent needs tools beyond the [base image](#base-image);
 - what blocks it (a skill that is not installed, a directory that does not exist, an unknown delegate) and what is worth knowing (a connector not connected yet).
 
 Press `y` to write the files, `n` to discard the proposal, or `s` to change its settings yourself in the settings panel; the proposal is checked again and shown with your changes.
@@ -100,9 +100,29 @@ Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images
 name: Developer
 runtime: codex
 connectors: [github]
-image: node
 prompt:
   text: Fix the GitHub issue you are given, push a branch and open a pull request.
+```
+
+### Base image
+
+Every agent's cells start from the built-in `codex` base image: Debian 12 with Codex and Claude Code, and common developer tools so coding agents work without a recipe:
+
+| Tools | Notes |
+|---|---|
+| git, gh, curl, jq, ripgrep (`rg`), fd, sqlite3, zip, unzip, tree | |
+| build-essential (gcc, make), pkg-config, libssl-dev | Native modules and crates |
+| Python 3 with pip and venv | `python3 -m venv .venv` in the work directory |
+| Node.js 22, npm, pnpm | Pinned in `guest/cell.env` |
+| Go | `GOPATH` and the build cache are in the agent's home |
+| Rust (rustc, cargo, clippy, rustfmt) | The toolchain is read-only in `/opt/rustup`; `~/.cargo` holds the registry cache and `cargo install` output. A repository that pins another toolchain needs an image recipe |
+
+Versions are pinned and checked by hash in `guest/cell.env`. Changing a pin or `guest/anchi-build-base.sh` makes a new base: the next task builds it (a few minutes; `scripts/anchi setup install` builds it right away), and image recipes are rebuilt on it. Dependencies are downloaded at task time through the egress proxy, so an agent with an `egress` list needs its registries: `registry.npmjs.org`, `pypi.org` and `files.pythonhosted.org`, `proxy.golang.org` and `sum.golang.org`, `index.crates.io` and `static.crates.io`. Tools beyond these go in an image recipe:
+
+```yaml
+# ~/.anchi/images/db.yaml
+description: PostgreSQL client
+packages: [postgresql-client]
 ```
 
 ## Agent settings
@@ -161,7 +181,7 @@ highRisk: { disable: [github-merge] }  # merging does not wait for you; no appro
 - **High-risk operations always ask**, for every agent and every task origin, whatever its `approvals`: merging a pull request, deleting, transferring or reconfiguring a repository, branch protection, collaborators, webhooks and deploy keys, deleting a branch, pushing to `main` or `master`, AWS deletions, terminations and access changes, and Linear deletions. The dialog says why the write is held and how the task started (`poll → @lead (t-…) → @developer (t-…)`). Switch entries off for every agent in `~/.anchi/settings.yaml` (`highRisk: { disable: [github-merge] }`), or for one agent in its file with the same field: the merge agent above merges without asking while other agents still ask. `approvals` take precedence: `ask` holds every write of its connector, so an agent with `approvals: { github: ask }` and `highRisk: { disable: [github-merge] }` still waits for you before a merge — give the exception to an agent without `approvals` for that connector. The ids: `github-merge`, `github-repo-delete`, `github-repo-settings`, `github-repo-transfer`, `github-protection`, `github-access`, `github-ref-delete`, `github-graphql`, `git-default-branch`, `git-ref-delete`, `aws-destroy`, `aws-s3-delete`, `aws-s3-access` and `linear-delete` (`services/egress_rules.py`); an unknown id is an error in the agent file. A task's access report shows the agent's exceptions. `highRisk` in an agent file needs the guest components of this release: run `scripts/anchi setup install` (**Runtimes**, `I`) after updating, since an older guest refuses the cell (`USAGE`) rather than starting it without the exception. The proxy cannot tell a force-push from a fast-forward, so it holds pushes to the default branch names rather than force-pushes.
 - **Egress.** `egress: [registry.npmjs.org, '*.pypi.org']` limits the hosts an agent's cells reach; its runtime and connectors' hosts are always allowed (for Codex: `chatgpt.com`, `*.chatgpt.com` and OpenAI's content CDN `*.oaiusercontent.com`). Other connections fail and are audited as `egress-denied`, and the task notes each refused host once while it runs. To allow one, press **^X l** in the task's view, then **e**, choose the host and confirm (or `scripts/anchi agents allow-host <agent> <host>`): the exact host is added to the agent's `egress`, from its next cell on. Wildcards are added by editing the file. Without `egress` the agent reaches any public host. An allowed host can still receive data (a gist on `github.com`), so a list narrows exfiltration; it does not end it.
 - **Triggers.** `schedule` takes a cron expression in local time; a run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `scripts/anchi triggers` lists them.
-- **Skills.** `scripts/anchi skills add <directory or GitHub URL> [--id x]`, or **a** on the **Skills** screen, stores a `SKILL.md` skill; a GitHub skill is pinned to the commit it was fetched at. Give it to agents in their settings panel (**^X s**) or with `skills: [id]`; their cells get it read-only. `scripts/anchi skills update [id]`, or **u** on the Skills screen, shows what the latest commit of the URL changes (files added, changed, removed) and installs exactly that commit after you confirm. Skill content is untrusted, like any other agent input.
+- **Skills.** `scripts/anchi skills add <directory or GitHub URL> [--id x]`, or **a** on the **Skills** screen, stores a `SKILL.md` skill; a GitHub skill is pinned to the commit it was fetched at. A directory or repository without a top-level `SKILL.md` is a collection: each `<name>/SKILL.md` and `skills/<name>/SKILL.md` in it is added under `<name>` with its own tree URL (for example `scripts/anchi skills add https://github.com/addyosmani/agent-skills`), and a skill that cannot be added is skipped and reported. Give it to agents in their settings panel (**^X s**) or with `skills: [id]`; their cells get it read-only. `scripts/anchi skills update [id]`, or **u** on the Skills screen, shows what the latest commit of the URL changes (files added, changed, removed) and installs exactly that commit after you confirm. Skill content is untrusted, like any other agent input.
 
 ## Directories of your computer (workspaces)
 

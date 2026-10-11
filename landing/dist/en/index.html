@@ -49,7 +49,7 @@
         <span class="brand-wordmark">anchi</span></a
       >
       <nav aria-label="Main navigation">
-        <a href="#workflow">Workflow</a><a href="#environment">Security</a
+        <a href="#environment">Security</a><a href="#workflow">Workflow</a
         ><a href="#platforms">Platforms</a
         ><a href="https://github.com/jwfing/anchi" class="github-link"
           >GitHub ↗</a
@@ -109,9 +109,72 @@
           </figcaption>
         </figure>
       </section>
+      <section class="section wrap security-section" id="environment">
+        <div class="section-heading">
+          <p class="eyebrow">01 / BOUNDARY</p>
+          <h2>Let agents work.<span>Keep the keys.</span></h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/isolation.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Isolated tasks</h3>
+            <p>Two layers of isolation: each task runs in its own cell inside a local VM.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/credentials.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Protected credentials</h3>
+            <p>Trusted services use real credentials outside the sandbox.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/authorization.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Access and approvals</h3>
+            <p>
+              Set folder, connector, and network access. Approve high-risk
+              writes.
+            </p>
+          </article>
+        </div>
+        <div class="security-note">
+          <span aria-hidden="true">[i]</span>
+          <p>
+            Credential isolation is not data isolation. What an agent reads can
+            still reach a cloud model.
+            <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
+              >Security model ↗</a
+            >
+          </p>
+        </div>
+      </section>
       <section class="section wrap workflow" id="workflow">
         <div class="section-heading">
-          <p class="eyebrow">01 / WORKFLOW</p>
+          <p class="eyebrow">02 / WORKFLOW</p>
           <h2>Build a team. Put it to work.</h2>
         </div>
         <div class="features concise-features">
@@ -157,69 +220,6 @@
             <h3>Assign tasks</h3>
             <p>Give the team a goal and let it work together.</p>
           </article>
-        </div>
-      </section>
-      <section class="section wrap security-section" id="environment">
-        <div class="section-heading">
-          <p class="eyebrow">02 / BOUNDARY</p>
-          <h2>Let agents work.<span>Keep the keys.</span></h2>
-        </div>
-        <div class="features concise-features">
-          <article>
-            <div class="feature-heading">
-              <img
-                class="feature-icon"
-                src="/icons/isolation.svg"
-                alt=""
-                aria-hidden="true"
-                width="44"
-                height="44"
-              />
-            </div>
-            <h3>Isolated tasks</h3>
-            <p>Each task runs in its own cell inside a local VM.</p>
-          </article>
-          <article>
-            <div class="feature-heading">
-              <img
-                class="feature-icon"
-                src="/icons/credentials.svg"
-                alt=""
-                aria-hidden="true"
-                width="44"
-                height="44"
-              />
-            </div>
-            <h3>Protected credentials</h3>
-            <p>Trusted services use real credentials outside the sandbox.</p>
-          </article>
-          <article>
-            <div class="feature-heading">
-              <img
-                class="feature-icon"
-                src="/icons/authorization.svg"
-                alt=""
-                aria-hidden="true"
-                width="44"
-                height="44"
-              />
-            </div>
-            <h3>Access and approvals</h3>
-            <p>
-              Set folder, connector, and network access. Approve high-risk
-              writes.
-            </p>
-          </article>
-        </div>
-        <div class="security-note">
-          <span aria-hidden="true">[i]</span>
-          <p>
-            Credential isolation is not data isolation. What an agent reads can
-            still reach a cloud model.
-            <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
-              >Security model ↗</a
-            >
-          </p>
         </div>
       </section>
       <section class="section wrap platforms-section" id="platforms">

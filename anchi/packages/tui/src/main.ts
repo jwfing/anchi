@@ -355,12 +355,16 @@ skillsCmd.action(() =>
 );
 skillsCmd
   .command('add <source>')
-  .description('From a local directory with SKILL.md, or a GitHub tree URL (pinned to its commit)')
-  .option('--id <id>')
+  .description(
+    'From a local directory with SKILL.md, or a GitHub URL (pinned to its commit); a directory or repository of skills adds each one',
+  )
+  .option('--id <id>', 'the id of a single skill')
   .action((source: string, opts: { id?: string }) =>
     withClient(async (client) => {
-      const s = await client.call('skills.add', { source, id: opts.id });
-      console.log(`added ${s.id}${s.commit ? ` at ${s.commit.slice(0, 10)}` : ''}`);
+      const { added, skipped } = await client.call('skills.add', { source, id: opts.id });
+      for (const s of added)
+        console.log(`added ${s.id}${s.commit ? ` at ${s.commit.slice(0, 10)}` : ''}`);
+      for (const s of skipped) console.log(`skipped ${sanitizeLine(s)}`);
     }),
   );
 skillsCmd

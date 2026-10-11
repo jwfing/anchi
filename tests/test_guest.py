@@ -91,3 +91,27 @@ class StartCommandTests(unittest.TestCase):
         with self.assertRaises(anchi_cell.Failure) as refused:
             anchi_cell.cell_start('t-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', '-', 'a b')
         self.assertEqual(str(refused.exception), 'BAD_HIGH_RISK')
+
+
+class BaseImageTests(unittest.TestCase):
+    def test_a_changed_build_script_or_runtime_pin_is_a_new_base(self):
+        import tempfile
+        from unittest.mock import patch
+
+        root = Path(__file__).parents[1] / 'guest'
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp)
+            (lib / 'build-base.sh').write_bytes((root / 'anchi-build-base.sh').read_bytes())
+            with patch.object(anchi_cell, 'LIB', lib), patch.object(anchi_cell, 'CELL_ENV', root / 'cell.env'):
+                first = anchi_cell.base_version()
+                self.assertRegex(first, r'^codex-[\d.]+-claude-[\d.]+-[0-9a-f]{8}$')
+                (lib / 'build-base.sh').write_text('#!/bin/sh\necho changed\n')
+                self.assertNotEqual(anchi_cell.base_version(), first)
+
+    def test_the_build_script_reads_only_pins_from_cell_env(self):
+        script = (Path(__file__).parents[1] / 'guest' / 'anchi-build-base.sh').read_text()
+        env = (Path(__file__).parents[1] / 'guest' / 'cell.env').read_text()
+        used = set(__import__('re').findall(r'\$\{?(ANCHI_[A-Z0-9_]+)', script))
+        self.assertTrue({'ANCHI_GO_VERSION', 'ANCHI_RUST_VERSION', 'ANCHI_PNPM_VERSION'} <= used)
+        for name in used:
+            self.assertRegex(env, rf'(?m)^{name}=\S+$', name)
