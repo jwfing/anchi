@@ -15,10 +15,13 @@ mountpoint -q "$raw" || exit 0
 chmod 0700 "$(dirname "$raw")"
 if mountpoint -q "$dest"; then
   [[ ${1:-} == remount ]] || exit 0
-  umount "$dest"
+  # Lazily: an idle cell may still hold the old mount; it lets go when the cell closes.
+  umount -l "$dest"
 fi
 mkdir -p "$dest"
 owner=$(stat -c %u "$raw")
 group=$(stat -c %g "$raw")
-bindfs -o allow_other,nodev,nosuid \
+# Multithreaded: single-threaded bindfs serves every cell's file operations one at a time, and a
+# dependency install in one cell (thousands of small files) stalled the others for minutes.
+bindfs -o allow_other,nodev,nosuid --multithreaded \
   --map="$owner/$agent:@$group/@$agent" "$raw" "$dest"
