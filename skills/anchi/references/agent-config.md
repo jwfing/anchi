@@ -1,6 +1,6 @@
 # Agent files, templates, recipes and settings
 
-Everything lives under `~/.anchi/` (or `ANCHI_HOME`). The daemon reloads files when they change; `anchi agents` lists agents and the error of any file it cannot load.
+Everything lives under `~/.anchi/` (or `ANCHI_HOME`). The daemon reloads files as soon as they are saved, without a confirmation: an edit that loosens an agent's limits takes effect at once (see rule 3 in SKILL.md). `anchi agents` lists agents and the error of any file it cannot load.
 
 ## Agent file: `~/.anchi/agents/<id>.yaml`
 
@@ -10,18 +10,19 @@ The file name is the id: 1–40 lowercase letters, digits or `-`. Unknown fields
 |---|---|---|
 | `name`, `description` | the id, none | Shown in the TUI |
 | `runtime` | required | `codex`, `claude-code` or `hermes` |
-| `model` | runtime default | e.g. `gpt-5.5` (Codex), `claude-sonnet-5` (Claude Code), a model of the user's endpoint (Hermes) |
+| `model` | runtime default | e.g. `gpt-5.5` (Codex), `claude-sonnet-5-5` or `claude-opus-5-5` (Claude Code), any model of the stored endpoint (Hermes), such as `nousresearch/hermes-4-405b`. A letter or digit first, then letters, digits and `. _ - : / @ +` |
 | `effort` | runtime default | `low`, `medium`, `high`, `xhigh` (Codex only) |
 | `prompt` | `{mode: append, text: ''}` | `text`, or `file` relative to this file. `mode: replace` replaces the runtime's base instructions (Hermes: the prompt becomes its persona either way) |
 | `connectors` | `[]` | Any of `github`, `aws`, `linear`, `gmail`, `drive`, `notion`, `slack` |
-| `accounts` | `{}` | Named Google account per service: `{gmail: work, drive: personal}`; `default` otherwise |
+| `accounts` | `{}` | Named Google account for `gmail` or `drive` (`{gmail: work}`), which must also be in `connectors`; `default` otherwise |
 | `approvals` | `{}` | `{github: ask}` holds every write of that connector for the user |
 | `highRisk` | none | `{disable: [github-merge]}`: these high-risk operations no longer wait for this agent |
 | `egress` | open | Host patterns the cells may reach besides the runtime's and connectors' hosts, e.g. `[registry.npmjs.org, '*.pypi.org']` |
-| `workspaces` | `[]` | `{path, mode: ro\|rw, name?}` under `~/AnchiWorkspaces` |
-| `skills` | `[]` | Installed skill ids (`anchi skills`) |
-| `delegates` | `[]` | Agents this one may hand tasks to (not itself) |
-| `triggers` | `[]` | See below |
+| `workspaces` | `[]` | `{path, mode?, name?}` under `~/AnchiWorkspaces`; `mode` is `ro` (default) or `rw` |
+| `skills` | `[]` | Installed skill ids (`anchi skills`); a missing one fails the task when it starts |
+| `delegates` | `[]` | Existing agents this one may hand tasks to (not itself) |
+| `maxTasks` | `3` | How many of its tasks run at once (1–10); more wait in its queue |
+| `triggers` | `[]` | See below; `text` may use `{title}`, `{url}` and `{id}` of a polled item |
 | `image` | `codex` (the base) | A recipe id in `~/.anchi/images/` |
 | `sandbox` | `cell` | `codex-workspace-write` (Codex only) adds Codex's own sandbox |
 | `extends` | none | A template id in `~/.anchi/templates/` |
@@ -33,7 +34,7 @@ A reviewer that only reads GitHub and needs approval for every write:
 ```yaml
 name: Reviewer
 runtime: claude-code
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 connectors: [github]
 approvals: { github: ask }
 egress: []                      # only GitHub and the runtime's own hosts
@@ -49,7 +50,7 @@ A lead that delegates and runs every weekday morning:
 name: Lead
 runtime: codex
 connectors: [github, linear]
-delegates: [developer, reviewer]
+delegates: [developer, reviewer]   # agents that exist
 triggers:
   - schedule: '0 9 * * 1-5'          # cron, local time; a missed run runs once on wake
     text: Triage new Linear issues and assign them.
@@ -70,7 +71,7 @@ runtime: hermes
 model: nousresearch/hermes-4-405b    # optional; the endpoint's default otherwise
 workspaces:
   - { path: projects/api, mode: rw }   # ~/AnchiWorkspaces/projects/api
-skills: [test-driven-development]
+skills: [test-driven-development]  # installed with `anchi skills add`
 egress: [registry.npmjs.org]
 ```
 
@@ -108,6 +109,7 @@ The recipe's content hash names the built layer; a changed recipe is built again
 |---|---|
 | `retentionDays` | Finished tasks are deleted after this many days (default 90) |
 | `codexAutoImport` | `false` stops re-importing the Codex login when it refreshes |
+| `maxCells` | Cells working at once across all agents (1–16, default 4); a cell waiting for a task it delegated does not count. Give the VM more memory before raising it much |
 | `highRisk: {disable: [...]}` | Exemptions for every agent |
 
 Key bindings: `~/.anchi/keybindings.json` (`anchi keys` shows the merged map).

@@ -883,4 +883,21 @@ daemon
   .command('uninstall')
   .action(() => console.log(uninstallAutostart() ? 'uninstalled' : 'not installed'));
 
+// For scripts/gen-skill-cli.py: every command's help, as `--help` prints it, in one run.
+program
+  .command('help-tree', { hidden: true })
+  .description('Print the help of every command as JSON')
+  .action(() => {
+    const out: { path: string[]; help: string }[] = [];
+    const walk = (cmd: Command, path: string[]) => {
+      out.push({ path, help: cmd.helpInformation() });
+      for (const sub of cmd.commands) {
+        if ((sub as Command & { _hidden?: boolean })._hidden) continue;
+        walk(sub, [...path, sub.name()]);
+      }
+    };
+    walk(program, []);
+    console.log(JSON.stringify(out));
+  });
+
 await program.parseAsync();

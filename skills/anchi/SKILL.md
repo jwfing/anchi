@@ -11,11 +11,14 @@ Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for 
 
 ## Rules for an agent operating Anchi
 
-1. **Never handle the user's secrets.** Tokens, API keys and Google sign-in are entered by the user: `anchi setup …` reads them without echo, the TUI uses masked dialogs. Do not ask the user to paste a secret into the chat, do not pass one on a command line or in a file, and never `cat` anything under `~/.config/anchi/`.
+1. **Never handle the user's secrets.** Tokens, API keys and Google sign-in are entered by the user: `anchi setup …` reads them without echo in a terminal, the TUI uses masked dialogs. Do not ask the user to paste a secret into the chat, and never pass one on a command line, in a file or **through a pipe**: every `anchi setup` command that takes a secret reads stdin when it is not a terminal, so `echo $KEY | anchi setup claude` or `gh auth token | anchi setup connector github` would work, and must not be done. Never `cat` anything under `~/.config/anchi/`. `anchi setup codex` and `anchi setup connector github --from-gh` copy a login from this computer into the vault (the gh token keeps all its scopes): run them only after the user agreed, and without `-y`.
 2. **Never approve or deny a held write for the user.** `anchi approve <id>` exists for the user. Show them `anchi approvals` and let them decide, unless they explicitly told you to approve that specific write.
-3. **Destructive commands need the user's go-ahead**: `anchi setup reset`, `anchi agents rm`, `anchi rm <task>`, `anchi setup disconnect`. Do not add `-y` to skip their confirmation unless the user asked for it.
-4. **Prefer editing agent files over the TUI** when you work non-interactively: they are plain YAML in `~/.anchi/agents/`, and the daemon reloads them on change. Keep the user's comments.
-5. **Report what Anchi says.** Errors carry a hint (`HERMES_NOT_CONFIGURED: set its OpenAI-compatible endpoint …`); pass it on instead of guessing.
+3. **Never loosen an agent's boundaries on your own.** Agent files, templates and `~/.anchi/settings.yaml` take effect as soon as they are saved, without a dialog. Change these only when the user asked for that change, and show them the diff before you save it: `approvals`, `highRisk` (in `settings.yaml` it exempts **every** agent), `egress`, `connectors`, `delegates`, `accounts`, `workspaces` and `sandbox`. The same goes for `anchi setup service-mode <service> auto` and `anchi agents allow-host`. Removing `approvals: ask` or adding a `highRisk` exemption is approving future writes for the user; making a task work is not a reason to do it.
+4. **Commands that take effect at once need the user's go-ahead in the conversation**; most do not ask for confirmation, so the CLI is no safety net:
+   - `anchi rm <task>`, `anchi cancel <task>`, `anchi skills rm <id>` and `anchi setup disconnect <id>` act immediately.
+   - `anchi agents rm`, `anchi setup reset` and `anchi setup workspaces` (restarts the VM, ending running tasks) ask in a terminal; do not add `-y` unless the user asked for it.
+   - Other edits to agent files (prompt, model, skills, triggers) are fine when they are what the user asked for; keep their comments. Edit files rather than the TUI when you work non-interactively.
+5. **Report what Anchi says.** Errors carry a hint (`cell start failed: HERMES_NOT_CONFIGURED — set its OpenAI-compatible endpoint …`); pass it on instead of guessing.
 
 ## First run
 
@@ -55,7 +58,7 @@ prompt:
   text: Fix the GitHub issue you are given, push a branch and open a pull request.
 ```
 
-Every field, with examples, is in [references/agent-config.md](references/agent-config.md). The ones that bound what an agent can do: `connectors`, `egress`, `workspaces`, `approvals`, `delegates`, `accounts`, `highRisk`. Unknown fields are errors; `anchi agents` shows each agent and any error in its file.
+Every field, with examples, is in [references/agent-config.md](references/agent-config.md). The ones that bound what an agent can do: `connectors`, `egress`, `workspaces`, `approvals`, `delegates`, `accounts`, `highRisk`. Unknown fields are errors, which `anchi agents` shows for each file. Skills and delegates an agent names must exist: the builder and the settings panel refuse ones that do not, but an edited file only fails when a task starts (`skill "<id>" is not installed`), so check `anchi skills` and `anchi agents` first.
 
 People usually create agents with the **Agent builder** in the TUI (**^X b**): they describe the agent, the builder proposes a file, and a full-screen dialog shows it before anything is written. **^X s** opens an agent's settings panel (runtime, model, prompt, skills, connectors, workspaces), which also shows a diff before saving.
 
@@ -70,7 +73,7 @@ anchi cancel <task>
 anchi rm <task>                               # delete a finished task and the tasks it delegated
 ```
 
-`-v` on `run`, `send` and `retry` shows tool output. A task id looks like `t-…`. Tasks of one agent can run in parallel; each has its own cell and session.
+`-v` on `run`, `send` and `retry` shows tool output. A task id looks like `t-…`. An agent runs up to `maxTasks` of its tasks at once (default 3), each in its own cell and session. Across all agents, `maxCells` cells work at once (default 4, in `~/.anchi/settings.yaml`); a cell waiting for a task it delegated does not count, and delegated tasks get a free cell first. Other tasks wait in line, and fail with `TOO_MANY_CELLS` after 10 minutes.
 
 ## Accounts (connectors)
 
@@ -113,7 +116,7 @@ anchi usage --by agent      # tokens by agent, model, runtime or day; subscripti
 anchi scan <task>           # look for real credential values in a live cell (should find none)
 ```
 
-In the TUI, **^X l** shows the access report of the task on screen. A host refused by an agent's `egress` list can be allowed with `anchi agents allow-host <agent> <host>` (exact host) after the user agrees.
+In the TUI, **^X l** shows the access report of the task on screen. A host refused by an agent's `egress` list can be allowed with `anchi agents allow-host <agent> <host>` (exact host), only after the user agrees (rule 3).
 
 ## Daemon and maintenance
 
@@ -124,7 +127,7 @@ anchi update                  # install the latest release; --check only checks
 anchi setup vm                # start a stopped VM, then: anchi setup vault unlock
 ```
 
-`anchi setup install` is safe to run again (it updates the VM's components) but refuses while task cells are live. `anchi setup reset` deletes the VM and everything in it; `--all` also deletes the vault key and `~/.anchi`.
+`anchi setup install` is safe to run again (it updates the VM's components) but refuses while task cells are live. `anchi setup reset` deletes the VM and everything in it, and refuses while tasks run or wait; `--all` also deletes the vault key and `~/.anchi` (keeping `keybindings.json`).
 
 ## More
 

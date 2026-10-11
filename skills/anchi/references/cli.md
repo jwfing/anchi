@@ -19,8 +19,6 @@ Options:
 Usage: anchi tui [options]
 
 Open the full-screen client (starts the daemon if needed)
-
-Options:
 ```
 
 ## `anchi keys`
@@ -30,8 +28,6 @@ Usage: anchi keys [options] [command]
 
 Key bindings of the TUI: the defaults merged with
 ~/.anchi/keybindings.json
-
-Options:
 
 Commands:
   init        Write a starting keybindings.json (the leader and an example)
@@ -43,8 +39,6 @@ Commands:
 Usage: anchi keys init [options]
 
 Write a starting keybindings.json (the leader and an example)
-
-Options:
 ```
 
 ## `anchi run`
@@ -139,8 +133,6 @@ Options:
 Usage: anchi rm [options] <task>
 
 Delete a finished task, the tasks it delegated and their transcripts
-
-Options:
 ```
 
 ## `anchi scan`
@@ -149,8 +141,6 @@ Options:
 Usage: anchi scan [options] <task>
 
 Credential-invariant scan of a task's live cell
-
-Options:
 ```
 
 ## `anchi skills`
@@ -159,8 +149,6 @@ Options:
 Usage: anchi skills [options] [command]
 
 Skills agents can use
-
-Options:
 
 Commands:
   add [options] <source>  From a local directory with SKILL.md, or a GitHub URL
@@ -199,8 +187,6 @@ Options:
 
 ```text
 Usage: anchi skills rm [options] <id>
-
-Options:
 ```
 
 ## `anchi triggers`
@@ -209,8 +195,6 @@ Options:
 Usage: anchi triggers [options]
 
 Agents' schedules and polls, with their next run and last result
-
-Options:
 ```
 
 ## `anchi approvals`
@@ -219,8 +203,6 @@ Options:
 Usage: anchi approvals [options]
 
 Writes waiting for your approval
-
-Options:
 ```
 
 ## `anchi approve`
@@ -229,8 +211,6 @@ Options:
 Usage: anchi approve [options] <id>
 
 Approve a write waiting for approval
-
-Options:
 ```
 
 ## `anchi deny`
@@ -239,16 +219,12 @@ Options:
 Usage: anchi deny [options] <id>
 
 Deny a write waiting for approval
-
-Options:
 ```
 
 ## `anchi cancel`
 
 ```text
 Usage: anchi cancel [options] <task>
-
-Options:
 ```
 
 ## `anchi agents`
@@ -257,8 +233,6 @@ Options:
 Usage: anchi agents [options] [command]
 
 List agents
-
-Options:
 
 Commands:
   rm [options] <id>       Delete an agent with its tasks and its files in the VM
@@ -284,8 +258,6 @@ Options:
 Usage: anchi agents allow-host [options] <id> <host>
 
 Add one host to an agent's egress list (a host its cells were refused)
-
-Options:
 ```
 
 ## `anchi setup`
@@ -294,8 +266,6 @@ Options:
 Usage: anchi setup [options] [command]
 
 Runtime and connector setup
-
-Options:
 
 Commands:
   status
@@ -331,8 +301,6 @@ Commands:
 
 ```text
 Usage: anchi setup status [options]
-
-Options:
 ```
 
 ### `anchi setup codex`
@@ -352,8 +320,6 @@ Options:
 Usage: anchi setup claude [options]
 
 Store a `claude setup-token` token or an Anthropic API key in the VM vault
-
-Options:
 ```
 
 ### `anchi setup hermes`
@@ -386,8 +352,6 @@ Options:
 Usage: anchi setup vm [options]
 
 Start the VM
-
-Options:
 ```
 
 ### `anchi setup install`
@@ -407,8 +371,6 @@ Options:
 Usage: anchi setup vault [options] <action>
 
 init or unlock the VM vault with the key in ~/.config/anchi/vault.key
-
-Options:
 ```
 
 ### `anchi setup connector`
@@ -478,8 +440,6 @@ Options:
 Usage: anchi setup service-mode [options] <id> <mode>
 
 Writes of a service: auto, or ask (each write waits for approval)
-
-Options:
 ```
 
 ## `anchi daemon`
@@ -488,8 +448,6 @@ Options:
 Usage: anchi daemon [options] [command]
 
 Manage the background daemon
-
-Options:
 
 Commands:
   start
@@ -504,24 +462,18 @@ Commands:
 
 ```text
 Usage: anchi daemon start [options]
-
-Options:
 ```
 
 ### `anchi daemon stop`
 
 ```text
 Usage: anchi daemon stop [options]
-
-Options:
 ```
 
 ### `anchi daemon status`
 
 ```text
 Usage: anchi daemon status [options]
-
-Options:
 ```
 
 ### `anchi daemon install`
@@ -530,14 +482,10 @@ Options:
 Usage: anchi daemon install [options]
 
 Run the daemon at login (launchd on macOS, a systemd user unit on Linux)
-
-Options:
 ```
 
 ### `anchi daemon uninstall`
 
 ```text
 Usage: anchi daemon uninstall [options]
-
-Options:
 ```

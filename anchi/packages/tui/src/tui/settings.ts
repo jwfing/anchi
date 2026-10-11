@@ -1,3 +1,4 @@
+import { MODEL_ID } from '@anchi/core';
 import type {
   AgentPatch,
   AgentSettings,
@@ -32,7 +33,8 @@ export type TextField = 'name' | 'description' | 'model';
 /** Fields typed in the panel, with their limits. */
 export const TEXT_FIELDS: Record<TextField, number> = { name: 100, description: 500, model: 80 };
 export const isTextField = (id: string): id is TextField => Object.hasOwn(TEXT_FIELDS, id);
-export const MODEL = /^[a-zA-Z0-9._-]{0,80}$/;
+/** A model id, or '' for the runtime's default. */
+export const MODEL = new RegExp(`^$|${MODEL_ID.source}`);
 
 export type SettingsRow =
   | { kind: 'header'; text: string }

@@ -15,6 +15,7 @@ help:
 check: lint
 	$(PYTHON) scripts/check-source.py
 	pnpm --dir anchi run check
+	$(PYTHON) scripts/gen-skill-cli.py --check
 	$(PYTHON) -m unittest discover -s tests -q
 
 lint:

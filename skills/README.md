@@ -13,4 +13,4 @@ mkdir -p ~/.codex/skills && cp -R skills/anchi ~/.codex/skills/
 anchi skills add https://github.com/jwfing/anchi/tree/main/skills/anchi
 ```
 
-`references/cli.md` is generated from the CLI's help: run `python3 scripts/gen-skill-cli.py` after changing a command. Keep the rest in step with the guides in `docs/` when behavior changes.
+`references/cli.md` is generated from the CLI's help: run `python3 scripts/gen-skill-cli.py` after changing a command; `make check` fails while it is out of date. Keep the rest in step with the guides in `docs/` when behavior changes.
