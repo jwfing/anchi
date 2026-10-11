@@ -21,7 +21,9 @@ export function codexOptions(
   options: TurnOptions,
   env: Record<string, string>,
 ): { codex: CodexOptions; thread: ThreadOptions } {
-  const config: CodexConfigObject = {};
+  // ChatGPT Apps and plugins act on the user's ChatGPT-linked accounts, not the agent's
+  // connectors. The egress proxy refuses them; this keeps Codex from offering them at all.
+  const config: CodexConfigObject = { features: { apps: false, plugins: false } };
   const instructions = options.instructions?.trim();
   if (instructions) {
     // `instructions` replaces Codex's base instructions; `developer_instructions` is added on top.

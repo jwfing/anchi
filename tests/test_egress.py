@@ -83,9 +83,32 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(headers['authorization'], 'Bearer fake-codex-access')
         self.assertEqual(headers['chatgpt-account-id'], 'acct-123')
         # Unauthenticated requests to the same host never receive the credential.
-        self.assertEqual(decide('GET', 'chatgpt.com', '/backend-api/plugins').reason, 'no-placeholder')
+        self.assertEqual(decide('GET', 'chatgpt.com', '/backend-api/codex/models').reason, 'no-placeholder')
         other = decide('GET', 'chatgpt.com', '/x', {'authorization': 'Bearer someone-else'})
         self.assertEqual((other.action, other.reason), ('pass', 'no-placeholder'))
+
+    def test_chatgpt_apps_and_plugins_are_denied(self):
+        # Codex's ChatGPT Apps (the codex_apps MCP server) and plugins act on the accounts the
+        # user linked in ChatGPT, outside the agent's connectors and approvals.
+        placeholder = {'authorization': 'Bearer anchi-placeholder'}
+        for method, path in (
+            ('POST', '/backend-api/ps/mcp'),
+            ('GET', '/backend-api/ps/plugins/list'),
+            ('GET', '/backend-api/ps/plugins/installed?x=1'),
+            ('GET', '/backend-api/plugins/featured'),
+            ('GET', '/backend-api/aip/connectors/links'),
+            ('GET', '/backend-api/connectors/directory/list'),
+            ('POST', '/backend-api/ps'),
+        ):
+            for headers in (placeholder, {}):
+                self.assertEqual(decide(method, 'chatgpt.com', path, headers).action, 'deny', path)
+        for method, path in (
+            ('GET', '/backend-api/codex/responses'),
+            ('GET', '/backend-api/codex/models'),
+            ('GET', '/backend-api/wham/accounts/check'),
+            ('GET', '/backend-api/psx'),
+        ):
+            self.assertEqual(decide(method, 'chatgpt.com', path, placeholder).action, 'inject', path)
 
     def test_claude_is_replace_only_for_either_credential_kind(self):
         oauth = {'authorization': f'Bearer {rules.PLACEHOLDER_CLAUDE_OAUTH}', 'anthropic-beta': 'oauth-2025-04-20'}

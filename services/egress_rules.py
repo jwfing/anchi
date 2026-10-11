@@ -42,7 +42,16 @@ class Rule:
 
 
 RULES: tuple[Rule, ...] = (
-    Rule(name='codex', hosts=('chatgpt.com',), kind='bearer', grant='codex', replace_only=True),
+    # ChatGPT Apps (Codex's codex_apps MCP server) and plugins act on the accounts the user
+    # linked in ChatGPT, outside the agent's connectors, approvals and audit.
+    Rule(
+        name='codex',
+        hosts=('chatgpt.com',),
+        kind='bearer',
+        grant='codex',
+        replace_only=True,
+        deny=(r'^\S+ /backend-api/(ps|plugins|aip|connectors)(/|$)',),
+    ),
     # Token refresh happens on the trusted side; a refresh from a cell would return a new
     # credential in the response body.
     Rule(name='openai-auth', hosts=('auth.openai.com',), kind='none', grant=None, deny=(r'.*',)),

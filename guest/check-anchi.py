@@ -215,6 +215,12 @@ def main():
         }
         for name, out in deny.items():
             check(f'minting denied: {name}', out.startswith('403') and 'denied' in out, out[:60])
+        out = proxied(
+            'chk-a',
+            'https://chatgpt.com/backend-api/ps/mcp',
+            "-X POST -H 'Authorization: Bearer anchi-placeholder' -d '{}'",
+        )
+        check('ChatGPT Apps denied', out.startswith('403') and 'denied' in out, out[:60])
         out = proxied('chk-b', 'https://api.github.com/user', "-H 'Authorization: token anchi-placeholder-github'")
         rows = [r for r in audit_since(since, 'chk-b') if r.get('host') == 'api.github.com']
         check(

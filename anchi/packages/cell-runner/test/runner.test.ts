@@ -164,7 +164,10 @@ describe('codex mapping', () => {
       {},
     );
     expect(opt.thread.sandboxMode).toBe('workspace-write');
-    expect(opt.codex.config).toEqual({ developer_instructions: 'be brief' });
+    expect(opt.codex.config).toEqual({
+      features: { apps: false, plugins: false },
+      developer_instructions: 'be brief',
+    });
     expect(opt.codex.codexPathOverride).toBe('/opt/codex/bin/codex');
   });
 
