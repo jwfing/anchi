@@ -60,7 +60,7 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
   - `tasks.search` (agent, status, words, time), `tasks.tree`, `tasks.delete`;
   - `approvals.list`, `approvals.decide` (called only after a full-screen dialog);
   - `triggers.list`;
-  - `skills.list`, `skills.add` (local directory or GitHub URL), `skills.remove`, `skills.checkUpdate` (what the latest commit of the URL changes, nothing written), `skills.update` (installs the commit the user reviewed);
+  - `skills.list`, `skills.add` (local directory or GitHub URL; a collection without a top-level `SKILL.md` adds each skill and returns `{added, skipped}`), `skills.remove`, `skills.checkUpdate` (what the latest commit of the URL changes, nothing written), `skills.update` (installs the commit the user reviewed);
   - `setup.importClaude`; `services.setToken`, `services.disconnect`, `services.setMode`, `services.googleClient`, `services.googleLogin`.
 - **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`, `setup` (a line of setup output), `approvals`, `oauth`, `tasksDeleted`.
 

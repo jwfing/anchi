@@ -821,12 +821,12 @@ export class Daemon {
       return null;
     },
     'skills.add': async ({ source, id }) => {
-      const skill = await this.skills.add(
+      const result = await this.skills.add(
         str(source, 'source', 500),
         id ? str(id, 'id', 40) : undefined,
       );
       this.hub.reload();
-      return skill;
+      return result;
     },
     'skills.remove': ({ id }) => {
       this.skills.remove(str(id, 'id', 40));

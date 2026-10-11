@@ -198,8 +198,10 @@ def approvals_decide(approval_id, verdict):
 
 
 def base_version():
+    """Names the base layer; a new runtime pin or a changed build script is a new base."""
     env = cell_env()
-    return f'codex-{env["ANCHI_CODEX_VERSION"]}-claude-{env["ANCHI_CLAUDE_VERSION"]}'
+    script = hashlib.sha256((LIB / 'build-base.sh').read_bytes()).hexdigest()[:8]
+    return f'codex-{env["ANCHI_CODEX_VERSION"]}-claude-{env["ANCHI_CLAUDE_VERSION"]}-{script}'
 
 
 def layer_dir(image, digest):
@@ -317,9 +319,7 @@ def image_build(image, digest):
     (build_dir / 'build.sh').write_text(script)
     env = cell_env()
     (build_dir / 'env').write_text(
-        ''.join(
-            f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith(('ANCHI_CODEX', 'ANCHI_CLAUDE'))
-        )
+        ''.join(f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith('ANCHI_'))
         + ''.join(f'export {k}={shell_quote(v)}\n' for k, v in proxy_env().items())
     )
     log_path = building / 'build.log'
@@ -580,6 +580,8 @@ def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
         'PATH': '/usr/local/bin:/usr/bin:/bin:/opt/codex/bin:/opt/node/bin',
         'LANG': 'C.UTF-8',
         'CODEX_HOME': '/home/agent/.codex',
+        # The base image's Rust toolchain (read-only); cargo itself uses ~/.cargo.
+        'RUSTUP_HOME': '/opt/rustup',
         'ANCHI_TASK': task,
         'ANCHI_AGENT': agent,
         'GIT_AUTHOR_NAME': f'{agent} (Anchi agent)',

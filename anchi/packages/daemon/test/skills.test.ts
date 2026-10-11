@@ -21,8 +21,9 @@ describe('skills', () => {
       'SKILL.md': '---\nname: Triage\ndescription: Sort incoming issues\n---\nSteps…',
       'scripts/label.sh': 'echo hi',
     });
-    const s = await store.add(src, 'triage');
-    expect(s).toMatchObject({
+    const { added } = await store.add(src, 'triage');
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({
       id: 'triage',
       name: 'Triage',
       description: 'Sort incoming issues',
@@ -41,6 +42,30 @@ describe('skills', () => {
     expect(() => store.bundle(['missing'])).toThrow(/not installed/);
     store.remove('triage');
     expect(store.list()).toEqual([]);
+  });
+
+  it('adds each skill of a local collection and skips the broken ones', async () => {
+    const store = new SkillStore(mkdtempSync(join(tmpdir(), 'skills-')));
+    const src = skillDir({
+      'README.md': 'a collection',
+      'skills/lint/SKILL.md': '---\nname: Lint\n---',
+      'skills/Bad Name/SKILL.md': 'x',
+      'top/SKILL.md': '---\nname: Top\n---',
+      'skills/top/SKILL.md': '---\nname: Shadow\n---',
+      '.hidden/SKILL.md': 'x',
+      'docs/guide.md': 'not a skill',
+    });
+    const { added, skipped } = await store.add(src);
+    expect(added.map((s) => s.id)).toEqual(['top', 'lint']);
+    expect(skipped).toEqual([
+      expect.stringMatching(/^skills\/Bad Name: .*id/),
+      expect.stringMatching(/^skills\/top: another "top"/),
+    ]);
+    expect(store.list().map((s) => [s.id, s.name])).toEqual([
+      ['lint', 'Lint'],
+      ['top', 'Top'],
+    ]);
+    await expect(store.add(src, 'one')).rejects.toThrow(/holds 4 skills/);
   });
 
   it('refuses links, missing SKILL.md and bad ids or URLs', async () => {
@@ -101,7 +126,9 @@ describe('skill updates', () => {
     const remote = fakeRemote();
     const first = remote.push(v1);
     const store = new SkillStore(mkdtempSync(join(tmpdir(), 'skills-')), remote);
-    expect(await store.add(url)).toMatchObject({ id: 'review', commit: first, source: url });
+    expect((await store.add(url)).added).toMatchObject([
+      { id: 'review', commit: first, source: url },
+    ]);
     expect(await store.checkUpdate('review')).toMatchObject({ upToDate: true, latest: first });
 
     const second = remote.push({
@@ -126,6 +153,35 @@ describe('skill updates', () => {
     expect(readFileSync(join(store.dir('review'), 'SKILL.md'), 'utf8')).toMatch(/v2/);
     await expect(store.update('review', 'main')).rejects.toThrow(/40-character/);
     expect(remote.resolves.every((r) => r === 'acme/skills@main')).toBe(true);
+  });
+
+  it('adds a repository of skills, each pinned and updated by its own tree URL', async () => {
+    const remote = fakeRemote();
+    const first = remote.push({
+      'README.md': 'many skills',
+      'skills/review/SKILL.md': '---\nname: review\n---\nv1',
+      'skills/ship/SKILL.md': '---\nname: ship\n---\nv1',
+    });
+    const store = new SkillStore(mkdtempSync(join(tmpdir(), 'skills-')), remote);
+    const { added, skipped } = await store.add('https://github.com/acme/skills');
+    expect(skipped).toEqual([]);
+    expect(added).toMatchObject([
+      {
+        id: 'review',
+        commit: first,
+        source: 'https://github.com/acme/skills/tree/HEAD/skills/review',
+      },
+      { id: 'ship', commit: first, source: 'https://github.com/acme/skills/tree/HEAD/skills/ship' },
+    ]);
+    const second = remote.push({
+      'skills/review/SKILL.md': '---\nname: review\n---\nv2',
+      'skills/ship/SKILL.md': '---\nname: ship\n---\nv1',
+    });
+    expect(await store.checkUpdate('review')).toMatchObject({
+      latest: second,
+      changed: ['SKILL.md'],
+    });
+    expect(await store.checkUpdate('ship')).toMatchObject({ changed: [], added: [], removed: [] });
   });
 
   it('refuses to update local skills', async () => {

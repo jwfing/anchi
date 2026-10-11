@@ -29,11 +29,15 @@ make check PYTHON=.venv/bin/python
 
 `anchi/pnpm-lock.yaml` pins the workspace. Dependency updates include manifest and lockfile, and respect pnpm's minimum release age: pin an older version instead of excluding a package from that policy.
 
+## Coding agents
+
+Coding agents (Codex, Claude Code and others) read [AGENTS.md](AGENTS.md) and the project skills in `.agents/skills/` (Claude Code through `CLAUDE.md` and the `.claude/skills` link). Keep them in step with this guide when a rule changes.
+
 ## Daily workflow
 
 - Run `make check` before submitting: Ruff, shellcheck when installed, Prettier, the trust-zone dependency check, syntax checks and all offline tests. It does not operate the VM, access accounts or call models. Some tests open loopback listeners.
 - `make format` uses Ruff for Python and Prettier for `anchi/`; see `ruff.toml` and `anchi/.prettierrc.json`. Avoid unrelated repository-wide formatting in security changes.
-- Keep cell UIDs and the Node, Codex and Claude Code pins in `guest/cell.env`; do not duplicate these literals elsewhere.
+- Keep cell UIDs and the Node, Codex, Claude Code and base-image toolchain (pnpm, Go, Rust) pins in `guest/cell.env`; do not duplicate these literals elsewhere.
 - Host packages (`protocol`, `core`, `daemon`, `tui`) must not import a runtime SDK or the cell runner; the cell runner must not import host packages. `anchi/scripts/check-deps.mjs` enforces it.
 - Everything a cell sends is untrusted. New runner frames, tools or guest commands need schema validation, bounds and tests of the refusal paths. Secrets go to the VM on stdin only.
 - Live checks are explicit: `make verify-vm`, `make verify-anchi` (no credentials) and `scripts/anchi-acceptance.sh` (real accounts).

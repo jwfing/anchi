@@ -43,7 +43,7 @@ A dependency check (`anchi/scripts/check-deps.mjs`) keeps runtime SDKs and the c
 1. The cell runner, the MCP server, skills and everything the runtimes produce are untrusted. Frames are bounded and schema-checked; the first violation ends the cell.
 2. Secrets travel to the VM on stdin only, never in arguments or logs, and never return to the Mac.
 3. Default checks are offline. VM, account and model checks are explicit (`make verify-vm`, `make verify-anchi`, `scripts/anchi-acceptance.sh`).
-4. `guest/cell.env` owns UID, Node, Codex and Claude Code pins; the cell runner's SDKs are pinned in `anchi/pnpm-lock.yaml`, never excluded from pnpm's release-age policy.
+4. `guest/cell.env` owns UID, Node, Codex, Claude Code and base-image toolchain pins; the cell runner's SDKs are pinned in `anchi/pnpm-lock.yaml`, never excluded from pnpm's release-age policy.
 5. Registry entries drive or consistency-check service modes, egress, credential scope, policy and installation. Connector writes reuse one-time policy grants and ledgers.
 6. Configuration and state files are written to a temporary file, then renamed; SQLite holds tasks, events and trigger state.
 

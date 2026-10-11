@@ -1316,7 +1316,7 @@ export function App({
           kind: 'text',
           title: 'Add a skill',
           label:
-            'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit)',
+            'A local directory with a SKILL.md, or a GitHub URL such as https://github.com/owner/repo/tree/main/skills/name (fetched at its current commit). A directory or repository of skills adds each one.',
           input: '',
           paths: { dirsOnly: true },
           submit: async (raw) => {
@@ -1325,17 +1325,21 @@ export function App({
             setModal({
               kind: 'text',
               title: 'Skill id',
-              label: `The id agents list it by (1–40 lowercase letters, digits or "-"). Enter keeps "${guess}".`,
+              label: `The id agents list it by (1–40 lowercase letters, digits or "-"). Enter keeps "${guess}"; a collection keeps each skill's directory name.`,
               input: '',
               allowEmpty: true,
               submit: async (id) => {
-                const skill = await client.call('skills.add', {
+                const { added, skipped } = await client.call('skills.add', {
                   source,
                   id: id.trim() || undefined,
                 });
                 refreshSkills();
+                const what =
+                  added.length === 1
+                    ? `skill ${added[0]!.id} added`
+                    : `${added.length} skills added`;
                 say(
-                  `skill ${skill.id} added; give it to agents with ${keyLabel(keysFor(keymap, ['global'], 'agent:settings')[0] ?? '')} in their chat`,
+                  `${what}${skipped.length ? ` (${skipped.length} skipped: ${skipped.join('; ')})` : ''}; give them to agents with ${keyLabel(keysFor(keymap, ['global'], 'agent:settings')[0] ?? '')} in their chat`,
                 );
               },
             });

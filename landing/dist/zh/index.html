@@ -49,7 +49,7 @@
         <span class="brand-wordmark">anchi</span></a
       >
       <nav aria-label="主导航">
-        <a href="#workflow">工作方式</a><a href="#environment">安全边界</a
+        <a href="#environment">安全边界</a><a href="#workflow">工作方式</a
         ><a href="#platforms">平台</a
         ><a href="https://github.com/jwfing/anchi" class="github-link"
           >GitHub ↗</a
@@ -104,9 +104,68 @@
           <figcaption>协作由 Anchi 协调，凭据留在沙箱之外。</figcaption>
         </figure>
       </section>
+      <section class="section wrap security-section" id="environment">
+        <div class="section-heading">
+          <p class="eyebrow">01 / 安全边界</p>
+          <h2>让智能体做事，<span>把钥匙留在自己手里。</span></h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/isolation.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>任务隔离</h3>
+            <p>两层虚拟化机制，每个任务在本地虚拟机的独立隔离单元内运行。</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/credentials.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>凭据隔离</h3>
+            <p>可信服务代为使用凭据，真实凭据不进入沙箱。</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/authorization.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>权限与授权</h3>
+            <p>设置目录、连接器和网络访问范围；重要写操作需你批准。</p>
+          </article>
+        </div>
+        <div class="security-note">
+          <span aria-hidden="true">[i]</span>
+          <p>
+            凭据隔离不等于数据隔离，智能体读取的内容仍可能发送到云端模型。
+            <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
+              >安全模型 ↗</a
+            >
+          </p>
+        </div>
+      </section>
       <section class="section wrap workflow" id="workflow">
         <div class="section-heading">
-          <p class="eyebrow">01 / 工作方式</p>
+          <p class="eyebrow">02 / 工作方式</p>
           <h2>像组建团队一样，开始协作。</h2>
         </div>
         <div class="features concise-features">
@@ -152,65 +211,6 @@
             <h3>分配任务</h3>
             <p>交代目标，让团队协作完成。</p>
           </article>
-        </div>
-      </section>
-      <section class="section wrap security-section" id="environment">
-        <div class="section-heading">
-          <p class="eyebrow">02 / 安全边界</p>
-          <h2>让智能体做事，<span>把钥匙留在自己手里。</span></h2>
-        </div>
-        <div class="features concise-features">
-          <article>
-            <div class="feature-heading">
-              <img
-                class="feature-icon"
-                src="/icons/isolation.svg"
-                alt=""
-                aria-hidden="true"
-                width="44"
-                height="44"
-              />
-            </div>
-            <h3>任务隔离</h3>
-            <p>每个任务在本地虚拟机的独立隔离单元内运行。</p>
-          </article>
-          <article>
-            <div class="feature-heading">
-              <img
-                class="feature-icon"
-                src="/icons/credentials.svg"
-                alt=""
-                aria-hidden="true"
-                width="44"
-                height="44"
-              />
-            </div>
-            <h3>凭据隔离</h3>
-            <p>可信服务代为使用凭据，真实凭据不进入沙箱。</p>
-          </article>
-          <article>
-            <div class="feature-heading">
-              <img
-                class="feature-icon"
-                src="/icons/authorization.svg"
-                alt=""
-                aria-hidden="true"
-                width="44"
-                height="44"
-              />
-            </div>
-            <h3>权限与授权</h3>
-            <p>设置目录、连接器和网络访问范围；重要写操作需你批准。</p>
-          </article>
-        </div>
-        <div class="security-note">
-          <span aria-hidden="true">[i]</span>
-          <p>
-            凭据隔离不等于数据隔离，智能体读取的内容仍可能发送到云端模型。
-            <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
-              >安全模型 ↗</a
-            >
-          </p>
         </div>
       </section>
       <section class="section wrap platforms-section" id="platforms">

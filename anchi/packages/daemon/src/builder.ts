@@ -66,14 +66,17 @@ An agent is a YAML file. Fields:
   /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
 - egress: hosts the agent may reach besides its runtime and connectors, e.g.
   [registry.npmjs.org, '*.pypi.org']. Propose the smallest list the job needs; omit it only
-  if the job needs the open web.
-- image: id of an image recipe (or omit for the base image, which has git, gh, curl, jq,
-  Codex and Claude Code on Debian 12).
+  if the job needs the open web. Package registries a developer agent may need:
+  registry.npmjs.org (npm, pnpm), pypi.org and files.pythonhosted.org (pip),
+  proxy.golang.org and sum.golang.org (Go), index.crates.io and static.crates.io (cargo).
+- image: id of an image recipe (or omit for the base image: Debian 12 with git, gh, curl, jq,
+  ripgrep, fd, build-essential, pkg-config, Python 3 with pip and venv, Node.js 22 with npm
+  and pnpm, Go, Rust with cargo, clippy and rustfmt, Codex and Claude Code).
 - sandbox: cell (default).
 
 An image recipe is a YAML file with:
 - description
-- packages: Debian 12 package names, e.g. [nodejs, npm, python3-pip]
+- packages: Debian 12 package names, e.g. [postgresql-client, imagemagick]
 - run: shell commands run as root at build time, e.g. installing the AWS CLI v2 from its
   official zip. Commands download through a proxy without credentials.
 

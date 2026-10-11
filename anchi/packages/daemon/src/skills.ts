@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
-import type { SkillInfo, SkillUpdate } from '@anchi/protocol';
+import type { SkillAddResult, SkillInfo, SkillUpdate } from '@anchi/protocol';
 
 /**
  * Skills are `SKILL.md` directories kept in ~/.anchi/skills/<id>. They come from a local
@@ -23,6 +23,7 @@ import type { SkillInfo, SkillUpdate } from '@anchi/protocol';
 
 export const MAX_SKILL_FILES = 200;
 export const MAX_SKILL_BYTES = 4 * 1024 * 1024;
+export const MAX_COLLECTION = 100;
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const SOURCE = '.anchi-source.json';
 
@@ -116,6 +117,24 @@ export const githubRemote: SkillRemote = {
   },
 };
 
+/** Skill directories of a collection: `<name>/SKILL.md` and `skills/<name>/SKILL.md`. */
+export function findSkills(dir: string): string[] {
+  const found = new Set<string>();
+  for (const base of ['', 'skills']) {
+    const at = join(dir, base);
+    if (!existsSync(at) || !lstatSync(at).isDirectory()) continue;
+    for (const name of readdirSync(at).sort()) {
+      if (name.startsWith('.')) continue;
+      const path = join(at, name);
+      if (lstatSync(path).isDirectory() && existsSync(join(path, 'SKILL.md')))
+        found.add(base ? `${base}/${name}` : name);
+    }
+  }
+  if (found.size > MAX_COLLECTION)
+    throw new Error(`a collection may have ${MAX_COLLECTION} skills at most`);
+  return [...found];
+}
+
 export class SkillStore {
   constructor(
     private root: string,
@@ -157,18 +176,61 @@ export class SkillStore {
     }
   }
 
-  /** Adds or replaces a skill from a local directory or a GitHub URL. */
-  async add(source: string, id?: string): Promise<SkillInfo> {
+  /**
+   * Adds or replaces skills from a local directory or a GitHub URL. A directory with a SKILL.md
+   * is one skill; one without is a collection, and each `<name>/SKILL.md` or
+   * `skills/<name>/SKILL.md` below it is added under `<name>` (a GitHub one pinned by its own
+   * tree URL, so it updates on its own). A skill that cannot be added is skipped, not fatal.
+   */
+  async add(source: string, id?: string): Promise<SkillAddResult> {
     if (source.startsWith('https://')) {
       const g = parseGitHubUrl(source);
       const commit = await this.remote.resolve(g.owner, g.repo, g.ref);
-      const skillId = id ?? (g.path.split('/').filter(Boolean).at(-1) ?? g.repo).toLowerCase();
+      const single = (g.path.split('/').filter(Boolean).at(-1) ?? g.repo).toLowerCase();
       return this.fromGitHub(g, commit, (dir) =>
-        this.install(skillId, dir, source, { url: source, commit }),
+        this.addFrom(dir, source, id, single, (sub) => ({
+          url: sub
+            ? `https://github.com/${g.owner}/${g.repo}/tree/${g.ref}/${[g.path, sub].filter(Boolean).join('/')}`
+            : source,
+          commit,
+        })),
       );
     }
     const dir = resolve(source);
-    return this.install(id ?? dir.split(sep).filter(Boolean).at(-1)?.toLowerCase(), dir, source);
+    return this.addFrom(dir, source, id, dir.split(sep).filter(Boolean).at(-1)?.toLowerCase());
+  }
+
+  /**
+   * Installs the skill at `dir` under `id` (else `single`), or every skill of the collection at
+   * `dir` under its directory name; an `id` is then refused.
+   */
+  private addFrom(
+    dir: string,
+    source: string,
+    id: string | undefined,
+    single: string | undefined,
+    origin?: (sub: string) => { url: string; commit: string },
+  ): SkillAddResult {
+    if (!existsSync(dir) || !lstatSync(dir).isDirectory())
+      throw new Error(`no skill directory at ${source}`);
+    if (existsSync(join(dir, 'SKILL.md')))
+      return { added: [this.install(id ?? single, dir, source, origin?.(''))], skipped: [] };
+    const subs = findSkills(dir);
+    if (!subs.length) throw new Error('a skill needs a SKILL.md');
+    if (id) throw new Error(`${source} holds ${subs.length} skills; add it without an id`);
+    const added: SkillInfo[] = [];
+    const skipped: string[] = [];
+    for (const sub of subs) {
+      try {
+        const name = sub.split('/').at(-1)!.toLowerCase();
+        if (added.some((s) => s.id === name)) throw new Error(`another "${name}" was added`);
+        added.push(this.install(name, join(dir, sub), `${source}/${sub}`, origin?.(sub)));
+      } catch (e) {
+        skipped.push(`${sub}: ${(e as Error).message}`);
+      }
+    }
+    if (!added.length) throw new Error(`no skill could be added: ${skipped.join('; ')}`);
+    return { added, skipped };
   }
 
   /** Compares an installed GitHub skill with the latest commit of its ref; changes nothing. */

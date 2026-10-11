@@ -32,7 +32,7 @@ is live text so it stays crisp and accessible.
 ## Terminal design
 
 The page introduces safe agent collaboration with a looping hero animation,
-followed by workflow, security boundaries, platforms/runtimes, and a TUI
+followed by security boundaries, workflow, platforms/runtimes, and a TUI
 preview. Keep the platform status and security claims aligned with the root README.
 
 `terminal.js` enhances the static page with keyboard-accessible tabs (teamwork,
