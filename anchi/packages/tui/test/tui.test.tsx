@@ -16,7 +16,7 @@ import { nextSetupAction, teamActivity, turnActivity, welcomeStep } from '../src
 import { App, filterTasks, skillSource, sortSkills } from '../src/tui/App.tsx';
 import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
-import { type MouseEvent, normalizeEnter, parseMouse } from '../src/tui/mouse.ts';
+import { type MouseEvent, normalizeKeys, parseMouse } from '../src/tui/mouse.ts';
 
 const ESC = '\u001b';
 const agent = (id: string, over: Partial<AgentSummary> = {}): AgentSummary => ({
@@ -238,7 +238,18 @@ describe('lines', () => {
     expect(parseMouse(`a${ESC}[<0;5;7Mb`).events).toEqual([
       { kind: 'press', button: 0, x: 5, y: 7 },
     ]);
-    expect(normalizeEnter('\n')).toBe('\r');
+    expect(normalizeKeys('\n')).toBe('\r');
+    expect(normalizeKeys(`${ESC}[27;1;13~`)).toBe('\r');
+  });
+
+  it('rewrites xterm modifyOtherKeys sequences to the CSI u form Ink parses', () => {
+    // Ctrl+C, the Ctrl+X leader, Shift+Enter and Alt+B.
+    expect(normalizeKeys(`${ESC}[27;5;99~`)).toBe(`${ESC}[99;5u`);
+    expect(normalizeKeys(`${ESC}[27;5;120~n`)).toBe(`${ESC}[120;5un`);
+    expect(normalizeKeys(`${ESC}[27;2;13~`)).toBe(`${ESC}[13;2u`);
+    expect(normalizeKeys(`${ESC}[27;3;98~`)).toBe(`${ESC}[98;3u`);
+    // Other sequences pass unchanged.
+    expect(normalizeKeys(`${ESC}[A${ESC}[3~x`)).toBe(`${ESC}[A${ESC}[3~x`);
   });
 });
 

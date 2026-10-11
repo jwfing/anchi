@@ -212,13 +212,40 @@ export interface CodexTurn {
   signal: AbortSignal;
 }
 
-export async function* runCodex(turn: CodexTurn): AsyncGenerator<RuntimeEvent> {
+/** Codex's error when the session to resume is not in CODEX_HOME (the agent's volume was lost). */
+const MISSING_SESSION = /no rollout found for thread id/;
+
+export const NEW_SESSION_WARNING =
+  "Codex no longer has this task's session (the agent's files in the VM were deleted, for " +
+  'example by `anchi setup reset`); continuing in a new session without the earlier conversation.';
+
+type CodexClient = Pick<Codex, 'startThread' | 'resumeThread'>;
+
+export async function* runCodex(
+  turn: CodexTurn,
+  client: (options: CodexOptions) => CodexClient = (o) => new Codex(o),
+): AsyncGenerator<RuntimeEvent> {
   const opts = codexOptions(turn.options, turn.env);
-  const codex = new Codex(opts.codex);
-  const thread = turn.resumeId
-    ? codex.resumeThread(turn.resumeId, opts.thread)
-    : codex.startThread(opts.thread);
-  const { events } = await thread.runStreamed(turn.input, { signal: turn.signal });
+  const codex = client(opts.codex);
   const state: MapState = { calls: new Set(), warnings: new Set() };
+  if (turn.resumeId) {
+    const thread = codex.resumeThread(turn.resumeId, opts.thread);
+    const { events } = await thread.runStreamed(turn.input, { signal: turn.signal });
+    let started = false;
+    try {
+      for await (const ev of events) {
+        if (ev.type !== 'thread.started') started = true;
+        yield* mapCodexEvent(ev, state);
+      }
+      return;
+    } catch (err) {
+      // Only a resume that failed before the turn began is retried, so no work runs twice.
+      if (started || turn.signal.aborted || !MISSING_SESSION.test(String(err))) throw err;
+    }
+    yield { type: 'error', message: NEW_SESSION_WARNING, fatal: false };
+  }
+  const { events } = await codex
+    .startThread(opts.thread)
+    .runStreamed(turn.input, { signal: turn.signal });
   for await (const ev of events) yield* mapCodexEvent(ev, state);
 }
