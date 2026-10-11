@@ -852,14 +852,30 @@ export class Hub extends EventEmitter<HubEvents> {
     return this.busy() < this.maxCells() && this.occupied() < CELL_CEILING && !this.outranked(task);
   }
 
-  /** Another task waiting for a cell goes first: a deeper one, or one as deep that came first. */
-  private outranked(task: TaskRow): boolean {
+  /** Cells a waiting task can take: the free places, plus the idle ones that can be closed. */
+  private places(): number {
+    const idle = [...this.cells.values()].filter((c) => c.idle).length;
+    return Math.min(this.maxCells() - this.busy(), CELL_CEILING - this.occupied()) + idle;
+  }
+
+  /** Tasks waiting for a cell that go first: deeper delegations, then those that came earlier. */
+  private ahead(task: TaskRow): number {
     let before = true;
+    let n = 0;
     for (const [id, depth] of this.roomQueue) {
       if (id === task.id) before = false;
-      else if (depth > task.depth || (before && depth === task.depth)) return true;
+      else if (depth > task.depth || (before && depth === task.depth)) n++;
     }
-    return false;
+    return n;
+  }
+
+  /**
+   * Waits only when the tasks before it would take every place a cell could be had in. Order
+   * alone must not hold a task back: a task joins the line before its image checks, and one
+   * image build takes minutes, far longer than the wait a task gives up after.
+   */
+  private outranked(task: TaskRow): boolean {
+    return this.ahead(task) >= this.places();
   }
 
   /** Tasks waiting for a cell, with their delegation depth. */
@@ -883,7 +899,6 @@ export class Hub extends EventEmitter<HubEvents> {
 
   private roomWaiters: (() => void)[] = [];
 
-  /** A cell became idle or went: tasks waiting for one look again. */
   /** Wakes tasks waiting for a cell, to check again (cells or settings changed). */
   roomChanged() {
     for (const resolve of this.roomWaiters.splice(0)) resolve();
