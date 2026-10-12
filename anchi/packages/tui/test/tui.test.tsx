@@ -12,7 +12,14 @@ import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize } from '../src/sanitize.ts';
-import { nextSetupAction, teamActivity, turnActivity, welcomeStep } from '../src/tui/usability.ts';
+import {
+  continued,
+  nextSetupAction,
+  resultLines,
+  teamActivity,
+  turnActivity,
+  welcomeStep,
+} from '../src/tui/usability.ts';
 import { App, filterTasks, skillSource, sortSkills } from '../src/tui/App.tsx';
 import { buildKeyMap } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
@@ -2384,5 +2391,88 @@ describe('onboarding and team state', () => {
         [],
       ),
     ).toContain('Delegated work in progress: @ops');
+  });
+});
+
+describe("a task view's history", () => {
+  const input = (text: string, seq: number, source: 'user' | 'task' = 'user'): StoredEvent => ({
+    seq,
+    ts: 0,
+    event: { type: 'input', text, source },
+  });
+  const message = (text: string, seq: number): StoredEvent => ({
+    seq,
+    ts: 0,
+    event: { type: 'message', text },
+  });
+
+  it('counts a task as continued once it has more than one input', () => {
+    expect(continued([])).toBe(false);
+    expect(continued([input('go', 1), message('done', 2)])).toBe(false);
+    expect(continued([input('go', 1), message('done', 2), input('and more', 3)])).toBe(true);
+    // A delegated task starts with the daemon's input; the user's reply makes it a conversation.
+    expect(continued([input('assigned', 1, 'task'), input('thanks, also', 2)])).toBe(true);
+  });
+
+  it('ends the result view with the key that shows the transcript', () => {
+    const t = task('t-a000000001', 'dev', { result: 'all good' });
+    expect(resultLines(t, 60, []).map((l) => l.text)).toEqual(['Result', 'all good']);
+    const lines = resultLines(t, 60, [], '^X h');
+    expect(lines.map((l) => l.text)).toEqual([
+      'Result',
+      'all good',
+      '',
+      '^X h shows the full transcript',
+    ]);
+    expect(lines.at(-1)?.tone).toBe('dim');
+  });
+
+  it("keeps a continued task's transcript after its reply; a one-shot task folds to its result", async () => {
+    const talk = fakeClient({
+      't-a000000001': [
+        input('first ask', 1),
+        message('first answer', 2),
+        input('follow-up', 3),
+        message('second answer', 4),
+      ],
+    });
+    const ui = render(
+      <App
+        client={talk.client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { title: 'talk', result: 'second answer' })]}
+      />,
+    );
+    await tick();
+    await openTask(ui);
+    const frame = await frameWith(ui, 'follow-up');
+    expect(frame).toContain('› first ask');
+    expect(frame).toContain('first answer');
+    expect(frame).toContain('second answer');
+    expect(frame).not.toContain('shows the full transcript');
+    ui.unmount();
+
+    const once = fakeClient({ 't-a000000002': [input('one shot', 1), message('its answer', 2)] });
+    const ui2 = render(
+      <App
+        client={once.client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000002', 'dev', { title: 'once', result: 'its answer' })]}
+      />,
+    );
+    await tick();
+    await openTask(ui2);
+    const result = await frameWith(ui2, 'shows the full transcript');
+    expect(result).toContain('Result');
+    expect(result).toContain('its answer');
+    expect(result).toContain('^X h shows the full transcript');
+    expect(result).not.toContain('› one shot');
+    // The key still switches to the transcript.
+    ui2.stdin.write('\u0018');
+    await tick();
+    ui2.stdin.write('h');
+    const history = await frameWith(ui2, '› one shot');
+    expect(history).not.toContain('shows the full transcript');
+    ui2.unmount();
   });
 });
