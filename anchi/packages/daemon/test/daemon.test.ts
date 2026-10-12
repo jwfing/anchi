@@ -1089,7 +1089,9 @@ describe('builder', () => {
     expect(JSON.parse((await cli('tasks', '--json')).stdout)).toEqual([]);
     expect(JSON.parse((await cli('approvals', '--json')).stdout)).toEqual([]);
     await expect(cli(...args, '--yes')).rejects.toThrow(/already exists/);
-  });
+    // Seven CLI processes, each loading the TypeScript sources: well over vitest's 5 s on a CI
+    // runner, and a timed-out run leaves its assertions to fail the next test.
+  }, 180_000);
 
   it('creates a starter for every runtime only after review, without granting access or calling a model', async () => {
     const { client } = await start();
