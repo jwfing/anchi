@@ -164,6 +164,8 @@ export class SetupRunner {
     private steps: Record<SetupAction, string[][]> = SETUP_STEPS,
     private cwd = REPO_ROOT,
     private resetSteps: string[][] = RESET_STEPS,
+    /** How long one command may run (tests shorten it). */
+    private stepTimeoutMs = STEP_TIMEOUT_MS,
   ) {}
 
   /** `env` is added to the steps' environment (the size of a VM `install` creates). */
@@ -180,7 +182,23 @@ export class SetupRunner {
     try {
       for (const [cmd, ...args] of action === 'reset' ? this.resetSteps : this.steps[action]) {
         onLine(`$ ${[cmd, ...args].join(' ')}`);
-        const { code, last } = await runLines(cmd!, args, this.cwd, onLine, env);
+        const { code, last, timedOut } = await runLines(
+          cmd!,
+          args,
+          this.cwd,
+          onLine,
+          env,
+          this.stepTimeoutMs,
+        );
+        if (timedOut) {
+          const limit =
+            this.stepTimeoutMs >= 60_000
+              ? `${Math.round(this.stepTimeoutMs / 60_000)} minutes`
+              : `${Math.ceil(this.stepTimeoutMs / 1000)} s`;
+          throw new Error(
+            `${action} failed: ${[cmd, ...args].join(' ')} did not finish within ${limit} and was stopped${last ? ` (last output: ${last})` : ''}`,
+          );
+        }
         if (code !== 0) {
           throw new Error(`${action} failed: ${cmd} exited with ${code}${last ? `: ${last}` : ''}`);
         }
@@ -197,7 +215,8 @@ function runLines(
   cwd: string,
   onLine: (line: string) => void,
   env: Record<string, string> = {},
-): Promise<{ code: number; last: string }> {
+  timeoutMs = STEP_TIMEOUT_MS,
+): Promise<{ code: number; last: string; timedOut: boolean }> {
   return new Promise((done) => {
     const child = spawn(cmd, args, {
       cwd,
@@ -205,7 +224,11 @@ function runLines(
       env: { ...process.env, ...env },
     });
     let last = '';
-    const timer = setTimeout(() => child.kill('SIGTERM'), STEP_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeoutMs);
     for (const stream of [child.stdout, child.stderr]) {
       createInterface({ input: stream }).on('line', (line) => {
         const text = line.slice(0, 2000);
@@ -215,11 +238,11 @@ function runLines(
     }
     child.on('error', (err) => {
       clearTimeout(timer);
-      done({ code: 127, last: err.message });
+      done({ code: 127, last: err.message, timedOut });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      done({ code: code ?? 1, last });
+      done({ code: code ?? 1, last, timedOut });
     });
   });
 }

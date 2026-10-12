@@ -337,7 +337,9 @@ are deleted locally only; revoke them at the provider if you no longer want them
 
 ## Recovery
 
-- **Installation failed:** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; workspaces and credentials are kept.
+- **Installation failed:** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; workspaces and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
+- **"The VM runs but could not be asked":** a guest command failed (shown with the message in Getting started, Runtimes and `anchi setup status`); the rest of the status is unknown, not reset. Press **r** to try again; if it keeps failing, `anchi setup install` reinstalls the guest components, keeping agents and credentials.
+- **Lima too old:** Getting started and `anchi setup status` list `Lima 2.2.0+ (found …)` under what is missing, and `anchi setup install` stops before creating the VM. macOS: `brew upgrade lima`; Linux: [Install Lima on Linux](#install-lima-on-linux).
 - **Installation refused because tasks are running:** installing restarts the egress proxy, which would end them. Wait for them (`anchi tasks`) or cancel them, then run it again; `ANCHI_FORCE_RESTART=1` installs anyway. `make verify-anchi` refuses for the same reason (`ANCHI_CHECK_WITH_TASKS=1` runs it beside them, leaving their cells alone).
 - **Interrupted installation:** run it again. Installer-marked incomplete root filesystems are kept as `rootfs-incomplete-*` before rebuilding; unmarked ones are never modified automatically.
 - **Stopped VM:** `anchi setup vm`, then `anchi setup vault unlock`.

@@ -50,6 +50,11 @@ export function WelcomeView({
         setup.host.installHint,
         'Install these prerequisites, then press Enter to check again.',
       );
+    else if (setup.vm === 'running' && setup.error)
+      lines.push(
+        `The VM runs but could not be asked: ${sanitizeLine(setup.error)}`,
+        `r check again · ${nextKey} reinstall its components if it keeps failing (agents and credentials are kept)`,
+      );
     else if (setup.vm === 'running' && setup.guestOutdated)
       lines.push(
         `The VM's components were installed by Anchi ${setup.guestVersion ?? 'an older release'}; this is Anchi ${setup.appVersion ?? 'a newer release'}.`,
@@ -115,6 +120,7 @@ export function TeamView({
   logs,
   cursor,
   height,
+  hints = 'Open Getting started or Agent builder.',
 }: {
   agents: AgentSummary[];
   tasks: TaskRow[];
@@ -122,6 +128,8 @@ export function TeamView({
   logs: Record<string, StoredEvent[]>;
   cursor: number;
   height: number;
+  /** Where to go without agents, with the keys as bound. */
+  hints?: string;
 }) {
   const room = Math.max(1, Math.floor((height - 3) / 3));
   const first = Math.max(0, cursor - room + 1);
@@ -134,7 +142,7 @@ export function TeamView({
       </Text>
       <Text> </Text>
       {!agents.length ? (
-        <Text>No agents yet. Open Getting started or Agent builder.</Text>
+        <Text>{`No agents yet. ${hints}`}</Text>
       ) : (
         agents.slice(first, first + room).map((agent, i) => {
           const task = tasks.find(

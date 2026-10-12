@@ -144,6 +144,9 @@ class FakeTransport implements GuestTransport {
       if (this.guestVersion === null) return { code: 1, stdout: '{"error":"USAGE"}', stderr: '' };
       return ok({ runtime_version: this.guestVersion, installed_at: '2026-10-11T00:00:00Z' });
     }
+    if (args[1]?.endsWith('vault_admin.py') && this.guestFails) {
+      return { code: 1, stdout: '{"error":"GUEST_SUDO_FAILED"}', stderr: '' };
+    }
     if (args[1]?.endsWith('claude_admin.py') && args[2] === 'status') {
       return ok({ configured: this.claude, kind: this.claude ? 'oauth' : null });
     }
@@ -201,6 +204,8 @@ class FakeTransport implements GuestTransport {
   hermes = false;
   /** What `anchi-cell version` reports; null for a guest from before the command. */
   guestVersion: string | null = APP_VERSION;
+  /** The VM runs but guest commands fail (sudo, a missing script). */
+  guestFails = false;
   codexImports: Record<string, string>[] = [];
   scanResult: { clean: boolean; findings: unknown[]; files: number } | null = {
     clean: true,
@@ -1189,6 +1194,21 @@ describe('builder', () => {
     expect(logs.some((l) => /builderRuntime gpt is not codex, claude-code or hermes/.test(l))).toBe(
       true,
     );
+  });
+
+  it('reports a VM that runs but cannot be asked instead of showing nothing installed', async () => {
+    vmRunning = true;
+    transport.guestFails = true;
+    const { client } = await start();
+    const status = await client.call('setup.status');
+    expect(status.vm).toBe('running');
+    expect(status.error).toMatch(/GUEST_SUDO_FAILED/);
+    expect(status.installed).toBe(false);
+    expect(status.guestOutdated).toBe(false);
+    // No limactl here: the VM's size is unknown, not invented.
+    expect(status.vmSize?.current).toBeUndefined();
+    transport.guestFails = false;
+    expect((await client.call('setup.status')).error).toBeUndefined();
   });
 
   it('tells the user when another Anchi version installed the VM components', async () => {

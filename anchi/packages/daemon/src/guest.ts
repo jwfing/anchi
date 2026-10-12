@@ -84,20 +84,31 @@ export class LimaTransport implements GuestTransport {
     });
   }
 
-  async vmStatus(): Promise<'missing' | 'stopped' | 'running' | 'unknown'> {
+  /** The VM's line of `limactl list` in `format`, or undefined when there is none. */
+  private list(format: string): Promise<string | undefined> {
     return new Promise((resolve) => {
-      const child = spawn(this.limactl, ['list', '--format', '{{.Name}} {{.Status}}'], {
+      const child = spawn(this.limactl, ['list', '--format', format], {
         stdio: ['ignore', 'pipe', 'ignore'],
       });
       let out = '';
       child.stdout.on('data', (b: Buffer) => (out += b.toString('utf8')));
-      child.on('error', () => resolve('unknown'));
-      child.on('close', () => {
-        const line = out.split('\n').find((l) => l.split(' ')[0] === this.vm);
-        if (!line) return resolve('missing');
-        resolve(line.includes('Running') ? 'running' : 'stopped');
-      });
+      child.on('error', () => resolve(undefined));
+      child.on('close', () => resolve(out.split('\n').find((l) => l.split(' ')[0] === this.vm)));
     });
+  }
+
+  async vmStatus(): Promise<'missing' | 'stopped' | 'running' | 'unknown'> {
+    const line = await this.list('{{.Name}} {{.Status}}');
+    if (line === undefined) return 'missing';
+    return line.includes('Running') ? 'running' : 'stopped';
+  }
+
+  /** The VM's CPUs and memory as Lima reports them (memory in bytes), for the Runtimes screen. */
+  async vmSize(): Promise<{ cpus: number; memoryGiB: number } | undefined> {
+    const line = await this.list('{{.Name}} {{.CPUs}} {{.Memory}}');
+    const [, cpus, bytes] = (line ?? '').split(' ');
+    if (!/^\d+$/.test(cpus ?? '') || !/^\d+$/.test(bytes ?? '')) return undefined;
+    return { cpus: Number(cpus), memoryGiB: Math.round(Number(bytes) / 2 ** 30) };
   }
 }
 

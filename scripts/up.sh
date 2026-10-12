@@ -19,6 +19,13 @@ if [[ $vm_type == qemu ]]; then
 else
   command -v limactl >/dev/null || { echo 'Install Lima first: brew install lima' >&2; exit 1; }
 fi
+# An older Lima refuses the template (minimumLimaVersion) only after the download; say it now.
+lima_min=$(awk '/^minimumLimaVersion:/ {print $2}' lima/anchi-vm.yaml)
+lima_have=$(limactl --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+if [[ -n $lima_min && -n $lima_have && $(printf '%s\n%s\n' "$lima_min" "$lima_have" | sort -V | head -1) != "$lima_min" ]]; then
+  echo "Lima $lima_have is older than the $lima_min Anchi needs: upgrade it (macOS: brew upgrade lima; Linux: see docs/GETTING_STARTED.md)" >&2
+  exit 1
+fi
 runtime_version=$(anchi_runtime_version)
 # A VM created as secure-vm is renamed rather than replaced by a second, empty VM.
 if [[ $vm_name == "$ANCHI_VM_DEFAULT" ]]; then

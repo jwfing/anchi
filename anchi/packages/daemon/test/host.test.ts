@@ -3,11 +3,41 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { homeLayout } from '@anchi/core';
 import { describe, expect, it } from 'vitest';
-import { appVersion, workspaceSteps } from '../src/host.ts';
+import { appVersion, SetupRunner, workspaceSteps } from '../src/host.ts';
 import { launchdPlist, systemdUnit } from '../src/launch.ts';
 import { notifyCommand } from '../src/notify.ts';
+import { limaMinimum, parseLimaVersion, versionAtLeast } from '../src/setup.ts';
 
 describe('host integration', () => {
+  it('compares the installed Lima with the version the VM template needs', () => {
+    expect(limaMinimum()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(limaMinimum(join(tmpdir(), 'no-such-checkout'))).toBe('0.0.0');
+    expect(parseLimaVersion('limactl version 2.2.0')).toBe('2.2.0');
+    expect(parseLimaVersion('limactl version 2.10.1-1-gabcdef')).toBe('2.10.1');
+    expect(parseLimaVersion('')).toBeNull();
+    expect(versionAtLeast('2.2.0', '2.2.0')).toBe(true);
+    // Numeric, not textual: 2.10 is newer than 2.2.
+    expect(versionAtLeast('2.10.0', '2.2.0')).toBe(true);
+    expect(versionAtLeast('1.0.9', '2.2.0')).toBe(false);
+    expect(versionAtLeast('2.1.9', '2.2.0')).toBe(false);
+  });
+
+  it('names the step and the limit when a setup command runs too long', async () => {
+    const steps = {
+      'vm-start': [[process.execPath, '-e', 'console.log("working"); setTimeout(() => {}, 10000)']],
+      install: [],
+      'vault-init': [],
+      'vault-unlock': [],
+      workspaces: [],
+    };
+    const runner = new SetupRunner(steps, undefined, [], 300);
+    const lines: string[] = [];
+    await expect(runner.run('vm-start', (l) => lines.push(l))).rejects.toThrow(
+      /vm-start failed: .* did not finish within 1 s and was stopped \(last output: working\)/,
+    );
+    expect(lines[0]).toMatch(/^\$ /);
+  });
+
   it('reads this Anchi version from the release manifest, else the workspace package', () => {
     expect(appVersion()).toMatch(/^\d+\.\d+\.\d+$/);
     const dir = mkdtempSync(join(tmpdir(), 'anchi-version-'));

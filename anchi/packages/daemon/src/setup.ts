@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import type {
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
-import { APP_VERSION, defaultVmSize, hostResources, VAULT_KEY } from './host.ts';
+import { APP_VERSION, defaultVmSize, hostResources, REPO_ROOT, VAULT_KEY } from './host.ts';
 import type { ServiceSetup } from './services.ts';
 
 export { CONNECTOR_IDS };
@@ -85,6 +86,50 @@ export async function connectorStatuses(guest: Guest): Promise<ConnectorStatus[]
   }));
 }
 
+/** `a` is at least `b`, both dotted numbers (`2.10.0` is newer than `2.2.0`). */
+export function versionAtLeast(a: string, b: string): boolean {
+  const parts = (v: string) => v.split('.').map((n) => Number(n) || 0);
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d) return d > 0;
+  }
+  return true;
+}
+
+/** The Lima the VM template needs (`minimumLimaVersion` in lima/anchi-vm.yaml). */
+export function limaMinimum(root = REPO_ROOT): string {
+  try {
+    const text = readFileSync(join(root, 'lima/anchi-vm.yaml'), 'utf8');
+    return /^minimumLimaVersion:\s*(\d+\.\d+\.\d+)/m.exec(text)?.[1] ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+/** The dotted version in `limactl --version` output (`limactl version 2.2.0`), or null. */
+export function parseLimaVersion(output: string): string | null {
+  return /(\d+\.\d+\.\d+)/.exec(output)?.[1] ?? null;
+}
+
+let limaVersionCache: { at: number; version: string | null } | undefined;
+/** The installed Lima's version, asked at most once a minute; null when it cannot say. */
+function limaVersion(): string | null {
+  if (limaVersionCache && Date.now() - limaVersionCache.at < 60_000) {
+    return limaVersionCache.version;
+  }
+  let version: string | null = null;
+  try {
+    version = parseLimaVersion(
+      execFileSync('limactl', ['--version'], { timeout: 5000 }).toString(),
+    );
+  } catch {
+    // Not installed or not answering: `missing` already names limactl.
+  }
+  limaVersionCache = { at: Date.now(), version };
+  return version;
+}
+
 export function hostReadiness(): NonNullable<SetupStatus['host']> {
   const executable = (name: string) =>
     (process.env.PATH ?? '').split(':').some((dir) => {
@@ -96,6 +141,10 @@ export function hostReadiness(): NonNullable<SetupStatus['host']> {
       }
     });
   const missing = ['limactl', 'python3'].filter((name) => !executable(name));
+  // An older Lima fails only at `limactl start`, deep in the installation log; say it here.
+  const minimum = limaMinimum();
+  const found = missing.includes('limactl') ? null : limaVersion();
+  if (found && !versionAtLeast(found, minimum)) missing.push(`Lima ${minimum}+ (found ${found})`);
   if (process.platform === 'linux') {
     if (!executable('qemu-system-x86_64')) missing.push('qemu-system-x86_64');
     try {
@@ -109,8 +158,8 @@ export function hostReadiness(): NonNullable<SetupStatus['host']> {
     missing,
     installHint:
       process.platform === 'darwin'
-        ? 'brew install lima python'
-        : 'Install Lima (https://lima-vm.io), Python 3.11+ and QEMU. Ubuntu/Debian: sudo apt-get install python3 qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.',
+        ? 'brew install lima python (brew upgrade lima for a newer Lima)'
+        : `Install Lima ${minimum}+ (https://lima-vm.io), Python 3.11+ and QEMU. Ubuntu/Debian: sudo apt-get install python3 qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.`,
   };
 }
 
@@ -141,6 +190,9 @@ export async function setupStatus(
     guestOutdated: false,
   };
   if (vm !== 'running') return empty;
+  // Shown on the Runtimes screen; a Lima that cannot say leaves it out.
+  const current = await lima.vmSize().catch(() => undefined);
+  if (current) empty.vmSize = { ...empty.vmSize!, current };
   try {
     const [vault, codex, claude, hermes, connectors, base, workspaces, guestVersion] =
       await Promise.all([
@@ -177,7 +229,9 @@ export async function setupStatus(
       // say its version is older than this Anchi.
       guestOutdated: base && guestVersion !== APP_VERSION,
     };
-  } catch {
-    return empty;
+  } catch (err) {
+    // The VM runs but a guest command failed (sudo, a missing script, an SSH hiccup): say so
+    // instead of showing everything as not installed.
+    return { ...empty, error: (err as Error).message.slice(0, 300) };
   }
 }

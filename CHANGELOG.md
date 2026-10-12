@@ -8,8 +8,12 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 - Anchi tells you when the VM's components were installed by another version: `setup.status` reports `appVersion`, `guestVersion` (`anchi-cell version`, from `/opt/secure-vm/installed.json`) and `guestOutdated`; Getting started goes back to its environment step and **Enter** (or `I` in Runtimes, which shows both versions) runs `anchi setup install`; the daemon logs it, tasks started meanwhile carry a notice, and `anchi update` says to run it. A guest from before this release counts as outdated until `scripts/anchi setup install` has run once.
 - `builderRuntime` in `~/.anchi/settings.yaml` (`codex`, `claude-code` or `hermes`) picks the Agent builder's runtime; a task keeps the runtime its session started on (`runtime` in the task row).
+- Runtimes and `anchi setup status` show the VM's CPUs and memory (`vmSize.current`), and `anchi setup status` prints a summary (`--json` for every field). A VM that runs but cannot be asked is reported with the failing command's message (`error`), in Getting started, Runtimes and the CLI, instead of as "not installed". A Lima older than the VM template needs (2.2.0) is listed with the missing prerequisites, and `anchi setup install` stops before creating the VM.
+- `anchi cancel`, `anchi setup disconnect` and `anchi skills rm` say what they did; `anchi agents` shows each agent's runtime; `anchi setup status`, `cancel`, `skills rm` and the `daemon` subcommands have help descriptions. Text and secret dialogs in the TUI take **^U** (clear) and **^W** (delete the last word).
 
 ### Changed
+
+- The install confirmation says what a first installation downloads and that it can take up to half an hour; Getting started shows the elapsed time next to the phase, and a step that runs past 45 minutes is named in the error. Connectors keeps every id in one column, lists **a** (another Google account) and **o** (Google client) in its hints, and tells Gmail and Drive users without a Google OAuth client where to start; Runtimes says to run `codex` first when the imported login has expired; Team overview without agents names the keys to Getting started and the builder.
 
 - The Agent builder runs on the first connected runtime (Codex, then Claude Code, then Hermes) instead of always Codex, so a user without a ChatGPT login can build agents. Getting started's runtime step accepts any connected runtime and lists Hermes (`h`) beside Codex and Claude Code.
 

@@ -449,6 +449,8 @@ export function App({
     phase: string;
     running: boolean;
     failed?: boolean;
+    /** When the step started, for the elapsed time next to the phase. */
+    startedAt: number;
   } | null>(null);
   const setupRunning = useRef(false);
   // A notification is newer than the initial list; a late list answer must not undo it.
@@ -538,6 +540,7 @@ export function App({
         setSetupProgress((p) => ({
           action,
           running: true,
+          startedAt: p?.running ? p.startedAt : Date.now(),
           phase:
             /download|fetch|pulling|anchi-image|base image|rootfs|debootstrap|install-anchi|bootstrap|trusted|egress|services/i.test(
               line,
@@ -917,11 +920,12 @@ export function App({
       throw new Error('Environment setup is already running. Open installation progress.');
     setupRunning.current = true;
     setSetupLog([]);
-    setSetupProgress({ action: step, phase: setupPhase(step, ''), running: true });
+    const startedAt = Date.now();
+    setSetupProgress({ action: step, phase: setupPhase(step, ''), running: true, startedAt });
     try {
       const status = await client.call('setup.run', { action: step, vmSize });
       setSetup(status);
-      setSetupProgress({ action: step, phase: 'Completed', running: false });
+      setSetupProgress({ action: step, phase: 'Completed', running: false, startedAt });
       setProblem(null);
     } catch (e) {
       setSetupProgress((p) => p && { ...p, running: false, failed: true });
@@ -959,8 +963,9 @@ export function App({
               title: 'Install',
               body:
                 `Create the anchi-vm VM with ${cpus} CPUs and ${memoryGiB} GiB of memory, install ` +
-                'the trusted services and the agent team, and build the base image. This takes ' +
-                'several minutes. Later changes: limactl edit anchi-vm --cpus N --memory N.',
+                'the trusted services and the agent team, and build the base image. This downloads ' +
+                'the VM image, Debian packages and the base image tools: several minutes, up to half ' +
+                'an hour on a slow network. Later changes: limactl edit anchi-vm --cpus N --memory N.',
               action: () => performSetup('install', { cpus, memoryGiB }),
             });
           },
@@ -983,7 +988,9 @@ export function App({
         install: [
           'Install or update',
           'Create or update the anchi-vm VM, install the trusted services and the agent ' +
-            'team, and build the base image. This takes several minutes.',
+            'team, and build the base image. A first installation downloads the VM image, Debian ' +
+            'packages and the base image tools: several minutes, up to half an hour on a slow ' +
+            'network; an update reuses what is done.',
         ],
         workspaces: [
           'Share ~/AnchiWorkspaces',
@@ -1424,7 +1431,9 @@ export function App({
         const skill = (skills ?? [])[skillCursor];
         if (!skill) return;
         if (!skill.commit)
-          return say(`${skill.id} was added from a local directory; add it again to refresh it`);
+          return say(
+            `${skill.id} was added from a local directory; press a and give the same directory to refresh it`,
+          );
         say(`checking ${skill.id}…`);
         return void client
           .call('skills.checkUpdate', { id: skill.id })
@@ -1713,6 +1722,9 @@ export function App({
       if (key.escape) return setModal(null);
       if (key.tab && field.masked) return setModal({ ...modal, revealed: !modal.revealed });
       if (key.backspace || key.delete) return editModalInput((v) => [...v].slice(0, -1).join(''));
+      // A pasted token that is wrong goes in one key, as in a shell.
+      if (key.ctrl && ch === 'u') return editModalInput(() => '');
+      if (key.ctrl && ch === 'w') return editModalInput((v) => v.replace(/\S+\s*$/, ''));
       if (key.return) {
         if (!modal.input && !field.optional) return;
         const values = { ...modal.values, ...(modal.input ? { [field.key]: modal.input } : {}) };
@@ -1761,6 +1773,8 @@ export function App({
         return setModal({ ...modal, ...completePath(modal.input, modal.paths) });
       }
       if (key.backspace || key.delete) return editModalInput((v) => [...v].slice(0, -1).join(''));
+      if (key.ctrl && ch === 'u') return editModalInput(() => '');
+      if (key.ctrl && ch === 'w') return editModalInput((v) => v.replace(/\S+\s*$/, ''));
       if (key.return) {
         if (!modal.input && !modal.allowEmpty) return;
         const { submit, input, title } = modal;
@@ -2123,6 +2137,8 @@ export function App({
                     ['connectors:awsProfile', 'aws profile'],
                     ['connectors:mode', 'service writes'],
                     ['connectors:disconnect', 'disconnect'],
+                    ['connectors:account', 'another Google account'],
+                    ['connectors:googleClient', 'Google client'],
                   ]
                 : context === 'usage'
                   ? [
@@ -2209,7 +2225,11 @@ export function App({
               width={textWidth}
               height={bodyHeight - 4}
               scroll={scroll}
-              busy={setupProgress?.running ? `${SPINNER[frame]} ${setupProgress.phase}` : ''}
+              busy={
+                setupProgress?.running
+                  ? `${SPINNER[frame % SPINNER.length]} ${setupProgress.phase} · ${duration(Date.now() - setupProgress.startedAt)}`
+                  : ''
+              }
               nextKey={hint('welcome:next', 'continue')}
             />
           ) : current === 'team' ? (
@@ -2220,6 +2240,7 @@ export function App({
               logs={logs}
               cursor={Math.min(teamCursor, userAgents.length - 1)}
               height={bodyHeight - 4}
+              hints={`${hint('nav:welcome', 'Getting started')} · ${hint('nav:builder', 'Agent builder')}`}
             />
           ) : agent ? (
             <>
@@ -2543,6 +2564,8 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
     figma: 'REST API; webhooks wait for approval',
     discord: 'bot REST API, no gateway; webhook tokens are denied',
   };
+  // One column for every id, the services' too, so `firecrawl` does not push its row out.
+  const idWidth = Math.max(8, ...setup.connectors.map((c) => c.id.length)) + 1;
   return (
     <Box flexDirection="column">
       {!setup.vaultUnlocked ? (
@@ -2554,7 +2577,7 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
         <Box key={c.id} flexDirection="column">
           <Text inverse={i === cursor}>
             <Text color={c.connected ? 'green' : 'gray'}>{c.connected ? '●' : '○'}</Text>{' '}
-            {c.id.padEnd(8)}
+            {c.id.padEnd(idWidth)}
             {c.connected ? sanitizeLine(c.account ?? 'connected') : 'not connected'}
             {c.profile ? ` · profile ${sanitizeLine(c.profile)}` : ''}
           </Text>
@@ -2600,7 +2623,7 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
               >
                 {c.connected ? '●' : '○'}
               </Text>{' '}
-              {c.id.padEnd(8)}
+              {c.id.padEnd(idWidth)}
               {c.reauthRequired
                 ? 'sign in again'
                 : c.connected
@@ -2609,7 +2632,9 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
                     ? setup.googleClientSource === 'builtin'
                       ? 'press Enter to sign in with Google'
                       : 'client stored — press Enter to sign in'
-                    : 'not connected'}
+                    : (c.id === 'gmail' || c.id === 'drive') && !setup.googleClient
+                      ? 'needs a Google OAuth client first — Enter imports yours (docs/GMAIL_SETUP.md)'
+                      : 'not connected'}
               {` · writes ${c.mode === 'ask' ? 'ask' : 'auto'}`}
             </Text>
             {listAccounts
@@ -2730,10 +2755,16 @@ function RuntimesView({
   if (!setup) return <Text dimColor>Loading…</Text>;
   const c = setup.codex;
   const expired = c.expiresAt !== null && c.expiresAt < Date.now();
+  const size = setup.vmSize?.current;
   return (
     <Box flexDirection="column">
       <Text>
-        VM: <Text color={setup.vm === 'running' ? 'green' : 'red'}>{setup.vm}</Text> · vault:{' '}
+        VM:{' '}
+        <Text color={setup.vm === 'running' ? 'green' : 'red'}>
+          {setup.vm}
+          {size ? ` (${size.cpus} CPUs, ${size.memoryGiB} GiB)` : ''}
+        </Text>{' '}
+        · vault:{' '}
         <Text color={setup.vaultUnlocked ? 'green' : 'red'}>
           {setup.vaultUnlocked ? 'unlocked' : 'locked'}
         </Text>{' '}
@@ -2742,6 +2773,11 @@ function RuntimesView({
           {setup.installed ? 'built' : 'not built yet'}
         </Text>
       </Text>
+      {setup.error ? (
+        <Text color="red">
+          {`The VM runs but could not be asked: ${sanitizeLine(setup.error)} · r to check again; I reinstalls its components if it keeps failing`}
+        </Text>
+      ) : null}
       {setup.vm === 'running' && setup.installed && setup.guestOutdated !== undefined ? (
         <Text>
           Components:{' '}
@@ -2759,7 +2795,7 @@ function RuntimesView({
         {c.connected ? (
           <Text color={expired ? 'red' : 'green'}>
             {expired
-              ? 'token expired — press i to re-import'
+              ? 'token expired — run `codex` on this computer once (it refreshes the login), then press i to re-import'
               : `connected, token valid until ${new Date(c.expiresAt!).toLocaleString()}`}
           </Text>
         ) : (
@@ -2989,8 +3025,8 @@ function ModalView({
         <Box flexGrow={1} />
         <Text dimColor>
           Enter next · Esc cancel
-          {field.masked ? ` · Tab ${modal.revealed ? 'hide' : 'show'} the input` : ''} · this screen
-          is drawn by Anchi, not by an agent
+          {field.masked ? ` · Tab ${modal.revealed ? 'hide' : 'show'} the input` : ''} · ^U clear ·
+          this screen is drawn by Anchi, not by an agent
         </Text>
       </Box>
     );
@@ -3128,7 +3164,7 @@ function ModalView({
         ) : null}
         <Box flexGrow={1} />
         <Text dimColor>
-          {`Enter confirm · ${modal.paths ? 'Tab complete the path · ' : ''}Esc cancel · this screen is drawn by Anchi, not by an agent`}
+          {`Enter confirm · ${modal.paths ? 'Tab complete the path · ' : ''}^U clear · Esc cancel · this screen is drawn by Anchi, not by an agent`}
         </Text>
       </Box>
     );

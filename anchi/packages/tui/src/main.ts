@@ -399,12 +399,15 @@ skillsCmd
       }
     }),
   );
-skillsCmd.command('rm <id>').action((id: string) =>
-  withClient(async (client) => {
-    await client.call('skills.remove', { id });
-    console.log('removed');
-  }),
-);
+skillsCmd
+  .command('rm <id>')
+  .description('Remove a skill; agents that list it fail to start until it is removed from them')
+  .action((id: string) =>
+    withClient(async (client) => {
+      await client.call('skills.remove', { id });
+      console.log(`removed ${sanitizeLine(id)}`);
+    }),
+  );
 
 program
   .command('triggers')
@@ -456,9 +459,13 @@ for (const [name, allow] of [
     );
 }
 
-program.command('cancel <task>').action(async (taskId: string) => {
-  await withClient((client) => client.call('tasks.cancel', { taskId }));
-});
+program
+  .command('cancel <task>')
+  .description('Cancel a running or queued task; its work and transcript are kept')
+  .action(async (taskId: string) => {
+    await withClient((client) => client.call('tasks.cancel', { taskId }));
+    console.log(`cancelled ${sanitizeLine(taskId)}`);
+  });
 
 const agentsCmd = program.command('agents').description('List agents');
 agentsCmd
@@ -480,7 +487,7 @@ agentsCmd.action(() =>
     for (const a of await client.call('agents.list')) {
       const extra = a.error
         ? styleText('red', ` ${sanitizeLine(a.error)}`)
-        : ` ${a.connectors.join(',') || '-'} · ${a.image}`;
+        : ` ${a.runtime ?? '-'} · ${a.connectors.join(',') || '-'} · ${a.image}`;
       console.log(`${a.id.padEnd(14)} ${a.status.padEnd(8)}${extra}`);
     }
   }),
@@ -524,11 +531,52 @@ async function deleteAgentCli(id: string, yes: boolean) {
 
 const setup = program.command('setup').description('Runtime and connector setup');
 
-setup.command('status').action(() =>
-  withClient(async (client) => {
-    console.log(JSON.stringify(await client.call('setup.status'), null, 2));
-  }),
-);
+setup
+  .command('status')
+  .description('VM, vault, runtimes, connectors and services at a glance')
+  .option('--json', 'the full status as JSON')
+  .action((opts: { json?: boolean }) =>
+    withClient(async (client) => {
+      const s = await client.call('setup.status');
+      if (opts.json) return console.log(JSON.stringify(s, null, 2));
+      const size = s.vmSize?.current;
+      const lines = [
+        `VM: ${s.vm}${size ? ` (${size.cpus} CPUs, ${size.memoryGiB} GiB)` : ''} · vault: ${
+          s.vaultUnlocked ? 'unlocked' : s.vaultKeyPresent === false ? 'no key yet' : 'locked'
+        } · base image: ${s.installed ? 'built' : 'not built'}`,
+        s.error ? `Could not ask the VM: ${s.error}` : '',
+        s.host?.missing.length
+          ? `Missing on this computer: ${s.host.missing.join(', ')} — ${s.host.installHint}`
+          : '',
+        s.guestOutdated === undefined
+          ? ''
+          : s.guestOutdated
+            ? `Components: installed by Anchi ${s.guestVersion ?? 'an older release'}; this is ${s.appVersion} — run anchi setup install`
+            : `Components: Anchi ${s.guestVersion ?? s.appVersion}`,
+        `Codex: ${
+          s.codex.connected
+            ? `connected${s.codex.expiresAt ? `, valid until ${new Date(s.codex.expiresAt).toLocaleString()}` : ''}`
+            : 'not connected'
+        }`,
+        `Claude Code: ${
+          s.claude?.connected
+            ? `connected (${s.claude.kind === 'api_key' ? 'API key' : 'subscription token'})`
+            : 'not connected'
+        }`,
+        `Hermes: ${s.hermes?.connected ? `${s.hermes.baseUrl} · ${s.hermes.model}` : 'not set up'}`,
+        `Workspaces: ${s.workspaces ? '~/AnchiWorkspaces is shared with the VM' : 'not shared'}`,
+        `Connectors: ${s.connectors.map((c) => `${c.id} ${c.connected ? '●' : '○'}`).join('  ')}`,
+        `Services: ${(s.services ?? [])
+          .map(
+            (c) =>
+              `${c.id} ${c.connected ? '●' : c.reauthRequired ? '! sign in again' : '○'} (writes ${c.mode})`,
+          )
+          .join('  ')}`,
+        `Google client: ${s.googleClientSource ?? (s.googleClient ? 'yes' : 'none')}`,
+      ];
+      for (const line of lines) if (line) console.log(sanitizeLine(line));
+    }),
+  );
 
 setup
   .command('codex')
@@ -544,7 +592,9 @@ setup
       }
       const s = await client.call('setup.importCodex');
       console.log(
-        `Codex connected; token valid until ${new Date(s.expiresAt ?? 0).toLocaleString()}`,
+        s.expiresAt
+          ? `Codex connected; token valid until ${new Date(s.expiresAt).toLocaleString()}`
+          : 'Codex connected',
       );
     }),
   );
@@ -754,6 +804,9 @@ const isService = (id: string): id is ServiceId => (SERVICE_IDS as readonly stri
 
 setup
   .command('disconnect <id>')
+  .description(
+    'Remove a connector or service credential from the vault (Google accounts are revoked too)',
+  )
   .option('--account <name>', 'gmail or drive: the account to disconnect (default: default)')
   .action(async (id: string, opts: { account?: string }) => {
     if (opts.account && id !== 'gmail' && id !== 'drive')
@@ -762,6 +815,9 @@ setup
       isService(id)
         ? client.call('services.disconnect', { id, account: opts.account })
         : client.call('connectors.remove', { id: id as ConnectorId }),
+    );
+    console.log(
+      `${sanitizeLine(id)}${opts.account ? ` (${sanitizeLine(opts.account)})` : ''} disconnected`,
     );
   });
 
@@ -908,29 +964,41 @@ async function readStdin(): Promise<string> {
 }
 
 const daemon = program.command('daemon').description('Manage the background daemon');
-daemon.command('start').action(async () => {
-  (await connectOrStart(layout)).close();
-  console.log('daemon running');
-});
-daemon.command('stop').action(async () => {
-  const client = await tryConnect(layout);
-  if (!client) return console.log('daemon not running');
-  await client.call('daemon.shutdown');
-  client.close();
-  console.log('daemon stopped');
-});
-daemon.command('status').action(async () => {
-  const client = await tryConnect(layout);
-  if (!client) return console.log('daemon not running');
-  console.log(JSON.stringify(await client.call('daemon.status'), null, 2));
-  client.close();
-});
+daemon
+  .command('start')
+  .description('Start the daemon in the background if it is not running')
+  .action(async () => {
+    (await connectOrStart(layout)).close();
+    console.log('daemon running');
+  });
+daemon
+  .command('stop')
+  .description('Stop the daemon; its cells are scanned and closed, running turns end')
+  .action(async () => {
+    const client = await tryConnect(layout);
+    if (!client) return console.log('daemon not running');
+    await client.call('daemon.shutdown');
+    client.close();
+    console.log('daemon stopped');
+  });
+daemon
+  .command('status')
+  .description(
+    'Whether the daemon runs, with its pid, home, start time, clients and cells, as JSON',
+  )
+  .action(async () => {
+    const client = await tryConnect(layout);
+    if (!client) return console.log('daemon not running');
+    console.log(JSON.stringify(await client.call('daemon.status'), null, 2));
+    client.close();
+  });
 daemon
   .command('install')
   .description('Run the daemon at login (launchd on macOS, a systemd user unit on Linux)')
   .action(() => console.log(`installed ${installAutostart(layout)}`));
 daemon
   .command('uninstall')
+  .description('Stop running the daemon at login')
   .action(() => console.log(uninstallAutostart() ? 'uninstalled' : 'not installed'));
 
 // For scripts/gen-skill-cli.py: every command's help, as `--help` prints it, in one run.
