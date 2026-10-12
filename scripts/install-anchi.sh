@@ -27,5 +27,6 @@ limactl copy guest/cell.env guest/arch.sh guest/install-gmail.sh guest/install-a
   guest/check-security.py guest/check-connectors.py "$vm_name:$stage/"
 limactl copy "$runner/runner.mjs" "$runner/forward.mjs" "$runner/mcp.mjs" "$vm_name:$stage/anchi-cell/"
 limactl copy -r services systemd "$vm_name:$stage/"
-limactl shell "$vm_name" -- sudo bash "$stage/install-gmail.sh"
+# install-gmail.sh rewrites installed.json; without the version it would record `unknown`.
+limactl shell "$vm_name" -- sudo env SECURE_VM_RUNTIME_VERSION="$(anchi_runtime_version)" bash "$stage/install-gmail.sh"
 limactl shell "$vm_name" -- sudo bash "$stage/install-anchi.sh"

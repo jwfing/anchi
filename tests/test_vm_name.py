@@ -184,3 +184,31 @@ class VmNameTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RuntimeVersionTests(unittest.TestCase):
+    def version(self, cwd):
+        return subprocess.run(
+            ['bash', '-c', f'source {SCRIPT}; anchi_runtime_version'],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def test_reads_the_checkout_or_release_version(self):
+        import json
+
+        self.assertEqual(self.version(ROOT), json.loads((ROOT / 'anchi/package.json').read_text())['version'])
+        with tempfile.TemporaryDirectory() as release:
+            Path(release, 'manifest.json').write_text('{"version": "9.9.9"}')
+            self.assertEqual(self.version(release), '9.9.9')
+        with tempfile.TemporaryDirectory() as empty:
+            self.assertEqual(self.version(empty), 'unknown')
+
+    def test_every_install_of_the_services_records_the_version(self):
+        # install-gmail.sh writes installed.json; a caller without the version records `unknown`.
+        for script in ('scripts/up.sh', 'scripts/install-anchi.sh'):
+            for line in (ROOT / script).read_text().splitlines():
+                if 'install-gmail.sh' in line and 'limactl shell' in line:
+                    self.assertIn('SECURE_VM_RUNTIME_VERSION=', line, script)
