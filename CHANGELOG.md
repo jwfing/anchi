@@ -4,7 +4,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
-Four boundary fixes in the VM. After updating, run `anchi setup install` once: it installs the proxy and cell manager that carry them.
+## 0.3.3 — 2026-10-12
+
+Four boundary fixes in the VM, from a review of 0.3.2: the egress proxy decides on the host a connection goes to, GraphQL mutations are found wherever they sit in a document, and the cell manager writes the agent's home and mounts workspaces without following links. After updating, run `anchi setup install` once: it installs the proxy and cell manager that carry them; until then the VM keeps the 0.3.2 behavior and Getting started reports its components as outdated.
 
 ### Fixed
 

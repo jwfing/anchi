@@ -7,11 +7,11 @@ approvals, audit and troubleshooting. Contribution procedures live separately in
 ## Install for a host-side agent
 
 Binary installations do not include a repository checkout. Fetch the skill from the tag matching
-`anchi --version`; `main` can document unreleased commands. For example, for Anchi 0.3.2:
+`anchi --version`; `main` can document unreleased commands. For example, for Anchi 0.3.3:
 
 ```bash
-git clone --depth 1 --branch v0.3.2 https://github.com/jwfing/anchi.git anchi-skills-v0.3.2
-cd anchi-skills-v0.3.2
+git clone --depth 1 --branch v0.3.3 https://github.com/jwfing/anchi.git anchi-skills-v0.3.3
+cd anchi-skills-v0.3.3
 ```
 
 Inspect `skills/anchi/SKILL.md` and its references, then copy the directory to **one** of your
@@ -42,7 +42,7 @@ access to the host, or approval authority.
 If its reference material is useful for a cell agent, install a matching release explicitly:
 
 ```bash
-anchi skills add https://github.com/jwfing/anchi/tree/v0.3.2/skills/anchi
+anchi skills add https://github.com/jwfing/anchi/tree/v0.3.3/skills/anchi
 ```
 
 Then select the skill in the agent's settings. GitHub skills are pinned to the fetched commit.
