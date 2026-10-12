@@ -28,6 +28,10 @@ const START_HINTS: Record<string, string> = {
   TOO_MANY_CELLS:
     'too many cells are alive in the VM; try again when a task finishes (after updating Anchi, `anchi setup install` raises the VM’s limit)',
   EGRESS_UNAVAILABLE: 'the egress proxy is not running; run `anchi setup install`',
+  AGENT_HOME_LINK:
+    "a link, file or directory is in the way of a file Anchi writes in the agent's home in the VM (the path after the colon); remove it there (see Troubleshooting) or delete the agent",
+  WORKSPACE_TOO_MANY_MASKS:
+    'the writable folder (named after the colon) has more git repositories and editor folders than Anchi masks; share a smaller folder',
 };
 
 /** Anchi tool calls one turn may make; a limit on runaway loops, not a security control. */
@@ -120,9 +124,9 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
       !('type' in value)
     ) {
       const code = String((value as { error: unknown }).error);
-      return this.fail(
-        `cell start failed: ${code}${START_HINTS[code] ? ` — ${START_HINTS[code]}` : ''}`,
-      );
+      // Some codes carry a detail after a colon (`WORKSPACE_NOT_A_DIRECTORY:<name>`).
+      const hint = START_HINTS[code.split(':', 1)[0] ?? code];
+      return this.fail(`cell start failed: ${code}${hint ? ` — ${hint}` : ''}`);
     }
     const parsed = cellMessageSchema.safeParse(value);
     if (!parsed.success) return this.fail('runner sent an invalid message');

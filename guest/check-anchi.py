@@ -221,6 +221,19 @@ def main():
             "-X POST -H 'Authorization: Bearer anchi-placeholder' -d '{}'",
         )
         check('ChatGPT Apps denied', out.startswith('403') and 'denied' in out, out[:60])
+        # The connection goes to example.com while the header names GitHub: no rule, credential
+        # or egress decision can be made on the header, so the proxy answers itself.
+        out = proxied(
+            'chk-a',
+            'https://example.com/user',
+            "-H 'Host: api.github.com' -H 'Authorization: token anchi-placeholder-github'",
+        )
+        rows = [r for r in audit_since(since, 'chk-a') if r.get('decision') == 'host-mismatch']
+        check(
+            'a Host header naming another host is refused',
+            out.startswith('400') and rows and rows[-1]['host'] == 'example.com',
+            f'{out[:60]} {rows[-1]["host"] if rows else "no audit row"}',
+        )
         out = proxied('chk-b', 'https://api.github.com/user', "-H 'Authorization: token anchi-placeholder-github'")
         rows = [r for r in audit_since(since, 'chk-b') if r.get('host') == 'api.github.com']
         check(

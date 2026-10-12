@@ -14,6 +14,8 @@ Start with `anchi setup status` (a summary; `--json` for every field) and `anchi
 | `IMAGE_BUILD_FAILED` | A recipe's `packages` or `run` failed | Read the build log tail in the task; fix the recipe in `~/.anchi/images/` |
 | `TOO_MANY_CELLS` | The task waited 10 minutes in line for a cell (`maxCells` working, default 4) | Retry when tasks finish (`anchi retry <task>`); idle cells close after 10 minutes. The user may raise `maxCells` in `settings.yaml` after giving the VM more memory |
 | `EGRESS_UNAVAILABLE` | The VM's proxy is down | `anchi setup install` |
+| `AGENT_HOME_LINK:<path>` | A link, file or directory sits where Anchi writes `<path>` in the agent's home (`.codex/auth.json`, `.codex/config.toml`); the cell is refused rather than written through it | `limactl shell anchi-vm -- sudo rm -rf /var/lib/anchi/agents/<agent>/home/<path>` (a link is removed, not followed), or delete the agent, which purges its home |
+| `WORKSPACE_TOO_MANY_MASKS:<name>` | The `rw` workspace has more git hooks, config and editor folders than Anchi masks read-only (1000) | Share a smaller folder, or make it `ro` |
 | Vault locked | The VM restarted | `anchi setup vault unlock` |
 | VM `stopped` or `missing` | | `anchi setup vm` (then unlock), or `anchi setup install` |
 | An agent file error in `anchi agents` | Unknown field, bad id or value | Fix the YAML; the message names the field |

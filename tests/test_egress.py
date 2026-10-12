@@ -480,6 +480,41 @@ class DecisionTests(unittest.TestCase):
         self.assertTrue(write('POST', 'api.github.com', '/graphql', b'{"query": "mutation { addComment }"}'))
         self.assertTrue(write('POST', 'api.linear.app', '/graphql', b'{"query":"mutation { commentCreate }"}'))
         self.assertFalse(write('POST', 'api.linear.app', '/graphql', b'{"query":"{ issue(id: 1) { title } }"}'))
+        # GraphQL lets comments, a byte-order mark, commas and other operations come before a
+        # mutation, so it counts anywhere at the top level, not only as the first word.
+        graphql = lambda query: b'{"query": ' + json.dumps(query).encode() + b'}'  # noqa: E731
+        for query in (
+            '# a comment first\nmutation { addComment }',
+            '﻿mutation { addComment }',
+            ', mutation { addComment }',
+            'query A { viewer { login } } mutation B { addComment }',
+            'fragment F on Repository { id } mutation { addComment }',
+            'mutation{addComment}',
+            '"""a description"""\nmutation { addComment }',
+            '# mutation\nmutation { addComment }',
+        ):
+            self.assertTrue(write('POST', 'api.github.com', '/graphql', graphql(query)), query)
+            self.assertTrue(write('POST', 'api.linear.app', '/graphql', graphql(query)), query)
+        # The word inside a string, a comment or a selection is not a mutation.
+        for query in (
+            'query { search(query: "mutation { x }") { x } }',
+            '# mutation\nquery { viewer { login } }',
+            '{ issue(id: 1) { mutation } }',
+            'query Q($m: String = "mutation") { f(m: $m) }',
+            '"""mutation""" query { viewer { login } }',
+        ):
+            self.assertFalse(write('POST', 'api.github.com', '/graphql', graphql(query)), query)
+        # A request whose document cannot be read is a write.
+        for body in (
+            b'not json',
+            b'{}',
+            b'{"query": null}',
+            b'{"query": 1}',
+            b'{"query": "  "}',
+            b'[{"query": "{ viewer { login } }"}]',
+            b'{"query": "' + b'{ a ' * 250_001 + b'"}',
+        ):
+            self.assertTrue(write('POST', 'api.github.com', '/graphql', body), body[:40])
         host, headers = signed('logs', target='Logs_20140328.FilterLogEvents')
         self.assertFalse(write('POST', host, '/', headers=headers))
         host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
@@ -536,6 +571,34 @@ class DecisionTests(unittest.TestCase):
             'github-graphql',
         )
         self.assertIsNone(risk('POST', 'api.github.com', '/graphql', b'{"query":"query { viewer { login } }"}'))
+        # The mutation's name is found after a comment or another operation.
+        self.assertEqual(
+            risk(
+                'POST',
+                'api.github.com',
+                '/graphql',
+                b'{"query":"# first\\nquery Q { viewer { login } } mutation M { mergePullRequest(input: {}) { x } }"}',
+            ),
+            'github-graphql',
+        )
+        self.assertEqual(
+            risk(
+                'POST', 'api.linear.app', '/graphql', b'{"query":"query { x } mutation { issueDelete(id: 1) { s } }"}'
+            ),
+            'linear-delete',
+        )
+        self.assertIsNone(risk('POST', 'api.github.com', '/graphql', b'{"query":"query { mergePullRequest { x } }"}'))
+        # A document that cannot be read is held like an unreadable push, whatever is disabled.
+        for body in (
+            b'not json',
+            b'[{"query": "mutation { mergePullRequest(input: {}) { x } }"}]',
+            b'{"query": "' + b'{ a ' * 250_001 + b'"}',
+        ):
+            self.assertEqual(risk('POST', 'api.github.com', '/graphql', body), 'github-graphql-unreadable')
+            self.assertEqual(
+                risk('POST', 'api.github.com', '/graphql', body, disabled=('github-graphql-unreadable',)),
+                'github-graphql-unreadable',
+            )
         self.assertIsNone(risk('POST', 'api.github.com', '/repos/o/r/pulls'))
         host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
         self.assertEqual(risk('POST', host, '/', headers=headers), 'aws-destroy')
@@ -1044,6 +1107,35 @@ class RegistryTests(unittest.TestCase):
         rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
         self.assertEqual([(r['host'], r['decision']) for r in rows][0], ('example.org', 'egress-denied'))
 
+    def test_a_host_header_naming_another_host_is_refused_before_injection(self):
+        proxy = self.proxy_with_cell()
+        headers = {'authorization': 'token anchi-placeholder-github'}
+        responses = []
+        with patch.object(self.module.EgressProxy, 'respond', staticmethod(lambda f, *a: responses.append(a[:2]))):
+            # The connection goes to a host of the cell's choosing while the header names GitHub.
+            flow, killed = self.proxy_flow('GET', 'evil.example', '/user', headers, False, named='api.github.com')
+            asyncio.run(proxy.request(flow))
+            self.assertEqual(flow.request.headers['authorization'], 'token anchi-placeholder-github')
+            # And the other way round, so the rule and the audit always speak of one host.
+            other, _ = self.proxy_flow('GET', 'api.github.com', '/user', headers, False, named='evil.example')
+            asyncio.run(proxy.request(other))
+            self.assertEqual(other.request.headers['authorization'], 'token anchi-placeholder-github')
+        self.assertEqual([r[0] for r in responses], [400, 400])
+        self.assertIn(b'Host header', responses[0][1])
+        self.assertEqual(killed, [])
+        rows = [json.loads(line) for line in Path(self.tmp, 'audit.jsonl').read_text().splitlines()]
+        self.assertEqual(
+            [(r['host'], r['decision']) for r in rows],
+            [('evil.example', 'host-mismatch'), ('api.github.com', 'host-mismatch')],
+        )
+        self.assertNotIn(GITHUB['token'], Path(self.tmp, 'audit.jsonl').read_text())
+        # A trailing dot or capitals in the header do not count as another host.
+        flow, _ = self.proxy_flow('GET', 'api.github.com', '/user', headers, False, named='API.GitHub.com.')
+        with patch.object(self.module.EgressProxy, 'respond', staticmethod(lambda f, *a: responses.append(a[:2]))):
+            asyncio.run(proxy.request(flow))
+        self.assertEqual(len(responses), 2)
+        self.assertEqual(flow.request.headers['authorization'], f'Bearer {GITHUB["token"]}')
+
     def test_upstream_errors_are_audited_once(self):
         from types import SimpleNamespace as NS
 
@@ -1082,7 +1174,7 @@ class RegistryTests(unittest.TestCase):
             asyncio.run(proxy.verify('gmail'))
         self.assertNotIn(GITHUB['token'], Path(self.tmp, 'audit.jsonl').read_text())
 
-    def proxy_flow(self, method, host, path, headers, stream, content=b''):
+    def proxy_flow(self, method, host, path, headers, stream, content=b'', named=None):
         from types import SimpleNamespace as NS
 
         killed = []
@@ -1090,7 +1182,8 @@ class RegistryTests(unittest.TestCase):
             method=method,
             path=path,
             url=f'https://{host}{path}',
-            pretty_host=host,
+            host=host,
+            pretty_host=named or host,
             headers=dict(headers),
             stream=stream,
             raw_content=content,
@@ -1635,6 +1728,7 @@ class HermesTests(unittest.TestCase):
                 method='POST',
                 path='/api/v1/chat/completions',
                 url='https://openrouter.ai/api/v1/chat/completions',
+                host='openrouter.ai',
                 pretty_host='openrouter.ai',
                 headers=dict(headers),
                 stream=None,
