@@ -8,7 +8,16 @@ export const runtimeSchema = z.enum(['codex', 'claude-code', 'hermes']);
 export type Runtime = z.infer<typeof runtimeSchema>;
 
 /** Connectors whose credentials the egress proxy injects into the agent's requests. */
-export const PROXY_CONNECTORS = ['github', 'aws', 'linear'] as const;
+export const PROXY_CONNECTORS = [
+  'github',
+  'aws',
+  'linear',
+  'posthog',
+  'sentry',
+  'firecrawl',
+  'figma',
+  'discord',
+] as const;
 /** Connectors served by trusted VM services, reached through per-cell sockets. */
 export const SERVICE_CONNECTORS = ['gmail', 'drive', 'notion', 'slack'] as const;
 export const connectorSchema = z.enum([...PROXY_CONNECTORS, ...SERVICE_CONNECTORS]);
@@ -43,6 +52,14 @@ export const HIGH_RISK_IDS = [
   'aws-s3-delete',
   'aws-s3-access',
   'linear-delete',
+  'posthog-delete',
+  'posthog-access',
+  'sentry-delete',
+  'sentry-access',
+  'figma-webhook',
+  'discord-delete',
+  'discord-members',
+  'discord-access',
 ] as const;
 export const highRiskIdSchema = z.enum(HIGH_RISK_IDS);
 export type HighRiskId = z.infer<typeof highRiskIdSchema>;
@@ -53,9 +70,9 @@ export type HighRiskId = z.infer<typeof highRiskIdSchema>;
  * same connector: the operation still waits for the user.
  */
 export function highRiskConnector(id: string): Connector {
-  if (id.startsWith('aws-')) return 'aws';
-  if (id.startsWith('linear-')) return 'linear';
-  return 'github';
+  // `git-…` entries are GitHub's too.
+  const prefix = id.split('-', 1)[0];
+  return PROXY_CONNECTORS.find((c) => c === prefix) ?? 'github';
 }
 
 /** Five-field cron expression (minute hour day-of-month month day-of-week). */
@@ -184,8 +201,8 @@ export const agentLayerSchema = z.strictObject({
   /** Skill ids in `skills/`, copied into the cell at task start. */
   skills: z.array(idSchema).max(50).optional(),
   /**
-   * Per connector, `ask` holds the agent's writes for approval: through the proxy for github,
-   * aws and linear, through the policy service (per agent) for gmail, drive, notion and slack.
+   * Per connector, `ask` holds the agent's writes for approval: through the proxy for the proxy
+   * connectors, through the policy service (per agent) for gmail, drive, notion and slack.
    */
   approvals: z.partialRecord(connectorSchema, approvalModeSchema).optional(),
   /**

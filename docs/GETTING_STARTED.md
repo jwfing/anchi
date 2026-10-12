@@ -258,7 +258,8 @@ and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the g
    A runtime is installed in the cell image the first time one of its agents runs a task (a few
    minutes, once); runtimes you never use are never downloaded.
 4. **Build an agent.** Select **Agent builder** and describe your first agent. **Connectors**
-   connects GitHub, AWS, Linear, Gmail, Drive, Notion and Slack. See the
+   connects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord, Gmail, Drive,
+   Notion and Slack. See the
    [agent team guide](AGENT_TEAM.md).
 5. **Optionally start the daemon at login:** `anchi daemon install`. On macOS this is a launch
    agent; on Linux a systemd user unit (`~/.config/systemd/user/anchi-daemon.service`). To keep
@@ -311,8 +312,8 @@ VM are separate and retained. Remove the installer's PATH line from your shell c
 `anchi setup reset` returns the machine to a first launch, for example to try the guided setup
 again. It refuses while tasks are running or queued, lists what it deletes and asks you to type
 `reset` (`--yes` skips the question). It deletes the `anchi-vm` VM with everything in it:
-the vault's encrypted credentials (Codex, Claude Code, Google, Notion, Slack, GitHub, AWS,
-Linear), agent homes, built images and the audit log. Idle cells are closed first.
+the vault's encrypted credentials (Codex, Claude Code, Google, Notion, Slack and the proxy
+connectors), agent homes, built images and the audit log. Idle cells are closed first.
 
 | | `anchi setup reset` | `anchi setup reset --all` |
 |---|---|---|

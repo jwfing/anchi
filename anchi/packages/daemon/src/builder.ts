@@ -39,7 +39,8 @@ An agent is a YAML file. Fields:
   omitted) and effort (low | medium | high | xhigh; codex only).
 - prompt: { mode: append, text: | ... } — the agent's system instructions. Be specific about
   its job, how it should work, and what it must not do.
-- connectors: any of github, aws, linear (credentials injected outside the agent's cell) and
+- connectors: any of github, aws, linear, posthog, sentry, firecrawl, figma, discord
+  (credentials injected outside the agent's cell) and
   gmail, drive, notion, slack (served by trusted services). Never put tokens anywhere. Grant
   only what the job needs.
 - accounts (optional): which signed-in Google account gmail or drive use, e.g.

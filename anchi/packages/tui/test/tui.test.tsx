@@ -455,8 +455,8 @@ describe('App', () => {
     const frame = await frameWith(ui, 'me@work.example');
     expect(frame).toContain('Google client (Gmail, Drive): built-in');
     expect(frame).toMatch(/└ work +me@work\.example/);
-    for (let i = 0; i < 3; i++) {
-      ui.stdin.write('j'); // github, aws, linear → gmail
+    for (let i = 0; i < 8; i++) {
+      ui.stdin.write('j'); // past the eight proxy connectors → gmail
       await tick();
     }
     ui.stdin.write('d');
@@ -1106,18 +1106,18 @@ describe('agent settings panel', () => {
     let frame = await frameWith(ui, 'Reviews pull requests');
     expect(frame).toContain('@dev: settings');
     expect(frame).toMatch(/\[x\] +github +connected/);
-    expect(frame).toMatch(/\[ \] +notion +not connected/);
     for (const _ of [1, 2, 3, 4, 5, 6, 7]) ui.stdin.write('j'); // past name … prompt
     await tick();
     ui.stdin.write(' '); // the first skill: review
     await tick();
-    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) ui.stdin.write('j'); // down to the workspace
+    for (let i = 0; i < 13; i++) ui.stdin.write('j'); // down to the workspace
     await tick();
     ui.stdin.write(' ');
     await tick();
     ui.stdin.write(' '); // ro → rw
     frame = await frameWith(ui, '[rw]');
     expect(frame).toContain('writes go straight to your computer');
+    expect(frame).toMatch(/\[ \] +notion +not connected/); // scrolled into view
     ui.stdin.write('\r');
     frame = await frameWith(ui, 'save these settings?');
     expect(frame).toContain('+ skills: [review]');

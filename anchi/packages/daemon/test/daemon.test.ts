@@ -522,6 +522,24 @@ describe('daemon tasks', () => {
     expect(transport.execs.some((e) => e.args.join(' ').includes('ghp_'))).toBe(false);
   });
 
+  it('imports the token of every proxy connector on stdin and refuses unknown ones', async () => {
+    const { client } = await start();
+    for (const id of ['posthog', 'sentry', 'firecrawl', 'figma', 'discord'] as const) {
+      await client.call('connectors.set', { id, token: `${id}-secret-value` });
+      const imported = transport.execs.find(
+        (e) => e.args.includes('import-token') && e.args.includes(id),
+      );
+      expect(imported?.stdin).toBe(JSON.stringify({ token: `${id}-secret-value` }));
+      expect(transport.execs.some((e) => e.args.join(' ').includes('secret-value'))).toBe(false);
+    }
+    await expect(
+      client.call('connectors.set', { id: 'notion' as 'github', token: 'x' }),
+    ).rejects.toThrow(/unknown connector/);
+    await expect(client.call('connectors.remove', { id: 'gitlab' as 'github' })).rejects.toThrow(
+      /unknown connector/,
+    );
+  });
+
   it('imports the gh CLI token and verifies it', async () => {
     const { client } = await start();
     await expect(client.call('connectors.importGh')).rejects.toThrow(/not logged in/);

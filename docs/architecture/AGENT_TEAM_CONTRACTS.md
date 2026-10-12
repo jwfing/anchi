@@ -18,13 +18,13 @@ Agents are YAML files in `~/.anchi/agents/<id>.yaml`. The file name is the id: 1
 | `runtime` | required | `codex`, `claude-code` or `hermes` |
 | `model`, `effort` | runtime default | Passed to the runtime |
 | `prompt` | `{mode: append, text: ''}` | `text` or `file` (relative to the declaring file). `replace` replaces the runtime's base instructions |
-| `connectors` | `[]` | `github`, `aws`, `linear`: the proxy injects credentials only for these. `gmail`, `drive`, `notion`, `slack`: reached through per-cell bridge sockets at `/run/anchi/connectors/<id>/api.sock`, which name the agent to the service |
+| `connectors` | `[]` | `github`, `aws`, `linear`, `posthog`, `sentry`, `firecrawl`, `figma`, `discord`: the proxy injects credentials only for these. `gmail`, `drive`, `notion`, `slack`: reached through per-cell bridge sockets at `/run/anchi/connectors/<id>/api.sock`, which name the agent to the service |
 | `image` | `codex` | An image recipe id in `~/.anchi/images/`, or the built-in `codex` image |
 | `network` | `proxy` | Reserved; `proxy` is the only value in phase 1 |
 | `sandbox` | `cell` | `cell`: the runtime runs without its own sandbox and the cell is the boundary. `codex-workspace-write` (Codex only): Codex's own sandbox as well; needs the per-agent AppArmor opt-in |
 | `delegates` | `[]` | Agents this agent may delegate tasks to; not itself |
 | `accounts` | `{}` | For `gmail` and `drive` among `connectors`: the named Google account the agent uses (`{gmail: work}`); `default` otherwise. The bridge pins it per cell; the cell cannot choose another |
-| `approvals` | `{}` | Per connector, `ask` holds the agent's writes for the user: in the proxy for `github`, `aws`, `linear`; in the policy service, as the principal `<connector>:<agent>`, for `gmail`, `drive`, `notion`, `slack` |
+| `approvals` | `{}` | Per connector, `ask` holds the agent's writes for the user: in the proxy for the proxy connectors; in the policy service, as the principal `<connector>:<agent>`, for `gmail`, `drive`, `notion`, `slack` |
 | `triggers` | `[]` | `{schedule: '<cron>', text}` or `{poll: {type: linear-issues, team?, label?, state?} \| {type: github-issues, query}, text, every?}`; `text` may use `{title}`, `{url}`, `{id}` |
 | `skills` | `[]` | Skill ids in `~/.anchi/skills/` |
 | `egress` | none (open) | Host patterns (`example.com`, `*.example.com`) the cells may reach, besides the runtime's and the connectors' hosts |
@@ -82,7 +82,7 @@ The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`.
 | `anchi-cell list` | Running cells, as JSON |
 | `anchi-cell reap [TASK...]` | Stop every cell not named, and unmount stale overlays |
 | `anchi-cell scan TASK` | Credential-invariant scan of a running cell: environment, process list and writable layer |
-| `anchi-cell verify CONNECTOR` | Has the egress proxy call the connector's identity endpoint (GitHub `/user`, Linear `viewer`, AWS `GetCallerIdentity`) with the stored credential. Prints the account, or `CREDENTIAL_REJECTED` |
+| `anchi-cell verify CONNECTOR` | Has the egress proxy call the connector's identity endpoint (GitHub `/user`, Linear `viewer`, AWS `GetCallerIdentity`, PostHog `/api/users/@me/` on the US then the EU cloud, Sentry `/api/0/organizations/`, Firecrawl `/v2/team/credit-usage`, Figma `/v1/me`, Discord `/api/v10/users/@me`) with the stored credential. Prints the account, or `CREDENTIAL_REJECTED` |
 | `anchi-cell audit TASK` | The task's rows of the egress audit log and its rotated file, the latest 2000, as JSON with their total |
 | `anchi-cell quota` | The latest subscription limits the egress proxy saw in runtime responses, as JSON |
 | `anchi-cell exec TASK -- COMMAND...` | Run a command as the agent user in a running cell, for live checks |

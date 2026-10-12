@@ -1,10 +1,10 @@
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
   ClaudeAccountStatus,
   HermesAccountStatus,
-  ConnectorId,
   ConnectorStatus,
   RuntimeAccountStatus,
   SetupStatus,
@@ -13,7 +13,7 @@ import type { Guest, LimaTransport } from './guest.ts';
 import { defaultVmSize, hostResources, VAULT_KEY } from './host.ts';
 import type { ServiceSetup } from './services.ts';
 
-export const CONNECTOR_IDS: ConnectorId[] = ['github', 'aws', 'linear'];
+export { CONNECTOR_IDS };
 
 /**
  * Reads the access token and account id from the host Codex login. Only the access token

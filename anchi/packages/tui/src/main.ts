@@ -22,6 +22,7 @@ import {
   REPO_ROOT,
 } from '@anchi/daemon';
 import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow, VmSize } from '@anchi/protocol';
+import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeLine } from './sanitize.ts';
@@ -691,7 +692,9 @@ setup
 
 setup
   .command('connector <id>')
-  .description('Connect github, aws or linear (secrets are read without echo)')
+  .description(
+    'Connect github, aws, linear, posthog, sentry, firecrawl, figma or discord (secrets are read without echo)',
+  )
   .option('--from-gh', 'github: import the token the gh CLI is logged in with')
   .option('--profile <name>', 'aws: use a host profile (SSO); the daemon keeps it refreshed')
   .option('-y, --yes', 'do not ask for confirmation')
@@ -714,10 +717,10 @@ setup
         );
       }
       let secret: ConnectorSecret;
-      if (id === 'github' || id === 'linear') {
+      if (TOKEN_CONNECTOR_IDS.includes(id as TokenConnectorId)) {
         // Tokens may also come on stdin for scripts: `anchi setup connector github < token-file`.
         const token = process.stdin.isTTY ? await askSecret(`${id} token: `) : await readStdin();
-        secret = { id, token };
+        secret = { id: id as TokenConnectorId, token };
       } else if (id === 'aws' && !process.stdin.isTTY) {
         // Scripts: {"accessKeyId", "secretAccessKey", "region", "sessionToken"?} on stdin.
         const v = JSON.parse(await readStdin()) as Record<string, string>;
@@ -738,7 +741,7 @@ setup
         const session = await askSecret('Session token (Enter to skip): ');
         if (session) secret.sessionToken = session;
       } else {
-        fail('connector must be github, aws or linear');
+        fail(`connector must be one of aws, ${TOKEN_CONNECTOR_IDS.join(', ')}`);
       }
       const status = await client.call('connectors.set', secret);
       console.log(
@@ -846,7 +849,7 @@ setup
       console.log('Reset deletes, and nothing can bring back:');
       console.log(
         `  the anchi-vm VM (${p.vm}) and everything in it: the vault's credentials (Codex, ` +
-          'Claude Code, Google, Notion, Slack, GitHub, AWS, Linear), agent homes, images and the audit log',
+          'Claude Code, Google, Notion, Slack and the proxy connectors), agent homes, images and the audit log',
       );
       if (p.cells) console.log(`  ${p.cells} idle cell(s): closed first`);
       if (opts.all) {

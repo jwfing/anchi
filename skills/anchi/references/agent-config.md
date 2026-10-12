@@ -13,7 +13,7 @@ The file name is the id: 1–40 lowercase letters, digits or `-`. Unknown fields
 | `model` | runtime default | e.g. `gpt-5.5` (Codex), `claude-sonnet-5-5` or `claude-opus-5-5` (Claude Code), any model of the stored endpoint (Hermes), such as `nousresearch/hermes-4-405b`. A letter or digit first, then letters, digits and `. _ - : / @ +` |
 | `effort` | runtime default | `low`, `medium`, `high`, `xhigh` (Codex only) |
 | `prompt` | `{mode: append, text: ''}` | `text`, or `file` relative to this file. `mode: replace` replaces the runtime's base instructions (Hermes: the prompt becomes its persona either way) |
-| `connectors` | `[]` | Any of `github`, `aws`, `linear`, `gmail`, `drive`, `notion`, `slack` |
+| `connectors` | `[]` | Any of `github`, `aws`, `linear`, `posthog`, `sentry`, `firecrawl`, `figma`, `discord`, `gmail`, `drive`, `notion`, `slack` |
 | `accounts` | `{}` | Named Google account for `gmail` or `drive` (`{gmail: work}`), which must also be in `connectors`; `default` otherwise |
 | `approvals` | `{}` | `{github: ask}` holds every write of that connector for the user |
 | `highRisk` | none | `{disable: [github-merge]}`: these high-risk operations no longer wait for this agent |
@@ -89,7 +89,7 @@ approvals: { notion: ask }
 
 - **Egress.** Without `egress` an agent reaches any public host. With it, only the listed hosts plus its runtime's and connectors' hosts; refused hosts are noted in the task, and `anchi agents allow-host <agent> <host>` adds one. Package registries a developer agent may need: `registry.npmjs.org`, `pypi.org` and `files.pythonhosted.org`, `proxy.golang.org` and `sum.golang.org`, `index.crates.io` and `static.crates.io`.
 - **Workspaces.** `rw` lets the agent change files that later run on the user's computer. Anchi masks git hooks, git config and editor configuration read-only and audits each turn for new hooks, executables and symlinks out, but `package.json` scripts and `Makefile`s remain the user's to review.
-- **High-risk ids:** `github-merge`, `github-repo-delete`, `github-repo-settings`, `github-repo-transfer`, `github-protection`, `github-access`, `github-ref-delete`, `github-graphql`, `git-default-branch`, `git-ref-delete`, `aws-destroy`, `aws-s3-delete`, `aws-s3-access`, `linear-delete`. `approvals: {<connector>: ask}` still holds writes an exemption covers.
+- **High-risk ids:** `github-merge`, `github-repo-delete`, `github-repo-settings`, `github-repo-transfer`, `github-protection`, `github-access`, `github-ref-delete`, `github-graphql`, `git-default-branch`, `git-ref-delete`, `aws-destroy`, `aws-s3-delete`, `aws-s3-access`, `linear-delete`, `posthog-delete`, `posthog-access`, `sentry-delete`, `sentry-access`, `figma-webhook`, `discord-delete`, `discord-members`, `discord-access`. `approvals: {<connector>: ask}` still holds writes an exemption covers.
 - **Templates.** `extends: base-dev` merges `~/.anchi/templates/base-dev.yaml` key by key; arrays and scalars in the agent replace the template's.
 
 ## Image recipe: `~/.anchi/images/<id>.yaml`
