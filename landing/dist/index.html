@@ -536,7 +536,7 @@
       <section class="section wrap" id="faq">
         <div class="section-heading"><p class="eyebrow">05 / 开始之前</p><h2>上手前需要知道。</h2></div>
         <div class="faq-list">
-          <details><summary>必须有 Codex 账号吗？</summary><p>连接 Codex、Claude Code 或 Hermes 中的一个即可。已发布版本可使用任一已连接 runtime 的手动 agent 文件。Unreleased 中，Agent builder 也可使用已连接的 runtime，并新增了无需模型调用的 starter 创建功能。<a href="https://github.com/jwfing/anchi/blob/main/docs/FIRST_TASK.md">首个任务指南 ↗</a></p></details>
+          <details><summary>必须有 Codex 账号吗？</summary><p>连接 Codex、Claude Code 或 Hermes 中的一个即可。Agent builder 使用任一已连接的 runtime，也可以不调用模型直接创建 starter agent；手动编写 agent 文件同样可以。<a href="https://github.com/jwfing/anchi/blob/main/docs/FIRST_TASK.md">首个任务指南 ↗</a></p></details>
           <details><summary>需要多少准备时间和资源？</summary><p>先安装 Lima 和 Python；Linux 还需要 QEMU/KVM。新 VM 默认使用主机一半的 CPU 和内存，可在安装时调整。安装至少保留 8 GB 磁盘空间，镜像和项目还需要额外空间。首次安装和首次构建 runtime 镜像各需几分钟。</p></details>
           <details><summary>数据都会留在我的电脑里吗？</summary><p>不会。托管凭据不进入任务 cell，但读取的内容可能发送给模型和允许访问的目的地。不配置 egress 时可访问公共互联网；配置后，runtime 和连接器的域名仍自动允许，Firecrawl 也能获取列表之外的 URL。</p></details>
           <details><summary>可以用于敏感生产账号吗？</summary><p>Anchi 是未签名的开发预览版，尚未完成安全审计。建议先使用测试账号和非敏感项目。模型调用消耗你的订阅额度或 API 余额。</p></details>

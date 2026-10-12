@@ -6,7 +6,7 @@ status and remaining acceptance work are in the [architecture notes](architectur
 
 | Area | Available now | Next work |
 |---|---|---|
-| Onboarding | Packaged macOS/Linux installation, TUI setup, manual agent files; starter creation is in Unreleased | Fresh-machine acceptance for each runtime and platform, clearer recovery from setup failures |
+| Onboarding | Packaged macOS/Linux installation, TUI setup, manual agent files; starter creation without a model call | Fresh-machine acceptance for each runtime and platform, clearer recovery from setup failures |
 | Security | Credential isolation, configured connectors/workspaces, approval rules, egress controls and offline regression tests | Complete live acceptance across connectors/runtimes and obtain independent security review |
 | Distribution | Public archives, checksums, updater and changelog | Publisher signing, provenance and broader compatibility evidence |
 | Developer experience | Task history, delegation, retries, audit, skills and TUI settings | File/diff review and richer artifact inspection; see the [backlog](architecture/BACKLOG.md) |
