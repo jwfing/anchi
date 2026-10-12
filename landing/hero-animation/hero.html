@@ -86,11 +86,11 @@ CELLS.forEach((c,i)=>{c.cy=c.y+39;document.getElementById('cells').insertAdjacen
  `<div class="a cell" id="cell${i}" style="top:${c.y}px"><div class="r1"><span class="av"><i></i></span>${c.n}<span class="tag mono">CELL 0${i+1}</span></div>
   <div class="r2 mono">${c.a}</div><div class="r3 mono"><span class="car">❯</span>${T.tasks[i]}<span class="cur"></span><span class="fk">${KEY}${T.fake}</span></div>
   <div class="done mono" id="done${i}">${T.done}</div></div>`)});
-const ROWS=['GITHUB_TOKEN','GMAIL_OAUTH','SLACK_BOT_TOKEN','TRELLO_KEY','POSTHOG_API_KEY','AWS_ACCESS_KEY'];
+const ROWS=['GITHUB_TOKEN','GMAIL_OAUTH','SLACK_BOT_TOKEN','LINEAR_KEY','POSTHOG_API_KEY','AWS_ACCESS_KEY'];
 const ROWSHOW=[0,2,5,4]; // rows displayed in hub (4 rows fit)
 ROWSHOW.forEach(r=>document.getElementById('rows').insertAdjacentHTML('beforeend',
  `<div class="row mono" id="row${r}"><span style="color:var(--amber)">${KEY}</span>${ROWS[r]}<span class="st" id="rst${r}">${T.sealed}</span></div>`));
-const SVC=[['GitHub','#c9d1c0'],['Gmail','#e8a090'],['Slack','#c6a6e0'],['Trello','#8fb8e6'],['PostHog','#f0c070'],['AWS','#f2a65a']];
+const SVC=[['GitHub','#c9d1c0'],['Gmail','#e8a090'],['Slack','#c6a6e0'],['Linear','#8fb8e6'],['PostHog','#f0c070'],['AWS','#f2a65a']];
 SVC.forEach((s,i)=>{const y=126+i*42;s.y=y;s.cy=y+17;document.getElementById('svcs').insertAdjacentHTML('beforeend',
  `<div class="a svc" id="svc${i}" style="top:${y}px"><span class="ic" style="background:${s[1]}">${s[0][0]}</span>${s[0]}<span class="ar mono">API</span></div>`)});
 

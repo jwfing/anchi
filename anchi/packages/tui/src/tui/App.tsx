@@ -74,6 +74,7 @@ import {
   agentTaskLines,
   welcomeStep,
   nextSetupAction,
+  runtimeReady,
   recoveryFor,
   resultLines,
   setupPhase,
@@ -82,6 +83,7 @@ import {
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
+const STARTER_RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
 const HOME = ['welcome', 'team'] as const;
 const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
 type ConfigItem = (typeof CONFIG)[number] | (typeof HOME)[number];
@@ -203,6 +205,7 @@ const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
 };
 
 type Modal =
+  | { kind: 'createAgent'; pick: number }
   | {
       kind: 'problem';
       message: string;
@@ -684,7 +687,7 @@ export function App({
     { kind: 'item', item: BUILDER },
     ...(userAgents.length
       ? userAgents.map((a) => ({ kind: 'item' as const, item: a.id }))
-      : [{ kind: 'note' as const, text: 'none yet — use the builder' }]),
+      : [{ kind: 'note' as const, text: 'none yet — Getting started' }]),
     {
       kind: 'header',
       text: `TASKS${pages > 1 ? ` ${page + 1}/${pages}` : ''}${taskFilter ? ' · filtered' : ''}`,
@@ -1153,10 +1156,10 @@ export function App({
         const action = nextSetupAction(setup);
         if (action) return setupStep(action);
         const step = welcomeStep(setup, agents, tasks);
-        if (step === 'runtime') return say('Press i for Codex, c for Claude Code or h for Hermes');
-        if (step === 'agent') return run('nav:builder');
+        if (step === 'runtime') return say('Choose i for Codex, c for Claude Code or h for Hermes');
+        if (step === 'agent') return run('agent:create');
         if (step === 'done') return run('nav:team');
-        const first = userAgents[0];
+        const first = userAgents.find((a) => runtimeReady(setup, a.runtime));
         if (first) {
           setSelected(first.id);
           setFocus('main');
@@ -1220,6 +1223,14 @@ export function App({
       case 'nav:builder':
         setSelected(BUILDER);
         return setFocus('main');
+      case 'agent:create':
+        return setModal({
+          kind: 'createAgent',
+          pick: Math.max(
+            0,
+            STARTER_RUNTIMES.findIndex((r) => setup && runtimeReady(setup, r)),
+          ),
+        });
       case 'tasks:pagePrev':
         return turnPage(page - 1, context === 'sidebar');
       case 'tasks:pageNext':
@@ -1693,6 +1704,30 @@ export function App({
       }
       return;
     }
+    if (modal?.kind === 'createAgent') {
+      if (key.escape) return setModal(null);
+      if (key.upArrow) return setModal({ ...modal, pick: Math.max(0, modal.pick - 1) });
+      if (key.downArrow)
+        return setModal({ ...modal, pick: Math.min(STARTER_RUNTIMES.length - 1, modal.pick + 1) });
+      if (key.return) {
+        const runtime = STARTER_RUNTIMES[modal.pick]!;
+        return setModal({
+          kind: 'text',
+          title: 'Name your starter agent',
+          label: `${runtime} · lowercase letters, digits and hyphens; for example dev`,
+          input: '',
+          submit: async (agentId) => {
+            const proposal = await client.call('agents.createPreview', {
+              agentId: agentId.trim(),
+              runtime,
+            });
+            setProposals((p) => [...p, proposal]);
+            setModal({ kind: 'proposal', proposal, scroll: 0 });
+          },
+        });
+      }
+      return;
+    }
     if (modal?.kind === 'proposal') {
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
       if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
@@ -1712,7 +1747,12 @@ export function App({
         setProposals((p) => p.filter((x) => x.id !== proposal.id));
         void client
           .call('builder.apply', { proposalId: proposal.id })
-          .then(() => say(`@${proposal.agentId} saved`))
+          .then((updated) => {
+            setAgents(updated);
+            setSelected(proposal.agentId);
+            setFocus('main');
+            say(`@${proposal.agentId} saved`);
+          })
           .catch((e: Error) => reportProblem(e));
       }
       return;
@@ -2998,6 +3038,22 @@ function ModalView({
       </Box>
     );
   }
+  if (modal.kind === 'createAgent') {
+    return (
+      <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
+        <Text bold>Create a starter agent</Text>
+        <Text>Choose a runtime. Connect it in Runtimes before running a task.</Text>
+        {STARTER_RUNTIMES.map((runtime, i) => (
+          <Text key={runtime} color={i === modal.pick ? 'cyan' : undefined}>
+            {i === modal.pick ? '› ' : '  '}
+            {runtime}
+          </Text>
+        ))}
+        <Text dimColor>No model call · no connectors or shared folders · runtime network only</Text>
+        <Text dimColor>↑/↓ choose · Enter continue · Esc cancel</Text>
+      </Box>
+    );
+  }
   if (modal.kind === 'secret') {
     const fields = SECRET_FIELDS[modal.connector];
     const field = fields[modal.index]!;
@@ -3455,7 +3511,7 @@ function ModalView({
       paddingX={2}
     >
       <Text bold color="magenta">
-        Builder proposal — review before anything is written
+        Agent proposal — review before anything is written
       </Text>
       <Box flexDirection="column" height={room}>
         {body.slice(start, start + room).map((l, i) => (

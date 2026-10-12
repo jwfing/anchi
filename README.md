@@ -1,106 +1,140 @@
 # Anchi / 安栖
 
-> **Anchi — a secured agent team.** Pronounced *AHN-chee*. 安栖 (ān qī) means a safe place to settle and rest: a home where a team can work without being exposed.
+**Run a team of coding agents with credentials kept outside their task environments.**
 
-Anchi builds a local agent team: each agent works in its own sandbox, never touches your keys, and uses only the accounts you allow. Agents work; you rest easy.
+Anchi runs Codex, Claude Code and Hermes agents on your own machine. Give each agent a role,
+connectors and optional project folders, then follow its tasks, review held writes and inspect
+network access from a terminal UI or CLI.
 
-Anchi runs a team of Codex, Claude Code and Hermes agents on your own machine and gives each agent only what its job needs. A misled or compromised agent can still misuse what it was given and leak what it reads, but it never holds a credential, it reaches only the services and directories it was configured with, and with an `egress` list only those hosts:
+[Getting started](docs/GETTING_STARTED.md) · [Documentation](docs/README.md) ·
+[Releases](https://github.com/jwfing/anchi/releases) · [Security model](SECURITY.md) ·
+[Contributing](CONTRIBUTING.md)
 
-- **Upstream credentials never enter an agent's sandbox.** Each task runs in a disposable cell inside a Linux VM. A trusted egress proxy injects or re-signs GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out; trusted services in the VM act for agents on Gmail, Drive, Notion and Slack.
-- **Each agent gets only what it is configured with:** its connectors, the hosts it may reach (any public host unless you list them), the directories of your Mac it may see, its skills and the agents it may delegate to.
-- **You decide on writes.** High-risk operations of every agent (merges, deletions, pushes to `main`, access changes) always wait for your approval, as do all writes of agents whose `approvals` say `ask`; the dialog shows how the task started.
-- **Checks run by themselves.** Every cell is scanned for real credential values before it is destroyed, and `make verify-anchi` checks the isolation live.
+**Development preview:** public binaries are available; packages are unsigned and Anchi has
+not completed a security audit. Start with test accounts and non-sensitive projects. Linux
+support is experimental. Hermes has not been verified against a live endpoint; PostHog, Sentry,
+Firecrawl, Figma and Discord have not yet been exercised against live accounts.
 
-You drive the team from a terminal UI or a CLI (`anchi`): build agents by describing them, give them tasks, let them delegate to each other, start them on a schedule or for new issues. Start with the [getting started guide](docs/GETTING_STARTED.md), then the [agent team guide](docs/AGENT_TEAM.md). To let an agent operate Anchi for you, give it the [Anchi skill](skills/README.md).
+![Anchi terminal team overview with example tasks](docs/assets/tui-team.svg)
 
-This is a **development build**: it has not had a security audit and the packaged distribution is a development preview.
+*Actual TUI rendering with synthetic example data; no live accounts.
+[Reproduce this preview](docs/assets/README.md).*
 
-Install the packaged app:
+## What you can do
+
+- **Give agents separate jobs.** Use different runtimes, instructions, connectors, skills and
+  folders for development, review or operations. Agents can delegate to named teammates.
+- **Work with code and services.** Share a project folder read-only or writable; connect GitHub,
+  AWS, Linear and other supported services without placing their credentials inside task cells.
+- **Follow the work.** See running tasks, tool activity, results and delegation in the TUI.
+  Continue or retry a task from the CLI; inspect its network audit and token usage.
+- **Review writes that need approval.** Set `approvals: {github: ask}` to hold GitHub writes.
+  Listed high-risk operations are held by default, with explicit global and per-agent exceptions.
+
+Use Anchi when you want persistent agent roles, isolated tasks and account access controlled
+outside the agent. It adds a VM, a trusted daemon and setup work to using an agent CLI directly.
+For a single local task that does not need these controls, your existing runtime CLI may be enough.
+
+## Install and run a first task
+
+| Host | Status | Prerequisites |
+|---|---|---|
+| macOS on Apple Silicon | Supported | Lima and Python: `brew install lima python` |
+| Linux x86_64, glibc (Ubuntu 22.04+ / Debian 12+) | Experimental | Lima, Python 3.11+, QEMU and KVM access; [Linux setup](docs/GETTING_STARTED.md#linux-prerequisites) |
+| Intel Mac, Windows, other architectures | Unsupported | — |
+
+Install the public preview, then open the guided setup:
 
 ```bash
 curl -fsSL https://anchi.elseward.xyz/install.sh | sh
 anchi
 ```
 
-The app includes Node and its dependencies. **Getting started** in the TUI guides VM setup;
-macOS needs Lima and Python (`brew install lima python`). See the getting started guide
-for Linux prerequisites and the source development workflow.
+The app bundles Node and its dependencies. No source checkout or pnpm is needed. The installer
+verifies the archive checksum; this is not publisher signing. See [installer options and source
+installation](docs/GETTING_STARTED.md) to inspect the script or pin a version.
 
-## Current capabilities
+Getting started prepares the VM and vault, connects one runtime, and walks you through a first
+agent and task. New VMs default to half your host's CPUs and memory (minimum 1 CPU / 2 GiB);
+you can choose the size. Initial VM setup can take up to half an hour; the first task for each
+runtime also builds its image, which can take several minutes.
+Model usage consumes your subscription quota or API credit.
 
-| Capability | Status |
-|---|---|
-| Lima VM with trusted services; each task in a disposable systemd-nspawn cell with loopback-only networking | Implemented; `make verify-vm` and `make verify-anchi` run the live isolation checks |
-| Codex and Claude Code in cells, holding placeholders only | Implemented; the proxy substitutes subscription tokens replace-only; the Codex login is re-imported from your machine as it refreshes |
-| Hermes Agent in cells, on an OpenAI-compatible endpoint you choose | Implemented; your API key stays in the vault and the proxy substitutes it under that endpoint's base URL only; not yet checked against a live endpoint |
-| Each runtime as its own image layer, installed the first time an agent uses it | Implemented; `anchi setup install` builds only the base layer |
-| GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads), Linear, PostHog, Sentry, Firecrawl, Figma and Discord (REST) through the egress proxy | Implemented; credential minting denied; credentials verified at import; PostHog, Sentry, Firecrawl, Figma and Discord not yet exercised against live accounts |
-| Gmail, Drive, Notion and Slack through trusted services, reached through a per-cell bridge that names the agent | Implemented; Gmail is read-only; per-service and per-agent write approval |
-| Per-agent egress allowlists, high-risk operations always held, held writes with the task's origin chain | Implemented |
-| Credential scan of every cell before it is destroyed | Implemented; a finding raises a notification |
-| Directories of your computer in agent cells (`~/AnchiWorkspaces`), read-only or writable, with code-running paths masked and audited | Implemented on macOS and Linux |
-| Delegation, schedule and polling triggers, skills (local or pinned GitHub commits, updatable) | Implemented |
-| Agent builder that knows what exists, agent settings panel, deleting agents with their tasks and VM files | Implemented |
-| Task history with search, delegation trees, retry of failed tasks; TUI with leader-key bindings and a command palette | Implemented |
-| Live acceptance with real accounts | Partly done; see the [phase 3 status](docs/architecture/AGENT_TEAM_PHASE3_PLAN.md#status) |
-| Remote machines, public distribution, signed packages | Not planned or not complete |
+> The no-model starter workflow below, builder runtime auto-selection and JSON list flags are **unreleased**. Until the next
+> binary release, [run from source](docs/GETTING_STARTED.md#install-from-source), using
+> `scripts/anchi` in place of `anchi`. Released binaries can use a
+> [manual agent file](docs/AGENT_TEAM.md#write-an-agent-file) with any connected runtime.
 
-Content an agent reads may reach a cloud model or any public host it is allowed to reach. Credential isolation does **not** mean data isolation. See the [security model](SECURITY.md) for the boundaries and their limits.
-
-## Supported hosts
-
-| Host | Status | Isolation layer |
-|---|---|---|
-| macOS on Apple Silicon | Supported | Lima + Virtualization.framework |
-| Linux x86_64 (Ubuntu 22.04+ / Debian 12+) | Experimental; KVM CI coverage uses Ubuntu 24.04 | Lima + QEMU/KVM |
-| Other platforms | Unsupported | — |
-
-## Development
-
-Requires Node 22+, pnpm, Python 3.11+ and Lima.
+After setup, create a starter with the runtime you connected; creation itself does not call a model:
 
 ```bash
+anchi agents create dev --runtime claude-code   # or codex / hermes; review, then confirm
+anchi run dev "Explain what tools you have access to. Do not change anything."
+anchi tasks --agent dev
+```
+
+The starter has no connectors, shared folders or extra network destinations. A successful first
+task ends with `done` and a response. If it fails, use [first-task troubleshooting](docs/FIRST_TASK.md)
+before connecting more accounts. In the TUI, **Ctrl+X, N** creates a starter; **Ctrl+X, s** opens
+its settings. The conversational **Agent builder** (**Ctrl+X, b**) uses a connected runtime
+to help customize agent roles.
+
+## How access works
+
+```text
+Host: TUI / CLI → trusted daemon
+                         │
+Lima VM:                 ├─ untrusted task cells (runtime, tools, skills)
+                         └─ trusted proxy + vault + connector services → APIs
+```
+
+Each task gets a disposable cell inside the VM. The proxy substitutes credentials for allowed
+API requests; trusted connector services perform supported operations on the agent's behalf.
+Agents hold placeholders for these managed credentials.
+
+| Control | Default and limits |
+|---|---|
+| Connectors | Only those listed on the agent. Available: GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord, Gmail, Drive, Notion and Slack. Gmail is read-only; Discord supports REST only. |
+| Network | Omitting `egress` allows public Internet access. `egress: []` allows runtime and configured connector hosts only; a nonempty list adds hosts. Firecrawl can fetch remote URLs outside this list. |
+| Writes | Ordinary writes can run automatically. `approvals: {connector: ask}` holds that connector's writes. Listed high-risk patterns are held by default; `highRisk.disable` can exempt patterns globally or per agent. Explicit `ask` still holds those writes. |
+| Project folders | No host folders unless shared as workspaces. Read-only by default; `rw` changes real files. Review those changes before running them on the host. |
+| Data | Content an agent reads can reach its model and allowed destinations. Credential isolation does not keep content local or prevent every misuse of allowed access. |
+
+The high-risk list covers specific operations, not every destructive action. Large streamed git
+pushes have additional refusal rules. See [SECURITY.md](SECURITY.md) for the complete boundaries,
+exceptions and private reporting route.
+
+## Next steps
+
+| Goal | Guide |
+|---|---|
+| Finish a first task without a business account | [First task](docs/FIRST_TASK.md) |
+| Add a project folder, connector or teammate | [Agent team](docs/AGENT_TEAM.md) |
+| Use keyboard navigation and the command palette | [TUI keys](docs/KEYBINDINGS.md) |
+| Automate tasks and inspect JSON output | [CLI reference](skills/anchi/references/cli.md) |
+| Let a host-side coding agent operate Anchi | [Install the Anchi skill](skills/README.md) |
+| Upgrade or understand what changed | [Changelog](CHANGELOG.md) and [Releases](https://github.com/jwfing/anchi/releases) |
+| Report a problem or propose a feature | [Issues](https://github.com/jwfing/anchi/issues/new/choose); [private vulnerability reporting](https://github.com/jwfing/anchi/security/advisories/new) |
+
+After updating the app with `anchi update`, check the release notes for required VM updates
+such as `anchi setup install`. App updates do not automatically update the VM's components.
+
+## Contribute
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md), the [repository map](docs/architecture/REPOSITORY.md)
+and [roadmap](docs/ROADMAP.md). Bug reproductions, onboarding feedback, docs and boundary tests
+are useful contributions. Check the [help wanted issues](https://github.com/jwfing/anchi/labels/help%20wanted)
+and discuss substantial changes in an issue first.
+
+```bash
+pnpm --dir anchi install
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-test.txt
-pnpm --dir anchi install
 make check PYTHON=.venv/bin/python
 ```
 
-`make check` runs Ruff, shellcheck when installed, Prettier, the trust-zone dependency check, syntax checks and the offline tests. It does not access a VM, an account or a model. Some tests open local loopback listeners.
+Offline checks require Node 22+, pnpm and Python 3.11+; they use no VM, account or model.
+Live checks are separate and explicit. All maintained documentation is in English.
 
-```bash
-make help          # List entry points
-make lint          # Ruff, shellcheck and Prettier checks
-make format        # Format Python and anchi sources
-make verify-vm     # Live VM and service isolation checks
-make verify-anchi  # Live agent-team cell and egress proxy checks
-```
-
-`scripts/anchi setup install` creates or updates the VM and installs everything; deployment changes the host and the VM and is separate from the default checks.
-
-## Repository layout
-
-| Directory | Responsibility |
-|---|---|
-| `anchi/` | Daemon, TUI and CLI (trusted, on the host) and the cell runner (untrusted, in cells); a pnpm workspace split by trust zone |
-| `services/` | Trusted VM services: vault and auth, policy, connectors, the egress proxy |
-| `guest/`, `systemd/`, `lima/` | VM bring-up, the task-cell manager, service units and VM configuration |
-| `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.py`) and live checks |
-| `tests/` | Offline tests of the Python services |
-| `poc/` | Phase 0 spikes and their results |
-| `landing/` | The static landing page |
-| `docs/` | Guides, architecture and engineering notes |
-
-See [module responsibilities](docs/architecture/REPOSITORY.md).
-
-## Contributing
-
-Bug reports, documentation, tests and code contributions are welcome. Discuss substantial feature or architecture changes in an issue first. Report security problems privately as described in [SECURITY.md](SECURITY.md).
-
-Follow [CONTRIBUTING.md](CONTRIBUTING.md) to prepare a branch and run checks. Each PR should explain the problem, resulting behavior, validation and known limitations, with live evidence for installation or isolation changes. Do not commit credentials, real messages or sessions, dependencies, or build artifacts.
-
-All maintained documentation is written in English. See the [documentation index](docs/README.md) and [changelog](CHANGELOG.md).
-
-## License
-
-[Apache License 2.0](license.md). Copyright 2026 Junwen. Third-party dependencies and bundled files retain their own copyright and license notices.
+[Apache License 2.0](LICENSE). Copyright 2026 Junwen. Dependencies retain their own notices.
+Anchi is pronounced *AHN-chee*; 安栖 means a safe place to settle and rest.

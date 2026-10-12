@@ -1,6 +1,6 @@
 # Contributing to Anchi
 
-Anchi is a secured agent team in development: not audited and not ready for public distribution. Changes to a boundary (credentials, cells, egress, approvals, policy) need tests that would fail if the boundary broke. Read the [repository architecture](docs/architecture/REPOSITORY.md) and [security boundaries](SECURITY.md) before making changes.
+Anchi is a secured agent team in development: available as a public development preview, with unsigned packages and no completed security audit. Changes to a boundary (credentials, cells, egress, approvals, policy) need tests that would fail if the boundary broke. Read the [repository architecture](docs/architecture/REPOSITORY.md) and [security boundaries](SECURITY.md) before making changes.
 
 ## Contributions and pull requests
 
@@ -61,4 +61,4 @@ Keep commands, paths, protocol fields and configuration keys exact. UI labels in
 
 ## Releases
 
-Follow the [release guide](docs/engineering/RELEASE.md). Never commit `artifacts/`, `node_modules`, credentials, mail bodies or real user sessions. Contributions are licensed under [Apache-2.0](license.md); ensure you have the right to contribute and retain third-party notices.
+Follow the [release guide](docs/engineering/RELEASE.md). Never commit `artifacts/`, `node_modules`, credentials, mail bodies or real user sessions. Contributions are licensed under [Apache-2.0](LICENSE); ensure you have the right to contribute and retain third-party notices.

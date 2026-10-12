@@ -21,6 +21,10 @@ and writes each archive plus its `.sha256` file under `artifacts/releases/`.
 checksum rejection, PATH configuration, daemon startup and real TUI rendering. Manual
 workflow runs produce downloadable CI artifacts without publishing. Pushing a `v<version>`
 tag matching `anchi/package.json` publishes a GitHub development release after both jobs pass.
+Release notes are generated from the exact dated version section of `CHANGELOG.md` by
+`scripts/release-notes.py`; a missing, duplicate or empty entry blocks publication. Preview with
+`python3 scripts/release-notes.py v<VERSION>`. It preserves migration instructions and links to
+the tagged guides. Remove or update README notices about unreleased features when they ship.
 Complete the release gates below before pushing a tag. Published tags and assets are immutable;
 fix a bad build by publishing a new version.
 
@@ -48,7 +52,7 @@ Current releases are development builds. Before tagging:
 - Changes to boundaries, credentials, approvals or guest commands have live evidence, and `scripts/anchi-acceptance.sh` has been run for the affected scenarios with real accounts.
 - `CHANGELOG.md` describes user-visible changes and anything users must do (re-import a token, rebuild images, rerun `scripts/anchi setup install`).
 
-Not yet in place for public distribution: a security review, signed artifacts, verified updates and a compatibility matrix.
+Public preview binaries and checksum-verified updates are available. A completed security review, publisher-signed artifacts and broader compatibility coverage remain open.
 
 ## Pinned versions
 

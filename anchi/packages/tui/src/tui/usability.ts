@@ -34,9 +34,14 @@ export function welcomeStep(
   )
     return 'environment';
   if (!setup.vaultUnlocked) return 'vault';
-  // The builder runs on whichever runtime is connected, so any one will do.
-  if (!runtimeReady(setup)) return 'runtime';
-  if (!agents.some((a) => a.id !== 'builder')) return 'agent';
+  const userAgents = agents.filter((a) => a.id !== 'builder');
+  if (
+    userAgents.length
+      ? !userAgents.some((a) => runtimeReady(setup, a.runtime))
+      : !runtimeReady(setup)
+  )
+    return 'runtime';
+  if (!userAgents.length) return 'agent';
   return tasks.some((t) => t.agentId !== 'builder' && t.status === 'done') ? 'done' : 'task';
 }
 export function nextSetupAction(setup: SetupStatus): SetupAction | undefined {

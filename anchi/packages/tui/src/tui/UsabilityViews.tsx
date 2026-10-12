@@ -65,7 +65,7 @@ export function WelcomeView({
       lines.push(
         setup.vm === 'stopped'
           ? 'Start your existing VM to continue.'
-          : 'Prepare the VM and agent image. This can take several minutes.',
+          : 'Prepare the VM and agent image. First installation can take up to half an hour.',
         `${nextKey} continue · completed steps are detected automatically`,
       );
   } else if (step === 'vault')
@@ -87,8 +87,10 @@ export function WelcomeView({
     );
   else if (step === 'agent')
     lines.push(
-      'Describe a role to Agent builder, then review and save its proposal.',
-      `${nextKey} open Agent builder`,
+      'Create a starter using your connected runtime; review its YAML before saving.',
+      'No model call, connectors or shared folders are needed to create it.',
+      `${nextKey} create a starter agent`,
+      'Agent builder is also available for custom roles using a connected runtime.',
     );
   else if (step === 'task')
     lines.push(

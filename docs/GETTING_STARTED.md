@@ -19,9 +19,9 @@ Choose one way to install:
 | Command | `anchi` | `scripts/anchi` in the checkout |
 | Updates | `anchi update` | `git pull`, then reinstall dependencies |
 
-Both ways need the same VM prerequisites, which differ per platform. A new VM gets half of
-this computer's CPUs and memory (at least 1 CPU and 2 GiB; you can choose other numbers) and
-up to 30 GB of dynamically allocated disk; keep at least 8 GB of disk free.
+Both ways need the same VM prerequisites, which differ per platform. A new VM defaults to half the host's CPUs and memory
+(minimum 1 CPU and 2 GiB); setup lets you choose other values. Its disk grows up to 30 GB;
+keep at least 8 GB free for installation, and more for runtime images and projects.
 
 ## Install the binary release
 
@@ -216,13 +216,17 @@ limactl --version
 These steps are the same for both installation methods and both platforms. From a source
 checkout, replace `anchi` with `scripts/anchi`.
 
+> Starter creation (`anchi agents create`, **Ctrl+X, N**) is unreleased. Use the source
+> checkout until the next binary release. On an older binary, create a
+> [manual agent file](AGENT_TEAM.md#write-an-agent-file) after connecting your runtime.
+
 ### Guided setup in the TUI
 
 Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**, which detects
 completed steps and guides you through prerequisites, environment installation, vault
-initialization/unlock, runtime login, Agent builder and a first task. Press **Enter** for the
+initialization/unlock, runtime login, starter creation and a first task. Press **Enter** for the
 next step; **Ctrl+X, L** shows installation logs and **Ctrl+X, !** opens persistent error
-details and recovery actions. Any one connected runtime is enough: Agent builder runs on the
+details and recovery actions. Starter creation uses no model. Any one connected runtime is enough: Agent builder runs on the
 first connected of Codex, Claude Code and Hermes (`builderRuntime` in `~/.anchi/settings.yaml`
 picks one). Teams with setup and a first task complete open on **Team overview**;
 **Ctrl+X, 0** reopens the guide.
@@ -262,16 +266,25 @@ picks one). Teams with setup and a first task complete open on **Team overview**
 
    A runtime is installed in the cell image the first time one of its agents runs a task (a few
    minutes, once); runtimes you never use are never downloaded.
-4. **Build an agent.** Select **Agent builder** and describe your first agent. **Connectors**
-   connects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord, Gmail, Drive,
-   Notion and Slack. See the
-   [agent team guide](AGENT_TEAM.md).
+4. **Create an agent and run a first task.** Continue in **Getting started**, or press
+   **Ctrl+X, N**, choose your connected runtime and name the agent. Review the YAML and press
+   **y** to save. The CLI equivalent (substitute your connected runtime) is:
+
+   ```bash
+   anchi agents create dev --runtime claude-code
+   anchi run dev "Explain what tools you have access to. Do not change anything."
+   anchi tasks --agent dev
+   ```
+
+   The starter has no connectors, shared folders or extra network destinations. Creation
+   calls no model; the task does. Expect a response and a `done` status. See [First task](FIRST_TASK.md)
+   for recovery and next steps. Use **Agent builder** for a custom role with any connected runtime.
 5. **Optionally start the daemon at login:** `anchi daemon install`. On macOS this is a launch
    agent; on Linux a systemd user unit (`~/.config/systemd/user/anchi-daemon.service`). To keep
    it running on Linux after you log out, run `loginctl enable-linger "$USER"`.
 
 Model calls consume your subscription quota. Anything an agent reads can reach the model
-and, through the proxy, any public host.
+and any destination its configuration permits; omitting `egress` allows public Internet access.
 
 ## Linux differences
 

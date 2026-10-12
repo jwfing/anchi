@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1058,6 +1059,93 @@ describe('daemon tasks', () => {
 });
 
 describe('builder', () => {
+  it('preserves numeric and YAML-keyword ids as starter display names', async () => {
+    const { client } = await start();
+    for (const agentId of ['123', 'true', 'null']) {
+      const p = await client.call('agents.createPreview', { agentId, runtime: 'codex' });
+      expect(p.errors).toEqual([]);
+      const agents = await client.call('builder.apply', { proposalId: p.id });
+      expect(agents.find((a) => a.id === agentId)?.name).toBe(agentId);
+    }
+  });
+
+  it('supports the noninteractive CLI onboarding and JSON lists against the daemon', async () => {
+    await start();
+    const cli = (...args: string[]) =>
+      promisify(execFile)(
+        process.execPath,
+        ['--import', 'tsx', join(import.meta.dirname, '../../tui/src/main.ts'), ...args],
+        { env: { ...process.env, ANCHI_HOME: root } },
+      );
+    const args = ['agents', 'create', 'cli-dev', '--runtime', 'claude-code'];
+    expect((await cli(...args, '--preview')).stdout).toContain('runtime: claude-code');
+    expect(existsSync(join(root, 'agents/cli-dev.yaml'))).toBe(false);
+    await expect(cli(...args)).rejects.toThrow(/--yes/);
+    expect(existsSync(join(root, 'agents/cli-dev.yaml'))).toBe(false);
+    expect((await cli(...args, '--yes')).stdout).toContain('Created @cli-dev');
+    expect(JSON.parse((await cli('agents', '--json')).stdout)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'cli-dev', runtime: 'claude-code' })]),
+    );
+    expect(JSON.parse((await cli('tasks', '--json')).stdout)).toEqual([]);
+    expect(JSON.parse((await cli('approvals', '--json')).stdout)).toEqual([]);
+    await expect(cli(...args, '--yes')).rejects.toThrow(/already exists/);
+  });
+
+  it('creates a starter for every runtime only after review, without granting access or calling a model', async () => {
+    const { client } = await start();
+    for (const runtime of ['codex', 'claude-code', 'hermes'] as const) {
+      const agentId = `starter-${runtime}`;
+      const file = join(root, `agents/${agentId}.yaml`);
+      const p = await client.call('agents.createPreview', { agentId, runtime });
+      expect(p.errors).toEqual([]);
+      expect(p.kind).toBe('create');
+      expect(existsSync(file)).toBe(false);
+      const agents = await client.call('builder.apply', { proposalId: p.id });
+      expect(agents.find((a) => a.id === agentId)).toMatchObject({ runtime, connectors: [] });
+      const yaml = readFileSync(file, 'utf8');
+      expect(yaml).toContain('egress: []');
+      expect(yaml).toContain('workspaces: []');
+      expect(yaml).not.toMatch(/highRisk|delegates|triggers/);
+    }
+    expect(transport.starts).toEqual([]);
+  });
+
+  it('rejects malformed starter requests and refuses overwrites even after preview and revision', async () => {
+    const { client } = await start();
+    const original = readFileSync(join(root, 'agents/dev.yaml'), 'utf8');
+    for (const params of [
+      { agentId: '../escape', runtime: 'codex' },
+      { agentId: 'builder', runtime: 'codex' },
+      { agentId: 'dev', runtime: 'codex' },
+      { agentId: 'bad', runtime: 'unsupported' },
+      { agentId: 'bad', runtime: 'codex', connectors: ['github'] },
+      { agentId: 'bad', runtime: 'codex', highRisk: { disable: ['github-merge'] } },
+    ]) {
+      await expect(client.call('agents.createPreview', params as never)).rejects.toThrow();
+    }
+    const p = await client.call('agents.createPreview', {
+      agentId: 'new-agent',
+      runtime: 'hermes',
+    });
+    write('agents/new-agent.yaml', 'runtime: codex\n');
+    await client.call('builder.revise', { proposalId: p.id, patch: { description: 'edited' } });
+    await expect(client.call('builder.apply', { proposalId: p.id })).rejects.toThrow(
+      /already exists/,
+    );
+    expect(readFileSync(join(root, 'agents/new-agent.yaml'), 'utf8')).toBe('runtime: codex\n');
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(original);
+    expect(existsSync(join(root, 'agents/bad.yaml'))).toBe(false);
+    const discarded = await client.call('agents.createPreview', {
+      agentId: 'cancelled',
+      runtime: 'codex',
+    });
+    await client.call('builder.discard', { proposalId: discarded.id });
+    await expect(client.call('builder.apply', { proposalId: discarded.id })).rejects.toThrow(
+      /unknown proposal/,
+    );
+    expect(existsSync(join(root, 'agents/cancelled.yaml'))).toBe(false);
+  });
+
   const reply = [
     'Here is the agent.',
     '```anchi-agent id=devops',

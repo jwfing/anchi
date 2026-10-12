@@ -1,0 +1,43 @@
+name: Bug report
+description: A reproducible problem with installation, tasks, the CLI or TUI.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, use [private reporting](https://github.com/jwfing/anchi/security/advisories/new).
+        Use synthetic examples. Never attach tokens, vault keys, credential files or private task content.
+  - type: input
+    id: version
+    attributes:
+      label: Anchi version and installation method
+      placeholder: "anchi --version; binary or source commit"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Host and runtime
+      placeholder: "OS version, CPU architecture, Lima version; Codex / Claude Code / Hermes"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal synthetic configuration or task when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and redacted error
+      description: Inspect logs and screenshots for secrets and private content before attaching them.
+    validations:
+      required: true

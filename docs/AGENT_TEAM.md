@@ -4,18 +4,14 @@ Anchi runs a secured team of Codex, Claude Code and Hermes agents. Each task run
 
 ## Install
 
-Install Anchi and its VM prerequisites as described in [Getting started](GETTING_STARTED.md), as the packaged app or from a source checkout. This guide writes `anchi` for the command; from a checkout, use `scripts/anchi`. On a Linux host (experimental), "the Mac" in this guide means that machine; its prerequisites and differences are in [Linux prerequisites](GETTING_STARTED.md#linux-prerequisites).
+Install Anchi and prepare its VM with [Getting started](GETTING_STARTED.md). This guide uses
+the installed `anchi` command. From a source checkout, use `scripts/anchi` instead; only source
+development needs Node and pnpm. With no arguments, `anchi` opens the TUI.
 
-```bash
-anchi setup install        # VM, trusted services, agent team and base image (minutes)
-anchi setup vault init     # first time only: creates ~/.config/anchi/vault.key
-anchi setup vault unlock   # after each VM start
-make verify-anchi          # source checkout only: live isolation checks, no credentials used
-```
-
-`setup install` runs `scripts/up.sh`, `scripts/install-anchi.sh` and the base image build (runtimes are installed later, by the first task that uses each), and is safe to run again to update. It refuses while task cells are live (a cell stays up 10 minutes after its task's last turn), since installing restarts the egress proxy; `make verify-anchi` refuses for the same reason. `anchi setup vm` starts a stopped VM. In the TUI, **Runtimes** has the same steps: `I` install, `s` start the VM, `u` unlock the vault. Keep a backup of the vault key: without it, the stored credentials cannot be recovered.
-
-`anchi` with no arguments opens the TUI and starts the daemon if needed; `anchi daemon install` starts the daemon at login.
+`anchi setup install` creates or updates the VM and refuses while task cells are live (cells
+can remain alive for 10 minutes after a task turn). `anchi setup vm` starts a stopped VM;
+`anchi setup vault unlock` unlocks it. Back up `~/.config/anchi/vault.key`: a replacement key
+cannot recover stored credentials. `anchi daemon install` starts the daemon at login.
 
 ## Connect accounts
 
@@ -105,6 +101,21 @@ The proxy denies credential minting (GitHub keys and installation tokens, AWS ST
 
 ## Create agents
 
+### Create a starter
+
+**Unreleased:** from a source checkout, use `scripts/anchi` until the next binary release.
+`anchi agents create dev --runtime claude-code` previews a minimal agent and asks before saving.
+Choose `codex`, `claude-code` or `hermes`; no Codex login or model call is needed for creation.
+`--preview` prints the YAML without saving; `--yes` saves without prompting after you review it.
+Existing ids are refused, including a file created after preview. In the TUI, **Ctrl+X, N**
+chooses the runtime and id, then opens the same proposal review used by the builder.
+
+The starter explicitly sets `connectors: []`, `egress: []`, `workspaces: []` and `maxTasks: 1`.
+Only its runtime hosts are reachable. Add access deliberately in the settings or agent file.
+See [First task](FIRST_TASK.md) for a complete example.
+
+### Use Agent builder
+
 Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. The builder runs on the first connected runtime (Codex, then Claude Code, then Hermes), so one connected runtime is enough; `builderRuntime: claude-code` in `~/.anchi/settings.yaml` picks one, and the builder's view shows which it uses. A builder conversation keeps the runtime it started on. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, directories under `~/AnchiWorkspaces`, agents and images. It replies with a proposal. A full-screen dialog shows:
 
 - the agent file;
@@ -115,7 +126,28 @@ Press `y` to write the files, `n` to discard the proposal, or `s` to change its 
 
 The builder can also change an existing agent. Each turn it gets a one-line summary of every agent, and the agent file of each agent your message names by id (`dev` or `@dev`; up to 4 KB per file). For a change it proposes a patch with only the fields to change: name, description, runtime, model, effort, prompt, skills, connectors and workspaces. The dialog shows the change as a diff of the agent file, and the rest of the file, comments included, stays as it is. If the file changes before you press `y`, the patch is refused; ask the builder again. For other fields (triggers, approvals, egress, delegates, image), the builder proposes the whole file, which replaces the old one. The builder cannot write any file itself.
 
+### Write an agent file
+
 Agents are YAML files in `~/.anchi/agents/`, and recipes are in `~/.anchi/images/`. You can also edit them directly; the daemon reloads them on change. See [Agent configuration](architecture/AGENT_TEAM_CONTRACTS.md#agent-configuration).
+
+For a first task on a released binary, create `~/.anchi/agents/dev.yaml` in your editor (make
+`~/.anchi/agents` if absent; choose another id if `dev` already exists):
+
+```yaml
+name: Developer
+runtime: claude-code   # or codex / hermes; use the runtime you connected
+connectors: []
+egress: []
+workspaces: []
+maxTasks: 1
+prompt:
+  text: Help with the requested task. Explain missing access instead of trying to bypass it.
+```
+
+Run `anchi agents` to check it, then `anchi run dev "Explain what tools you have access to. Do not change anything."`.
+
+The following advanced example requires GitHub and Linear accounts plus an installed `triage`
+skill; it is not a first-run configuration:
 
 ```yaml
 # ~/.anchi/agents/dev.yaml
@@ -199,8 +231,8 @@ highRisk: { disable: [github-merge] }  # merging does not wait for you; no appro
 ```
 
 - **Delegation.** An agent with `delegates` gets the tools `anchi_delegate_task`, `anchi_task_status`, `anchi_send_to_task` and `anchi_list_tasks`. A delegated task runs in its own cell with its own connectors; the parent waits for its result. Delegation stops at three levels, ten children per task and sixty turns per tree, and an agent cannot be asked to work on a task above its own.
-- **Approvals.** Without `approvals`, an agent's writes go straight through; only high-risk operations (below) wait for you. With `approvals: {<connector>: ask}` for a proxy connector, the proxy holds the agent's writes: git push, GitHub API writes and mutations, AWS operations other than reads, Linear mutations, and for PostHog, Sentry, Firecrawl, Figma and Discord every request other than `GET` (except PostHog queries, which are reads; every Firecrawl scrape, crawl and search counts, since each spends credits). A full-screen dialog shows the git refs or the start of the request; `y` lets it through, `n` refuses it, and it is refused after five minutes (`approvalTimeoutMinutes: 30` in `~/.anchi/settings.yaml` waits longer, up to 720; the held request stays open in the proxy meanwhile, and the agent's own tool may give up first). For Gmail, Drive, Notion and Slack, `ask` holds the agent's writes in the service's own policy (`notion:writer`), alongside each service's write mode, which applies to every agent; reads follow the service's mode, and these approvals expire after the policy service's ten minutes whatever `approvalTimeoutMinutes` says. `anchi approvals`, `approve ID` and `deny ID` do the same from the CLI.
-- **High-risk operations always ask**, for every agent and every task origin, whatever its `approvals`: merging a pull request, deleting, transferring or reconfiguring a repository, branch protection, collaborators, webhooks and deploy keys, deleting a branch, pushing to `main` or `master`, AWS deletions, terminations and access changes, Linear deletions, deleting PostHog or Sentry organizations, projects and teams and changing their members, Figma webhooks (they send future events to a URL), deleting Discord channels or servers, banning, kicking or changing members' roles, and changing Discord roles, channel permissions, server or bot settings. The dialog says why the write is held and how the task started (`poll → @lead (t-…) → @developer (t-…)`). Switch entries off for every agent in `~/.anchi/settings.yaml` (`highRisk: { disable: [github-merge] }`), or for one agent in its file with the same field: the merge agent above merges without asking while other agents still ask. `approvals` take precedence: `ask` holds every write of its connector, so an agent with `approvals: { github: ask }` and `highRisk: { disable: [github-merge] }` still waits for you before a merge — give the exception to an agent without `approvals` for that connector. The ids: `github-merge`, `github-repo-delete`, `github-repo-settings`, `github-repo-transfer`, `github-protection`, `github-access`, `github-ref-delete`, `github-graphql`, `git-default-branch`, `git-ref-delete`, `aws-destroy`, `aws-s3-delete`, `aws-s3-access`, `linear-delete`, `posthog-delete`, `posthog-access`, `sentry-delete`, `sentry-access`, `figma-webhook`, `discord-delete`, `discord-members` and `discord-access` (`services/egress_rules.py`); an unknown id is an error in the agent file. A task's access report shows the agent's exceptions. `highRisk` in an agent file needs the guest components of this release: run `anchi setup install` (**Runtimes**, `I`) after updating, since an older guest refuses the cell (`USAGE`) rather than starting it without the exception. The proxy cannot tell a force-push from a fast-forward, so it holds pushes to the default branch names rather than force-pushes.
+- **Approvals.** Without `approvals`, ordinary writes go straight through; listed high-risk operations (below) wait by default unless exempted. With `approvals: {<connector>: ask}` for a proxy connector, the proxy holds the agent's writes: git push, GitHub API writes and mutations, AWS operations other than reads, Linear mutations, and for PostHog, Sentry, Firecrawl, Figma and Discord every request other than `GET` (except PostHog queries, which are reads; every Firecrawl scrape, crawl and search counts, since each spends credits). A full-screen dialog shows the git refs or the start of the request; choose `y` to allow or `n` to refuse, then press **Enter** to confirm. An unanswered write is refused after five minutes (`approvalTimeoutMinutes: 30` in `~/.anchi/settings.yaml` waits longer, up to 720; the held request stays open in the proxy meanwhile, and the agent's own tool may give up first). For Gmail, Drive, Notion and Slack, `ask` holds the agent's writes in the service's own policy (`notion:writer`), alongside each service's write mode, which applies to every agent; reads follow the service's mode, and these approvals expire after the policy service's ten minutes whatever `approvalTimeoutMinutes` says. `anchi approvals`, `approve ID` and `deny ID` do the same from the CLI.
+- **Listed high-risk operations ask by default**, for every agent and every task origin, whatever its `approvals`: merging a pull request, deleting, transferring or reconfiguring a repository, branch protection, collaborators, webhooks and deploy keys, deleting a branch, pushing to `main` or `master`, AWS deletions, terminations and access changes, Linear deletions, deleting PostHog or Sentry organizations, projects and teams and changing their members, Figma webhooks (they send future events to a URL), deleting Discord channels or servers, banning, kicking or changing members' roles, and changing Discord roles, channel permissions, server or bot settings. The dialog says why the write is held and how the task started (`poll → @lead (t-…) → @developer (t-…)`). Switch entries off for every agent in `~/.anchi/settings.yaml` (`highRisk: { disable: [github-merge] }`), or for one agent in its file with the same field: the merge agent above merges without asking while other agents still ask. `approvals` take precedence: `ask` holds every write of its connector, so an agent with `approvals: { github: ask }` and `highRisk: { disable: [github-merge] }` still waits for you before a merge — give the exception to an agent without `approvals` for that connector. The ids: `github-merge`, `github-repo-delete`, `github-repo-settings`, `github-repo-transfer`, `github-protection`, `github-access`, `github-ref-delete`, `github-graphql`, `git-default-branch`, `git-ref-delete`, `aws-destroy`, `aws-s3-delete`, `aws-s3-access`, `linear-delete`, `posthog-delete`, `posthog-access`, `sentry-delete`, `sentry-access`, `figma-webhook`, `discord-delete`, `discord-members` and `discord-access` (`services/egress_rules.py`); an unknown id is an error in the agent file. A task's access report shows the agent's exceptions. `highRisk` in an agent file needs the guest components of this release: run `anchi setup install` (**Runtimes**, `I`) after updating, since an older guest refuses the cell (`USAGE`) rather than starting it without the exception. The proxy cannot tell a force-push from a fast-forward, so it holds pushes to the default branch names rather than force-pushes.
 - **Egress.** `egress: [registry.npmjs.org, '*.pypi.org']` limits the hosts an agent's cells reach; its runtime and connectors' hosts are always allowed (for Codex: `chatgpt.com`, `*.chatgpt.com` and OpenAI's content CDN `*.oaiusercontent.com`). Other connections fail and are audited as `egress-denied`, and the task notes each refused host once while it runs. To allow one, press **^X l** in the task's view, then **e**, choose the host and confirm (or `anchi agents allow-host <agent> <host>`): the exact host is added to the agent's `egress`, from its next cell on. Wildcards are added by editing the file. Without `egress` the agent reaches any public host. An allowed host can still receive data (a gist on `github.com`), so a list narrows exfiltration; it does not end it.
 - **Triggers.** `schedule` takes a cron expression in local time; a run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `anchi triggers` lists them.
 - **Skills.** `anchi skills add <directory or GitHub URL> [--id x]`, or **a** on the **Skills** screen, stores a `SKILL.md` skill; a GitHub skill is pinned to the commit it was fetched at. A directory or repository without a top-level `SKILL.md` is a collection: each `<name>/SKILL.md` and `skills/<name>/SKILL.md` in it is added under `<name>` with its own tree URL (for example `anchi skills add https://github.com/addyosmani/agent-skills`), and a skill that cannot be added is skipped and reported. Give it to agents in their settings panel (**^X s**) or with `skills: [id]`; their cells get it read-only. `anchi skills update [id]`, or **u** on the Skills screen, shows what the latest commit of the URL changes (files added, changed, removed) and installs exactly that commit after you confirm. The screen lists one line per skill — its id and where it came from (`owner/repo @ commit`, or `local`) — with the skills of one repository together and local ones last; it shows how far down the list you are (`12/25`), scrolls with the cursor (**↑ ↓**, **PgUp PgDn**, **Home End**) and shows the selected skill's description below the list. Skill content is untrusted, like any other agent input.
@@ -283,7 +315,7 @@ Hosts and paths come from the agent's requests, so they are shown as agent text.
 - Each working cell may use up to 2 GB of the VM's memory, and a cell waiting on a delegation keeps its runtime's memory (a few hundred MB). At the default `maxCells: 4` the 16 live cells are reached only by deep delegation — 4 working cells and 12 waiting on them — which is about 8 GB working plus a few GB waiting, more than a VM with half of a 16 GB computer has. Chains that deep are rare, but before raising `maxCells` or letting agents delegate several levels down, give the VM more memory: `limactl stop anchi-vm && limactl edit anchi-vm --memory 8 --cpus 6 && limactl start anchi-vm`, then `anchi setup vault unlock`.
 - A turn that runs longer than 60 minutes is cancelled and the task fails.
 - Finished tasks are deleted after 90 days; set `retentionDays` in `~/.anchi/settings.yaml` to change it.
-- Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content. High-risk operations wait for you whatever the origin; use `approvals` for its other writes, and `egress` to limit where it can send data.
+- Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content. Listed high-risk operations wait by default whatever the origin, unless exempted with `highRisk.disable`; use `approvals` for its other writes, and `egress` to limit where it can send data.
 - Credential isolation is not data isolation: agents can send what they read to any public host they may reach.
 - Request bodies over 8 MiB stream through the proxy. S3 calls are re-signed on that path, including `aws-chunked` uploads with signed or unsigned chunks.
 - A git push larger than git's `http.postBuffer` (1 MiB) is sent without a length and streams through the proxy at any size: the proxy reads its ref updates before any of it leaves. An ordinary push goes through. A high-risk push of this size (to `main` or `master`, deleting a branch) cannot wait for approval, since holding would stall the upload: it is refused, and git shows `! [remote rejected] main -> main (anchi: …)`; push to another branch and open a pull request. When the agent's GitHub writes ask (`approvals: {github: ask}`), pushes wait for you with their whole body as before, up to 8 MiB.

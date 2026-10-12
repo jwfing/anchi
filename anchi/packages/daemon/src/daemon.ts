@@ -769,6 +769,7 @@ export class Daemon {
       return null;
     },
     'agents.list': () => this.hub.summaries(),
+    'agents.createPreview': (params) => this.proposals.starter(params),
     'agents.reload': () => this.hub.reload(),
     'agents.settings': async (params) => this.agentSettings(params),
     'agents.deletePreview': ({ agentId }) => this.deletionPreview(agentId),

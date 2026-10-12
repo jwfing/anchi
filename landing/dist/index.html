@@ -7,14 +7,17 @@
     <title>安栖 — 安全的智能体团队</title>
     <meta
       name="description"
-      content="Anchi 帮你在本地搭一支 agent 团队：每个 agent 都在独立的沙箱里干活，碰不到你的密钥，能用哪些账号由你说了算。agent 工作，你更放心。"
+      content="在本地组织 Codex、Claude Code 和 Hermes，分工处理开发、审查和运维。每个任务运行在独立 cell 中，托管凭据留在 cell 外。agent 工作，你更放心。"
     />
     <link rel="canonical" href="https://anchi.elseward.xyz/zh/" />
     <meta property="og:title" content="安栖 — 安全的智能体团队" />
     <meta
       property="og:description"
-      content="Anchi 帮你在本地搭一支 agent 团队：每个 agent 都在独立的沙箱里干活，碰不到你的密钥，能用哪些账号由你说了算。agent 工作，你更放心。"
+      content="在本地组织 Codex、Claude Code 和 Hermes，分工处理开发、审查和运维。每个任务运行在独立 cell 中，托管凭据留在 cell 外。agent 工作，你更放心。"
     />
+    <meta property="og:image" content="https://anchi.elseward.xyz/anchi-hero-vertical-zh-dark.jpg" />
+    <meta property="og:image:alt" content="Anchi agent cells and trusted credential gateway" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://anchi.elseward.xyz/zh/" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -72,16 +75,17 @@
         <div class="hero-copy">
           <h1>创建智能体团队，<br /><span>让他们安全地工作。</span></h1>
           <p class="intro">
-            Anchi 帮你在本地搭一支 agent 团队：每个 agent 都在独立的沙箱里干活，碰不到你的密钥，能用哪些账号由你说了算。
+            在本地组织 Codex、Claude Code 和 Hermes，分工处理开发、审查和运维。每个任务运行在独立 cell 中，托管凭据留在 cell 外。
           </p>
-          <p class="intro intro-security">agent 工作，你更放心。</p>
+          <p class="intro intro-security">在终端跟踪任务、审核待批准的写操作，并查看网络访问记录。</p>
           <div class="hero-install" aria-label="安装 Anchi">
             <span class="install-prompt" aria-hidden="true">$</span>
             <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code>
             <button class="install-copy" type="button" aria-label="复制安装命令" aria-live="polite" hidden>复制</button>
           </div>
-          <p class="availability install-meta">开发者预览版 · macOS / Linux<br />
+          <p class="availability install-meta">未签名预览版 · Apple Silicon macOS / 实验性 Linux<br />
             <a href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md">安装指南 ↗</a>
+            <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi/releases">版本发布 ↗</a>
             <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi">源码 ↗</a>
           </p>
         </div>
@@ -148,7 +152,7 @@
               />
             </div>
             <h3>权限与授权</h3>
-            <p>设置目录、连接器和网络访问范围；重要写操作需你批准。</p>
+            <p>设置目录、连接器和网络范围。列出的高风险写操作默认等待批准，也可显式配置豁免。</p>
           </article>
         </div>
         <div class="security-note">
@@ -486,7 +490,7 @@
                     <p class="approval-tag">等待你的决定</p>
                     <h3>允许 @lead 执行写入？</h3>
                     <p>
-                      高风险写入会暂停。操作内容和任务的来源，一起交给你判断。
+                      列出的高风险写入默认等待批准，显式豁免除外。打开审核后，先按 y 或 n 选择，再按 Enter 确认。
                     </p>
                     <div class="approval-detail">
                       <p>
@@ -500,10 +504,10 @@
                     </div>
                     <div class="approval-actions">
                       <button type="button" data-decision="approved">
-                        [y] 模拟批准</button
+                        [y] 选择批准</button
                       ><button type="button" data-decision="denied">
-                        [n] 模拟拒绝</button
-                      ><button type="button" data-reset hidden>
+                        [n] 选择拒绝</button
+                      ><button type="button" data-confirm hidden>[Enter] 确认选择</button><button type="button" data-reset hidden>
                         重新演示 ↺
                       </button>
                     </div>
@@ -529,6 +533,16 @@
           <p class="demo-caption">交互演示 · 非实时任务</p>
         </section>
       </section>
+      <section class="section wrap" id="faq">
+        <div class="section-heading"><p class="eyebrow">05 / 开始之前</p><h2>上手前需要知道。</h2></div>
+        <div class="faq-list">
+          <details><summary>必须有 Codex 账号吗？</summary><p>连接 Codex、Claude Code 或 Hermes 中的一个即可。已发布版本可使用任一已连接 runtime 的手动 agent 文件。Unreleased 中，Agent builder 也可使用已连接的 runtime，并新增了无需模型调用的 starter 创建功能。<a href="https://github.com/jwfing/anchi/blob/main/docs/FIRST_TASK.md">首个任务指南 ↗</a></p></details>
+          <details><summary>需要多少准备时间和资源？</summary><p>先安装 Lima 和 Python；Linux 还需要 QEMU/KVM。新 VM 默认使用主机一半的 CPU 和内存，可在安装时调整。安装至少保留 8 GB 磁盘空间，镜像和项目还需要额外空间。首次安装和首次构建 runtime 镜像各需几分钟。</p></details>
+          <details><summary>数据都会留在我的电脑里吗？</summary><p>不会。托管凭据不进入任务 cell，但读取的内容可能发送给模型和允许访问的目的地。不配置 egress 时可访问公共互联网；配置后，runtime 和连接器的域名仍自动允许，Firecrawl 也能获取列表之外的 URL。</p></details>
+          <details><summary>可以用于敏感生产账号吗？</summary><p>Anchi 是未签名的开发预览版，尚未完成安全审计。建议先使用测试账号和非敏感项目。模型调用消耗你的订阅额度或 API 余额。</p></details>
+          <details><summary>在哪里看文档、升级说明或反馈问题？</summary><p><a href="https://github.com/jwfing/anchi/blob/main/docs/README.md">文档</a> · <a href="https://github.com/jwfing/anchi/releases">版本说明</a> · <a href="https://github.com/jwfing/anchi/issues/new/choose">反馈问题</a>。更新应用后，查看版本说明中是否需要更新 VM。安全漏洞请使用<a href="https://github.com/jwfing/anchi/security/advisories/new">私密报告入口</a>。</p></details>
+        </div>
+      </section>
     </main>
     <footer class="footer wrap">
       <div>
@@ -548,7 +562,7 @@
         <a href="https://github.com/jwfing/anchi">GitHub ↗</a
         ><a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
           >安全模型 ↗</a
-        ><a href="https://github.com/jwfing/anchi/blob/main/license.md"
+        ><a href="https://github.com/jwfing/anchi/blob/main/LICENSE"
           >Apache-2.0</a
         ><a href="#top">回到顶部 ↑</a>
       </div>

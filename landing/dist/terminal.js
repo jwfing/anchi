@@ -46,30 +46,54 @@
   const approvalStatus = document.querySelector(
     "#panel-approval .panel-heading > span:last-child",
   );
+  const confirm = document.querySelector("[data-confirm]");
+  const approvalPanel = document.querySelector("#panel-approval");
+  let decision = null;
+  function choose(value) {
+    decision = value;
+    decisionButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.decision === value)));
+    confirm.hidden = false;
+    result.textContent = isChinese
+      ? `已选择${value === "approved" ? "批准" : "拒绝"}。按 Enter 确认。`
+      : `Selected ${value === "approved" ? "approve" : "deny"}. Press Enter to confirm.`;
+  }
+  function finish() {
+    if (!decision) return;
+    const approved = decision === "approved";
+    result.textContent = isChinese
+      ? approved ? "✓ 模拟已批准。此演示不会执行操作。" : "× 模拟已拒绝。此演示不会执行操作。"
+      : approved ? "✓ Example approved. No operation is executed." : "× Example denied. No operation is executed.";
+    approvalStatus.textContent = approved ? "✓ approved" : "× denied";
+    decisionButtons.forEach((button) => { button.hidden = true; });
+    confirm.hidden = true;
+    reset.hidden = false;
+    reset.focus();
+    decision = null;
+  }
   decisionButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const approved = button.dataset.decision === "approved";
-      result.textContent = isChinese
-        ? approved
-          ? "✓ 模拟已批准。实际操作会在确认后继续。"
-          : "× 模拟已拒绝。实际操作会被阻止。"
-        : approved
-          ? "✓ Example approved. A real operation would now continue."
-          : "× Example denied. A real operation would be blocked.";
-      approvalStatus.textContent = approved ? "✓ approved" : "× denied";
-      decisionButtons.forEach((item) => {
-        item.hidden = true;
-      });
-      reset.hidden = false;
-      reset.focus();
-    });
+    button.setAttribute("aria-pressed", "false");
+    button.addEventListener("click", () => choose(button.dataset.decision));
+  });
+  confirm?.addEventListener("click", finish);
+  approvalPanel?.addEventListener("keydown", (event) => {
+    if (!reset.hidden || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === "y" || event.key === "n") {
+      event.preventDefault();
+      choose(event.key === "y" ? "approved" : "denied");
+    } else if (event.key === "Enter" && decision) {
+      event.preventDefault();
+      finish();
+    }
   });
   reset?.addEventListener("click", () => {
+    decision = null;
     result.textContent = "";
     approvalStatus.textContent = "1 pending";
-    decisionButtons.forEach((item) => {
-      item.hidden = false;
+    decisionButtons.forEach((button) => {
+      button.hidden = false;
+      button.setAttribute("aria-pressed", "false");
     });
+    confirm.hidden = true;
     reset.hidden = true;
     decisionButtons[0].focus();
   });

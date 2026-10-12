@@ -36,7 +36,7 @@ followed by security boundaries, workflow, platforms/runtimes, and a TUI
 preview. Keep the platform status and security claims aligned with the root README.
 
 `terminal.js` enhances the static page with keyboard-accessible tabs (teamwork,
-agent builder, approvals) and simulated approval outcomes. The demo never connects
+agent builder, approvals) and simulated approval outcomes (choose y/n or click a choice, then Enter or Confirm). The demo never connects
 to the daemon or executes operations. Without JavaScript, the default session and
 documentation links remain available.
 

@@ -6,6 +6,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
+- Create an agent without a Codex login or model call: `anchi agents create <id> --runtime codex|claude-code|hermes` previews a starter with no connectors, shared folders or extra egress hosts. `--preview` inspects without saving; `--yes` saves non-interactively. Getting started and **Ctrl+X, N** offer the same workflow. Creation refuses existing ids, including files that appear after review.
+- `anchi agents --json`, `anchi tasks --json` and `anchi approvals --json` print arrays for scripts.
+- A first-task walkthrough, user roadmap, actual TUI preview with example data, issue forms and a PR template.
 - Anchi tells you when the VM's components were installed by another version: `setup.status` reports `appVersion`, `guestVersion` (`anchi-cell version`, from `/opt/secure-vm/installed.json`) and `guestOutdated`; Getting started goes back to its environment step and **Enter** (or `I` in Runtimes, which shows both versions) runs `anchi setup install`; the daemon logs it, tasks started meanwhile carry a notice, and `anchi update` says to run it. A guest from before this release counts as outdated until `scripts/anchi setup install` has run once.
 - `builderRuntime` in `~/.anchi/settings.yaml` (`codex`, `claude-code` or `hermes`) picks the Agent builder's runtime; a task keeps the runtime its session started on (`runtime` in the task row).
 - Runtimes and `anchi setup status` show the VM's CPUs and memory (`vmSize.current`), and `anchi setup status` prints a summary (`--json` for every field). A VM that runs but cannot be asked is reported with the failing command's message (`error`), in Getting started, Runtimes and the CLI, instead of as "not installed". A Lima older than the VM template needs (2.2.0) is listed with the missing prerequisites, and `anchi setup install` stops before creating the VM.
@@ -14,12 +17,16 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- README leads with developer workflows, prerequisites and the first task; guides use the installed `anchi` command, explain source/release differences and document default VM sizing. Skills document release-matched installation and separate host CLI administration from in-cell MCP permissions.
+- Release publication derives version-specific notes from CHANGELOG, preserving migration instructions, and refuses missing, duplicate or empty version entries. Apache-2.0 text is now in `LICENSE`, with copyright in `NOTICE`; packages include both.
+- Landing pages link to releases and support, explain setup and preview limits, and use a supported Linear connector in both animation exports. The approval example requires a choice and confirmation, matching the TUI.
 - The install confirmation says what a first installation downloads and that it can take up to half an hour; Getting started shows the elapsed time next to the phase, and a step that runs past 45 minutes is named in the error. Connectors keeps every id in one column, lists **a** (another Google account) and **o** (Google client) in its hints, and tells Gmail and Drive users without a Google OAuth client where to start; Runtimes says to run `codex` first when the imported login has expired; Team overview without agents names the keys to Getting started and the builder.
-
 - The Agent builder runs on the first connected runtime (Codex, then Claude Code, then Hermes) instead of always Codex, so a user without a ChatGPT login can build agents. Getting started's runtime step accepts any connected runtime and lists Hermes (`h`) beside Codex and Claude Code.
 
 ### Fixed
 
+- First-run setup checks that an existing agent has a connected runtime and opens a ready agent for the first task.
+- Security descriptions now state that listed high-risk operations are held by default, explain global/per-agent exemptions and explicit `ask` precedence, and avoid implying that credential isolation keeps content local. SECURITY links directly to private vulnerability reporting.
 - The builder's instructions no longer describe Codex and Claude Code as part of the base image; each runtime is a layer of its own since 0.3.0.
 
 ## 0.3.1 — 2026-10-11

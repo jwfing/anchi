@@ -39,12 +39,12 @@ Commands:
   skills                           Skills agents can use
   triggers                         Agents' schedules and polls, with their next
                                    run and last result
-  approvals                        Writes waiting for your approval
+  approvals [options]              Writes waiting for your approval
   approve <id>                     Approve a write waiting for approval
   deny <id>                        Deny a write waiting for approval
   cancel <task>                    Cancel a running or queued task; its work and
                                    transcript are kept
-  agents                           List agents
+  agents [options]                 List or manage agents
   setup                            Runtime and connector setup
   daemon                           Manage the background daemon
 ```
@@ -172,6 +172,7 @@ Options:
   -q, --search <words>   words in the title or result
   --since <age>          created within, e.g. 24h or 7d
   -n, --limit <n>        how many (default: "50")
+  --json                 Print the task array as JSON
 ```
 
 ### `anchi rm`
@@ -253,6 +254,9 @@ Agents' schedules and polls, with their next run and last result
 Usage: anchi approvals [options]
 
 Writes waiting for your approval
+
+Options:
+  --json      Print the pending approval array as JSON
 ```
 
 ### `anchi approve`
@@ -284,13 +288,30 @@ Cancel a running or queued task; its work and transcript are kept
 ```text
 Usage: anchi agents [options] [command]
 
-List agents
+List or manage agents
+
+Options:
+  --json                  Print the agent array as JSON
 
 Commands:
+  create [options] <id>   Review and create a starter agent without a model call
   rm [options] <id>       Delete an agent with its tasks and its files in the VM
                           (workspaces are kept)
   allow-host <id> <host>  Add one host to an agent's egress list (a host its
                           cells were refused)
+```
+
+#### `anchi agents create`
+
+```text
+Usage: anchi agents create [options] <id>
+
+Review and create a starter agent without a model call
+
+Options:
+  --runtime <runtime>  codex, claude-code or hermes
+  --preview            Print the proposal without saving it
+  -y, --yes            Save the reviewed starter without an interactive prompt
 ```
 
 #### `anchi agents rm`
