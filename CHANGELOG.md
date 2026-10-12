@@ -4,6 +4,16 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+Four boundary fixes in the VM. After updating, run `anchi setup install` once: it installs the proxy and cell manager that carry them.
+
+### Fixed
+
+- The egress proxy decides rules, credential injection and egress lists on the host a request's connection goes to. A request whose `Host` header names another host is refused with HTTP 400 and audited as `host-mismatch`; before, the header chose the rule, so a cell could have a connector's credential injected into a connection to a host of its choosing. Needs `scripts/anchi setup install`.
+- GitHub and Linear GraphQL requests count as writes, and are checked for high-risk mutations, when a `mutation` operation appears anywhere at the top level of the document (after a comment, a byte-order mark, a comma or another operation), not only as its first word; a GitHub GraphQL request whose document cannot be read is held as high-risk (`github-graphql-unreadable`, like an unreadable push), and an unreadable Linear one counts as a write. Before, a mutation behind a comment passed as a read, outside `approvals: ask` and the high-risk holds. Needs `scripts/anchi setup install`.
+- The cell manager writes Codex's placeholder files into the agent's home without following links: a link, file or directory left where `.codex` or its files should be refuses the cell (`AGENT_HOME_LINK:<path>`, with a hint) instead of creating or handing over whatever the link named. Needs `scripts/anchi setup install`.
+- Workspaces are mounted, and the read-only masks of `rw` workspaces attached, from descriptors resolved without following links, so a directory renamed or linked while a cell starts cannot move a mask or the mount. A writable folder with more than 1000 masked paths refuses the cell (`WORKSPACE_TOO_MANY_MASKS:<name>`). Needs `scripts/anchi setup install`.
+- The hint after `cell start failed: <code>` also appears for codes that carry a detail (`WORKSPACE_NOT_A_DIRECTORY:<name>`).
+
 ## 0.3.2 — 2026-10-12
 
 Agents without a Codex login: the builder runs on any connected runtime and a starter agent can be created without a model call. Anchi now notices VM components installed by another version, and the approval timeout is configurable. After updating, run `anchi setup install` once: it gives the VM the guest command and proxy settings this release uses; until then Getting started reports the VM's components as outdated and the proxy keeps the five-minute approval timeout.

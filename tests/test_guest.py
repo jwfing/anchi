@@ -250,3 +250,215 @@ class InstalledVersionTests(unittest.TestCase):
         self.assertIn(
             "command == 'version' and not rest", (Path(__file__).parents[1] / 'guest/anchi_cell.py').read_text()
         )
+
+
+class AgentHomeWriteTests(unittest.TestCase):
+    """Root writes the Codex placeholder into a home the agent owns. A link the agent left
+    where the directory or the file should be must not make root create, truncate or hand
+    over anything the link names."""
+
+    def setUp(self):
+        import tempfile
+        from unittest.mock import patch
+
+        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-home-'))
+        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
+        self.home = self.tmp / 'home'
+        self.home.mkdir()
+        self.elsewhere = self.tmp / 'elsewhere'
+        self.elsewhere.mkdir()
+        patcher = patch('os.fchown')  # ownership needs root; the links are what is tested here
+        self.fchown = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write(self):
+        anchi_cell.write_owned(self.home, '.codex/auth.json', '{}', 1000)
+
+    def test_writes_the_file_into_a_directory_it_creates(self):
+        import os
+        import stat
+
+        self.write()
+        path = self.home / '.codex/auth.json'
+        self.assertEqual(path.read_text(), '{}')
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE((self.home / '.codex').stat().st_mode), 0o700 & ~os.umask(0o022))
+        # Both the directory and the file are handed to the agent.
+        self.assertEqual([c.args[1:] for c in self.fchown.call_args_list], [(1000, 1000), (1000, 1000)])
+
+    def test_a_linked_directory_refuses_the_cell_without_entering_the_target(self):
+        (self.home / '.codex').symlink_to(self.elsewhere)
+        with self.assertRaisesRegex(anchi_cell.Failure, r'^AGENT_HOME_LINK:\.codex/auth\.json$'):
+            self.write()
+        self.assertEqual(list(self.elsewhere.iterdir()), [])
+        self.assertFalse(self.fchown.called)
+
+    def test_a_file_in_place_of_the_directory_refuses_the_cell(self):
+        (self.home / '.codex').write_text('kept')
+        with self.assertRaisesRegex(anchi_cell.Failure, 'AGENT_HOME_LINK'):
+            self.write()
+        self.assertEqual((self.home / '.codex').read_text(), 'kept')
+
+    def test_a_linked_file_is_replaced_and_its_target_left_alone(self):
+        (self.home / '.codex').mkdir()
+        target = self.elsewhere / 'auth.json'
+        target.write_text('theirs')
+        (self.home / '.codex/auth.json').symlink_to(target)
+        self.write()
+        self.assertFalse((self.home / '.codex/auth.json').is_symlink())
+        self.assertEqual((self.home / '.codex/auth.json').read_text(), '{}')
+        self.assertEqual(target.read_text(), 'theirs')
+
+    def test_a_directory_in_place_of_the_file_refuses_the_cell(self):
+        (self.home / '.codex/auth.json').mkdir(parents=True)
+        with self.assertRaisesRegex(anchi_cell.Failure, 'AGENT_HOME_LINK'):
+            self.write()
+        self.assertTrue((self.home / '.codex/auth.json').is_dir())
+
+
+class WorkspaceMaskTests(unittest.TestCase):
+    """The paths of a writable workspace that a cell must not change are found by descriptor
+    from the workspace's own descriptor, never through a link, so what gets mounted read-only
+    is what was found and nothing the names could be made to point at."""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-ws-'))
+        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
+        self.ws = self.tmp / 'ws'
+        self.ws.mkdir()
+
+    def masks(self):
+        import os
+
+        found = {}
+
+        def take(rel, fd):
+            found[rel] = os.fstat(fd).st_ino
+            os.close(fd)
+
+        fd = os.open(self.ws, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            count = anchi_cell.workspace_masks(fd, take)
+        finally:
+            os.close(fd)
+        return found, count
+
+    def test_finds_git_and_editor_configuration_near_the_top(self):
+        for d in (
+            'repo/.git/hooks',
+            'repo/.git/info',
+            'repo/.vscode',
+            'a/b/c/d/e/.git/hooks',  # deeper than MAX_REPO_DEPTH
+            'repo/node_modules/x/.git/hooks',
+            'repo/.hidden/.git/hooks',
+        ):
+            (self.ws / d).mkdir(parents=True)
+        (self.ws / 'repo/.git/config').write_text('[core]\n')
+        (self.ws / 'repo/.gitattributes').write_text('')
+        (self.ws / 'a/b/c/.envrc').write_text('')
+        found, count = self.masks()
+        self.assertEqual(
+            sorted(found),
+            [
+                'a/b/c/.envrc',
+                'repo/.git/config',
+                'repo/.git/hooks',
+                'repo/.git/info',
+                'repo/.gitattributes',
+                'repo/.vscode',
+            ],
+        )
+        self.assertEqual(count, 6)
+        for rel, ino in found.items():
+            self.assertEqual(ino, (self.ws / rel).lstat().st_ino, rel)
+
+    def test_links_and_special_files_are_never_followed(self):
+        import os
+
+        outside = self.tmp / 'outside'
+        (outside / '.git/hooks').mkdir(parents=True)
+        (outside / 'hooks').mkdir()
+        (self.ws / 'repo/.git').mkdir(parents=True)
+        (self.ws / 'linked').symlink_to(outside)  # a linked directory is not walked
+        (self.ws / 'repo/.git/hooks').symlink_to(outside / 'hooks')  # a linked mask is skipped
+        (self.ws / 'repo/.git/config').symlink_to(outside / 'config')  # dangling too
+        (self.ws / 'repo2').mkdir()
+        (self.ws / 'repo2/.git').symlink_to(outside / '.git')  # a linked .git is skipped
+        os.mkfifo(self.ws / 'repo/.envrc')
+        found, count = self.masks()
+        self.assertEqual((found, count), ({}, 0))
+
+    def test_stops_at_the_limit(self):
+        from unittest.mock import patch
+
+        for i in range(4):
+            (self.ws / f'r{i}/.git/hooks').mkdir(parents=True)
+        with patch.object(anchi_cell, 'MAX_MASKS', 2):
+            found, count = self.masks()
+        self.assertEqual((sorted(found), count), (['r0/.git/hooks', 'r1/.git/hooks'], 2))
+
+
+class CellCleanupTests(unittest.TestCase):
+    """A cell's work directory holds the staged workspace binds; removing it while one is still
+    mounted would remove the Mac's files through it."""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-cells-'))
+        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
+
+    def test_mount_points_below_a_cell_come_deepest_first(self):
+        table = self.tmp / 'mounts'
+        cells = '/run/anchi/cells'
+        table.write_text(
+            '\n'.join(
+                [
+                    f'overlay {cells}/t1/root overlay rw 0 0',
+                    f'virtiofs {cells}/t1/ws/rw virtiofs rw 0 0',
+                    f'virtiofs {cells}/t1/ws/rw/.git/hooks virtiofs ro 0 0',
+                    f'virtiofs {cells}/t1/ws/my\\040space virtiofs ro 0 0',
+                    f'overlay {cells}/t10/root overlay rw 0 0',
+                    f'overlay {cells}/t1-b/root overlay rw 0 0',
+                    'tmpfs /run tmpfs rw 0 0',
+                ]
+            )
+        )
+        points = anchi_cell.mount_points(f'{cells}/t1', table=table)
+        self.assertEqual(points[0], f'{cells}/t1/ws/rw/.git/hooks')
+        self.assertEqual(
+            sorted(points),
+            [f'{cells}/t1/root', f'{cells}/t1/ws/my space', f'{cells}/t1/ws/rw', f'{cells}/t1/ws/rw/.git/hooks'],
+        )
+
+    def test_the_work_directory_stays_while_something_is_mounted_below_it(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        work = self.tmp / 't1'
+        (work / 'ws/rw').mkdir(parents=True)
+        (work / 'ws/rw/file').write_text('the Mac side')
+
+        def egress(request, timeout=15):
+            raise anchi_cell.Failure('EGRESS_UNAVAILABLE')
+
+        with patch.multiple(
+            anchi_cell,
+            CELLS=self.tmp,
+            run=lambda *a, **k: SimpleNamespace(returncode=1, stdout=''),
+            egress=egress,
+            unmount_below=lambda path: False,
+        ):
+            anchi_cell.cleanup('t1')
+        self.assertEqual((work / 'ws/rw/file').read_text(), 'the Mac side')
+        with patch.multiple(
+            anchi_cell,
+            CELLS=self.tmp,
+            run=lambda *a, **k: SimpleNamespace(returncode=1, stdout=''),
+            egress=egress,
+            unmount_below=lambda path: True,
+        ):
+            anchi_cell.cleanup('t1')
+        self.assertFalse(work.exists())

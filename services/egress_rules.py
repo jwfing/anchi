@@ -605,18 +605,73 @@ AWS_READ = re.compile(
     r'^[a-z0-9-]+:(Get|List|Describe|Filter|Search|Lookup|Head|Query|Scan|BatchGet|Select|'
     r'Check|Validate|Estimate|Preview|Simulate|Test|View|Download|StartQuery|StopQuery)'
 )
-GRAPHQL_MUTATION = re.compile(r'^\s*mutation\b')
 REST_CONNECTORS = ('posthog', 'sentry', 'firecrawl', 'figma', 'discord')
 # PostHog runs HogQL and insight queries as POST; they read.
 POSTHOG_QUERY = re.compile(r'^/api/(projects|environments)/[^/]+/query/?$')
+GRAPHQL_MAX_DOCUMENT = 1_000_000
+
+
+def graphql_strip(document):
+    """The document with its comments and string literals blanked, so a `mutation` keyword is
+    found only where GraphQL reads one, and one inside a string or comment is not."""
+    out, i, n = [], 0, len(document)
+    while i < n:
+        c = document[i]
+        if c == '#':
+            while i < n and document[i] not in '\r\n':
+                i += 1
+            continue
+        if document.startswith('"""', i):
+            j = document.find('"""', i + 3)
+            while j != -1 and document[j - 1] == '\\':
+                j = document.find('"""', j + 1)
+            i = n if j == -1 else j + 3
+            out.append(' ')
+            continue
+        if c == '"':
+            i += 1
+            while i < n and document[i] not in '"\n':
+                i += 2 if document[i] == '\\' else 1
+            i += 1
+            out.append(' ')
+            continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
+
+
+def graphql_document(body):
+    """The GraphQL document of a request body, stripped (see graphql_strip), or None when the
+    body is not a readable GraphQL request: the proxy then treats it as a write."""
+    try:
+        request = json.loads(body or b'{}')
+    except ValueError:
+        return None
+    query = request.get('query') if isinstance(request, dict) else None
+    if not isinstance(query, str) or not query.strip() or len(query) > GRAPHQL_MAX_DOCUMENT:
+        return None
+    return graphql_strip(query.lstrip('﻿'))
 
 
 def graphql_mutation(body):
-    try:
-        query = json.loads(body or b'{}').get('query', '')
-    except (ValueError, AttributeError):
-        return True  # unreadable: treat as a write
-    return isinstance(query, str) and bool(GRAPHQL_MUTATION.match(query))
+    """Whether a GraphQL request carries a mutation. GraphQL lets comments, a byte-order mark,
+    commas and other operations precede it (`operationName` picks one of several), so the
+    keyword counts anywhere at the top level of the document, not only as its first token; a
+    document that holds a mutation beside a query is a write whichever operation is named.
+    Unreadable requests count as writes too."""
+    document = graphql_document(body)
+    if document is None:
+        return True
+    depth = 0
+    for match in re.finditer(r'[(){}]|\b(query|mutation|subscription|fragment)\b', document):
+        token = match.group(0)
+        if token in '({':
+            depth += 1
+        elif token in ')}':
+            depth = max(0, depth - 1)
+        elif depth == 0 and token == 'mutation':
+            return True
+    return False
 
 
 def is_write(decision, method, path, body):
@@ -852,13 +907,14 @@ def git_update_subject(old, new, ref):
 
 
 def graphql_mutation_names(body):
-    try:
-        query = json.loads(body or b'{}').get('query', '')
-    except (ValueError, AttributeError):
+    """Field names of a request that carries a mutation (every selection in the document, so a
+    high-risk operation is found wherever it sits), or '' for a request without one."""
+    if not graphql_mutation(body):
         return ''
-    if not isinstance(query, str) or not GRAPHQL_MUTATION.match(query):
-        return ''
-    return ','.join(dict.fromkeys(re.findall(r'\b([a-z][A-Za-z]+)\s*[({]', query)))
+    document = graphql_document(body)
+    if document is None:
+        return 'unreadable'
+    return ','.join(dict.fromkeys(re.findall(r'\b([a-z][A-Za-z]+)\s*[({]', document)))
 
 
 def high_risk(decision, method, path, body, disabled=()):
@@ -878,7 +934,11 @@ def high_risk(decision, method, path, body, disabled=()):
             return 'github-push-unreadable', 'a push whose ref updates cannot be read'
         subjects = [git_update_subject(*u) for u in parsed[0]]
     elif rule.name == 'github-api' and path.split('?', 1)[0] == '/graphql':
-        subjects = [f'graphql-mutation:{graphql_mutation_names(body)}']
+        names = graphql_mutation_names(body)
+        if names == 'unreadable':
+            # A document that cannot be read could hold any mutation, like an unreadable push.
+            return 'github-graphql-unreadable', 'a GraphQL request whose document cannot be read'
+        subjects = [f'graphql-mutation:{names}']
     else:
         subjects = [decision.op or '']
     for entry_id, rule_name, pattern, text in HIGH_RISK:

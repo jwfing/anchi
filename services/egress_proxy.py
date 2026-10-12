@@ -872,13 +872,28 @@ class EgressProxy:
         )
 
     @staticmethod
+    def target_host(req):
+        """The host the request goes to, and whether the client's Host header names the same host.
+
+        mitmproxy's `pretty_host` prefers the Host header, which the cell writes; the connection
+        goes to `host` (the CONNECT target, or the request line's host). Rules, egress lists and
+        the audit must follow the connection, so a request whose Host header names another host
+        is refused rather than decided on the header."""
+        host = str(req.host or '').lower().rstrip('.')
+        named = str(req.pretty_host or host).lower().rstrip('.')
+        return host, named == host
+
+    @staticmethod
     def streams_push(req, cell):
         """Whether a chunked push streams. Not when the agent's GitHub writes ask: those wait
         for the user with the whole body, up to 8 MiB."""
         if 'github' in cell.ask:
             return False
+        host, consistent = EgressProxy.target_host(req)
+        if not consistent:
+            return False
         headers = {k.lower(): v for k, v in req.headers.items()}
-        decision = rules.decide(req.method, req.pretty_host, req.path, headers, b'', cell.grants, cell.extra)
+        decision = rules.decide(req.method, host, req.path, headers, b'', cell.grants, cell.extra)
         return decision.action == 'inject' and decision.rule.name == 'github-git'
 
     def response(self, flow):
@@ -967,7 +982,7 @@ class EgressProxy:
         req = flow.request
         req.headers.pop('proxy-authorization', None)
         headers = {k.lower(): v for k, v in req.headers.items()}
-        host = req.pretty_host
+        host, consistent = self.target_host(req)
         path = req.path.split('?', 1)[0]
         decision = rules.decide(req.method, host, req.path, headers, body, cell.grants, cell.extra)
         entry = {
@@ -983,6 +998,12 @@ class EgressProxy:
         }
         if entry['client_cred'] == 'other':
             self.alert_credential(cell, entry)
+        if not consistent:
+            # The cell asked for one host and named another: no rule, credential or egress
+            # decision can be made on the header, so nothing leaves.
+            entry['decision'] = 'host-mismatch'
+            audit(entry)
+            return 400, b'anchi: the Host header does not name the host the request goes to\n', None
         # Checked again when the connection opens; refusing here keeps the request off the
         # upstream path, so it is never audited as reaching the host.
         if not rules.egress_allowed(cell.egress, host.lower().rstrip('.')):
