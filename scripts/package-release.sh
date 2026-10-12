@@ -34,7 +34,8 @@ cp scripts/up.sh scripts/install-anchi.sh scripts/vault.py scripts/vm-name.sh sc
 cp landing/dist/install.sh "$root/scripts/update.sh"
 # Exclude Python caches even when packaging a developer's checkout.
 find "$root" -type d -name __pycache__ -exec rm -rf {} +
-cp license.md "$root/LICENSE"
+cp LICENSE "$root/LICENSE"
+cp NOTICE "$root/NOTICE"
 printf '{"version":"%s","target":"%s"}\n' "$version" "$target" > "$root/manifest.json"
 cat > "$root/bin/anchi" <<'SH'
 #!/bin/sh

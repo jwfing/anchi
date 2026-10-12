@@ -20,6 +20,14 @@ Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for 
    - Other edits to agent files (prompt, model, skills, triggers) are fine when they are what the user asked for; keep their comments. Edit files rather than the TUI when you work non-interactively.
 5. **Report what Anchi says.** Errors carry a hint (`cell start failed: HERMES_NOT_CONFIGURED — set its OpenAI-compatible endpoint …`); pass it on instead of guessing.
 
+## Where this skill runs
+
+Host-side agents use the `anchi` CLI below. Inside an Anchi task cell, this skill is reference
+material only: the host CLI, vault administration and full team control are not available.
+Use the exposed `anchi_*` MCP tools within the current agent's delegate and task permissions.
+Never install a host CLI or request host files to bypass those limits. Check `anchi --version`
+and `anchi <command> --help` on the host; prefer the skill from the matching release.
+
 ## First run
 
 ```bash
@@ -60,7 +68,14 @@ prompt:
 
 Every field, with examples, is in [references/agent-config.md](references/agent-config.md). The ones that bound what an agent can do: `connectors`, `egress`, `workspaces`, `approvals`, `delegates`, `accounts`, `highRisk`. Unknown fields are errors, which `anchi agents` shows for each file. Skills and delegates an agent names must exist: the builder and the settings panel refuse ones that do not, but an edited file only fails when a task starts (`skill "<id>" is not installed`), so check `anchi skills` and `anchi agents` first.
 
-People usually create agents with the **Agent builder** in the TUI (**^X b**): they describe the agent, the builder proposes a file, and a full-screen dialog shows it before anything is written. **^X s** opens an agent's settings panel (runtime, model, prompt, skills, connectors, workspaces), which also shows a diff before saving.
+For a minimal starter (Unreleased), use `anchi agents create dev --runtime claude-code --preview`
+(or `codex` / `hermes`). Review the YAML, then run without `--preview` to confirm in a terminal;
+use `--yes` non-interactively only when the user authorized creating that reviewed starter.
+No model is called and no connector, workspace or extra egress host is granted. Existing ids
+are refused. **Ctrl+X, N** opens this workflow in the TUI. On an older binary, use a manual file
+with `connectors: []`, `egress: []` and `workspaces: []`.
+
+People can also create agents with the **Agent builder** in the TUI (**^X b**): using a connected runtime, they describe the agent, the builder proposes a file, and a full-screen dialog shows it before anything is written. **^X s** opens an agent's settings panel (runtime, model, prompt, skills, connectors, workspaces), which also shows a diff before saving.
 
 ## Tasks
 
@@ -90,7 +105,7 @@ An agent gets a connector only if its file lists it. Several Google accounts: co
 
 ## Approvals
 
-Writes wait for the user when the agent's file says `approvals: { github: ask }` (per connector), and always for high-risk operations (merging a PR, deleting or reconfiguring a repository, pushing to `main`, AWS deletions, Linear deletions, Discord moderation…) unless `highRisk: { disable: [...] }` exempts them.
+Writes wait for the user when the agent's file says `approvals: { github: ask }` (per connector), and by default for listed high-risk operations (merging a PR, deleting or reconfiguring a repository, pushing to `main`, AWS deletions, Linear deletions, Discord moderation…) unless `highRisk: { disable: [...] }` exempts them.
 
 ```bash
 anchi approvals          # what is waiting, with the task's origin chain
@@ -98,7 +113,7 @@ anchi approve <id>       # the user's decision — see rule 2
 anchi deny <id>
 ```
 
-In the TUI, a held write opens a full-screen dialog (**^X a** to review). Unanswered writes are refused after five minutes, or `approvalTimeoutMinutes` from `~/.anchi/settings.yaml` (connector services: always ten). Raising it is the user's call, like the other settings (rule 3).
+In the TUI, a held write is announced without stealing focus. **^X a** opens review; choose **y** or **n**, then press **Enter** to confirm. An explicit connector `ask` still holds writes even when `highRisk.disable` exempts their pattern. Unanswered writes are refused after five minutes, or `approvalTimeoutMinutes` from `~/.anchi/settings.yaml` (connector services: always ten). Raising it is the user's call, like the other settings (rule 3).
 
 ## Teams, triggers, skills, workspaces
 

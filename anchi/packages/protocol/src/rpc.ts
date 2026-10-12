@@ -624,6 +624,8 @@ export interface Methods {
   'daemon.status': [Record<string, never>, DaemonStatus];
   'daemon.shutdown': [Record<string, never>, null];
   'agents.list': [Record<string, never>, AgentSummary[]];
+  /** Local starter with no connector, workspace or extra egress grants. Confirm via builder.apply. */
+  'agents.createPreview': [{ agentId: string; runtime: RuntimeId }, BuilderProposal];
   'agents.reload': [Record<string, never>, AgentSummary[]];
   /** Current settings and what is available, for an agent or a pending builder proposal. */
   'agents.settings': [{ agentId: string } | { proposalId: string }, AgentSettings];

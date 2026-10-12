@@ -25,8 +25,11 @@ when changing content, and keep the alternate-language metadata and sitemap in s
 
 ## Brand
 
-`dist/logo.svg` is the transparent roof-and-cross mark used in the header and
-footer. `dist/favicon.svg` uses the same geometry on a dark tile. The wordmark
+`dist/logo.svg` is the flat, split-diamond silhouette used in the header and
+footer. Its upper and lower triangles have a 7:3 height ratio, with a clear
+vertical gap between the two halves. `dist/favicon.svg` uses the same geometry
+on a dark tile. The hero animations use the same mark for the trusted gateway. All retain the lime accent,
+without facets or glow. The wordmark
 is live text so it stays crisp and accessible.
 
 ## Terminal design
@@ -36,7 +39,7 @@ followed by security boundaries, workflow, platforms/runtimes, and a TUI
 preview. Keep the platform status and security claims aligned with the root README.
 
 `terminal.js` enhances the static page with keyboard-accessible tabs (teamwork,
-agent builder, approvals) and simulated approval outcomes. The demo never connects
+agent builder, approvals) and simulated approval outcomes (choose y/n or click a choice, then Enter or Confirm). The demo never connects
 to the daemon or executes operations. Without JavaScript, the default session and
 documentation links remain available.
 

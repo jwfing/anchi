@@ -24,6 +24,7 @@ import {
 } from '@anchi/daemon';
 import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow, VmSize } from '@anchi/protocol';
 import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
+import type { RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeLine } from './sanitize.ts';
@@ -292,8 +293,16 @@ program
   .option('-q, --search <words>', 'words in the title or result')
   .option('--since <age>', 'created within, e.g. 24h or 7d')
   .option('-n, --limit <n>', 'how many', '50')
+  .option('--json', 'Print the task array as JSON')
   .action(
-    (opts: { agent?: string; status?: string; search?: string; since?: string; limit: string }) =>
+    (opts: {
+      agent?: string;
+      status?: string;
+      search?: string;
+      since?: string;
+      limit: string;
+      json?: boolean;
+    }) =>
       withClient(async (client) => {
         const age = opts.since ? /^(\d+)([hd])$/.exec(opts.since) : null;
         if (opts.since && !age) fail('--since takes a number of hours or days, such as 24h or 7d');
@@ -307,7 +316,8 @@ program
           since,
           limit: Number(opts.limit) || 50,
         });
-        for (const t of list) console.log(taskLine(t));
+        if (opts.json) console.log(JSON.stringify(list, null, 2));
+        else for (const t of list) console.log(taskLine(t));
       }),
   );
 
@@ -428,9 +438,11 @@ program
 program
   .command('approvals')
   .description('Writes waiting for your approval')
-  .action(() =>
+  .option('--json', 'Print the pending approval array as JSON')
+  .action((opts: { json?: boolean }) =>
     withClient(async (client) => {
       const list = await client.call('approvals.list');
+      if (opts.json) return console.log(JSON.stringify(list, null, 2));
       if (!list.length) return console.log('no writes waiting for approval');
       for (const a of list) {
         console.log(
@@ -467,7 +479,36 @@ program
     console.log(`cancelled ${sanitizeLine(taskId)}`);
   });
 
-const agentsCmd = program.command('agents').description('List agents');
+const agentsCmd = program
+  .command('agents')
+  .description('List or manage agents')
+  .option('--json', 'Print the agent array as JSON');
+agentsCmd
+  .command('create <id>')
+  .description('Review and create a starter agent without a model call')
+  .requiredOption('--runtime <runtime>', 'codex, claude-code or hermes')
+  .option('--preview', 'Print the proposal without saving it')
+  .option('-y, --yes', 'Save the reviewed starter without an interactive prompt')
+  .action((agentId: string, opts: { runtime: RuntimeId; preview?: boolean; yes?: boolean }) =>
+    withClient(async (client) => {
+      const p = await client.call('agents.createPreview', { agentId, runtime: opts.runtime });
+      try {
+        console.log(p.agentYaml);
+        for (const warning of p.warnings) console.log(`Warning: ${sanitizeLine(warning)}`);
+        if (p.errors.length) throw new Error(p.errors.join('; '));
+        if (opts.preview) return;
+        if (!opts.yes && !process.stdin.isTTY)
+          throw new Error('Review with --preview, then use --yes to save without a terminal');
+        if (!opts.yes && (await ask(`Save @${agentId}? [y/N] `)).toLowerCase() !== 'y') return;
+        await client.call('builder.apply', { proposalId: p.id });
+        console.log(
+          `Created @${agentId}. Run: anchi run ${agentId} "Explain what tools you have access to. Do not change anything."`,
+        );
+      } finally {
+        await client.call('builder.discard', { proposalId: p.id });
+      }
+    }),
+  );
 agentsCmd
   .command('rm <id>')
   .description('Delete an agent with its tasks and its files in the VM (workspaces are kept)')
@@ -482,9 +523,11 @@ agentsCmd
       console.log(`@${id} may now reach: ${r.egress.join(', ')} (from its next cell)`);
     }),
   );
-agentsCmd.action(() =>
+agentsCmd.action((opts: { json?: boolean }) =>
   withClient(async (client) => {
-    for (const a of await client.call('agents.list')) {
+    const list = await client.call('agents.list');
+    if (opts.json) return console.log(JSON.stringify(list, null, 2));
+    for (const a of list) {
       const extra = a.error
         ? styleText('red', ` ${sanitizeLine(a.error)}`)
         : ` ${a.runtime ?? '-'} · ${a.connectors.join(',') || '-'} · ${a.image}`;

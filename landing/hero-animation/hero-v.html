@@ -57,7 +57,7 @@ svg{position:absolute;left:0;top:0;overflow:visible}
   <svg id="lines" width="440" height="500"></svg>
   <div id="cells"></div>
   <div id="hub" class="a">
-    <div class="hd"><svg width="16" height="16" viewBox="0 0 18 18" style="position:static"><path d="M2 16 L9 2 L16 16 M9 2 V16 M5.5 10 H12.5" fill="none" stroke="var(--lime)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg><span data-t="gw"></span></div>
+    <div class="hd"><svg width="16" height="16" viewBox="0 0 64 64" style="position:static"><path d="M30 7 9 42 30 57Z M34 7 55 42 34 57Z" fill="var(--lime)"/></svg><span data-t="gw"></span></div>
     <div class="sub" data-t="gwSub"></div>
     <div class="vl"><svg width="9" height="10" viewBox="0 0 9 10" style="position:static"><rect x="1" y="4.5" width="7" height="5" rx="1" fill="var(--amber)"/><path d="M2.5 4.5V3a2 2 0 0 1 4 0v1.5" fill="none" stroke="var(--amber)" stroke-width="1.2"/></svg><span data-t="vault"></span></div>
     <div id="rows"></div>
@@ -84,11 +84,11 @@ CELLS.forEach((c,i)=>{c.cx=c.x+60;document.getElementById('cells').insertAdjacen
  `<div class="a cell" id="cell${i}" style="left:${c.x}px"><span class="tag">0${i+1}</span><div class="r1"><span class="av"><i></i></span>${c.n}</div>
   <div class="r2">${c.a}</div><div class="r3"><span class="car">❯</span>${T.tasks[i]}<span class="cur"></span></div>
   <span class="fk">${KEY}${T.fake}</span><div class="done" id="done${i}">${T.done}</div></div>`)});
-const ROWS=['GITHUB_TOKEN','GMAIL_OAUTH','SLACK_TOKEN','TRELLO_KEY','POSTHOG_KEY','AWS_KEY'];
+const ROWS=['GITHUB_TOKEN','GMAIL_OAUTH','SLACK_TOKEN','LINEAR_KEY','POSTHOG_KEY','AWS_KEY'];
 const ROWSHOW=[0,2,4,5];
 ROWSHOW.forEach(r=>document.getElementById('rows').insertAdjacentHTML('beforeend',
  `<div class="row" id="row${r}"><span style="color:var(--amber);display:flex">${KEY}</span>${ROWS[r]}<span class="st" id="rst${r}"></span></div>`));
-const SVC=[['GitHub','#c9d1c0'],['Gmail','#e8a090'],['Slack','#c6a6e0'],['Trello','#8fb8e6'],['PostHog','#f0c070'],['AWS','#f2a65a']];
+const SVC=[['GitHub','#c9d1c0'],['Gmail','#e8a090'],['Slack','#c6a6e0'],['Linear','#8fb8e6'],['PostHog','#f0c070'],['AWS','#f2a65a']];
 SVC.forEach((s,i)=>{s.cx=14+412/6*(i+.5);document.getElementById('svcs').insertAdjacentHTML('beforeend',
  `<div class="a svc" id="svc${i}" style="left:${s.cx-28}px"><div class="ic" id="ic${i}"><span style="background:${s[1]}">${s[0][0]}</span></div>${s[0]}</div>`)});
 

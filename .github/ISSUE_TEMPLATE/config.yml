@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/jwfing/anchi/security/advisories/new
+    about: Credential exposure, approval bypass, escape and other security boundaries.
+  - name: Setup and troubleshooting
+    url: https://github.com/jwfing/anchi/blob/main/docs/FIRST_TASK.md
+    about: Installation, a first task and common recovery steps.

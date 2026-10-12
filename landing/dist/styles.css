@@ -1233,3 +1233,9 @@ html[lang="zh-CN"] .fleet-hero h1 {
   .hero-install { gap: 10px; padding-left: 12px; }
   .hero-install code { white-space: normal; overflow-wrap: anywhere; }
 }
+
+.faq-list details { border-top: 1px solid var(--line); padding: 20px 0; }
+.faq-list summary { cursor: pointer; font-weight: 600; }
+.faq-list p { max-width: 78ch; line-height: 1.7; color: var(--muted); }
+.faq-list a { color: var(--lime); }
+.approval-actions button[aria-pressed="true"] { outline: 2px solid var(--lime); outline-offset: 2px; }

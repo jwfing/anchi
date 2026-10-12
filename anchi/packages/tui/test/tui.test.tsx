@@ -84,6 +84,7 @@ function fakeClient(
         };
       }
       if (method === 'connectors.set') return { id: 'github', connected: true, account: null };
+      if (method === 'builder.apply') return [agent('dev')];
       return null;
     }),
     on: (name: string, cb: (p: unknown) => void) => {
@@ -828,7 +829,7 @@ describe('App', () => {
     });
     await tick();
     const frame = ui.lastFrame() ?? '';
-    expect(frame).toContain('Builder proposal');
+    expect(frame).toContain('Agent proposal');
     expect(frame).not.toContain(`${ESC}[2J`);
     ui.stdin.write('x');
     await tick();
@@ -1297,7 +1298,7 @@ describe('agent settings panel', () => {
     const ui = render(<App client={client} initialAgents={[agent('builder')]} initialTasks={[]} />);
     await tick();
     emit('proposal', { proposal });
-    expect(await frameWith(ui, '[s] settings')).toContain('Builder proposal');
+    expect(await frameWith(ui, '[s] settings')).toContain('Agent proposal');
     ui.stdin.write('s');
     expect(await frameWith(ui, 'Proposal for @rev: settings')).toContain('review');
     for (const _ of [1, 2, 3, 4, 5, 6, 7]) ui.stdin.write('j');
@@ -2248,6 +2249,72 @@ describe('usability workflows', () => {
 });
 
 describe('onboarding and team state', () => {
+  it.each(['claude-code', 'hermes'] as const)(
+    'creates a first %s agent without a Codex login and requires confirmation',
+    async (runtime) => {
+      const { client: defaults } = fakeClient();
+      const ready = await defaults.call('setup.status');
+      const setup = {
+        ...ready,
+        codex: { ...ready.codex, connected: false },
+        claude: {
+          runtime: 'claude-code' as const,
+          connected: runtime === 'claude-code',
+          kind: 'api_key' as const,
+        },
+        hermes: {
+          runtime: 'hermes' as const,
+          connected: runtime === 'hermes',
+          baseUrl: 'https://example.com/v1',
+          model: 'example',
+        },
+      };
+      expect(welcomeStep(setup, [], [])).toBe('agent');
+      expect(welcomeStep(setup, [agent('dev', { runtime })], [])).toBe('task');
+      expect(welcomeStep(setup, [agent('dev')], [])).toBe('runtime');
+      const p = {
+        id: 'p-starter',
+        agentId: 'dev',
+        kind: 'create',
+        agentYaml: `runtime: ${runtime}\nconnectors: []\negress: []`,
+        agentDiff: '+ starter',
+        imageYaml: null,
+        imageDiff: '',
+        errors: [],
+        warnings: [],
+      };
+      const { client, calls } = fakeClient(
+        {},
+        {
+          'setup.status': () => setup,
+          'agents.createPreview': () => p,
+          'builder.apply': () => [agent('dev', { runtime, connectors: [] })],
+        },
+      );
+      const ui = render(
+        <App client={client} initialView="welcome" initialAgents={[]} initialTasks={[]} />,
+      );
+      expect(await frameWith(ui, 'create a starter agent')).toContain('create a starter agent');
+      ui.stdin.write('\r');
+      expect(await frameWith(ui, `› ${runtime}`)).toContain(`› ${runtime}`);
+      ui.stdin.write('\r');
+      await frameWith(ui, 'Name your starter');
+      ui.stdin.write('dev');
+      await tick();
+      ui.stdin.write('\r');
+      expect(await frameWith(ui, 'Agent proposal')).toContain('Agent proposal');
+      expect(calls.find(([m]) => m === 'agents.createPreview')?.[1]).toEqual({
+        agentId: 'dev',
+        runtime,
+      });
+      expect(calls.some(([m]) => m === 'builder.apply' || m === 'tasks.create')).toBe(false);
+      ui.stdin.write('y');
+      await tick();
+      expect(calls.find(([m]) => m === 'builder.apply')?.[1]).toEqual({ proposalId: p.id });
+      ui.unmount();
+    },
+  );
+
   it('resumes each setup stage and detects expired runtime credentials', async () => {
     const { client } = fakeClient();
     const ready = await client.call('setup.status');

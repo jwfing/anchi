@@ -1,5 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import {
   type AgentPatch,
@@ -11,13 +19,16 @@ import {
   type HomeLayout,
   imageFile,
   imageRecipeSchema,
+  idSchema,
   parseYamlAs,
   patchAgentYaml,
   type ResolvedAgent,
   resolvedAgentSchema,
   type Runtime,
+  runtimeSchema,
 } from '@anchi/core';
 import type { BuilderProposal, SetupStatus } from '@anchi/protocol';
+import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
 import { digest, lineDiff, PATCH_FIELDS, parsePatch, updateAgentFile } from './settings.ts';
@@ -61,7 +72,7 @@ An agent is a YAML file. Fields:
 - approvals: per connector, ask to hold every write for the user's approval (optional), e.g.
   { github: ask }. Without it, writes go straight through; high-risk operations (merging a pull
   request, pushing to main or master, deleting a branch or repository, AWS deletions, ...) wait
-  for the user anyway. Add it only when the user wants to approve the agent's writes.
+  for the user by default unless highRisk exemptions apply. Add it only when the user wants to approve the agent's writes.
 - highRisk: high-risk operations this agent does without approval (optional), by id, e.g.
   { disable: [github-merge] } for an agent whose job is merging pull requests. Ids:
   ${HIGH_RISK_IDS.join(', ')}. Only when the user asks for it. approvals for the same connector
@@ -347,21 +358,59 @@ function mergePatch(base: AgentPatch, over: AgentPatch): AgentPatch {
   return merged;
 }
 
-function writeAtomic(file: string, text: string) {
+function writeAtomic(file: string, text: string, createOnly = false) {
   mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, text, { mode: 0o600 });
-  renameSync(tmp, file);
+  const tmp = `${file}.${randomBytes(8).toString('hex')}.tmp`;
+  writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
+  try {
+    // Linking publishes the complete file atomically and refuses any existing destination.
+    if (createOnly) linkSync(tmp, file);
+    else renameSync(tmp, file);
+  } finally {
+    if (existsSync(tmp)) unlinkSync(tmp);
+  }
 }
 
 /** Holds proposals until the user confirms or discards them. Only `apply` writes files. */
 export class Proposals {
-  private items = new Map<string, { proposal: BuilderProposal; imageId?: string }>();
+  private items = new Map<
+    string,
+    { proposal: BuilderProposal; imageId?: string; createOnly?: boolean }
+  >();
 
   constructor(
     private layout: HomeLayout,
     private refs?: () => ProposalRefs,
   ) {}
+
+  /** A local starter: no model call, connector, workspace, or extra network grant. */
+  starter(params: unknown): BuilderProposal {
+    const { agentId, runtime } = z
+      .strictObject({ agentId: idSchema, runtime: runtimeSchema })
+      .parse(params);
+    if (agentId === BUILDER_ID) throw new Error('"builder" is reserved');
+    if (existsSync(agentFile(this.layout, agentId)))
+      throw new Error(`agent "${agentId}" already exists`);
+    const proposal = this.add({
+      agent: {
+        id: agentId,
+        yaml: [
+          `name: ${JSON.stringify(agentId)}`,
+          `runtime: ${runtime}`,
+          'connectors: []',
+          'egress: []',
+          'workspaces: []',
+          'maxTasks: 1',
+          'prompt:',
+          '  mode: append',
+          '  text: Help with the requested task. Explain missing access instead of trying to bypass it.',
+          '',
+        ].join('\n'),
+      },
+    })!;
+    this.items.set(proposal.id, { proposal, createOnly: true });
+    return proposal;
+  }
 
   add(blocks: ParsedBlocks): BuilderProposal | undefined {
     const proposal = makeProposal(this.layout, blocks, this.refs?.());
@@ -420,6 +469,11 @@ export class Proposals {
     const item = this.items.get(id);
     if (!item) throw new Error(`unknown proposal "${id}"`);
     const { proposal } = item;
+    if (item.createOnly && existsSync(agentFile(this.layout, proposal.agentId))) {
+      throw new Error(
+        `agent "${proposal.agentId}" already exists; create a new proposal with another id`,
+      );
+    }
     if (proposal.kind === 'update') {
       const patch = parsePatch(proposal.patch ?? {});
       const fresh = makeUpdate(this.layout, proposal.agentId, patch, this.refs?.(), {
@@ -457,7 +511,11 @@ export class Proposals {
     if (item.imageId && item.proposal.imageYaml) {
       writeAtomic(imageFile(this.layout, item.imageId), item.proposal.imageYaml);
     }
-    writeAtomic(agentFile(this.layout, item.proposal.agentId), item.proposal.agentYaml);
+    writeAtomic(
+      agentFile(this.layout, item.proposal.agentId),
+      item.proposal.agentYaml,
+      item.createOnly,
+    );
     this.items.delete(id);
     return { agentId: item.proposal.agentId, imageId: item.imageId };
   }

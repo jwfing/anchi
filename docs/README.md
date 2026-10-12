@@ -7,11 +7,15 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | Document | Purpose |
 |---|---|
 | [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault, connect a runtime, and get a shell in the VM |
+| [First task](FIRST_TASK.md) | One connected runtime, one starter, one successful task; no business account needed |
+| [CLI reference](../skills/anchi/references/cli.md) | Every command and flag, generated from the implementation |
+| [Troubleshooting](../skills/anchi/references/troubleshooting.md) | Setup and runtime errors, recovery and limitations |
+| [Roadmap](ROADMAP.md) | Current priorities, preview status and contribution routes |
 | [Agent team](AGENT_TEAM.md) | Connect accounts; create, configure and delete agents; delegation, approvals, egress, triggers, skills, workspaces and tasks |
 | [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, and Slack operations, scopes, and authorization |
 | [Gmail setup](GMAIL_SETUP.md) | Create the Google OAuth client for Gmail and Drive |
-| [Anchi skill](../skills/README.md) | A skill that lets Claude Code, Codex or an Anchi agent operate Anchi for you |
+| [Anchi skill](../skills/README.md) | A skill for a host-side agent to operate Anchi, with separate limits for agents inside cells |
 
 ## Security and architecture
 
@@ -35,4 +39,4 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | [Contributing](../CONTRIBUTING.md) | Development commands, checks, and documentation conventions |
 | [Release process](engineering/RELEASE.md) | Versioning and release gates |
 | [Changelog](../CHANGELOG.md) | Project changes |
-| [License](../license.md) | Apache License 2.0 |
+| [License](../LICENSE) | Apache License 2.0 |
