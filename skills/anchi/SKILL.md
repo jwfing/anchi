@@ -98,7 +98,7 @@ anchi approve <id>       # the user's decision — see rule 2
 anchi deny <id>
 ```
 
-In the TUI, a held write opens a full-screen dialog (**^X a** to review). Unanswered writes are refused after five minutes (connector services: ten).
+In the TUI, a held write opens a full-screen dialog (**^X a** to review). Unanswered writes are refused after five minutes, or `approvalTimeoutMinutes` from `~/.anchi/settings.yaml` (connector services: always ten). Raising it is the user's call, like the other settings (rule 3).
 
 ## Teams, triggers, skills, workspaces
 
