@@ -755,6 +755,9 @@ export class Hub extends EventEmitter<HubEvents> {
     const existing = this.cells.get(task.id);
     if (existing && !existing.session.closed && existing.key === key) {
       clearTimeout(existing.idle);
+      // `idle` means "has a live idle timer": a stale handle would let the room-making loop
+      // and places() take this cell as idle and close it mid-turn.
+      existing.idle = undefined;
       return existing;
     }
     if (existing) await this.closeCell(task.id, 'agent settings changed');
