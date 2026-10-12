@@ -2,6 +2,7 @@
 import type {
   AgentSettings,
   AgentSummary,
+  Approval,
   Notifications,
   RuntimeEvent,
   StoredEvent,
@@ -555,8 +556,8 @@ describe('App', () => {
     const frame = ui.lastFrame() ?? '';
     for (const header of ['CONFIGURE', 'AGENTS', 'TASKS']) expect(frame).toContain(header);
     expect(frame).toContain('@dev fix the bug');
-    // Rows: title, CONFIGURE, 5 settings, AGENTS, builder, dev, TASKS, then the tasks.
-    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 14 });
+    // Rows: title, HOME, 3 home items, CONFIGURE, 5 settings, AGENTS, builder, dev, TASKS, then the tasks.
+    mouse!({ kind: 'press', button: 0, x: 5, y: 2 + 15 });
     await tick();
     expect(ui.lastFrame()).toContain('t-a000000002 · @dev · done');
     expect(ui.lastFrame()).toContain('https://github.com/o/r/pull/9');
@@ -2474,5 +2475,125 @@ describe("a task view's history", () => {
     const history = await frameWith(ui2, '› one shot');
     expect(history).not.toContain('shows the full transcript');
     ui2.unmount();
+  });
+});
+
+describe('the Approvals view', () => {
+  const held = (
+    over: Partial<Approval> & { id: string; agent: string; task: string },
+  ): Approval => ({
+    kind: 'proxy',
+    connector: 'github',
+    operation: 'POST /o/r.git/git-receive-pack',
+    host: 'github.com',
+    summary: `git push: refs/heads/fix${ESC}]52;c;AAAA\u0007`,
+    createdAt: Date.now(),
+    timeout: 300,
+    reason: 'high-risk: push to main or master',
+    origin: 'you → @dev (t-a000000001)',
+    ...over,
+  });
+
+  it('lists the writes waiting for a decision and decides the chosen one with y or n, then Enter', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev'), agent('ops')]}
+        initialTasks={[
+          task('t-a000000001', 'dev', { status: 'running', createdAt: 2 }),
+          task('t-a000000002', 'ops', { status: 'running', createdAt: 1 }),
+        ]}
+      />,
+    );
+    await tick();
+    ui.stdin.write('\u0018'); // ^X 5
+    await tick();
+    ui.stdin.write('5');
+    let frame = await frameWith(ui, 'No write is waiting for your decision.');
+    expect(frame).toContain('· Approvals');
+    const push = held({ id: 'a'.repeat(16), agent: 'dev', task: 't-a000000001' });
+    const issue = held({
+      id: 'b'.repeat(16),
+      agent: 'ops',
+      task: 't-a000000002',
+      connector: 'linear',
+      operation: 'POST /graphql',
+      host: 'api.linear.app',
+      summary: '{"query":"mutation { issueDelete(id: 1) { success } }"}',
+      reason: 'the agent asks for every Linear write',
+      origin: 'poll → @ops (t-a000000002)',
+    });
+    emit('approvals', { approvals: [push, issue] });
+    frame = await frameWith(ui, '2 writes waiting for your decision');
+    expect(frame).toContain('⏸ Approvals 2');
+    expect(frame).toContain('› @dev · github · POST /o/r.git/git-receive-pack');
+    expect(frame).toContain('  @ops · linear · POST /graphql');
+    expect(frame).toContain('why        high-risk: push to main or master');
+    expect(frame).toContain('started by you → @dev (t-a000000001)');
+    expect(frame).toContain('git push: refs/heads/fix');
+    expect(frame).not.toContain(']52;');
+    expect(frame).toContain('y select approve · n select deny · Enter confirm');
+    // Enter alone decides nothing.
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.some(([m]) => m === 'approvals.decide')).toBe(false);
+    ui.stdin.write('y');
+    frame = await frameWith(ui, 'Approve selected · Enter confirm');
+    expect(frame).toMatch(/git-receive-pack · \d+ s → approve/);
+    // Moving to another write drops the choice.
+    ui.stdin.write('j');
+    frame = await frameWith(ui, '› @ops · linear · POST /graphql');
+    expect(frame).not.toContain('selected · Enter confirm');
+    expect(frame).toContain('why        the agent asks for every Linear write');
+    expect(frame).toContain('issueDelete');
+    ui.stdin.write('n');
+    await frameWith(ui, 'Deny selected · Enter confirm');
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({
+      id: 'b'.repeat(16),
+      allow: false,
+    });
+    emit('approvals', { approvals: [push] });
+    frame = await frameWith(ui, '1 write waiting for your decision');
+    expect(frame).toContain('› @dev · github');
+    expect(frame).toContain('⏸ Approvals 1');
+    // a: the full dialog for the chosen write; Esc returns to the list.
+    ui.stdin.write('a');
+    await frameWith(ui, 'Approve a write by @dev?');
+    ui.stdin.write('\u001b');
+    await frameWith(ui, '1 write waiting for your decision');
+    // o: the write's task.
+    ui.stdin.write('o');
+    frame = await frameWith(ui, 't-a000000001 · @dev · running');
+    expect(frame).toContain('t-a000000001 · @dev · running');
+    ui.unmount();
+  }, 20_000);
+
+  it('keeps y and n out of the chat and opens the chosen write from the Team overview too', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    emit('approvals', {
+      approvals: [held({ id: 'c'.repeat(16), agent: 'dev', task: 't-a000000001' })],
+    });
+    await frameWith(ui, '1 write waiting for approval (^X a)');
+    ui.stdin.write('y\r');
+    await tick();
+    expect(calls.some(([m]) => m === 'approvals.decide')).toBe(false);
+    ui.stdin.write('\u0018');
+    await tick();
+    ui.stdin.write('5');
+    await frameWith(ui, '1 write waiting for your decision');
+    ui.stdin.write('y');
+    await frameWith(ui, 'Approve selected');
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({
+      id: 'c'.repeat(16),
+      allow: true,
+    });
+    ui.unmount();
   });
 });

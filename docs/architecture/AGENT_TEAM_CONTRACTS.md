@@ -59,7 +59,7 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
   - `connectors.set` carries a secret. The daemon writes it to the guest administration command's stdin and never stores or logs it. It then verifies the connector, records the account it reports, and removes a credential the service refuses.
 - **Phase 2:**
   - `tasks.search` (agent, status, words, time), `tasks.tree`, `tasks.delete`;
-  - `approvals.list`, `approvals.decide` (called only after a full-screen dialog);
+  - `approvals.list`, `approvals.decide` (called only after the approval dialog or the Approvals view showed the write);
   - `triggers.list`;
   - `skills.list`, `skills.add` (local directory or GitHub URL; a collection without a top-level `SKILL.md` adds each skill and returns `{added, skipped}`), `skills.remove`, `skills.checkUpdate` (what the latest commit of the URL changes, nothing written), `skills.update` (installs the commit the user reviewed);
   - `setup.importClaude`, `setup.importHermes` (`baseUrl`, `apiKey`, `model`; the key on stdin to `hermes_admin.py`); `services.setToken`, `services.disconnect`, `services.setMode`, `services.googleClient`, `services.googleLogin`.

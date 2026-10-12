@@ -11,6 +11,7 @@ export const CONTEXTS = [
   'global',
   'welcome',
   'team',
+  'approvals',
   'sidebar',
   'chat',
   'task',
@@ -31,6 +32,14 @@ interface ActionInfo {
 export const ACTIONS = {
   'nav:welcome': { title: 'Getting started', contexts: ['global'] },
   'nav:team': { title: 'Team overview', contexts: ['global'] },
+  'nav:approvals': {
+    title: 'Approvals: every write waiting for your decision',
+    contexts: ['global'],
+  },
+  'approvals:approve': { title: 'Select approve for the chosen write', contexts: ['approvals'] },
+  'approvals:deny': { title: 'Select deny for the chosen write', contexts: ['approvals'] },
+  'approvals:confirm': { title: 'Confirm the selected decision', contexts: ['approvals'] },
+  'approvals:task': { title: "Open the chosen write's task", contexts: ['approvals'] },
   'welcome:next': { title: 'Continue setup / start the first task', contexts: ['welcome'] },
   'team:open': { title: 'Open agent', contexts: ['team'] },
   'problem:open': { title: 'Resolve the latest problem', contexts: ['global'] },
@@ -169,6 +178,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
   global: {
     '<leader> 0': 'nav:welcome',
     '<leader> 4': 'nav:team',
+    '<leader> 5': 'nav:approvals',
     '<leader> !': 'problem:open',
     '<leader> L': 'setup:logs',
     '<leader> h': 'task:history',
@@ -212,6 +222,16 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     r: 'setup:refresh',
   },
   team: { ...VIEW, ...BACK, ...LIST, enter: 'team:open', a: 'approvals:open' },
+  approvals: {
+    ...VIEW,
+    ...BACK,
+    ...LIST,
+    y: 'approvals:approve',
+    n: 'approvals:deny',
+    enter: 'approvals:confirm',
+    a: 'approvals:open',
+    o: 'approvals:task',
+  },
   sidebar: {
     ...VIEW,
     up: 'nav:prev',

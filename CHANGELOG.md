@@ -4,9 +4,16 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- An **Approvals** view in the sidebar (**^X 5**) lists every write waiting for your decision, with the same details as the approval dialog: ↑ ↓ choose, y or n select, Enter confirms, a opens the full dialog, o opens the write's task. The sidebar item shows how many are waiting.
+
 ### Changed
 
 - A task's view keeps showing the full transcript after a reply when you continued the task from that view (more than one message of yours); before, the view folded to the last result as soon as the turn ended. The result view ends with the key that shows the transcript (`^X h` by default).
+
+### Fixed
+
 - A cell reused for a follow-up turn no longer counts as idle while that turn runs: before, under cell pressure (`maxCells` reached) the daemon could close it as the "longest-idle" cell to make room, killing the running turn (or a turn waiting on a delegation) and failing the task. A reused cell whose turn has finished still makes room as before.
 - A guest command that exits before reading its stdin (VM stopped, guest refuses early, or killed on timeout) no longer crashes the daemon with an unhandled EPIPE; the failure surfaces as the command's result. An agent whose assigned skills exceed 8 MB as a bundle — the most the guest accepts on stdin — now fails the task with a clear message instead of hitting that crash on every start.
 
