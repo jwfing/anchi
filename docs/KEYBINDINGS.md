@@ -8,7 +8,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 
 **^X Space** (or **^X p**) opens the command palette: type to filter every command of the current view, **Enter** runs it. **?** in views without a text input, or **^X ?** anywhere, lists the keys of the current view.
 
-**Create a starter:** **Ctrl+X, N** (uppercase N) chooses a runtime and agent id without a model call, then opens YAML review. This is separate from **Ctrl+X, n**, which starts a task. Available in Unreleased.
+**Create a starter:** **Ctrl+X, N** (uppercase N) chooses a runtime and agent id without a model call, then opens YAML review. This is separate from **Ctrl+X, n**, which starts a task.
 
 ## Defaults
 
@@ -23,6 +23,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X !, ^X L | Persistent problem details, installation log |
 | ^X h | Toggle task result and history |
 | ^X b | Agent builder |
+| ^X N | Create a starter agent (no model call) |
 | ^X n | New task (a new session) for the agent shown |
 | ^X c | Cancel the running task after confirmation |
 | ^X r | Run a failed or cancelled task again (continue its session, or start over) |

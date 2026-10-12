@@ -68,7 +68,7 @@ prompt:
 
 Every field, with examples, is in [references/agent-config.md](references/agent-config.md). The ones that bound what an agent can do: `connectors`, `egress`, `workspaces`, `approvals`, `delegates`, `accounts`, `highRisk`. Unknown fields are errors, which `anchi agents` shows for each file. Skills and delegates an agent names must exist: the builder and the settings panel refuse ones that do not, but an edited file only fails when a task starts (`skill "<id>" is not installed`), so check `anchi skills` and `anchi agents` first.
 
-For a minimal starter (Unreleased), use `anchi agents create dev --runtime claude-code --preview`
+For a minimal starter, use `anchi agents create dev --runtime claude-code --preview`
 (or `codex` / `hermes`). Review the YAML, then run without `--preview` to confirm in a terminal;
 use `--yes` non-interactively only when the user authorized creating that reviewed starter.
 No model is called and no connector, workspace or extra egress host is granted. Existing ids

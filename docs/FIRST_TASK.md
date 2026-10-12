@@ -4,10 +4,6 @@ Goal: run one task with one runtime, without connecting a business account or sh
 Complete [installation, VM setup, vault unlock and one runtime connection](GETTING_STARTED.md#set-up-the-vm-and-your-first-agent)
 first. The task consumes model quota or API credit; creating the starter does not.
 
-The starter command is **unreleased**. Until the next binary release, use a source checkout and
-replace `anchi` with `scripts/anchi`, or use the [manual agent file](AGENT_TEAM.md#write-an-agent-file)
-on a released binary.
-
 ## Create and inspect the agent
 
 Use the runtime you connected (`codex`, `claude-code` or `hermes`):
@@ -43,7 +39,7 @@ anchi tasks --agent dev --json
 ```
 
 `tasks --json`, `agents --json` and `approvals --json` emit arrays, including `[]` for no results.
-These list flags are unreleased with the starter command. `run`, `send` and `retry` stream text
+`run`, `send` and `retry` stream text
 and return a nonzero exit code when the turn does not finish successfully.
 
 ## If it does not finish

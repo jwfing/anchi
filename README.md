@@ -60,11 +60,6 @@ you can choose the size. Initial VM setup can take up to half an hour; the first
 runtime also builds its image, which can take several minutes.
 Model usage consumes your subscription quota or API credit.
 
-> The no-model starter workflow below, builder runtime auto-selection and JSON list flags are **unreleased**. Until the next
-> binary release, [run from source](docs/GETTING_STARTED.md#install-from-source), using
-> `scripts/anchi` in place of `anchi`. Released binaries can use a
-> [manual agent file](docs/AGENT_TEAM.md#write-an-agent-file) with any connected runtime.
-
 After setup, create a starter with the runtime you connected; creation itself does not call a model:
 
 ```bash

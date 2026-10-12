@@ -216,10 +216,6 @@ limactl --version
 These steps are the same for both installation methods and both platforms. From a source
 checkout, replace `anchi` with `scripts/anchi`.
 
-> Starter creation (`anchi agents create`, **Ctrl+X, N**) is unreleased. Use the source
-> checkout until the next binary release. On an older binary, create a
-> [manual agent file](AGENT_TEAM.md#write-an-agent-file) after connecting your runtime.
-
 ### Guided setup in the TUI
 
 Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**, which detects

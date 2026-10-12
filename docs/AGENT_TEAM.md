@@ -103,7 +103,6 @@ The proxy denies credential minting (GitHub keys and installation tokens, AWS ST
 
 ### Create a starter
 
-**Unreleased:** from a source checkout, use `scripts/anchi` until the next binary release.
 `anchi agents create dev --runtime claude-code` previews a minimal agent and asks before saving.
 Choose `codex`, `claude-code` or `hermes`; no Codex login or model call is needed for creation.
 `--preview` prints the YAML without saving; `--yes` saves without prompting after you review it.

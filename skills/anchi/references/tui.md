@@ -27,7 +27,7 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 | ^N, ^P | Next / previous sidebar item |
 | ^X n | New task for the agent shown |
 | ^X s | The agent's settings panel (Space selects, Enter reviews the diff) |
-| ^X N | Create a starter agent without a model call (Unreleased); choose runtime/id, then review YAML |
+| ^X N | Create a starter agent without a model call; choose runtime/id, then review YAML |
 | ^X a | Review a write waiting for approval (y / n, Enter confirms) |
 | ^X c, ^X r | Cancel the task (after confirmation); run a failed or cancelled task again |
 | ^X l | External access of the task shown; e allows a refused host after confirmation |

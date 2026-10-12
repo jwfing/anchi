@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.3.2 — 2026-10-12
+
+Agents without a Codex login: the builder runs on any connected runtime and a starter agent can be created without a model call. Anchi now notices VM components installed by another version, and the approval timeout is configurable. After updating, run `anchi setup install` once: it gives the VM the guest command and proxy settings this release uses; until then Getting started reports the VM's components as outdated and the proxy keeps the five-minute approval timeout.
+
 ### Added
 
 - Create an agent without a Codex login or model call: `anchi agents create <id> --runtime codex|claude-code|hermes` previews a starter with no connectors, shared folders or extra egress hosts. `--preview` inspects without saving; `--yes` saves non-interactively. Getting started and **Ctrl+X, N** offer the same workflow. Creation refuses existing ids, including files that appear after review.
