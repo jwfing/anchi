@@ -69,7 +69,7 @@ import {
 import { type Line, type Tone, transcriptLines, truncate, wrap } from './lines.ts';
 import type { MouseEvent } from './mouse.ts';
 import { completePath, type PathKind } from './pathcomplete.ts';
-import { WelcomeView, TeamView } from './UsabilityViews.tsx';
+import { ApprovalsView, TeamView, WelcomeView } from './UsabilityViews.tsx';
 import {
   agentTaskLines,
   welcomeStep,
@@ -85,12 +85,13 @@ import {
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
 const STARTER_RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
-const HOME = ['welcome', 'team'] as const;
+const HOME = ['welcome', 'team', 'approvals'] as const;
 const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
 type ConfigItem = (typeof CONFIG)[number] | (typeof HOME)[number];
 const CONFIG_LABEL: Record<ConfigItem, string> = {
   welcome: 'Getting started',
   team: 'Team overview',
+  approvals: 'Approvals',
   runtimes: 'Runtimes',
   skills: 'Skills',
   connectors: 'Connectors',
@@ -378,6 +379,11 @@ export function App({
   const [scrolls, setScrolls] = useState<Record<string, number>>({});
   const [history, setHistory] = useState<Record<string, boolean>>({});
   const [teamCursor, setTeamCursor] = useState(0);
+  const [approvalCursor, setApprovalCursor] = useState(0);
+  /** y or n pressed in the Approvals view for one write; Enter confirms it. */
+  const [approvalPick, setApprovalPick] = useState<{ id: string; allow: boolean } | null>(null);
+  /** Ticks every second while the Approvals view counts down its writes' timeouts. */
+  const [clock, setClock] = useState(() => Date.now());
   const sending = useRef(new Set<string>());
   const [connectorCursor, setConnectorCursor] = useState(0);
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
@@ -512,6 +518,16 @@ export function App({
     if (modal?.kind === 'approval' && !approvals.some((a) => a.id === modal.approval.id))
       setModal(null);
   }, [approvals, modal]);
+  // The Approvals view: the chosen row stays in range, and a choice dies with its write.
+  useEffect(() => {
+    setApprovalCursor((c) => Math.min(c, Math.max(0, approvals.length - 1)));
+    setApprovalPick((p) => (p && approvals.some((a) => a.id === p.id) ? p : null));
+  }, [approvals]);
+  useEffect(() => {
+    if (current !== 'approvals' || !approvals.length) return;
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [current, approvals.length]);
   useEffect(() => {
     void client
       .call('approvals.list')
@@ -1145,6 +1161,7 @@ export function App({
   /** Runs a bound action in the current view. */
   const run = (action: ActionId): void => {
     const running = (t?: TaskRow) => t && (t.status === 'running' || t.status === 'queued');
+    const chosenApproval = approvals[Math.min(approvalCursor, Math.max(0, approvals.length - 1))];
     switch (action) {
       case 'nav:welcome':
         setSelected('welcome');
@@ -1152,6 +1169,10 @@ export function App({
         return;
       case 'nav:team':
         setSelected('team');
+        setFocus('main');
+        return;
+      case 'nav:approvals':
+        setSelected('approvals');
         setFocus('main');
         return;
       case 'welcome:next': {
@@ -1340,7 +1361,33 @@ export function App({
       }
       case 'approvals:open':
         if (!approvals.length) return say('no write is waiting for approval');
-        return setModal({ kind: 'approval', approval: approvals[0]! });
+        return setModal({
+          kind: 'approval',
+          approval: (current === 'approvals' ? chosenApproval : undefined) ?? approvals[0]!,
+        });
+      case 'approvals:approve':
+      case 'approvals:deny':
+        if (!chosenApproval) return say('no write is waiting for approval');
+        return setApprovalPick({ id: chosenApproval.id, allow: action === 'approvals:approve' });
+      case 'approvals:confirm': {
+        if (!chosenApproval) return say('no write is waiting for approval');
+        if (approvalPick?.id !== chosenApproval.id)
+          return say('select y (approve) or n (deny) first, then Enter');
+        const { allow } = approvalPick;
+        const { id, operation } = chosenApproval;
+        setApprovalPick(null);
+        return void client
+          .call('approvals.decide', { id, allow })
+          .then(() => say(`${allow ? 'approved' : 'denied'}: ${sanitizeLine(operation)}`))
+          .catch(reportProblem);
+      }
+      case 'approvals:task':
+        if (!chosenApproval) return say('no write is waiting for approval');
+        if (!tasks.some((t) => t.id === chosenApproval.task))
+          return say(`${chosenApproval.task} is not in the task list`);
+        setSelected(TASK_ITEM + chosenApproval.task);
+        setFocus('main');
+        return;
       case 'builder:proposal':
         if (!proposals.length) return say('no builder proposal is waiting');
         return setModal({ kind: 'proposal', proposal: proposals.at(-1)!, scroll: 0 });
@@ -1368,10 +1415,18 @@ export function App({
       case 'chat:editor':
         return editDraft();
       case 'list:up':
+        if (current === 'approvals') {
+          setApprovalPick(null);
+          return setApprovalCursor((c) => Math.max(0, c - 1));
+        }
         if (current === 'team') return setTeamCursor((c) => Math.max(0, c - 1));
         if (current === 'skills') return setSkillCursor((c) => Math.max(0, c - 1));
         return setConnectorCursor((c) => Math.max(0, c - 1));
       case 'list:down':
+        if (current === 'approvals') {
+          setApprovalPick(null);
+          return setApprovalCursor((c) => Math.min(Math.max(0, approvals.length - 1), c + 1));
+        }
         if (current === 'team') return setTeamCursor((c) => Math.min(userAgents.length - 1, c + 1));
         if (current === 'skills')
           return setSkillCursor((c) => Math.min((skills ?? []).length - 1, c + 1));
@@ -2140,79 +2195,88 @@ export function App({
           ['setup:hermes', 'Hermes'],
           ['setup:logs', 'logs'],
         ]
-      : context === 'team'
+      : context === 'approvals'
         ? [
-            ['team:open', 'open'],
+            ['approvals:approve', 'select approve'],
+            ['approvals:deny', 'select deny'],
+            ['approvals:confirm', 'confirm'],
             ['list:down', 'choose'],
-            ['approvals:open', 'review approvals'],
+            ['approvals:open', 'full dialog'],
+            ['approvals:task', 'open the task'],
           ]
-        : context === 'sidebar'
+        : context === 'team'
           ? [
-              ['focus:main', 'open'],
-              ['tasks:pageNext', 'task page'],
-              ['tasks:filter', 'filter'],
-              ['focus:toggle', 'pane'],
+              ['team:open', 'open'],
+              ['list:down', 'choose'],
+              ['approvals:open', 'review approvals'],
             ]
-          : context === 'task'
+          : context === 'sidebar'
             ? [
-                ['chat:submit', 'reply'],
-                ['task:history', showHistory ? 'result' : 'history'],
-                ['task:access', 'access'],
-                ...((detail?.status === 'failed' || detail?.status === 'cancelled'
-                  ? [['task:retry', 'retry']]
-                  : []) as [ActionId, string][]),
-                busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
-                ['task:new', `new task for @${detail?.agentId}`],
-                ['chat:escape', 'sidebar'],
+                ['focus:main', 'open'],
+                ['tasks:pageNext', 'task page'],
+                ['tasks:filter', 'filter'],
+                ['focus:toggle', 'pane'],
               ]
-            : context === 'chat'
+            : context === 'task'
               ? [
-                  ['chat:submit', chatMode ? 'send' : 'start task'],
-                  ['chat:newline', 'newline'],
-                  ...((chatMode ? [['task:new', 'new task']] : []) as [ActionId, string][]),
+                  ['chat:submit', 'reply'],
+                  ['task:history', showHistory ? 'result' : 'history'],
+                  ['task:access', 'access'],
+                  ...((detail?.status === 'failed' || detail?.status === 'cancelled'
+                    ? [['task:retry', 'retry']]
+                    : []) as [ActionId, string][]),
+                  busy ? ['task:cancel', 'cancel'] : ['task:delete', 'delete'],
+                  ['task:new', `new task for @${detail?.agentId}`],
                   ['chat:escape', 'sidebar'],
-                  ['agent:settings', 'settings'],
-                  ['chat:editor', 'editor'],
-                  ['transcript:tools', 'tools'],
                 ]
-              : context === 'connectors'
+              : context === 'chat'
                 ? [
-                    ['connectors:connect', 'connect'],
-                    ['connectors:ghImport', 'github from gh'],
-                    ['connectors:awsProfile', 'aws profile'],
-                    ['connectors:mode', 'service writes'],
-                    ['connectors:disconnect', 'disconnect'],
-                    ['connectors:account', 'another Google account'],
-                    ['connectors:googleClient', 'Google client'],
+                    ['chat:submit', chatMode ? 'send' : 'start task'],
+                    ['chat:newline', 'newline'],
+                    ...((chatMode ? [['task:new', 'new task']] : []) as [ActionId, string][]),
+                    ['chat:escape', 'sidebar'],
+                    ['agent:settings', 'settings'],
+                    ['chat:editor', 'editor'],
+                    ['transcript:tools', 'tools'],
                   ]
-                : context === 'usage'
+                : context === 'connectors'
                   ? [
-                      ['usage:period', PERIODS[usagePeriod]!.label],
-                      ['usage:group', `by ${GROUPS[usageGroup]}`],
-                      ['usage:refresh', 'refresh'],
+                      ['connectors:connect', 'connect'],
+                      ['connectors:ghImport', 'github from gh'],
+                      ['connectors:awsProfile', 'aws profile'],
+                      ['connectors:mode', 'service writes'],
+                      ['connectors:disconnect', 'disconnect'],
+                      ['connectors:account', 'another Google account'],
+                      ['connectors:googleClient', 'Google client'],
                     ]
-                  : context === 'access'
+                  : context === 'usage'
                     ? [
-                        ['access:period', PERIODS[accessPeriod]!.label],
-                        ['access:refresh', 'refresh'],
+                        ['usage:period', PERIODS[usagePeriod]!.label],
+                        ['usage:group', `by ${GROUPS[usageGroup]}`],
+                        ['usage:refresh', 'refresh'],
                       ]
-                    : context === 'skills'
+                    : context === 'access'
                       ? [
-                          ['list:down', 'choose'],
-                          ['skills:add', 'add'],
-                          ['skills:update', 'update'],
-                          ['skills:remove', 'remove'],
-                          ['focus:sidebar', 'sidebar'],
+                          ['access:period', PERIODS[accessPeriod]!.label],
+                          ['access:refresh', 'refresh'],
                         ]
-                      : [
-                          ['setup:vmStart', 'start VM'],
-                          ['setup:install', 'install'],
-                          ['setup:unlock', 'unlock'],
-                          ['setup:workspaces', 'workspaces'],
-                          ['setup:codex', 'Codex'],
-                          ['setup:claude', 'Claude'],
-                          ['setup:hermes', 'Hermes'],
-                        ];
+                      : context === 'skills'
+                        ? [
+                            ['list:down', 'choose'],
+                            ['skills:add', 'add'],
+                            ['skills:update', 'update'],
+                            ['skills:remove', 'remove'],
+                            ['focus:sidebar', 'sidebar'],
+                          ]
+                        : [
+                            ['setup:vmStart', 'start VM'],
+                            ['setup:install', 'install'],
+                            ['setup:unlock', 'unlock'],
+                            ['setup:workspaces', 'workspaces'],
+                            ['setup:codex', 'Codex'],
+                            ['setup:claude', 'Claude'],
+                            ['setup:hermes', 'Hermes'],
+                          ];
   const status = pending.length
     ? `${keyLabel(pending.join(' '))} …  (Esc cancels)`
     : (problem ? `! ${hint('problem:open', 'resolve')} · ${sanitizeLine(problem.message)}` : '') ||
@@ -2246,6 +2310,7 @@ export function App({
             current={current}
             height={bodyHeight}
             frame={frame}
+            pending={approvals.length}
           />
         ) : null}
         <Box
@@ -2276,6 +2341,19 @@ export function App({
                   : ''
               }
               nextKey={hint('welcome:next', 'continue')}
+            />
+          ) : current === 'approvals' ? (
+            <ApprovalsView
+              approvals={approvals}
+              cursor={Math.min(approvalCursor, Math.max(0, approvals.length - 1))}
+              pick={approvalPick}
+              now={clock}
+              width={textWidth}
+              height={bodyHeight - 4}
+              keys={{
+                select: `${hint('approvals:approve', 'select approve')} · ${hint('approvals:deny', 'select deny')} · ${hint('approvals:confirm', 'confirm')}`,
+                confirm: hint('approvals:confirm', 'confirm'),
+              }}
             />
           ) : current === 'team' ? (
             <TeamView
@@ -2504,12 +2582,17 @@ function Sidebar(props: {
   current: string;
   height: number;
   frame: number;
+  /** Writes waiting for approval, shown on the Approvals item. */
+  pending: number;
 }) {
-  const { focused, rows, agents, tasks, current, height, frame } = props;
+  const { focused, rows, agents, tasks, current, height, frame, pending } = props;
   const inner = SIDEBAR_WIDTH - 4;
   const spin = SPINNER[frame % SPINNER.length]!;
   const running = (id: string) => tasks.some((t) => t.agentId === id && t.status === 'running');
   const item = (key: string) => {
+    if (key === 'approvals' && pending) {
+      return { glyph: '⏸', color: 'yellow', text: `${CONFIG_LABEL.approvals} ${pending}` };
+    }
     if (([...HOME, ...CONFIG] as readonly string[]).includes(key)) {
       return { glyph: '·', color: undefined, text: CONFIG_LABEL[key as ConfigItem] };
     }
@@ -2903,6 +2986,7 @@ const CONTEXT_LABEL: Record<Context, string> = {
   global: 'Everywhere',
   welcome: 'Getting started',
   team: 'Team overview',
+  approvals: 'Approvals',
   sidebar: 'Sidebar',
   chat: 'Agent view (each message starts a task; the builder continues one)',
   task: 'Task (the input replies to the task)',

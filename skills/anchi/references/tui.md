@@ -10,6 +10,7 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 |---|---|---|
 | Getting started | ^X 0 | Prerequisites, VM, vault and a runtime (i Codex, c Claude Code, h Hermes; any one), then the builder and a first task; Enter continues. After an Anchi update it asks to update the VM's components first |
 | Team overview | ^X 4 | Each agent's current activity, pending approvals and delegated work |
+| Approvals | ^X 5 | Every write waiting for your decision; ↑ ↓ choose, y / n select, Enter confirms, a the full dialog, o the write's task |
 | Configure → Runtimes | ^X 1 | s start the VM, I install/update, u unlock the vault, V new vault, W share workspaces, i Codex, c Claude Code, h Hermes, r refresh |
 | Configure → Skills | ^X 1, ↓ | One line per skill: ↑ ↓ choose, PgUp PgDn page, Home End (g G) first and last; a add (directory or GitHub URL), u update after reviewing which files are added, changed or removed, d remove |
 | Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client |

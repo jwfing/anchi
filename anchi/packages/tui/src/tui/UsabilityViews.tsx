@@ -1,9 +1,108 @@
 /** @jsxRuntime automatic */
 import { Box, Text } from 'ink';
 import type { AgentSummary, Approval, SetupStatus, StoredEvent, TaskRow } from '@anchi/protocol';
-import { sanitizeLine } from '../sanitize.ts';
-import { wrap } from './lines.ts';
+import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { truncate, wrap } from './lines.ts';
 import { teamActivity, welcomeStep } from './usability.ts';
+
+/** Seconds before the proxy refuses a held write on its own. */
+function secondsLeft(a: Approval, now: number): number {
+  return Math.max(0, Math.round(a.timeout - (now - a.createdAt) / 1000));
+}
+
+/**
+ * Every write waiting for the user's decision, with the chosen one's details as the approval
+ * dialog shows them. No agent transcript is drawn here, so y, n and Enter act only on what
+ * Anchi itself lists.
+ */
+export function ApprovalsView({
+  approvals,
+  cursor,
+  pick,
+  now,
+  width,
+  height,
+  keys,
+}: {
+  approvals: Approval[];
+  cursor: number;
+  pick: { id: string; allow: boolean } | null;
+  now: number;
+  width: number;
+  height: number;
+  /** The keys as bound: how to select a decision, and the key that confirms it. */
+  keys: { select: string; confirm: string };
+}) {
+  if (!approvals.length) {
+    return (
+      <Box flexDirection="column" height={height}>
+        <Text>No write is waiting for your decision.</Text>
+        <Text> </Text>
+        {wrap(
+          "Writes wait here when an agent's `approvals` setting says ask for a connector, and for " +
+            'the listed high-risk operations (merges, pushes to main, deletions, access changes). ' +
+            'Each one is refused on its own after the approval timeout.',
+          width,
+        ).map((line, i) => (
+          <Text key={i} dimColor>
+            {line}
+          </Text>
+        ))}
+      </Box>
+    );
+  }
+  const chosen = approvals[Math.min(cursor, approvals.length - 1)]!;
+  const listRoom = Math.max(1, Math.min(approvals.length, Math.floor(height / 4)));
+  const first = Math.max(0, Math.min(cursor - listRoom + 1, approvals.length - listRoom));
+  const detailRoom = Math.max(1, height - listRoom - 10);
+  const summary = sanitize(chosen.summary).split('\n').slice(0, detailRoom);
+  const decided = pick && pick.id === chosen.id ? pick : null;
+  return (
+    <Box flexDirection="column" height={height}>
+      <Text>
+        {approvals.length} write{approvals.length === 1 ? '' : 's'} waiting for your decision
+      </Text>
+      <Text> </Text>
+      {approvals.slice(first, first + listRoom).map((a, i) => {
+        const selected = first + i === cursor;
+        const mark = pick?.id === a.id ? ` → ${pick.allow ? 'approve' : 'deny'}` : '';
+        return (
+          <Text key={a.id} inverse={selected} wrap="truncate">
+            {truncate(
+              `${selected ? '› ' : '  '}@${sanitizeLine(a.agent)} · ${sanitizeLine(a.connector)} · ${sanitizeLine(a.operation)} · ${secondsLeft(a, now)} s${mark}`,
+              width,
+            )}
+          </Text>
+        );
+      })}
+      <Text> </Text>
+      <Text bold color="red">
+        Approve a write by @{sanitizeLine(chosen.agent)}?
+      </Text>
+      {chosen.reason ? (
+        <Text color="yellow">{`why        ${sanitizeLine(chosen.reason)}`}</Text>
+      ) : null}
+      <Text wrap="truncate">{`started by ${sanitizeLine(chosen.origin || chosen.task)}`}</Text>
+      <Text>{`connector  ${sanitizeLine(chosen.connector)} (${sanitizeLine(chosen.host)})`}</Text>
+      <Text wrap="truncate">{`operation  ${sanitizeLine(chosen.operation)}`}</Text>
+      <Text dimColor>{`refused automatically in about ${secondsLeft(chosen, now)} s`}</Text>
+      <Box flexDirection="column" height={detailRoom}>
+        {summary.map((l, i) => (
+          <Text key={i} wrap="truncate">
+            {truncate(l, Math.max(10, width)) || ' '}
+          </Text>
+        ))}
+      </Box>
+      <Box flexGrow={1} />
+      <Text dimColor>The content above comes from the agent. This view is drawn by Anchi.</Text>
+      <Text bold>
+        {decided
+          ? `${decided.allow ? 'Approve' : 'Deny'} selected · ${keys.confirm} · y / n to change`
+          : keys.select}
+      </Text>
+    </Box>
+  );
+}
 
 export function WelcomeView({
   setup,

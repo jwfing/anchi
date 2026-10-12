@@ -740,7 +740,7 @@ export interface Methods {
   'skills.checkUpdate': [{ id: string }, SkillUpdate];
   /** Replaces a GitHub skill with its content at `commit`, the one the user reviewed. */
   'skills.update': [{ id: string; commit: string }, SkillInfo];
-  /** The caller showed the approval in a full-screen dialog and the user decided. */
+  /** The caller showed the approval (full-screen dialog or the Approvals view) and the user decided. */
   'approvals.decide': [{ id: string; allow: boolean }, null];
 }
 

@@ -19,7 +19,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | Tab, Shift+Tab | Switch between the sidebar and the main pane |
 | ^N, ^P (or ^X j, ^X k) | Next / previous sidebar item |
 | ^X 1, ^X 2, ^X 3 | Configure, Agents, Tasks |
-| ^X 0, ^X 4 | Getting started, Team overview |
+| ^X 0, ^X 4, ^X 5 | Getting started, Team overview, Approvals |
 | ^X !, ^X L | Persistent problem details, installation log |
 | ^X h | Toggle task result and history |
 | ^X b | Agent builder |
@@ -66,6 +66,8 @@ Getting started checks host prerequisites, VM, vault and runtime before guiding 
 
 Team overview lists each agent’s current activity, pending approvals and delegated work. **↑ ↓** selects an agent; **Enter** opens it. Finished task details show the result and artifact links first, ending with the key that reveals the event history (**^X h**); a task you continued from its view keeps showing its transcript when the reply arrives.
 
+Approvals lists every write waiting for your decision, with the same details as the approval dialog: **↑ ↓** (j k) choose, **y** or **n** select, **Enter** confirms, **a** opens the full dialog, **o** opens the write's task. The sidebar item shows how many are waiting.
+
 ### Sidebar
 
 ↑ ↓ (j k) move, Home End (g G) first and last, PgUp PgDn ([ ]) task pages, 1 2 3 sections, Enter → (l) open, s agent settings, D delete the selected agent or task, / filter, ? keys, q quit.
@@ -84,7 +86,7 @@ Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a fail
 
 The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc; **e** chooses a host the task was refused, to add to the agent's egress list after a confirmation (y).
 
-The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Pending write approvals appear in the status bar without opening a dialog. Open **^X a**, select **y** or **n**, then press **Enter** to confirm; **Esc** postpones the decision. Confirmation and proposal dialogs use **y**, **n** and **Esc** (and **s** in a proposal for its settings); the retry dialog uses **c** (continue the session) or **n** (a new task). These dialog keys are not rebindable.
+The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Pending write approvals appear in the status bar and as a count on the sidebar's Approvals item, without opening a dialog. Open **^X a**, select **y** or **n**, then press **Enter** to confirm; **Esc** postpones the decision. Confirmation and proposal dialogs use **y**, **n** and **Esc** (and **s** in a proposal for its settings); the retry dialog uses **c** (continue the session) or **n** (a new task). These dialog keys are not rebindable.
 
 ## Changing keys
 
