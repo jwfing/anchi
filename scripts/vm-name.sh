@@ -20,6 +20,21 @@ anchi_vm_name() {
   echo "$name"
 }
 
+# The Anchi version of this checkout or release, which the VM records in installed.json.
+anchi_runtime_version() {
+  python3 - <<'PY'
+import json
+for name in ('anchi/package.json', 'manifest.json'):
+    try:
+        print(json.load(open(name))['version'])
+        break
+    except (OSError, KeyError, ValueError):
+        pass
+else:
+    print('unknown')
+PY
+}
+
 # One migration at a time: the daemon at start, scripts/up.sh and vault.py each ask for one, and
 # two renames (or a rename next to a `limactl start`) would fight over the same VM. A second
 # caller waits for the first, after which it finds nothing left to move. Fails rather than

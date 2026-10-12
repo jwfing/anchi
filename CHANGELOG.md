@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-11
+
+Five more connectors through the egress proxy. After updating, run `anchi setup install` once so the VM's proxy, vault and cell manager know them.
+
 ### Added
 
 - PostHog, Sentry, Firecrawl, Figma and Discord connectors through the egress proxy: `anchi setup connector <id>` (or **Connectors** in the TUI) stores the token, the proxy verifies it and injects it into the service's API only; agents use the placeholders `POSTHOG_PERSONAL_API_KEY`, `SENTRY_AUTH_TOKEN`, `FIRECRAWL_API_KEY`, `FIGMA_ACCESS_TOKEN` and `DISCORD_BOT_TOKEN`. PostHog US and EU Cloud and `sentry.io` only; Discord through REST, without the gateway. Key and token creation and Discord webhooks are denied, and new high-risk entries hold deletions, member and permission changes and Figma webhooks. Firecrawl fetches any URL, beyond an agent's `egress` list. Needs `scripts/anchi setup install`.
@@ -11,6 +15,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 ### Fixed
 
 - The proxy no longer reports Linear's placeholder key as a credential the cell brought itself (a notification once per cell).
+- `scripts/install-anchi.sh` (run by `anchi setup install`) records the Anchi version in the VM's `/opt/secure-vm/installed.json`; it wrote `unknown` since 0.3.0.
 
 ## 0.3.0 — 2026-10-11
 

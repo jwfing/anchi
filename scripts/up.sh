@@ -19,19 +19,7 @@ if [[ $vm_type == qemu ]]; then
 else
   command -v limactl >/dev/null || { echo 'Install Lima first: brew install lima' >&2; exit 1; }
 fi
-# The version of the checkout, recorded in the VM's installed.json.
-runtime_version=$(python3 - <<'PY'
-import json
-for name in ('anchi/package.json', 'manifest.json'):
-    try:
-        print(json.load(open(name))['version'])
-        break
-    except (OSError, KeyError, ValueError):
-        pass
-else:
-    print('unknown')
-PY
-)
+runtime_version=$(anchi_runtime_version)
 # A VM created as secure-vm is renamed rather than replaced by a second, empty VM.
 if [[ $vm_name == "$ANCHI_VM_DEFAULT" ]]; then
   bash scripts/vm-name.sh migrate
