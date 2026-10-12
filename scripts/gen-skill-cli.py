@@ -56,10 +56,10 @@ def render():
         '',
     ]
     for entry in help_tree():
-        if not entry['path']:
-            continue
+        # The root entry is the command list, with the global options (`--version`).
         depth = len(entry['path'])
-        lines += [f'{"#" * min(depth + 1, 4)} `anchi {" ".join(entry["path"])}`', '', '```text']
+        name = ' '.join(['anchi', *entry['path']])
+        lines += [f'{"#" * min(depth + 2, 4)} `{name}`', '', '```text']
         lines += [section(entry['help']), '```', '']
     return '\n'.join(lines).rstrip() + '\n'
 

@@ -49,4 +49,4 @@ Report the result as it is. If a check fails for a reason unrelated to your chan
 
 ## Live checks (only when asked)
 
-`make verify-vm`, `make verify-anchi` and `scripts/anchi-acceptance.sh` need a running `secure-vm`; the last uses real accounts. They refuse while task cells are live. If a change affects the VM and you could not run them, say which live check would cover it.
+`make verify-vm`, `make verify-anchi` and `scripts/anchi-acceptance.sh` need a running `anchi-vm`; the last uses real accounts. They refuse while task cells are live. If a change affects the VM and you could not run them, say which live check would cover it.

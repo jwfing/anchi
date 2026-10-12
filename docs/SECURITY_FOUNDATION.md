@@ -9,8 +9,8 @@ A separate `secure-auth` UID owns OAuth client configuration, access/refresh tok
 The 32-byte master key is `~/.config/anchi/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled. Restart requires unlocking again.
 
 ```bash
-scripts/anchi setup vault init     # Create once; reuses an existing key
-scripts/anchi setup vault unlock
+anchi setup vault init     # Create once; reuses an existing key
+anchi setup vault unlock
 python3 scripts/vault.py status
 python3 scripts/vault.py lock
 ```
@@ -48,7 +48,7 @@ bash scripts/policy.sh rules
 bash scripts/policy.sh mode gmail ask
 ```
 
-Anchi's approval dialog shows pending writes of agent cells and approves the exact digest the policy service recorded; `policy.sh` is the administration fallback. `show` exposes the actual action. Review it before approving the exact digest. Terminal JSON escapes control characters and treats mail as data. The in-cell tool keeps the same request ID while it waits. Uncertain external execution remains UNKNOWN without automatic retry.
+Anchi's approval dialog shows pending writes of agent cells and approves the exact digest the policy service recorded; `policy.sh` is the administration fallback, from a source checkout (it is not in the release archive). `show` exposes the actual action. Review it before approving the exact digest. Terminal JSON escapes control characters and treats mail as data. The in-cell tool keeps the same request ID while it waits. Uncertain external execution remains UNKNOWN without automatic retry.
 
 Each connector has `auto`/`ask`; missing modes default to `auto`. Mode changes increment the epoch and revoke all unconsumed grants. `ask` means review each request, not permanent denial. All modes retain allowlists, revision binding and quotas. `read <connector> allow|deny` and `gmail-read` remain compatibility aliases. There is no `gmail.send` path.
 
@@ -85,4 +85,4 @@ bash scripts/verify.sh
 
 Offline tests cover service logic; VM checks exercise deployed identities, sockets, credentials, approvals and network isolation. Provider account lifecycle, malicious-content behavior and recovery need separate checks. Do not infer real-account readiness or complete prompt-injection protection from passing infrastructure tests.
 
-Agents are started through `scripts/anchi`. Current limitations, including snapshot rollback, trusted administrators and cloud disclosure, are described in the [security model](../SECURITY.md).
+Agents are started through `anchi` (`anchi` in a source checkout). Current limitations, including snapshot rollback, trusted administrators and cloud disclosure, are described in the [security model](../SECURITY.md).

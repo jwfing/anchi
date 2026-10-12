@@ -22,7 +22,7 @@ curl -fsSL https://anchi.elseward.xyz/install.sh | sh
 anchi
 ```
 
-The app includes Node and its dependencies. The Runtimes screen guides VM setup;
+The app includes Node and its dependencies. **Getting started** in the TUI guides VM setup;
 macOS needs Lima and Python (`brew install lima python`). See the getting started guide
 for Linux prerequisites and the source development workflow.
 
@@ -34,7 +34,7 @@ for Linux prerequisites and the source development workflow.
 | Codex and Claude Code in cells, holding placeholders only | Implemented; the proxy substitutes subscription tokens replace-only; the Codex login is re-imported from your machine as it refreshes |
 | Hermes Agent in cells, on an OpenAI-compatible endpoint you choose | Implemented; your API key stays in the vault and the proxy substitutes it under that endpoint's base URL only; not yet checked against a live endpoint |
 | Each runtime as its own image layer, installed the first time an agent uses it | Implemented; `anchi setup install` builds only the base layer |
-| GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads), Linear, PostHog, Sentry, Firecrawl, Figma and Discord (REST) through the egress proxy | Implemented; credential minting denied; credentials verified at import |
+| GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads), Linear, PostHog, Sentry, Firecrawl, Figma and Discord (REST) through the egress proxy | Implemented; credential minting denied; credentials verified at import; PostHog, Sentry, Firecrawl, Figma and Discord not yet exercised against live accounts |
 | Gmail, Drive, Notion and Slack through trusted services, reached through a per-cell bridge that names the agent | Implemented; Gmail is read-only; per-service and per-agent write approval |
 | Per-agent egress allowlists, high-risk operations always held, held writes with the task's origin chain | Implemented |
 | Credential scan of every cell before it is destroyed | Implemented; a finding raises a notification |

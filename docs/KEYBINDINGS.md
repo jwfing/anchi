@@ -73,17 +73,17 @@ Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a fail
 
 - **Runtimes:** s start the VM, I install, u unlock the vault, V initialize a new vault, W share workspaces, i import Codex, c connect Claude Code, h set Hermes's endpoint, r refresh.
 - **Skills:** ↑ ↓ (k j) choose, PgUp PgDn a page, Home End (g G) first and last, a add, u update to the latest commit of its URL, d remove.
-- **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, r refresh.
+- **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, a another Google account (Gmail, Drive), o your Google OAuth client, r refresh.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.
 - **Access:** p period (24 hours, 7 days, 30 days), r refresh, ↑ ↓ scroll.
 
 The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc; **e** chooses a host the task was refused, to add to the agent's egress list after a confirmation (y).
 
-The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Pending write approvals appear in the status bar without opening a dialog. Open **^X a**, select **y** or **n**, then press **Enter** to confirm; **Esc** postpones the decision. Confirmation and proposal dialogs use **y**, **n** and **Esc** (and **s** in a proposal for its settings). These dialog keys are not rebindable.
+The agent settings panel uses ↑ ↓ (k j), **Space** to select and **Enter** to review. Pending write approvals appear in the status bar without opening a dialog. Open **^X a**, select **y** or **n**, then press **Enter** to confirm; **Esc** postpones the decision. Confirmation and proposal dialogs use **y**, **n** and **Esc** (and **s** in a proposal for its settings); the retry dialog uses **c** (continue the session) or **n** (a new task). These dialog keys are not rebindable.
 
 ## Changing keys
 
-`anchi keys init` writes `~/.anchi/keybindings.json`; `anchi keys` prints the effective bindings and anything it skipped. The TUI applies changes while it runs.
+`anchi keys init` writes `~/.anchi/keybindings.json`; `anchi keys` prints the effective bindings and anything it skipped (and exits with 1 when it skipped something). The TUI applies changes while it runs.
 
 ```json
 {

@@ -19,8 +19,9 @@ Choose one way to install:
 | Command | `anchi` | `scripts/anchi` in the checkout |
 | Updates | `anchi update` | `git pull`, then reinstall dependencies |
 
-Both ways need the same VM prerequisites, which differ per platform. The VM uses 4 GB of RAM
-and up to 30 GB of dynamically allocated disk; keep at least 8 GB of disk free.
+Both ways need the same VM prerequisites, which differ per platform. A new VM gets half of
+this computer's CPUs and memory (at least 1 CPU and 2 GiB; you can choose other numbers) and
+up to 30 GB of dynamically allocated disk; keep at least 8 GB of disk free.
 
 ## Install the binary release
 
@@ -36,6 +37,7 @@ not need sudo or modify your vault, agents or VM.
    brew install lima python
    ```
 
+   Anchi needs Lima 2.2.0 or newer (`limactl --version`).
 2. Install the app:
 
    ```bash
@@ -87,7 +89,8 @@ cell runner from the checkout.
    brew install git node pnpm lima python
    ```
 
-   Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses.
+   Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Lima must
+   be 2.2.0 or newer (`limactl --version`).
 2. Clone the repository and install the workspace dependencies:
 
    ```bash

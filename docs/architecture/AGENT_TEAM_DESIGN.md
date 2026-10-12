@@ -1,6 +1,6 @@
 # Agent team design (version 2)
 
-**Status: phases 1 and 2 and most of phase 3 are implemented**; Linux workspaces and part of the live acceptance remain. See the [phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status) and [phase 3](AGENT_TEAM_PHASE3_PLAN.md#status) plans for what differs from this design, and the [backlog](BACKLOG.md) for what is recorded but not planned. The [agent team guide](../AGENT_TEAM.md), the [contracts](AGENT_TEAM_CONTRACTS.md) and the [security model](../../SECURITY.md) describe the implementation.
+**Status: phases 1 and 2 and most of phase 3 are implemented**; Linux workspaces and part of the live acceptance remain. See the [phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status) and [phase 3](AGENT_TEAM_PHASE3_PLAN.md#status) plans for what differs from this design, and the [backlog](BACKLOG.md) for what is recorded but not planned. Hermes Agent became a third runtime after this design (0.3.0): where it says Codex and Claude Code, read all three. The [agent team guide](../AGENT_TEAM.md), the [contracts](AGENT_TEAM_CONTRACTS.md) and the [security model](../../SECURITY.md) describe the implementation.
 
 Positioning: **a secured agent team.** Anchi runs a team of Codex and Claude Code agents on the user's machine. Each task runs in a disposable cell, upstream credentials stay outside the cell, each agent gets only the connectors, hosts, directories, skills and delegates it is configured with, and writes that matter wait for the user.
 
