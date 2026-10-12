@@ -1146,7 +1146,7 @@ export function App({
         const action = nextSetupAction(setup);
         if (action) return setupStep(action);
         const step = welcomeStep(setup, agents, tasks);
-        if (step === 'runtime') return say('Choose i for Codex or c for Claude Code');
+        if (step === 'runtime') return say('Press i for Codex, c for Claude Code or h for Hermes');
         if (step === 'agent') return run('nav:builder');
         if (step === 'done') return run('nav:team');
         const first = userAgents[0];
@@ -2742,6 +2742,18 @@ function RuntimesView({
           {setup.installed ? 'built' : 'not built yet'}
         </Text>
       </Text>
+      {setup.vm === 'running' && setup.installed && setup.guestOutdated !== undefined ? (
+        <Text>
+          Components:{' '}
+          {setup.guestOutdated ? (
+            <Text color="red">
+              {`installed by Anchi ${setup.guestVersion ?? 'an older release'}; this is ${setup.appVersion} — press I to update them`}
+            </Text>
+          ) : (
+            <Text color="green">{`Anchi ${setup.guestVersion ?? setup.appVersion}`}</Text>
+          )}
+        </Text>
+      ) : null}
       <Text>
         Codex (ChatGPT subscription):{' '}
         {c.connected ? (

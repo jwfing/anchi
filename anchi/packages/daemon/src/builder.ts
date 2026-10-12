@@ -15,8 +15,9 @@ import {
   patchAgentYaml,
   type ResolvedAgent,
   resolvedAgentSchema,
+  type Runtime,
 } from '@anchi/core';
-import type { BuilderProposal } from '@anchi/protocol';
+import type { BuilderProposal, SetupStatus } from '@anchi/protocol';
 import { parse as parseYaml } from 'yaml';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
 import { digest, lineDiff, PATCH_FIELDS, parsePatch, updateAgentFile } from './settings.ts';
@@ -75,7 +76,7 @@ An agent is a YAML file. Fields:
   proxy.golang.org and sum.golang.org (Go), index.crates.io and static.crates.io (cargo).
 - image: id of an image recipe (or omit for the base image: Debian 12 with git, gh, curl, jq,
   ripgrep, fd, build-essential, pkg-config, Python 3 with pip and venv, Node.js 22 with npm
-  and pnpm, Go, Rust with cargo, clippy and rustfmt, Codex and Claude Code).
+  and pnpm, Go, Rust with cargo, clippy and rustfmt; the agent's runtime is added on top).
 - sandbox: cell (default).
 
 An image recipe is a YAML file with:
@@ -114,13 +115,29 @@ instead.
 The inventory shows each agent's file when the user's message names its id; otherwise it
 shows a summary, so ask the user to name the agent if you need to see its prompt.`;
 
-/** The builder itself: a Codex agent with no connectors, in a base-image cell. */
-export function builderAgent(): ResolvedAgent {
+/**
+ * The runtime the builder uses when the user has not chosen one: the first connected of Codex,
+ * Claude Code and Hermes, so a user without a ChatGPT login can still build agents; Codex when
+ * none is connected (its task then fails with the hint to connect one).
+ */
+export function chooseBuilderRuntime(
+  status: Pick<SetupStatus, 'codex' | 'claude' | 'hermes'>,
+  now = Date.now(),
+): Runtime {
+  const { codex } = status;
+  if (codex.connected && (codex.expiresAt === null || codex.expiresAt > now)) return 'codex';
+  if (status.claude?.connected) return 'claude-code';
+  if (status.hermes?.connected) return 'hermes';
+  return 'codex';
+}
+
+/** The builder itself: an agent with no connectors, in a base-image cell, on `runtime`. */
+export function builderAgent(runtime: Runtime = 'codex'): ResolvedAgent {
   const agent = resolvedAgentSchema.parse({
     id: BUILDER_ID,
     name: 'Agent builder',
     description: 'Designs agents and their images; proposals need your confirmation',
-    runtime: 'codex',
+    runtime,
     prompt: { mode: 'append', text: SKILL },
     connectors: [],
     image: BASE_IMAGE,

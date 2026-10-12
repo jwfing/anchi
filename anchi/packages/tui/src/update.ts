@@ -121,6 +121,6 @@ export async function selfUpdate(
   }
   await io.install(app, root!, latest);
   io.log(
-    `Updated to Anchi ${latest}. Existing tasks and daemons keep running.\nAfter tasks finish, run anchi daemon stop, then reopen anchi.\nIf login startup is enabled, also run anchi daemon install.`,
+    `Updated to Anchi ${latest}. Existing tasks and daemons keep running.\nAfter tasks finish, run anchi daemon stop, then reopen anchi.\nIf login startup is enabled, also run anchi daemon install.\nThen run anchi setup install once to update the VM's components (Getting started asks for it too).`,
   );
 }

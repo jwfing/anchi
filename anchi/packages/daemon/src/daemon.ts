@@ -20,6 +20,8 @@ import {
   listImageIds,
   parseYamlAs,
   resolveAgent,
+  type Runtime,
+  runtimeSchema,
 } from '@anchi/core';
 import {
   type AgentDeletion,
@@ -35,6 +37,7 @@ import {
   type SetupAction,
   type ResetPreview,
   type ServiceConnectorId,
+  type SetupStatus,
   type TaskStatus,
   TOKEN_CONNECTOR_IDS,
   type TokenConnectorId,
@@ -43,9 +46,16 @@ import {
 import { ApprovalWatcher } from './approvals.ts';
 import { mergeAuditRows, summarizeAccess, summarizeAudit } from './audit.ts';
 import { QuotaAlerts } from './quota.ts';
-import { builderAgent, BUILDER_ID, parseBlocks, Proposals } from './builder.ts';
+import {
+  builderAgent,
+  BUILDER_ID,
+  chooseBuilderRuntime,
+  parseBlocks,
+  Proposals,
+} from './builder.ts';
 import { Guest, LimaTransport } from './guest.ts';
 import {
+  APP_VERSION,
   AWS_PROFILE,
   awsExport,
   ghToken,
@@ -247,6 +257,7 @@ export class Daemon {
       if (!vault || (vault.connected && (vault.expiresAt ?? 0) >= hostExpiry)) return false;
       await this.guest.importCodex(login.accessToken, login.accountId);
       this.log(`codex token imported; valid until ${new Date(hostExpiry).toISOString()}`);
+      void this.refreshSetup();
       return true;
     } catch (err) {
       this.log(`codex token import failed: ${(err as Error).message}`);
@@ -309,6 +320,59 @@ export class Daemon {
     if (this.warned === message) return;
     this.warned = message;
     this.log(message);
+  }
+
+  /** The builder's runtime when settings.yaml names none: the first connected one. */
+  private autoBuilderRuntime: Runtime = 'codex';
+
+  /**
+   * The runtime the builder runs on: `builderRuntime` in ~/.anchi/settings.yaml, else the first
+   * connected of codex, claude-code and hermes (`chooseBuilderRuntime`). Read when a builder
+   * task starts; a task keeps the runtime its session started on.
+   */
+  builderRuntime(): Runtime {
+    const raw = this.settings().builderRuntime;
+    if (raw === undefined || raw === null) return this.autoBuilderRuntime;
+    const parsed = runtimeSchema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+    this.warnOnce(
+      `settings.yaml: builderRuntime ${String(raw)} is not codex, claude-code or hermes; using ${this.autoBuilderRuntime}`,
+    );
+    return this.autoBuilderRuntime;
+  }
+
+  /** The VM's components come from another Anchi version; set by the latest setup status. */
+  private guestOutdated?: { guest: string | null; app: string };
+  private warnedGuest = false;
+
+  /** What a fresh setup status changes: the builder's runtime and the outdated-guest warning. */
+  private noteSetup(status: SetupStatus): void {
+    if (status.vm === 'running') {
+      const runtime = chooseBuilderRuntime(status);
+      if (runtime !== this.autoBuilderRuntime) {
+        this.autoBuilderRuntime = runtime;
+        this.log(`builder runtime: ${runtime} (the first runtime connected)`);
+        this.hub.reload();
+      }
+    }
+    this.guestOutdated = status.guestOutdated
+      ? { guest: status.guestVersion ?? null, app: status.appVersion ?? APP_VERSION }
+      : undefined;
+    if (this.guestOutdated && !this.warnedGuest) {
+      this.warnedGuest = true;
+      this.log(this.guestWarning());
+    }
+  }
+
+  private guestWarning(): string {
+    const { guest, app } = this.guestOutdated ?? { guest: null, app: APP_VERSION };
+    return `⚠ the VM's components were installed by Anchi ${guest ?? 'an older release'}; this is Anchi ${app}: run anchi setup install (Runtimes → I) to update them`;
+  }
+
+  /** Reads the setup status for its side effects; a VM that is not up is not an error. */
+  private async refreshSetup(): Promise<void> {
+    const status = await setupStatus(this.guest, this.lima, this.services).catch(() => undefined);
+    if (status) this.noteSetup(status);
   }
 
   /** Days finished tasks are kept: `retentionDays` in ~/.anchi/settings.yaml, default 90. */
@@ -395,7 +459,10 @@ export class Daemon {
       onPolicyApproval: (task, connector, id) =>
         this.approvals.addPolicy(this.guest, task, connector, id),
       log: this.log,
-      builtins: [builderAgent()],
+      // The builder runs on whichever runtime is connected (or the one settings.yaml names).
+      builtins: [
+        { id: BUILDER_ID, agent: (runtime) => builderAgent(runtime ?? this.builderRuntime()) },
+      ],
     });
     this.triggers = new TriggerRunner(
       {
@@ -709,8 +776,12 @@ export class Daemon {
       }
       return result;
     },
-    'tasks.create': ({ agentId, text }) =>
-      this.hub.createTask(str(agentId, 'agent', 40), str(text, 'text', 200_000)),
+    'tasks.create': ({ agentId, text }) => {
+      const task = this.hub.createTask(str(agentId, 'agent', 40), str(text, 'text', 200_000));
+      // CLI users see no Runtimes screen: say it where they look.
+      if (this.guestOutdated) this.hub.notice(task.id, this.guestWarning());
+      return task;
+    },
     'tasks.list': ({ agentId, limit }) =>
       this.store.listTasks(agentId, Math.min(Math.max(Number(limit) || 100, 1), 500)),
     'tasks.get': ({ taskId: id }) => this.hub.getTask(taskId(id)),
@@ -768,9 +839,14 @@ export class Daemon {
       }
       return this.guest.scan(task);
     },
-    'setup.status': () => setupStatus(this.guest, this.lima, this.services),
+    'setup.status': async () => {
+      const status = await setupStatus(this.guest, this.lima, this.services);
+      this.noteSetup(status);
+      return status;
+    },
     'setup.importClaude': async ({ token }) => {
       await this.guest.importClaude(str(token, 'token', 500).trim());
+      void this.refreshSetup();
       return claudeStatus(this.guest);
     },
     'setup.importHermes': async ({ baseUrl, apiKey, model }) => {
@@ -779,11 +855,13 @@ export class Daemon {
         str(apiKey, 'apiKey', 500).trim(),
         str(model, 'model', 100).trim(),
       );
+      void this.refreshSetup();
       return hermesStatus(this.guest);
     },
     'setup.importCodex': async () => {
       const login = readHostCodexLogin();
       await this.guest.importCodex(login.accessToken, login.accountId);
+      void this.refreshSetup();
       return codexStatus(this.guest);
     },
     'setup.run': async ({ action, vmSize }) => {
@@ -797,7 +875,9 @@ export class Daemon {
       );
       await this.setup.run(action, (line) => this.broadcast('setup', { action, line }), env);
       this.log(`setup ${action} done`);
-      return setupStatus(this.guest, this.lima);
+      const status = await setupStatus(this.guest, this.lima);
+      this.noteSetup(status);
+      return status;
     },
     'setup.resetPreview': async () => this.resetPreview(),
     'setup.reset': async ({ confirm }) => {
@@ -1028,6 +1108,9 @@ export class Daemon {
       if (migration) void migration.then(() => this.reapCells());
       else await this.reapCells();
     }
+    // Which runtime the builder gets and whether the guest is outdated, before any client asks.
+    if (migration) void migration.then(() => this.refreshSetup());
+    else void this.refreshSetup();
     this.hub.recoverInterrupted();
 
     this.server = createServer((socket) => {

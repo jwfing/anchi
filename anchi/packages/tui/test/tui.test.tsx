@@ -1999,6 +1999,83 @@ describe('usability workflows', () => {
     ui.unmount();
   });
 
+  it('asks to update the VM components installed by another Anchi version', async () => {
+    const outdated = {
+      vm: 'running',
+      installed: true,
+      vaultUnlocked: true,
+      vaultKeyPresent: true,
+      codex: { connected: true, expiresAt: Date.now() + 1e6 },
+      appVersion: '0.3.2',
+      guestVersion: '0.3.1',
+      guestOutdated: true,
+    };
+    const { client, calls } = fakeClient({}, { 'setup.status': () => outdated });
+    const ui = render(
+      <App
+        client={client}
+        initialView="welcome"
+        initialAgents={[agent('builder'), agent('dev')]}
+        initialTasks={[]}
+      />,
+    );
+    expect(await frameWith(ui, 'installed by Anchi 0.3.1; this is Anchi 0.3.2')).toContain(
+      '→ Prepare local environment',
+    );
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Install or update')).toContain('update the anchi-vm VM');
+    expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.find(([m]) => m === 'setup.run')?.[1]).toEqual({ action: 'install' });
+    ui.unmount();
+    // Runtimes says so too, with the key to press.
+    const runtimes = render(
+      <App
+        client={client}
+        initialView="runtimes"
+        initialAgents={[agent('dev')]}
+        initialTasks={[]}
+      />,
+    );
+    expect(await frameWith(runtimes, 'press I to update them')).toContain(
+      'installed by Anchi 0.3.1; this is 0.3.2',
+    );
+    runtimes.unmount();
+  });
+
+  it('lists every runtime at the runtime step and goes on with any of them', async () => {
+    const { client } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          installed: true,
+          vaultUnlocked: true,
+          vaultKeyPresent: true,
+          codex: { connected: false, expiresAt: null },
+          claude: { runtime: 'claude-code', connected: false, kind: null },
+          hermes: { runtime: 'hermes', connected: false, baseUrl: null, model: null },
+          guestOutdated: false,
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialView="welcome"
+        initialAgents={[agent('builder')]}
+        initialTasks={[]}
+      />,
+    );
+    const frame = await frameWith(ui, '[h] Hermes');
+    expect(frame).toContain('→ Connect a runtime');
+    expect(frame).toContain('[c] Claude Code');
+    expect(frame).toContain('Agent builder uses the first one connected');
+    expect(frame).not.toContain('requires Codex');
+    ui.unmount();
+  });
+
   it('resumes onboarding at the missing vault step', async () => {
     const { client, calls } = fakeClient(
       {},
@@ -2086,6 +2163,21 @@ describe('onboarding and team state', () => {
     expect(welcomeStep({ ...ready, codex: { ...ready.codex, expiresAt: 1 } }, [], [])).toBe(
       'runtime',
     );
+    // The builder runs on any connected runtime: Claude Code alone is enough for a first agent.
+    expect(
+      welcomeStep(
+        {
+          ...ready,
+          codex: { ...ready.codex, connected: false },
+          claude: { runtime: 'claude-code', connected: true, kind: 'oauth' },
+        },
+        [],
+        [],
+      ),
+    ).toBe('agent');
+    // Components installed by another Anchi version go back to the environment step.
+    expect(nextSetupAction({ ...ready, guestOutdated: true })).toBe('install');
+    expect(welcomeStep({ ...ready, guestOutdated: true }, [agent('dev')], [])).toBe('environment');
     expect(welcomeStep(ready, [], [])).toBe('agent');
     expect(welcomeStep(ready, [agent('dev')], [])).toBe('task');
     expect(welcomeStep(ready, [agent('dev')], [task('t-done', 'dev')])).toBe('done');

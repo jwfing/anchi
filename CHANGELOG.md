@@ -4,6 +4,19 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- Anchi tells you when the VM's components were installed by another version: `setup.status` reports `appVersion`, `guestVersion` (`anchi-cell version`, from `/opt/secure-vm/installed.json`) and `guestOutdated`; Getting started goes back to its environment step and **Enter** (or `I` in Runtimes, which shows both versions) runs `anchi setup install`; the daemon logs it, tasks started meanwhile carry a notice, and `anchi update` says to run it. A guest from before this release counts as outdated until `scripts/anchi setup install` has run once.
+- `builderRuntime` in `~/.anchi/settings.yaml` (`codex`, `claude-code` or `hermes`) picks the Agent builder's runtime; a task keeps the runtime its session started on (`runtime` in the task row).
+
+### Changed
+
+- The Agent builder runs on the first connected runtime (Codex, then Claude Code, then Hermes) instead of always Codex, so a user without a ChatGPT login can build agents. Getting started's runtime step accepts any connected runtime and lists Hermes (`h`) beside Codex and Claude Code.
+
+### Fixed
+
+- The builder's instructions no longer describe Codex and Claude Code as part of the base image; each runtime is a layer of its own since 0.3.0.
+
 ## 0.3.1 — 2026-10-11
 
 Five more connectors through the egress proxy. After updating, run `anchi setup install` once so the VM's proxy, vault and cell manager know them.

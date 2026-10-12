@@ -14,6 +14,7 @@ import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
 import {
+  APP_VERSION,
   connectOrStart,
   type DaemonClient,
   installAutostart,
@@ -133,10 +134,7 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
 }
 
 const program = new Command('anchi').description('Anchi (安栖): a secured agent team');
-const versionFile = existsSync(join(REPO_ROOT, 'manifest.json'))
-  ? join(REPO_ROOT, 'manifest.json')
-  : join(REPO_ROOT, 'anchi/package.json');
-const appVersion = (JSON.parse(readFileSync(versionFile, 'utf8')) as { version: string }).version;
+const appVersion = APP_VERSION;
 program.version(appVersion);
 
 program
