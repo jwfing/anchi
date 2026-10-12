@@ -11,6 +11,8 @@ import {
   loadImage,
   type ResolvedAgent,
   resolveAgent,
+  type Runtime,
+  runtimeSchema,
   workspaceName,
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
@@ -88,8 +90,12 @@ export interface HubOptions {
   /** Longest a single turn may run before it is cancelled and the task fails. */
   turnTimeoutMs?: number;
   log?(msg: string): void;
-  /** Agents defined by Anchi itself (the builder); their ids are reserved. */
-  builtins?: ResolvedAgent[];
+  /**
+   * Agents defined by Anchi itself (the builder); their ids are reserved. `agent()` gives the
+   * agent as configured now; with a runtime, the same agent on that runtime, for a task whose
+   * session started there.
+   */
+  builtins?: { id: string; agent: (runtime?: Runtime) => ResolvedAgent }[];
   /** Rewrites a turn's input before the runtime sees it (the builder's inventory). */
   turnInput?: (agent: ResolvedAgent, text: string) => string | Promise<string>;
 }
@@ -150,12 +156,23 @@ export class Hub extends EventEmitter<HubEvents> {
 
   // ── agents ───────────────────────────────────────────────
 
-  private builtin(id: string): ResolvedAgent | undefined {
-    return this.opts.builtins?.find((a) => a.id === id);
+  private builtin(id: string, runtime?: Runtime): ResolvedAgent | undefined {
+    return this.opts.builtins?.find((a) => a.id === id)?.agent(runtime);
   }
 
   private resolve(id: string): ResolvedAgent {
     return this.builtin(id) ?? resolveAgent(id, this.opts.layout);
+  }
+
+  /**
+   * The agent a task runs as. A built-in agent's runtime follows what is connected, but a task
+   * keeps the runtime its session started on: another runtime cannot resume that session.
+   */
+  private agentFor(task: TaskRow): ResolvedAgent {
+    const pinned = runtimeSchema.safeParse(task.runtime);
+    return (
+      (pinned.success && this.builtin(task.agentId, pinned.data)) || this.resolve(task.agentId)
+    );
   }
 
   reload(): AgentSummary[] {
@@ -550,8 +567,12 @@ export class Hub extends EventEmitter<HubEvents> {
 
   private async execute(state: AgentState, job: Job, signal: AbortSignal): Promise<void> {
     let task = this.getTask(job.taskId);
-    const agent = this.resolve(state.id);
+    const agent = this.agentFor(task);
     state.agent = agent;
+    if (task.runtime !== agent.runtime) {
+      this.opts.store.setRuntime(task.id, agent.runtime);
+      task = { ...task, runtime: agent.runtime };
+    }
     if (task.depth > 0 && this.opts.store.treeTurns(task.rootId) >= DELEGATION.maxTreeTurns) {
       return this.finish(
         task.id,

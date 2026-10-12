@@ -57,7 +57,7 @@ Drafts, cursor positions and transcript scroll positions are kept per conversati
 
 ### Home
 
-Getting started checks host prerequisites, VM, vault and runtime before guiding you to Agent builder and a first task. **Enter** resumes the next step; **↑ ↓** scroll. Installation continues when you leave the view, and **^X L** opens its log. Agent builder currently uses Codex; Claude agents can be used once configured.
+Getting started checks host prerequisites, VM, vault and runtime before guiding you to Agent builder and a first task. **Enter** resumes the next step; **↑ ↓** scroll. Installation continues when you leave the view, and **^X L** opens its log. Any connected runtime completes the runtime step (**i** Codex, **c** Claude Code, **h** Hermes); Agent builder runs on the first one connected. After an Anchi update, the guide asks to update the VM's components before anything else.
 
 Team overview lists each agent’s current activity, pending approvals and delegated work. **↑ ↓** selects an agent; **Enter** opens it. Finished task details show the result and artifact links first; **^X h** reveals the event history.
 

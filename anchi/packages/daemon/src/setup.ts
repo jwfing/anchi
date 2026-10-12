@@ -10,7 +10,7 @@ import type {
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
-import { defaultVmSize, hostResources, VAULT_KEY } from './host.ts';
+import { APP_VERSION, defaultVmSize, hostResources, VAULT_KEY } from './host.ts';
 import type { ServiceSetup } from './services.ts';
 
 export { CONNECTOR_IDS };
@@ -136,19 +136,24 @@ export async function setupStatus(
     workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
     vmSize: { default: defaultVmSize(host), host },
+    appVersion: APP_VERSION,
+    guestVersion: null,
+    guestOutdated: false,
   };
   if (vm !== 'running') return empty;
   try {
-    const [vault, codex, claude, hermes, connectors, base, workspaces] = await Promise.all([
-      guest.vaultStatus(),
-      codexStatus(guest),
-      claudeStatus(guest),
-      // A guest installed before Hermes support has no hermes_admin.py.
-      hermesStatus(guest).catch(() => empty.hermes!),
-      connectorStatuses(guest),
-      guest.imageStatus('codex', 'base').catch(() => false),
-      guest.workspacesMounted().catch(() => false),
-    ]);
+    const [vault, codex, claude, hermes, connectors, base, workspaces, guestVersion] =
+      await Promise.all([
+        guest.vaultStatus(),
+        codexStatus(guest),
+        claudeStatus(guest),
+        // A guest installed before Hermes support has no hermes_admin.py.
+        hermesStatus(guest).catch(() => empty.hermes!),
+        connectorStatuses(guest),
+        guest.imageStatus('codex', 'base').catch(() => false),
+        guest.workspacesMounted().catch(() => false),
+        guest.version().catch(() => null),
+      ]);
     const svc = (await services?.status().catch(() => undefined)) ?? {
       services: [],
       googleClient: false,
@@ -167,6 +172,10 @@ export async function setupStatus(
       googleClient: svc.googleClient,
       googleClientSource: svc.googleClientSource,
       workspaces,
+      guestVersion,
+      // Until the base image is built, installing is the next step anyway. A guest too old to
+      // say its version is older than this Anchi.
+      guestOutdated: base && guestVersion !== APP_VERSION,
     };
   } catch {
     return empty;

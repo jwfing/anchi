@@ -219,8 +219,10 @@ Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**,
 completed steps and guides you through prerequisites, environment installation, vault
 initialization/unlock, runtime login, Agent builder and a first task. Press **Enter** for the
 next step; **Ctrl+X, L** shows installation logs and **Ctrl+X, !** opens persistent error
-details and recovery actions. Agent builder currently requires a Codex login. Teams with setup
-and a first task complete open on **Team overview**; **Ctrl+X, 0** reopens the guide.
+details and recovery actions. Any one connected runtime is enough: Agent builder runs on the
+first connected of Codex, Claude Code and Hermes (`builderRuntime` in `~/.anchi/settings.yaml`
+picks one). Teams with setup and a first task complete open on **Team overview**;
+**Ctrl+X, 0** reopens the guide.
 
 ### Step by step
 
@@ -299,9 +301,12 @@ the installer to obtain a managed installation; self-update does not modify a ch
 Existing daemon processes keep using the old version
 so installation does not interrupt running tasks. Once tasks finish, run `anchi daemon stop`,
 then reopen `anchi`. If you enabled login startup, rerun `anchi daemon install` too so its
-service points to the new version. Run `anchi setup install` when the release notes require
-VM/service updates. Older packages remain under `~/.local/share/anchi/versions` and can be
-removed once no daemon or login service uses them.
+service points to the new version. Then run `anchi setup install` once to update the VM's
+components: Anchi compares the version that installed them (`/opt/secure-vm/installed.json`)
+with its own, and until they match **Getting started** opens on its environment step with
+**Enter** running the update, **Runtimes** shows both versions in red with `I`, and every
+new task carries a notice. Older packages remain under `~/.local/share/anchi/versions` and
+can be removed once no daemon or login service uses them.
 
 To remove the app, first run `anchi daemon uninstall` and `anchi daemon stop`, then delete
 only the installed `anchi` launcher and the install root. Your `~/.anchi` data, vault and Lima

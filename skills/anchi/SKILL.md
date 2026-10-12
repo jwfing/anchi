@@ -44,7 +44,7 @@ Then connect at least one runtime:
 | Claude Code | `anchi setup claude` | `claude setup-token` output, or an Anthropic API key |
 | Hermes | `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` | An API key for any OpenAI-compatible HTTPS endpoint |
 
-A runtime is installed into the cell image the first time one of its agents runs a task (a few minutes, once).
+A runtime is installed into the cell image the first time one of its agents runs a task (a few minutes, once). One connected runtime is enough: the Agent builder runs on the first connected of Codex, Claude Code and Hermes, or on `builderRuntime` from `~/.anchi/settings.yaml`.
 
 ## Agents
 

@@ -106,7 +106,7 @@ The proxy denies credential minting (GitHub keys and installation tokens, AWS ST
 
 ## Create agents
 
-Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, directories under `~/AnchiWorkspaces`, agents and images. It replies with a proposal. A full-screen dialog shows:
+Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. The builder runs on the first connected runtime (Codex, then Claude Code, then Hermes), so one connected runtime is enough; `builderRuntime: claude-code` in `~/.anchi/settings.yaml` picks one, and the builder's view shows which it uses. A builder conversation keeps the runtime it started on. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, directories under `~/AnchiWorkspaces`, agents and images. It replies with a proposal. A full-screen dialog shows:
 
 - the agent file;
 - an image recipe, if the agent needs tools beyond the [base image](#base-image);

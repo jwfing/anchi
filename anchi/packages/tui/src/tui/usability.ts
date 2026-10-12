@@ -26,18 +26,24 @@ export function welcomeStep(
   agents: AgentSummary[],
   tasks: TaskRow[],
 ): WelcomeStep {
-  if (setup.vm !== 'running' || !setup.installed || setup.host?.missing.length)
+  if (
+    setup.vm !== 'running' ||
+    !setup.installed ||
+    setup.guestOutdated ||
+    setup.host?.missing.length
+  )
     return 'environment';
   if (!setup.vaultUnlocked) return 'vault';
-  if (!runtimeReady(setup, agents.some((a) => a.id !== 'builder') ? undefined : 'codex'))
-    return 'runtime';
+  // The builder runs on whichever runtime is connected, so any one will do.
+  if (!runtimeReady(setup)) return 'runtime';
   if (!agents.some((a) => a.id !== 'builder')) return 'agent';
   return tasks.some((t) => t.agentId !== 'builder' && t.status === 'done') ? 'done' : 'task';
 }
 export function nextSetupAction(setup: SetupStatus): SetupAction | undefined {
   if (setup.host?.missing.length) return undefined;
   if (setup.vm === 'stopped') return 'vm-start';
-  if (setup.vm !== 'running' || !setup.installed) return 'install';
+  // Components installed by another Anchi version are updated by the same install step.
+  if (setup.vm !== 'running' || !setup.installed || setup.guestOutdated) return 'install';
   if (!setup.vaultUnlocked) return setup.vaultKeyPresent === false ? 'vault-init' : 'vault-unlock';
   return undefined;
 }

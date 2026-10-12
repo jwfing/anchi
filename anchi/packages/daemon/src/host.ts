@@ -12,6 +12,23 @@ export const REPO_ROOT = resolve(
   import.meta.url.endsWith('.mjs') ? '..' : '../../../..',
 );
 
+/** This Anchi's version: the release manifest, or the workspace package in a checkout. */
+export function appVersion(root = REPO_ROOT): string {
+  for (const file of ['manifest.json', 'anchi/package.json']) {
+    try {
+      const { version } = JSON.parse(readFileSync(join(root, file), 'utf8')) as {
+        version?: unknown;
+      };
+      if (typeof version === 'string' && version) return version;
+    } catch {
+      // Not this file; a checkout has no manifest.
+    }
+  }
+  return 'unknown';
+}
+
+export const APP_VERSION = appVersion();
+
 export const WORKSPACE_MOUNT = '/mnt/anchi-host';
 
 /** The Lima VM (`secure-vm` before 0.3; scripts/vm-name.sh renames it). */

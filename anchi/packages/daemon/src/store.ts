@@ -123,6 +123,7 @@ function rowToTask(r: Record<string, unknown>): TaskRow {
     title: r.title as string,
     status: r.status as TaskStatus,
     resumeId: (r.resume_id as string | null) ?? null,
+    runtime: (r.runtime as string | null) ?? null,
     createdAt: r.created_at as number,
     startedAt: (r.started_at as number | null) ?? null,
     finishedAt: (r.finished_at as number | null) ?? null,
@@ -179,6 +180,8 @@ export class Store {
       ['turns', 'INTEGER NOT NULL DEFAULT 0'],
       ['input_tokens', 'INTEGER NOT NULL DEFAULT 0'],
       ['output_tokens', 'INTEGER NOT NULL DEFAULT 0'],
+      // The runtime a task's session belongs to (null for tasks from before it was recorded).
+      ['runtime', 'TEXT'],
     ];
     for (const [name, type] of add) {
       if (!have.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
@@ -528,6 +531,11 @@ export class Store {
 
   setResumeId(id: string, resumeId: string): void {
     this.db.prepare('UPDATE tasks SET resume_id = ? WHERE id = ?').run(resumeId, id);
+  }
+
+  /** Records the runtime a task runs on, once, when its first turn starts. */
+  setRuntime(id: string, runtime: string): void {
+    this.db.prepare('UPDATE tasks SET runtime = ? WHERE id = ?').run(runtime, id);
   }
 
   /** Tasks that were in flight when the daemon stopped; they cannot be resumed mid-turn. */

@@ -274,6 +274,20 @@ export class Guest {
     };
   }
 
+  /**
+   * The Anchi version that installed the guest components, or null when the guest predates the
+   * command (then it is older than any Anchi that asks).
+   */
+  async version(): Promise<string | null> {
+    try {
+      const out = parse(await this.transport.exec(['anchi-cell', 'version']));
+      return typeof out.runtime_version === 'string' ? out.runtime_version.slice(0, 40) : null;
+    } catch (err) {
+      if (err instanceof GuestError) return null;
+      throw err;
+    }
+  }
+
   /** The latest limits the proxy saw in the runtimes' responses, by injection rule. */
   async quota(): Promise<Record<string, GuestQuota>> {
     return parse(await this.transport.exec(['anchi-cell', 'quota'])) as Record<string, GuestQuota>;

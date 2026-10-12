@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { homeLayout } from '@anchi/core';
 import type { QuotaInfo, TaskRow } from '@anchi/protocol';
 import {
+  APP_VERSION,
+  chooseBuilderRuntime,
   Daemon,
   QuotaAlerts,
   DaemonClient,
@@ -137,6 +139,17 @@ class FakeTransport implements GuestTransport {
         return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
       return ok({ connector: args[2], account: 'octo' });
     }
+    if (args[0] === 'anchi-cell' && args[1] === 'version') {
+      // A guest from before the command answers USAGE, like any unknown command.
+      if (this.guestVersion === null) return { code: 1, stdout: '{"error":"USAGE"}', stderr: '' };
+      return ok({ runtime_version: this.guestVersion, installed_at: '2026-10-11T00:00:00Z' });
+    }
+    if (args[1]?.endsWith('claude_admin.py') && args[2] === 'status') {
+      return ok({ configured: this.claude, kind: this.claude ? 'oauth' : null });
+    }
+    if (args[1]?.endsWith('hermes_admin.py') && args[2] === 'status') {
+      return ok({ configured: this.hermes, base_url: null, model: null });
+    }
     if (args[1]?.endsWith('codex_admin.py')) {
       if (args[2] === 'status') {
         return ok({ configured: this.codex !== null, account_id: 'acct', expires_at: this.codex });
@@ -183,6 +196,11 @@ class FakeTransport implements GuestTransport {
   scans: string[] = [];
   /** Vault Codex expiry (seconds) or null when not configured. */
   codex: number | null = null;
+  /** Whether the vault holds a Claude Code token or a Hermes endpoint. */
+  claude = false;
+  hermes = false;
+  /** What `anchi-cell version` reports; null for a guest from before the command. */
+  guestVersion: string | null = APP_VERSION;
   codexImports: Record<string, string>[] = [];
   scanResult: { clean: boolean; findings: unknown[]; files: number } | null = {
     clean: true,
@@ -234,6 +252,14 @@ const SETUP_STEPS = {
   'vault-unlock': [[process.execPath, '-e', 'console.log("{\\"unlocked\\": true}")']],
 };
 
+/** A Lima that reports the fake VM running, for the setup status that asks the guest. */
+class RunningLima extends LimaTransport {
+  override async vmStatus(): Promise<'running'> {
+    return 'running';
+  }
+}
+let vmRunning = false;
+
 async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: string) {
   const layout = homeLayout(root);
   const d = new Daemon({
@@ -249,7 +275,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     layout,
     guest: new Guest(transport),
     // No limactl: the tests never depend on a VM of the machine they run on.
-    lima: new LimaTransport('anchi-vm', join(root, 'no-limactl')),
+    lima: new (vmRunning ? RunningLima : LimaTransport)('anchi-vm', join(root, 'no-limactl')),
     log: (m) => void logs.push(m),
     quiet: true,
     idleMs,
@@ -266,6 +292,7 @@ beforeEach(() => {
   hostCalls = [];
   hostAnswers = {};
   logs = [];
+  vmRunning = false;
   root = mkdtempSync(join(tmpdir(), 'anchi-daemon-'));
   transport = new FakeTransport();
   write('agents/dev.yaml', 'runtime: codex\nconnectors: [github]\n');
@@ -607,6 +634,10 @@ describe('daemon tasks', () => {
     const host = hostResources();
     const status = await client.call('setup.status');
     expect(status.vmSize).toEqual({ default: defaultVmSize(host), host });
+    // Without a VM there is nothing to compare this version with.
+    expect(status.appVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(status.guestVersion).toBeNull();
+    expect(status.guestOutdated).toBe(false);
     const lines: string[] = [];
     client.on('setup', ({ line }) => lines.push(line));
     await expect(
@@ -1087,6 +1118,118 @@ describe('builder', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(seen).toEqual(['devops']);
     expect(transport.starts[0]![6]).toBe('-');
+    // Codex, the first choice, when no runtime is known to be connected.
+    expect(transport.starts[0]![8]).toBe('codex');
+    expect((await client.call('tasks.get', { taskId: task.id })).runtime).toBe('codex');
+  });
+
+  it('gives the builder the first connected runtime, so a Claude-only user can build agents', () => {
+    const codex = (connected: boolean, expiresAt: number | null = null) => ({
+      runtime: 'codex' as const,
+      connected,
+      accountId: null,
+      expiresAt,
+    });
+    const claude = (connected: boolean) => ({
+      runtime: 'claude-code' as const,
+      connected,
+      kind: null,
+    });
+    const hermes = (connected: boolean) => ({
+      runtime: 'hermes' as const,
+      connected,
+      baseUrl: null,
+      model: null,
+    });
+    const all = { codex: codex(true), claude: claude(true), hermes: hermes(true) };
+    expect(chooseBuilderRuntime(all)).toBe('codex');
+    // An expired Codex login is not connected.
+    expect(chooseBuilderRuntime({ ...all, codex: codex(true, 1) }, 2)).toBe('claude-code');
+    expect(chooseBuilderRuntime({ ...all, codex: codex(false), claude: claude(false) })).toBe(
+      'hermes',
+    );
+    expect(
+      chooseBuilderRuntime({ codex: codex(false), claude: claude(false), hermes: hermes(false) }),
+    ).toBe('codex');
+    expect(chooseBuilderRuntime({ codex: codex(false), claude: claude(false) })).toBe('codex');
+  });
+
+  it('runs the builder on the connected runtime, or the one settings.yaml names, and a task keeps its runtime', async () => {
+    vmRunning = true;
+    transport.claude = true;
+    const { client } = await start();
+    // The status says Claude Code is the only runtime connected.
+    expect((await client.call('setup.status')).claude.connected).toBe(true);
+    expect(logs).toContain('builder runtime: claude-code (the first runtime connected)');
+    expect((await client.call('agents.list')).find((a) => a.id === 'builder')?.runtime).toBe(
+      'claude-code',
+    );
+    const task = await client.call('tasks.create', { agentId: 'builder', text: 'hello' });
+    await client.call('tasks.wait', { taskId: task.id });
+    expect(transport.starts[0]![8]).toBe('claude-code');
+    expect((await client.call('tasks.get', { taskId: task.id })).runtime).toBe('claude-code');
+    // The user picks Codex for the builder: new tasks follow, the old one keeps its session's
+    // runtime and its cell.
+    write('settings.yaml', 'builderRuntime: codex\n');
+    const more = await client.call('tasks.send', { taskId: task.id, text: 'more' });
+    await client.call('tasks.wait', { taskId: more.id });
+    expect(transport.starts).toHaveLength(1);
+    const next = await client.call('tasks.create', { agentId: 'builder', text: 'new' });
+    await client.call('tasks.wait', { taskId: next.id });
+    expect(transport.starts[1]![8]).toBe('codex');
+    expect((await client.call('tasks.get', { taskId: next.id })).runtime).toBe('codex');
+    expect((await client.call('agents.list')).find((a) => a.id === 'builder')?.runtime).toBe(
+      'codex',
+    );
+    // A value that is not a runtime is reported and ignored.
+    write('settings.yaml', 'builderRuntime: gpt\n');
+    const third = await client.call('tasks.create', { agentId: 'builder', text: 'again' });
+    await client.call('tasks.wait', { taskId: third.id });
+    expect(transport.starts[2]![8]).toBe('claude-code');
+    expect(logs.some((l) => /builderRuntime gpt is not codex, claude-code or hermes/.test(l))).toBe(
+      true,
+    );
+  });
+
+  it('tells the user when another Anchi version installed the VM components', async () => {
+    vmRunning = true;
+    transport.guestVersion = '0.0.1';
+    const { client } = await start();
+    const status = await client.call('setup.status');
+    expect(status).toMatchObject({
+      installed: true,
+      appVersion: APP_VERSION,
+      guestVersion: '0.0.1',
+      guestOutdated: true,
+    });
+    expect(logs.some((l) => /installed by Anchi 0\.0\.1; this is Anchi/.test(l))).toBe(true);
+    // Tasks started from the CLI see it too.
+    const task = await client.call('tasks.create', { agentId: 'dev', text: 'go' });
+    await client.call('tasks.wait', { taskId: task.id });
+    const notices = (await client.call('tasks.events', { taskId: task.id }))
+      .map((e) => e.event)
+      .filter((e) => e.type === 'notice')
+      .map((e) => (e as { text: string }).text);
+    expect(notices.some((n) => /installed by Anchi 0\.0\.1/.test(n))).toBe(true);
+    // A guest from before the command cannot say: older than this Anchi.
+    transport.guestVersion = null;
+    expect(await client.call('setup.status')).toMatchObject({
+      guestVersion: null,
+      guestOutdated: true,
+    });
+    // The same version: nothing to do.
+    transport.guestVersion = APP_VERSION;
+    expect(await client.call('setup.status')).toMatchObject({
+      guestVersion: APP_VERSION,
+      guestOutdated: false,
+    });
+    const quiet = await client.call('tasks.create', { agentId: 'dev', text: 'go' });
+    await client.call('tasks.wait', { taskId: quiet.id });
+    expect(
+      (await client.call('tasks.events', { taskId: quiet.id })).some(
+        (e) => e.event.type === 'notice' && /installed by Anchi/.test(e.event.text),
+      ),
+    ).toBe(false);
   });
 });
 

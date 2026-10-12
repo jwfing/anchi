@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -223,3 +224,29 @@ class WorkspaceShareTests(unittest.TestCase):
         self.assertIn("! pgrep -f -- '^bindfs .*--multithreaded.* /mnt/anchi-host$'", install)
         unit = (root / 'systemd/anchi-workspaces.service').read_text()
         self.assertIn('ExecStop=-/usr/bin/umount -l /mnt/anchi-host', unit)
+
+
+class InstalledVersionTests(unittest.TestCase):
+    """`anchi-cell version` tells the daemon which Anchi installed the guest, so it can ask for
+    `anchi setup install` after an update instead of failing tasks against an older guest."""
+
+    def test_reports_the_installing_version_or_unknown(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'installed.json'
+            self.assertEqual(anchi_cell.installed_version(path), {'runtime_version': 'unknown', 'installed_at': None})
+            path.write_text('{"runtime_version": "0.3.1", "installed_at": "2026-10-11T19:07:53Z"}')
+            self.assertEqual(
+                anchi_cell.installed_version(path),
+                {'runtime_version': '0.3.1', 'installed_at': '2026-10-11T19:07:53Z'},
+            )
+            for broken in ('not json', '[1]', '{"runtime_version": ""}', '{"runtime_version": 3}'):
+                path.write_text(broken)
+                self.assertEqual(anchi_cell.installed_version(path)['runtime_version'], 'unknown', broken)
+            # Bounded: the daemon shows it in the TUI.
+            path.write_text(json.dumps({'runtime_version': 'v' * 100}))
+            self.assertEqual(len(anchi_cell.installed_version(path)['runtime_version']), 40)
+        self.assertIn(
+            "command == 'version' and not rest", (Path(__file__).parents[1] / 'guest/anchi_cell.py').read_text()
+        )

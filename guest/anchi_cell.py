@@ -41,6 +41,8 @@ EGRESS_CELLS = Path('/run/anchi-egress/cells')
 AUDIT_LOG = Path('/var/log/anchi-egress/audit.jsonl')
 AUDIT_MAX_ROWS = 2000
 CELL_ENV = Path('/opt/secure-vm/cell.env')
+# The Anchi version the guest components were installed from (guest/install-gmail.sh writes it).
+INSTALLED = Path('/opt/secure-vm/installed.json')
 APPARMOR_PROFILE = Path('/etc/apparmor.d/anchi-cell-bwrap')
 # A ceiling on live cells; the daemon decides how many work at once (`maxCells`, default 4)
 # and lets cells waiting for a delegated task stay alive beyond that (hub.ts CELL_CEILING).
@@ -93,6 +95,26 @@ def cell_env():
 
 def emit(value):
     print(json.dumps(value))
+
+
+def installed_version(path=INSTALLED):
+    """Which Anchi installed the guest components, so the daemon can tell an outdated guest.
+
+    `unknown` when the manifest is missing or unreadable (a guest installed before the version
+    was recorded); the daemon treats both as older than itself.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    version = data.get('runtime_version')
+    installed_at = data.get('installed_at')
+    return {
+        'runtime_version': version[:40] if isinstance(version, str) and version else 'unknown',
+        'installed_at': installed_at[:40] if isinstance(installed_at, str) else None,
+    }
 
 
 def name(value, code):
@@ -1192,6 +1214,8 @@ def main(argv):
         return emit(audit_rows(rest[0], [AUDIT_LOG.with_suffix('.jsonl.1'), AUDIT_LOG]))
     if command == 'quota' and not rest:
         return emit(egress({'op': 'quota'}))
+    if command == 'version' and not rest:
+        return emit(installed_version())
     if command == 'purge-agent' and len(rest) == 1:
         return agent_purge(rest[0])
     if command == 'skills' and len(rest) == 2 and rest[0] == 'set':

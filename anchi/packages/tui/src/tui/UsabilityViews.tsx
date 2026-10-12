@@ -30,7 +30,7 @@ export function WelcomeView({
   const labels = [
     'Prepare local environment',
     'Set up your credentials',
-    'Connect Codex or Claude Code',
+    'Connect a runtime',
     'Create your first agent',
     'Complete your first task',
   ];
@@ -50,6 +50,12 @@ export function WelcomeView({
         setup.host.installHint,
         'Install these prerequisites, then press Enter to check again.',
       );
+    else if (setup.vm === 'running' && setup.guestOutdated)
+      lines.push(
+        `The VM's components were installed by Anchi ${setup.guestVersion ?? 'an older release'}; this is Anchi ${setup.appVersion ?? 'a newer release'}.`,
+        'Update them before running tasks (it refuses while task cells are live).',
+        `${nextKey} update · your agents and credentials are kept`,
+      );
     else
       lines.push(
         setup.vm === 'stopped'
@@ -66,12 +72,13 @@ export function WelcomeView({
     );
   else if (step === 'runtime')
     lines.push(
-      'Choose one runtime:',
+      'Connect one runtime:',
       '[i] Codex — run codex login on this computer, then import it.',
       '[c] Claude Code — run claude setup-token, then paste the token.',
+      '[h] Hermes — an OpenAI-compatible endpoint, its API key and a model.',
       agents.some((a) => a.id !== 'builder')
         ? 'Connect the runtime used by your agent.'
-        : 'Agent builder currently requires Codex to create your first agent.',
+        : 'Agent builder uses the first one connected (Codex, then Claude Code, then Hermes); builderRuntime in ~/.anchi/settings.yaml picks one.',
     );
   else if (step === 'agent')
     lines.push(

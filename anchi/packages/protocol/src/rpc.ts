@@ -18,6 +18,12 @@ export interface TaskRow {
   status: TaskStatus;
   /** Runtime thread, once the first turn has started. */
   resumeId: string | null;
+  /**
+   * The runtime the task runs on, set when its first turn starts; a task keeps it even when its
+   * agent's runtime changes later (its session belongs to that runtime). Optional for clients
+   * connected to an older daemon.
+   */
+  runtime?: string | null;
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -229,6 +235,18 @@ export interface SetupStatus {
    * it. Optional for clients connected to an older daemon.
    */
   vmSize?: { default: VmSize; host: VmSize };
+  /** This Anchi's version. Optional for clients connected to an older daemon. */
+  appVersion?: string;
+  /**
+   * The Anchi version that installed the VM's components (`anchi-cell version`); null when the
+   * VM is not running or the guest predates the command.
+   */
+  guestVersion?: string | null;
+  /**
+   * The VM's components were installed by another Anchi version (or one too old to say): run
+   * `anchi setup install` to update them.
+   */
+  guestOutdated?: boolean;
 }
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */

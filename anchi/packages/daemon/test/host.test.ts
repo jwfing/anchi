@@ -1,10 +1,21 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { homeLayout } from '@anchi/core';
 import { describe, expect, it } from 'vitest';
-import { workspaceSteps } from '../src/host.ts';
+import { appVersion, workspaceSteps } from '../src/host.ts';
 import { launchdPlist, systemdUnit } from '../src/launch.ts';
 import { notifyCommand } from '../src/notify.ts';
 
 describe('host integration', () => {
+  it('reads this Anchi version from the release manifest, else the workspace package', () => {
+    expect(appVersion()).toMatch(/^\d+\.\d+\.\d+$/);
+    const dir = mkdtempSync(join(tmpdir(), 'anchi-version-'));
+    writeFileSync(join(dir, 'manifest.json'), '{"version":"9.9.9","target":"test"}');
+    expect(appVersion(dir)).toBe('9.9.9');
+    expect(appVersion(join(dir, 'nothing'))).toBe('unknown');
+  });
+
   it('passes agent text to notifiers as flattened arguments', () => {
     const text = 'line1\nline2 "quoted" $(rm -rf ~) \u0007';
     const [cmd, args] = notifyCommand('linux', 'title', text)!;
