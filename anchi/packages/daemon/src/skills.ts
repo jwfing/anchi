@@ -24,6 +24,8 @@ import type { SkillAddResult, SkillInfo, SkillUpdate } from '@anchi/protocol';
 export const MAX_SKILL_FILES = 200;
 export const MAX_SKILL_BYTES = 4 * 1024 * 1024;
 export const MAX_COLLECTION = 100;
+/** The guest reads at most this much on stdin (`anchi_cell.py` skills_set). */
+export const MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const SOURCE = '.anchi-source.json';
 
@@ -335,6 +337,11 @@ export class SkillStore {
         throw new Error(`skill "${id}" is not installed`);
       for (const f of readSkillTree(this.dir(id)))
         files[`skills/${id}/${f.path}`] = f.data.toString('base64');
+    }
+    // The payload `guest.setSkills` sends; past the guest's limit it would refuse without
+    // draining stdin, so fail here with a message the agent's owner can act on.
+    if (Buffer.byteLength(JSON.stringify({ files })) > MAX_BUNDLE_BYTES) {
+      throw new Error('the agent’s skills exceed 8 MB together; assign fewer or smaller skills');
     }
     const digest = createHash('sha256').update(JSON.stringify(files)).digest('hex').slice(0, 16);
     return { files, digest };

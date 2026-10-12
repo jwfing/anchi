@@ -44,6 +44,18 @@ describe('skills', () => {
     expect(store.list()).toEqual([]);
   });
 
+  it('refuses a bundle past the guest stdin limit', async () => {
+    const store = new SkillStore(mkdtempSync(join(tmpdir(), 'skills-')));
+    // Each skill stays under its own 4 MB cap; together their base64 passes 8 MiB.
+    const blob = 'x'.repeat(4 * 1024 * 1024 - 200);
+    for (const id of ['big-one', 'big-two']) {
+      const src = skillDir({ 'SKILL.md': '---\nname: Big\ndescription: d\n---', 'blob.bin': blob });
+      await store.add(src, id);
+    }
+    expect(() => store.bundle(['big-one'])).not.toThrow();
+    expect(() => store.bundle(['big-one', 'big-two'])).toThrow(/exceed 8 MB/);
+  });
+
   it('adds each skill of a local collection and skips the broken ones', async () => {
     const store = new SkillStore(mkdtempSync(join(tmpdir(), 'skills-')));
     const src = skillDir({

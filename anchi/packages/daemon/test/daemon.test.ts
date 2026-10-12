@@ -2202,6 +2202,47 @@ describe('cell limit', () => {
     expect(done.status).toBe('failed');
     expect(done.result ?? '').toContain('no cell became free');
   });
+
+  it('does not close a reused cell mid-turn to make room', async () => {
+    write('settings.yaml', 'maxCells: 2\n');
+    write('agents/other.yaml', 'runtime: codex\n');
+    write('agents/late.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    // A first turn completes and the cell idles; the follow-up reuses it and runs.
+    const reused = await client.call('tasks.create', { agentId: 'dev', text: 'one' });
+    await client.call('tasks.wait', { taskId: reused.id });
+    await client.call('tasks.send', { taskId: reused.id, text: 'hang' });
+    const other = await client.call('tasks.create', { agentId: 'other', text: 'hang' });
+    await new Promise((r) => setTimeout(r, 200));
+    const late = await client.call('tasks.create', { agentId: 'late', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 300));
+    // No cell is idle: the late task waits instead of killing the reused cell's running turn.
+    expect((await client.call('tasks.get', { taskId: reused.id })).status).toBe('running');
+    expect((await client.call('tasks.get', { taskId: late.id })).status).not.toBe('done');
+    expect(logs).not.toContain(`cell ${reused.id} ended: making room for another task`);
+    expect(transport.starts).toHaveLength(2);
+    await client.call('tasks.cancel', { taskId: reused.id });
+    expect((await client.call('tasks.wait', { taskId: late.id })).status).toBe('done');
+    await client.call('tasks.cancel', { taskId: other.id });
+  });
+
+  it('closes a genuinely idle reused cell to make room', async () => {
+    write('settings.yaml', 'maxCells: 2\n');
+    write('agents/other.yaml', 'runtime: codex\n');
+    write('agents/late.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    // Two turns in the same cell, both complete: the reused cell idles again.
+    const reused = await client.call('tasks.create', { agentId: 'dev', text: 'one' });
+    await client.call('tasks.wait', { taskId: reused.id });
+    await client.call('tasks.send', { taskId: reused.id, text: 'two' });
+    await client.call('tasks.wait', { taskId: reused.id });
+    const other = await client.call('tasks.create', { agentId: 'other', text: 'hang' });
+    await new Promise((r) => setTimeout(r, 200));
+    const late = await client.call('tasks.create', { agentId: 'late', text: 'hello' });
+    expect((await client.call('tasks.wait', { taskId: late.id })).status).toBe('done');
+    expect(logs).toContain(`cell ${reused.id} ended: making room for another task`);
+    await client.call('tasks.cancel', { taskId: other.id });
+  });
 });
 
 describe('cells and delegation', () => {
