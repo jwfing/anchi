@@ -1196,6 +1196,26 @@ describe('builder', () => {
     );
   });
 
+  it('sends the approval timeout from settings.yaml to the egress proxy, within bounds', async () => {
+    const { daemon } = await start();
+    const sent = () =>
+      JSON.parse(transport.execs.filter((e) => e.args[1] === 'egress-settings').at(-1)!.stdin);
+    // Without the setting the proxy keeps its default.
+    expect(sent()).toEqual({ high_risk_disabled: [] });
+    write('settings.yaml', 'approvalTimeoutMinutes: 30\nhighRisk: { disable: [github-merge] }\n');
+    await daemon.pushEgressSettings();
+    expect(sent()).toEqual({ high_risk_disabled: ['github-merge'], approval_timeout_s: 1800 });
+    // Out of range or not a whole number: the default, with a line in the log.
+    for (const bad of ['0', '721', '2.5', 'soon']) {
+      write('settings.yaml', `approvalTimeoutMinutes: ${bad}\n`);
+      await daemon.pushEgressSettings();
+      expect(sent()).toEqual({ high_risk_disabled: [] });
+    }
+    expect(
+      logs.filter((l) => /approvalTimeoutMinutes .* is not a whole number/.test(l)),
+    ).toHaveLength(4);
+  });
+
   it('reports a VM that runs but cannot be asked instead of showing nothing installed', async () => {
     vmRunning = true;
     transport.guestFails = true;

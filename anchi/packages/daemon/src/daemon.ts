@@ -278,14 +278,37 @@ export class Daemon {
     }
   }
 
-  /** Sends the user's high-risk exceptions (`highRisk: {disable: [ids]}`) to the egress proxy. */
+  /**
+   * How long the egress proxy holds a write for the user's approval, in seconds:
+   * `approvalTimeoutMinutes` in ~/.anchi/settings.yaml (1 to 720), else the proxy's default
+   * (5 minutes). Writes held by the connector services keep the policy service's ten minutes.
+   */
+  approvalTimeoutS(): number | undefined {
+    const raw = this.settings().approvalTimeoutMinutes;
+    if (raw === undefined || raw === null) return undefined;
+    const minutes = Number(raw);
+    if (Number.isInteger(minutes) && minutes >= 1 && minutes <= 720) return minutes * 60;
+    this.warnOnce(
+      `settings.yaml: approvalTimeoutMinutes ${String(raw)} is not a whole number from 1 to 720; using the default (5)`,
+    );
+    return undefined;
+  }
+
+  /**
+   * Sends the user's settings the egress proxy applies to the egress proxy: high-risk
+   * exceptions (`highRisk: {disable: [ids]}`) and the approval timeout.
+   */
   async pushEgressSettings(): Promise<void> {
     const highRisk = this.settings().highRisk as { disable?: unknown } | undefined;
     const disabled = Array.isArray(highRisk?.disable) ? highRisk.disable.map(String) : [];
+    const timeout = this.approvalTimeoutS();
     try {
       const r = await this.guest.transport.exec(
         ['anchi-cell', 'egress-settings'],
-        JSON.stringify({ high_risk_disabled: disabled }),
+        JSON.stringify({
+          high_risk_disabled: disabled,
+          ...(timeout === undefined ? {} : { approval_timeout_s: timeout }),
+        }),
       );
       if (r.code !== 0) this.log(`egress settings not applied: ${r.stdout.trim().slice(0, 200)}`);
     } catch (err) {

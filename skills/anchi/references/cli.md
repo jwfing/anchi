@@ -42,7 +42,8 @@ Commands:
   approvals                        Writes waiting for your approval
   approve <id>                     Approve a write waiting for approval
   deny <id>                        Deny a write waiting for approval
-  cancel <task>
+  cancel <task>                    Cancel a running or queued task; its work and
+                                   transcript are kept
   agents                           List agents
   setup                            Runtime and connector setup
   daemon                           Manage the background daemon

@@ -86,6 +86,7 @@ The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`.
 | `anchi-cell audit TASK` | The task's rows of the egress audit log and its rotated file, the latest 2000, as JSON with their total |
 | `anchi-cell quota` | The latest subscription limits the egress proxy saw in runtime responses, as JSON |
 | `anchi-cell version` | The Anchi version that installed the guest components and when (`/opt/secure-vm/installed.json`; `unknown` when it was not recorded) |
+| `anchi-cell egress-settings` | The user's settings for the egress proxy, on stdin: `{high_risk_disabled: [ids], approval_timeout_s?: 60–43200}`; the proxy validates them (`BAD_SETTINGS`) and keeps them across restarts |
 | `anchi-cell exec TASK -- COMMAND...` | Run a command as the agent user in a running cell, for live checks |
 | `anchi-image status ID HASH` | Whether a built layer exists for this recipe hash (and the current base) |
 | `anchi-image build ID HASH` | Build an image layer from the recipe JSON on stdin (`codex base` builds the base layer; `runtime-<runtime> runtime` builds a runtime's layer from `build-runtime-<runtime>.sh`). Prints metadata and the build log path |

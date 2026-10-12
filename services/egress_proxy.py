@@ -45,16 +45,36 @@ SERVICE_MAX = 256 * 1024
 # Writes held by the policy service return at once; this bounds a slow upstream.
 SERVICE_TIMEOUT = 150
 APPROVAL_TIMEOUT = 300
+# The user may wait longer for an approval (`approvalTimeoutMinutes` in settings.yaml), within
+# bounds: a held write keeps its cell's request and body open in the proxy meanwhile.
+APPROVAL_TIMEOUT_MIN, APPROVAL_TIMEOUT_MAX = 60, 12 * 3600
 SETTINGS = Path(os.environ.get('ANCHI_EGRESS_STATE', '/var/lib/anchi-egress')) / 'settings.json'
+
+
+def check_settings(value):
+    """The daemon's settings, validated: unknown high-risk ids or a timeout out of bounds are
+    errors, so a typo in settings.yaml is reported rather than silently narrowed."""
+    if not isinstance(value, dict):
+        raise ValueError('BAD_SETTINGS')
+    known = {entry[0] for entry in rules.HIGH_RISK}
+    disabled = value.get('high_risk_disabled', [])
+    if not isinstance(disabled, list) or not all(d in known for d in disabled):
+        raise ValueError('BAD_SETTINGS')
+    timeout = value.get('approval_timeout_s', APPROVAL_TIMEOUT)
+    if (
+        not isinstance(timeout, int)
+        or isinstance(timeout, bool)
+        or not APPROVAL_TIMEOUT_MIN <= timeout <= APPROVAL_TIMEOUT_MAX
+    ):
+        raise ValueError('BAD_SETTINGS')
+    return {'high_risk_disabled': sorted(set(disabled)), 'approval_timeout_s': timeout}
 
 
 def load_settings():
     try:
-        value = json.loads(SETTINGS.read_text())
-        known = {entry[0] for entry in rules.HIGH_RISK}
-        return {'high_risk_disabled': [d for d in value.get('high_risk_disabled', []) if d in known]}
+        return check_settings(json.loads(SETTINGS.read_text()))
     except (OSError, ValueError, AttributeError):
-        return {'high_risk_disabled': []}
+        return {'high_risk_disabled': [], 'approval_timeout_s': APPROVAL_TIMEOUT}
 
 
 CREDENTIAL_ALERTS_MAX = 20
@@ -271,7 +291,8 @@ def write_summary(decision, method, path, body):
 
 class Approvals:
     """Writes held for the user. The daemon watches this queue over the control socket and
-    answers; an unanswered request is refused after APPROVAL_TIMEOUT seconds."""
+    answers; an unanswered request is refused after `timeout` seconds (APPROVAL_TIMEOUT unless
+    the user's settings say otherwise). Each pending item carries the timeout it was given."""
 
     def __init__(self, timeout=APPROVAL_TIMEOUT):
         self.timeout = timeout
@@ -552,8 +573,8 @@ class EgressProxy:
     def __init__(self, registry=None, credentials=None, call=https_call):
         self.registry = registry or Registry(('127.0.0.1', 18080))
         self.credentials = credentials or Credentials()
-        self.approvals = Approvals()
         self.settings = load_settings()
+        self.approvals = Approvals(self.settings['approval_timeout_s'])
         self.call = call
         self.control = None
         # Latest quota headers per runtime rule: {rule: {ts, status, headers}}.
@@ -651,19 +672,15 @@ class EgressProxy:
         return frozenset(self.settings['high_risk_disabled']) | cell.high_risk_disabled
 
     def set_settings(self, value):
-        """Settings the daemon owns (the user's high-risk exceptions), kept across restarts."""
-        if not isinstance(value, dict):
-            raise ValueError('BAD_SETTINGS')
-        known = {entry[0] for entry in rules.HIGH_RISK}
-        disabled = value.get('high_risk_disabled', [])
-        if not isinstance(disabled, list) or not all(d in known for d in disabled):
-            raise ValueError('BAD_SETTINGS')
-        self.settings = {'high_risk_disabled': sorted(set(disabled))}
+        """Settings the daemon owns (the user's high-risk exceptions and approval timeout), kept
+        across restarts. The timeout applies to writes held from now on."""
+        self.settings = check_settings(value)
+        self.approvals.timeout = self.settings['approval_timeout_s']
         SETTINGS.parent.mkdir(parents=True, exist_ok=True)
         temporary = SETTINGS.with_suffix('.tmp')
         temporary.write_text(json.dumps(self.settings))
         os.replace(temporary, SETTINGS)
-        audit({'event': 'settings', 'high_risk_disabled': self.settings['high_risk_disabled']})
+        audit({'event': 'settings', **self.settings})
         return self.settings
 
     async def poll(self, kind, params):

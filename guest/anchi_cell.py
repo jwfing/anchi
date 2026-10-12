@@ -1207,7 +1207,8 @@ def main(argv):
     if command == 'start' and 6 <= len(rest) <= 12:
         return cell_start(*rest)
     if command == 'egress-settings' and not rest:
-        # {"high_risk_disabled": [ids]} on stdin, from the user's ~/.anchi/settings.yaml.
+        # {"high_risk_disabled": [ids], "approval_timeout_s"?: seconds} on stdin, from the
+        # user's ~/.anchi/settings.yaml; the proxy validates and keeps them.
         return emit(egress({'op': 'settings.set', 'settings': json.loads(sys.stdin.read(65536) or '{}')}))
     if command == 'audit' and len(rest) == 1:
         name(rest[0], 'BAD_TASK')

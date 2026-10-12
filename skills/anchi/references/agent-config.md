@@ -112,5 +112,6 @@ The recipe's content hash names the built layer; a changed recipe is built again
 | `builderRuntime` | `codex`, `claude-code` or `hermes`: the Agent builder's runtime; without it, the first connected one in that order. A builder conversation keeps the runtime it started on |
 | `maxCells` | Cells working at once across all agents (1–16, default 4); a cell waiting for a task it delegated does not count. Give the VM more memory before raising it much |
 | `highRisk: {disable: [...]}` | Exemptions for every agent |
+| `approvalTimeoutMinutes` | How long the egress proxy holds a write for approval (1–720, default 5); Gmail, Drive, Notion and Slack approvals keep the policy service's ten minutes |
 
 Key bindings: `~/.anchi/keybindings.json` (`anchi keys` shows the merged map).

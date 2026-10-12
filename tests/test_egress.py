@@ -784,11 +784,58 @@ class RegistryTests(unittest.TestCase):
         proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
         with patch.object(self.module, 'SETTINGS', Path(self.tmp, 'settings.json')):
             self.assertEqual(
-                proxy.set_settings({'high_risk_disabled': ['github-merge']}), {'high_risk_disabled': ['github-merge']}
+                proxy.set_settings({'high_risk_disabled': ['github-merge']}),
+                {'high_risk_disabled': ['github-merge'], 'approval_timeout_s': 300},
             )
-            self.assertEqual(self.module.load_settings(), {'high_risk_disabled': ['github-merge']})
+            self.assertEqual(
+                self.module.load_settings(), {'high_risk_disabled': ['github-merge'], 'approval_timeout_s': 300}
+            )
             with self.assertRaises(ValueError):
                 proxy.set_settings({'high_risk_disabled': ['everything']})
+
+    def test_settings_set_the_approval_timeout_within_bounds(self):
+        proxy = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+        self.assertEqual(proxy.approvals.timeout, 300)
+        with patch.object(self.module, 'SETTINGS', Path(self.tmp, 'settings.json')):
+            # The user waits longer for approvals: held writes from now on get the new limit.
+            proxy.set_settings({'high_risk_disabled': [], 'approval_timeout_s': 1800})
+            self.assertEqual(proxy.approvals.timeout, 1800)
+            self.assertEqual(self.module.load_settings()['approval_timeout_s'], 1800)
+            # A restart reads it back; the queue starts with it.
+            again = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+            self.assertEqual(again.approvals.timeout, 1800)
+            # Out of bounds, not a whole number of seconds, or a boolean: refused, nothing changes.
+            for bad in (30, 13 * 3600, '600', 600.5, True, None):
+                with self.assertRaises(ValueError, msg=repr(bad)):
+                    proxy.set_settings({'high_risk_disabled': [], 'approval_timeout_s': bad})
+            self.assertEqual(proxy.approvals.timeout, 1800)
+            # Left out: back to the default.
+            proxy.set_settings({'high_risk_disabled': []})
+            self.assertEqual(proxy.approvals.timeout, 300)
+            # A settings file from before the timeout existed still loads.
+            Path(self.tmp, 'settings.json').write_text('{"high_risk_disabled": ["github-merge"]}')
+            self.assertEqual(
+                self.module.load_settings(), {'high_risk_disabled': ['github-merge'], 'approval_timeout_s': 300}
+            )
+
+    def test_held_writes_carry_the_timeout_they_were_given(self):
+        async def scenario():
+            approvals = self.module.Approvals(timeout=0.05)
+            seen = []
+
+            class Watcher:
+                def write(self, line):
+                    seen.append(json.loads(line))
+
+                def is_closing(self):
+                    return False
+
+            approvals.watchers.add(Watcher())
+            # The dialog counts down from the timeout the write was held with.
+            self.assertEqual(await approvals.ask({'task': 't1'}), 'timeout')
+            self.assertEqual(seen[0]['approval']['timeout'], 0.05)
+
+        asyncio.run(scenario())
 
     def test_egress_allowlists_add_runtime_and_connector_hosts(self):
         allow = rules.egress_allowlist(['registry.npmjs.org', '*.pypi.org'], {'codex', 'github'})
