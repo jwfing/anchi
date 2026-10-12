@@ -6,8 +6,8 @@ Gmail is part of the connector registry. See [connectors](CONNECTORS.md) for Dri
 
 Sign-in needs an OAuth client. Anchi supports two:
 
-- **Built-in client:** a release may ship Anchi's own Desktop client (`services/google_client.json`, installed readable by the auth service only). When it is present, you can sign in without a Google Cloud project; `scripts/anchi setup status` shows `googleClientSource: "builtin"`.
-- **Your own client:** a client you import takes precedence over the built-in one (`googleClientSource: "user"`). `scripts/anchi setup google-client --remove` removes it and falls back to the built-in client. Replacing or removing the client is refused while any Google account is connected (`DISCONNECT_BEFORE_REPLACING_CLIENT`): tokens refresh only with the client that obtained them.
+- **Built-in client:** a release may ship Anchi's own Desktop client (`services/google_client.json`, installed readable by the auth service only). When it is present, you can sign in without a Google Cloud project; `anchi setup status` shows `googleClientSource: "builtin"`.
+- **Your own client:** a client you import takes precedence over the built-in one (`googleClientSource: "user"`). `anchi setup google-client --remove` removes it and falls back to the built-in client. Replacing or removing the client is refused while any Google account is connected (`DISCONNECT_BEFORE_REPLACING_CLIENT`): tokens refresh only with the client that obtained them.
 
 Anchi has not passed Google's verification yet, so releases currently ship no built-in client and you import your own. `gmail.readonly` is a Google *restricted* scope: an app offering it to arbitrary users needs Google's verification and an annual third-party security assessment; until then an unverified client works only for its listed test users. Your own client in Testing mode, with yourself as test user, does not depend on Anchi's verification.
 
@@ -24,12 +24,12 @@ The implementation uses a random host loopback port, state and PKCE. See [native
 
 ## 2. Authorize
 
-Unlock the vault first (`scripts/anchi setup vault unlock`), then:
+Unlock the vault first (`anchi setup vault unlock`), then:
 
 ```bash
-scripts/anchi setup google-client /absolute/path/to/desktop-client.json   # once, without a built-in client
-scripts/anchi setup service gmail
-scripts/anchi setup service gmail --account work   # optional: another Google account
+anchi setup google-client /absolute/path/to/desktop-client.json   # once, without a built-in client
+anchi setup service gmail
+anchi setup service gmail --account work   # optional: another Google account
 ```
 
 Select the account and consent in the system browser; the command waits up to about ten minutes.
@@ -44,13 +44,13 @@ The VM's auth service can reach `oauth2.googleapis.com` only while a Google clie
 - The VM exchanges and stores tokens; access and refresh tokens never reach the Mac or a cell.
 - Granted scopes must exactly match `gmail.readonly`; broader previous consent is rejected. Prefer a dedicated OAuth client.
 
-`scripts/anchi setup status` lists the services. `connected` means local credentials exist, not that Google still accepts them. Invalid refresh authorization sets `reauth_required` and stops Google calls until you sign in again. Only an actual read validates external authorization.
+`anchi setup status` lists the services. `connected` means local credentials exist, not that Google still accepts them. Invalid refresh authorization sets `reauth_required` and stops Google calls until you sign in again. Only an actual read validates external authorization.
 
-Connecting defaults to standing read authorization. Use `scripts/anchi setup service-mode gmail ask` to review each request, or `auto` to restore automatic authorization.
+Connecting defaults to standing read authorization. Use `anchi setup service-mode gmail ask` to review each request, or `auto` to restore automatic authorization.
 
 ## 3. Read
 
-Give an agent the connector (`connectors: [gmail]`); it gets the tools `gmail_list` and `gmail_read`. For a manual check without an agent:
+Give an agent the connector (`connectors: [gmail]`); it gets the tools `gmail_list` and `gmail_read`. For a manual check without an agent, from a source checkout (`scripts/gmail.sh` is not in the release archive):
 
 ```bash
 bash scripts/gmail.sh list --query 'in:inbox newer_than:7d' --limit 3
@@ -83,8 +83,8 @@ Link and 4–8-digit masking is heuristic: it may miss login material or hide da
 ## 6. Disconnect
 
 ```bash
-scripts/anchi setup disconnect gmail                  # the default account
-scripts/anchi setup disconnect gmail --account work   # a named account
+anchi setup disconnect gmail                  # the default account
+anchi setup disconnect gmail --account work   # a named account
 ```
 
 Local token use and pending authorization stop first, followed by a Google revocation attempt. OAuth client configuration remains. On remote failure, `revocation_pending:true` allows retrying the same command. In-flight requests may still finish.
@@ -96,4 +96,4 @@ make check
 bash scripts/verify.sh
 ```
 
-The first command runs offline checks; the second checks the installed VM. Provider consent, mailbox reading, token refresh, reauthentication and remote revocation require separate real-account checks. Start with a test account and selected messages. Passing local tests does not establish that Google accepts the current credentials or that every recovery path works.
+Both run from a source checkout: the first runs the offline checks; the second checks the installed VM. Provider consent, mailbox reading, token refresh, reauthentication and remote revocation require separate real-account checks. Start with a test account and selected messages. Passing local tests does not establish that Google accepts the current credentials or that every recovery path works.

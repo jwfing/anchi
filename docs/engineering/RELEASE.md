@@ -36,7 +36,7 @@ See [Getting started](../GETTING_STARTED.md) for the exact commands.
 
 ## Version
 
-The version is `version` in `anchi/package.json`. `scripts/up.sh` records it in the VM's `/opt/secure-vm/installed.json` with the install time.
+The version is `version` in `anchi/package.json`. `scripts/up.sh` and `scripts/install-anchi.sh` record it (through `guest/install-gmail.sh`) in the VM's `/opt/secure-vm/installed.json` with the install time.
 
 ## Release gates
 

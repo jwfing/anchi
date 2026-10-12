@@ -1,6 +1,6 @@
 # Documentation
 
-Anchi is a secured agent team: Codex and Claude Code agents in disposable cells that never hold upstream credentials, each limited to what it is configured with. Start with the [project overview](../README.md), [Getting started](GETTING_STARTED.md) and the [agent team guide](AGENT_TEAM.md). Documentation is maintained in English. This index covers the current implementation, operating instructions and known limitations. Historical proposals and acceptance reports are not maintained; use Git history when needed.
+Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposable cells that never hold upstream credentials, each limited to what it is configured with. Start with the [project overview](../README.md), [Getting started](GETTING_STARTED.md) and the [agent team guide](AGENT_TEAM.md). Documentation is maintained in English. This index covers the current implementation, operating instructions and known limitations. Historical proposals and acceptance reports are not maintained; use Git history when needed.
 
 ## Using Anchi
 

@@ -6,10 +6,10 @@ Gmail, Google Drive, Notion and Slack are registered in `services/connectors.py`
 
 | Connector | Preparation | Connect |
 |---|---|---|
-| Gmail | Without a built-in client: enable Gmail API in Google Cloud and import a Desktop OAuth client JSON | `scripts/anchi setup google-client <json>` once, then `scripts/anchi setup service gmail [--account <name>]` (read-only scope) |
-| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `scripts/anchi setup service drive [--account <name>]`; tokens are stored independently from Gmail |
-| Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | `scripts/anchi setup service notion`, then enter the `ntn_` token without echo |
-| Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | `scripts/anchi setup service slack`, then enter the `xoxb-` Bot User OAuth Token |
+| Gmail | Without a built-in client: enable Gmail API in Google Cloud and import a Desktop OAuth client JSON | `anchi setup google-client <json>` once, then `anchi setup service gmail [--account <name>]` (read-only scope) |
+| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `anchi setup service drive [--account <name>]`; tokens are stored independently from Gmail |
+| Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | `anchi setup service notion`, then enter the `ntn_` token without echo |
+| Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | `anchi setup service slack`, then enter the `xoxb-` Bot User OAuth Token |
 
 The TUI's **Connectors → Services** does the same with masked input in a full-screen dialog that agent output cannot draw over; **Tab** shows the input to check it and hides it again. Tokens go from the client to the daemon and over stdin to the encrypted vault; they are never logged or stored on the Mac. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
 
@@ -20,7 +20,7 @@ Gmail and Drive can hold several Google accounts each, by name (`default` withou
 New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation in Anchi's approval dialog. Any mode change revokes all unconsumed grants. The mode is per connector service and applies to every agent. An agent can additionally have its writes held with `approvals: {notion: ask}` in its file (the policy principal `notion:<agent>`): agents reach the services through a bridge that names them, so policy can tell them apart.
 
 ```bash
-scripts/anchi setup service-mode drive ask   # Require approval for Drive
+anchi setup service-mode drive ask   # Require approval for Drive
 bash scripts/policy.sh rules                 # Show current modes
 ```
 
@@ -61,10 +61,12 @@ The in-cell tool keeps the same request ID while waiting and times out after ten
 
 ## CLI and validation
 
+From a source checkout (`scripts/policy.sh` is not in the release archive; the TUI's approval dialog and `anchi approvals` cover the same decisions):
+
 ```bash
 bash scripts/policy.sh read drive allow  # Compatibility alias: allow=auto (includes writes), deny=ask
 bash scripts/policy.sh pending
-limactl shell secure-vm -- sudo /usr/bin/python3 /opt/secure-vm/services/connector_admin.py slack probe
+limactl shell anchi-vm -- sudo /usr/bin/python3 /opt/secure-vm/services/connector_admin.py slack probe
 ```
 
 Real-account validation remains a maintainer task: connect, search, read, create, update/append/post, inspect and approve full write content in `ask` mode, then disconnect. Local tests do not replace provider-specific account checks.

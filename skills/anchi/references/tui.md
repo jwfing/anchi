@@ -11,10 +11,10 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 | Getting started | ^X 0 | Prerequisites, VM, vault and runtime, then the builder and a first task; Enter continues |
 | Team overview | ^X 4 | Each agent's current activity, pending approvals and delegated work |
 | Configure → Runtimes | ^X 1 | s start the VM, I install/update, u unlock the vault, V new vault, W share workspaces, i Codex, c Claude Code, h Hermes, r refresh |
-| Configure → Skills | ^X 1 | One line per skill: ↑ ↓ choose, PgUp PgDn page, Home End (g G) first and last; a add (directory or GitHub URL), u update after reviewing which files are added, changed or removed, d remove |
-| Configure → Connectors | ^X 1 | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect |
-| Configure → Usage | ^X 1 | Tokens and subscription limits; p period, b group by agent, model, runtime or day, r refresh |
-| Configure → Access | ^X 1 | Hosts, injections and refusals per agent; p period, r refresh |
+| Configure → Skills | ^X 1, ↓ | One line per skill: ↑ ↓ choose, PgUp PgDn page, Home End (g G) first and last; a add (directory or GitHub URL), u update after reviewing which files are added, changed or removed, d remove |
+| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client |
+| Configure → Usage | ^X 1, ↓↓↓ | Tokens and subscription limits; p period, b group by agent, model, runtime or day, r refresh |
+| Configure → Access | ^X 1, ↓↓↓↓ | Hosts, injections and refusals per agent; p period, r refresh |
 | Agents | ^X 2 | An agent's view lists its tasks; its input starts a new task |
 | Tasks | ^X 3 | A task's view shows its transcript; its input replies to it |
 | Agent builder | ^X b | Describe an agent; review the proposed file in a dialog; y writes it |

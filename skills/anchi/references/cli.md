@@ -2,7 +2,53 @@
 
 Generated from `anchi --help` by `scripts/gen-skill-cli.py`; run `anchi <command> --help` for the installed version. From a source checkout, use `scripts/anchi`.
 
-## `anchi update`
+## `anchi`
+
+```text
+Usage: anchi [options] [command]
+
+Anchi (安栖): a secured agent team
+
+Options:
+  -V, --version                    output the version number
+
+Commands:
+  update [options]                 Update this installation to the latest
+                                   release
+  tui                              Open the full-screen client (starts the
+                                   daemon if needed)
+  keys                             Key bindings of the TUI: the defaults merged
+                                   with ~/.anchi/keybindings.json
+  run [options] <agent> <text...>  Give an agent a task and stream it until the
+                                   turn ends
+  send [options] <task> <text...>  Send a follow-up to a task
+  retry [options] <task>           Run a failed or cancelled task again:
+                                   continue its session, or start over
+  audit [options] <task>           A task's external access: hosts requested,
+                                   credentials injected, refusals (egress audit
+                                   log)
+  access [options]                 External access of every agent over a period:
+                                   hosts, injections, refusals
+  usage [options]                  Token use by agent, model, runtime or day,
+                                   and the subscription limits last seen
+  tasks [options]                  List tasks, newest first
+  rm <task>                        Delete a finished task, the tasks it
+                                   delegated and their transcripts
+  scan <task>                      Credential-invariant scan of a task's live
+                                   cell
+  skills                           Skills agents can use
+  triggers                         Agents' schedules and polls, with their next
+                                   run and last result
+  approvals                        Writes waiting for your approval
+  approve <id>                     Approve a write waiting for approval
+  deny <id>                        Deny a write waiting for approval
+  cancel <task>
+  agents                           List agents
+  setup                            Runtime and connector setup
+  daemon                           Manage the background daemon
+```
+
+### `anchi update`
 
 ```text
 Usage: anchi update [options]
@@ -13,7 +59,7 @@ Options:
   --check     Check for a newer version without installing
 ```
 
-## `anchi tui`
+### `anchi tui`
 
 ```text
 Usage: anchi tui [options]
@@ -21,7 +67,7 @@ Usage: anchi tui [options]
 Open the full-screen client (starts the daemon if needed)
 ```
 
-## `anchi keys`
+### `anchi keys`
 
 ```text
 Usage: anchi keys [options] [command]
@@ -33,7 +79,7 @@ Commands:
   init        Write a starting keybindings.json (the leader and an example)
 ```
 
-### `anchi keys init`
+#### `anchi keys init`
 
 ```text
 Usage: anchi keys init [options]
@@ -41,7 +87,7 @@ Usage: anchi keys init [options]
 Write a starting keybindings.json (the leader and an example)
 ```
 
-## `anchi run`
+### `anchi run`
 
 ```text
 Usage: anchi run [options] <agent> <text...>
@@ -52,7 +98,7 @@ Options:
   -v, --verbose  show tool output
 ```
 
-## `anchi send`
+### `anchi send`
 
 ```text
 Usage: anchi send [options] <task> <text...>
@@ -63,7 +109,7 @@ Options:
   -v, --verbose  show tool output
 ```
 
-## `anchi retry`
+### `anchi retry`
 
 ```text
 Usage: anchi retry [options] <task>
@@ -75,7 +121,7 @@ Options:
   -v, --verbose  show tool output
 ```
 
-## `anchi audit`
+### `anchi audit`
 
 ```text
 Usage: anchi audit [options] <task>
@@ -87,7 +133,7 @@ Options:
   --json      the full report as JSON
 ```
 
-## `anchi access`
+### `anchi access`
 
 ```text
 Usage: anchi access [options]
@@ -99,7 +145,7 @@ Options:
   --json         the summary as JSON
 ```
 
-## `anchi usage`
+### `anchi usage`
 
 ```text
 Usage: anchi usage [options]
@@ -112,7 +158,7 @@ Options:
   --json         totals and limits as JSON
 ```
 
-## `anchi tasks`
+### `anchi tasks`
 
 ```text
 Usage: anchi tasks [options]
@@ -127,7 +173,7 @@ Options:
   -n, --limit <n>        how many (default: "50")
 ```
 
-## `anchi rm`
+### `anchi rm`
 
 ```text
 Usage: anchi rm [options] <task>
@@ -135,7 +181,7 @@ Usage: anchi rm [options] <task>
 Delete a finished task, the tasks it delegated and their transcripts
 ```
 
-## `anchi scan`
+### `anchi scan`
 
 ```text
 Usage: anchi scan [options] <task>
@@ -143,7 +189,7 @@ Usage: anchi scan [options] <task>
 Credential-invariant scan of a task's live cell
 ```
 
-## `anchi skills`
+### `anchi skills`
 
 ```text
 Usage: anchi skills [options] [command]
@@ -159,7 +205,7 @@ Commands:
   rm <id>
 ```
 
-### `anchi skills add`
+#### `anchi skills add`
 
 ```text
 Usage: anchi skills add [options] <source>
@@ -171,7 +217,7 @@ Options:
   --id <id>   the id of a single skill
 ```
 
-### `anchi skills update`
+#### `anchi skills update`
 
 ```text
 Usage: anchi skills update [options] [id]
@@ -183,13 +229,13 @@ Options:
   -y, --yes   update without asking
 ```
 
-### `anchi skills rm`
+#### `anchi skills rm`
 
 ```text
 Usage: anchi skills rm [options] <id>
 ```
 
-## `anchi triggers`
+### `anchi triggers`
 
 ```text
 Usage: anchi triggers [options]
@@ -197,7 +243,7 @@ Usage: anchi triggers [options]
 Agents' schedules and polls, with their next run and last result
 ```
 
-## `anchi approvals`
+### `anchi approvals`
 
 ```text
 Usage: anchi approvals [options]
@@ -205,7 +251,7 @@ Usage: anchi approvals [options]
 Writes waiting for your approval
 ```
 
-## `anchi approve`
+### `anchi approve`
 
 ```text
 Usage: anchi approve [options] <id>
@@ -213,7 +259,7 @@ Usage: anchi approve [options] <id>
 Approve a write waiting for approval
 ```
 
-## `anchi deny`
+### `anchi deny`
 
 ```text
 Usage: anchi deny [options] <id>
@@ -221,13 +267,13 @@ Usage: anchi deny [options] <id>
 Deny a write waiting for approval
 ```
 
-## `anchi cancel`
+### `anchi cancel`
 
 ```text
 Usage: anchi cancel [options] <task>
 ```
 
-## `anchi agents`
+### `anchi agents`
 
 ```text
 Usage: anchi agents [options] [command]
@@ -241,7 +287,7 @@ Commands:
                           cells were refused)
 ```
 
-### `anchi agents rm`
+#### `anchi agents rm`
 
 ```text
 Usage: anchi agents rm [options] <id>
@@ -252,7 +298,7 @@ Options:
   -y, --yes   delete without typing the id
 ```
 
-### `anchi agents allow-host`
+#### `anchi agents allow-host`
 
 ```text
 Usage: anchi agents allow-host [options] <id> <host>
@@ -260,7 +306,7 @@ Usage: anchi agents allow-host [options] <id> <host>
 Add one host to an agent's egress list (a host its cells were refused)
 ```
 
-## `anchi setup`
+### `anchi setup`
 
 ```text
 Usage: anchi setup [options] [command]
@@ -298,13 +344,13 @@ Commands:
                                   waits for approval)
 ```
 
-### `anchi setup status`
+#### `anchi setup status`
 
 ```text
 Usage: anchi setup status [options]
 ```
 
-### `anchi setup codex`
+#### `anchi setup codex`
 
 ```text
 Usage: anchi setup codex [options]
@@ -315,7 +361,7 @@ Options:
   -y, --yes   do not ask for confirmation
 ```
 
-### `anchi setup claude`
+#### `anchi setup claude`
 
 ```text
 Usage: anchi setup claude [options]
@@ -323,7 +369,7 @@ Usage: anchi setup claude [options]
 Store a `claude setup-token` token or an Anthropic API key in the VM vault
 ```
 
-### `anchi setup hermes`
+#### `anchi setup hermes`
 
 ```text
 Usage: anchi setup hermes [options]
@@ -336,7 +382,7 @@ Options:
   --model <model>   the default model, e.g. nousresearch/hermes-4-405b
 ```
 
-### `anchi setup workspaces`
+#### `anchi setup workspaces`
 
 ```text
 Usage: anchi setup workspaces [options]
@@ -347,7 +393,7 @@ Options:
   -y, --yes   do not ask for confirmation
 ```
 
-### `anchi setup vm`
+#### `anchi setup vm`
 
 ```text
 Usage: anchi setup vm [options]
@@ -355,7 +401,7 @@ Usage: anchi setup vm [options]
 Start the VM
 ```
 
-### `anchi setup install`
+#### `anchi setup install`
 
 ```text
 Usage: anchi setup install [options]
@@ -368,7 +414,7 @@ Options:
   --memory <gib>  memory of a new VM in GiB (default: half of this computer's)
 ```
 
-### `anchi setup vault`
+#### `anchi setup vault`
 
 ```text
 Usage: anchi setup vault [options] <action>
@@ -376,7 +422,7 @@ Usage: anchi setup vault [options] <action>
 init or unlock the VM vault with the key in ~/.config/anchi/vault.key
 ```
 
-### `anchi setup connector`
+#### `anchi setup connector`
 
 ```text
 Usage: anchi setup connector [options] <id>
@@ -390,7 +436,7 @@ Options:
   -y, --yes         do not ask for confirmation
 ```
 
-### `anchi setup disconnect`
+#### `anchi setup disconnect`
 
 ```text
 Usage: anchi setup disconnect [options] <id>
@@ -399,7 +445,7 @@ Options:
   --account <name>  gmail or drive: the account to disconnect (default: default)
 ```
 
-### `anchi setup service`
+#### `anchi setup service`
 
 ```text
 Usage: anchi setup service [options] <id>
@@ -412,7 +458,7 @@ Options:
                     gmail: work }
 ```
 
-### `anchi setup google-client`
+#### `anchi setup google-client`
 
 ```text
 Usage: anchi setup google-client [options] [path]
@@ -424,7 +470,7 @@ Options:
   --remove    remove your client and use the built-in one, when Anchi ships one
 ```
 
-### `anchi setup reset`
+#### `anchi setup reset`
 
 ```text
 Usage: anchi setup reset [options]
@@ -438,7 +484,7 @@ Options:
   -y, --yes   do not ask for confirmation
 ```
 
-### `anchi setup service-mode`
+#### `anchi setup service-mode`
 
 ```text
 Usage: anchi setup service-mode [options] <id> <mode>
@@ -446,7 +492,7 @@ Usage: anchi setup service-mode [options] <id> <mode>
 Writes of a service: auto, or ask (each write waits for approval)
 ```
 
-## `anchi daemon`
+### `anchi daemon`
 
 ```text
 Usage: anchi daemon [options] [command]
@@ -462,25 +508,25 @@ Commands:
   uninstall
 ```
 
-### `anchi daemon start`
+#### `anchi daemon start`
 
 ```text
 Usage: anchi daemon start [options]
 ```
 
-### `anchi daemon stop`
+#### `anchi daemon stop`
 
 ```text
 Usage: anchi daemon stop [options]
 ```
 
-### `anchi daemon status`
+#### `anchi daemon status`
 
 ```text
 Usage: anchi daemon status [options]
 ```
 
-### `anchi daemon install`
+#### `anchi daemon install`
 
 ```text
 Usage: anchi daemon install [options]
@@ -488,7 +534,7 @@ Usage: anchi daemon install [options]
 Run the daemon at login (launchd on macOS, a systemd user unit on Linux)
 ```
 
-### `anchi daemon uninstall`
+#### `anchi daemon uninstall`
 
 ```text
 Usage: anchi daemon uninstall [options]
