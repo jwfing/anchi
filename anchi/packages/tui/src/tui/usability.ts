@@ -221,7 +221,22 @@ export function agentTaskLines(
   return out;
 }
 
-export function resultLines(task: TaskRow, width: number, tasks: TaskRow[]): Line[] {
+/** Whether the user kept talking in a task: more than one input, so its view is a conversation
+ * and shows the transcript, not only the last result, once a turn ends. */
+export function continued(events: StoredEvent[]): boolean {
+  let inputs = 0;
+  for (const { event } of events) if (event.type === 'input' && ++inputs > 1) return true;
+  return false;
+}
+
+/** A finished task's result, links and delegated work; `historyKey` names the key that shows
+ * the full transcript instead. */
+export function resultLines(
+  task: TaskRow,
+  width: number,
+  tasks: TaskRow[],
+  historyKey?: string,
+): Line[] {
   const result: Line[] = [];
   const add = (text: string, tone: Line['tone']) => {
     for (const line of wrap(sanitize(text), width)) result.push({ text: line, tone });
@@ -248,6 +263,10 @@ export function resultLines(task: TaskRow, width: number, tasks: TaskRow[]): Lin
     add('Delegated work', 'system');
     for (const child of children)
       add(`@${child.agentId}: ${child.status} · ${sanitizeLine(child.title)}`, 'dim');
+  }
+  if (historyKey) {
+    result.push({ text: '', tone: 'dim' });
+    add(`${historyKey} shows the full transcript`, 'dim');
   }
   return result;
 }

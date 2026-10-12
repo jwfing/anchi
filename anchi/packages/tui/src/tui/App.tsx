@@ -76,6 +76,7 @@ import {
   nextSetupAction,
   runtimeReady,
   recoveryFor,
+  continued,
   resultLines,
   setupPhase,
   turnActivity,
@@ -618,7 +619,9 @@ export function App({
     }));
   const scrollRef = useRef(setScroll);
   scrollRef.current = setScroll;
-  const showHistory = history[conversationKey] ?? !detail;
+  // A task's view shows a finished task's result, unless the user asked for the transcript or
+  // kept talking in it (then it is a conversation, and a reply must not fold it away).
+  const showHistory = history[conversationKey] ?? (!detail || continued(logs[detail.id] ?? []));
   const isFinished = task && ['done', 'failed', 'cancelled'].includes(task.status);
 
   useEffect(() => {
@@ -652,6 +655,8 @@ export function App({
     focus === 'side' ? 'sidebar' : detail ? 'task' : isMenu ? (current as Context) : 'chat';
   // A task's view has an input too: text and the input's keys first, then its own bindings.
   const active: Context[] = context === 'task' ? ['chat', 'task', 'global'] : [context, 'global'];
+  // Named at the end of a result view; absent when the user unbound it.
+  const historyKey = keyLabel(keysFor(keymap, active, 'task:history')[0] ?? '') || undefined;
   const typing = context === 'chat' || context === 'task';
   // While a chord is pending, the keys that can follow it (which-key), above the status line.
   const next = pending.length ? continuations(keymap, active, pending) : [];
@@ -706,14 +711,14 @@ export function App({
       agent && !chatMode
         ? agentTaskLines(agentTasks, logs, textWidth)
         : isFinished && !showHistory
-          ? resultLines(task, textWidth, tasks)
+          ? resultLines(task, textWidth, tasks, historyKey)
           : transcriptLines(task ? (logs[task.id] ?? []) : [], textWidth, {
               verbose,
               expanded,
               live: task?.status === 'running',
               prefix: task ? `${task.id}:` : '',
             }),
-    [agent, chatMode, logs, task, tasks, showHistory, textWidth, verbose, expanded],
+    [agent, chatMode, logs, task, tasks, showHistory, historyKey, textWidth, verbose, expanded],
   );
   // Input box: border and padding take four columns, the prompt two.
   const maxScroll = Math.max(0, lines.length - transcriptHeight);
