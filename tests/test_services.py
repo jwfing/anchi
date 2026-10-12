@@ -263,6 +263,31 @@ class OAuthTests(unittest.TestCase):
         auth.remove_token('slack')
         self.assertFalse(auth.status()['slack']['connected'])
 
+    def test_proxy_connector_tokens_go_to_the_egress_proxy_only(self):
+        good = {
+            'posthog': 'phx_' + 'a' * 40,
+            'sentry': 'sntryu_' + 'a' * 64,
+            'firecrawl': 'fc-' + 'a' * 32,
+            'figma': 'figd_' + 'a-' * 20,
+            'discord': 'MTAwMDAwMDAwMDAwMDAwMDAw.GabcDE.' + 'x' * 38,
+        }
+        for connector, token in good.items():
+            auth.import_token(connector, {'token': token})
+            self.assertEqual(auth.handle({'op': 'egress_credential', 'connector': connector}, 'egress')['token'], token)
+            with self.assertRaises(Denied):
+                auth.handle({'op': 'egress_credential', 'connector': connector}, 'slack')
+        auth.import_token('sentry', {'token': 'b' * 64})  # a token from before prefixes
+        for connector, bad in (
+            ('posthog', 'phc_' + 'a' * 40),  # the public project key
+            ('sentry', 'sntrys_' + 'a' * 64),  # an organization token
+            ('firecrawl', 'fc_' + 'a' * 32),
+            ('figma', 'figd_short'),
+            ('discord', 'Bot MTAwMDAwMDAwMDAwMDAwMDAw.GabcDE.' + 'x' * 38),
+        ):
+            with self.assertRaises(Denied):
+                auth.import_token(connector, {'token': bad})
+        self.assertNotIn('phx_', json.dumps(auth.status()))
+
     def test_disallow_client_replacement_while_connected(self):
         auth.write('tokens.json', {'access_token': 'x'})
         with self.assertRaises(Denied):

@@ -95,3 +95,51 @@ class LimaTemplateTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ConnectorListTests(unittest.TestCase):
+    """The proxy connectors are listed in Python (proxy, auth, vault, cell manager) and in
+    TypeScript (config schema, protocol); a connector missing from one of them fails late."""
+
+    @staticmethod
+    def ts_list(path, name):
+        text = (ROOT / path).read_text()
+        body = re.search(rf'\b{name}(?:: [^=]+)? = \[([^\]]*)\]', text)
+        assert body, f'{name} not found in {path}'
+        return re.findall(r"'([a-z0-9-]+)'", body.group(1))
+
+    def test_proxy_connectors_agree(self):
+        import importlib.util
+
+        import auth
+        import egress_rules
+        import vault
+
+        spec = importlib.util.spec_from_file_location('anchi_cell', ROOT / 'guest/anchi_cell.py')
+        anchi_cell = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(anchi_cell)
+        connectors = list(egress_rules.CONNECTORS)
+        self.assertEqual(self.ts_list('anchi/packages/core/src/config/schema.ts', 'PROXY_CONNECTORS'), connectors)
+        self.assertEqual(self.ts_list('anchi/packages/protocol/src/rpc.ts', 'CONNECTOR_IDS'), connectors)
+        self.assertEqual(list(anchi_cell.PROXY_CONNECTORS), connectors)
+        self.assertEqual(set(auth.EGRESS_CONNECTORS), set(connectors))
+        tokens = self.ts_list('anchi/packages/protocol/src/rpc.ts', 'TOKEN_CONNECTOR_IDS')
+        self.assertEqual(set(tokens), set(connectors) - {'aws'})
+        self.assertTrue(set(tokens) <= set(auth.TOKENS))
+        for connector in connectors:
+            self.assertIn(auth.EGRESS_CONNECTORS[connector], vault.NAMES, connector)
+            self.assertIn(connector, egress_rules.VERIFY_ENDPOINTS, connector)
+            self.assertIn(connector, egress_rules.BASE_EGRESS, connector)
+            self.assertTrue(any(r.grant == connector for r in egress_rules.RULES), connector)
+        # The credential scan of a cell looks for every connector's real values.
+        source = (ROOT / 'guest/anchi_cell.py').read_text()
+        for connector in connectors:
+            self.assertIn(f"('{connector}', '{connector}.json'", source, connector)
+
+    def test_high_risk_ids_agree(self):
+        import egress_rules
+
+        self.assertEqual(
+            self.ts_list('anchi/packages/core/src/config/schema.ts', 'HIGH_RISK_IDS'),
+            [entry[0] for entry in egress_rules.HIGH_RISK],
+        )

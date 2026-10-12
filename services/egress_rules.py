@@ -16,8 +16,10 @@ from urllib.parse import parse_qs
 from xml.sax.saxutils import escape
 
 PLACEHOLDER_MARK = 'anchi-placeholder'
+# The mark without its dash, for placeholders that must match a token alphabet (Linear, Discord).
+PLACEHOLDER_COMPACT = 'anchiplaceholder'
 PLACEHOLDER_AWS_KEY = 'AKIAANCHIPLACEHOLDER'
-CONNECTORS = ('github', 'aws', 'linear')
+CONNECTORS = ('github', 'aws', 'linear', 'posthog', 'sentry', 'firecrawl', 'figma', 'discord')
 # Runtime credentials an agent of that runtime gets; injected replace-only.
 RUNTIMES = ('codex', 'claude', 'hermes')
 # Hermes sends `Authorization: Bearer <key>` to the user's OpenAI-compatible endpoint.
@@ -30,7 +32,7 @@ PLACEHOLDER_CLAUDE_KEY = 'sk-ant-api03-anchi-placeholder-' + '0' * 40
 class Rule:
     name: str
     hosts: tuple[str, ...]
-    # bearer | basic | raw | aws_sigv4 | anthropic | none (deny-only)
+    # bearer | basic | raw | bot (Discord) | figma | aws_sigv4 | anthropic | none (deny-only)
     kind: str
     # Connector or runtime that grants this rule; None applies to every agent.
     grant: str | None
@@ -120,6 +122,50 @@ RULES: tuple[Rule, ...] = (
         grant='linear',
         deny=(r'\b(apiKeyCreate|apiKeyDelete|oauthClient\w*|oauthToken\w*)\b',),
     ),
+    # US and EU Cloud; ingestion (`*.i.posthog.com`) takes the public project key, not this one.
+    Rule(
+        name='posthog',
+        hosts=('us.posthog.com', 'eu.posthog.com'),
+        kind='bearer',
+        grant='posthog',
+        path=r'^/api/',
+        deny=(
+            r'^\S+ /api/personal_api_keys(/|$)',
+            # Resetting or rotating a project's keys returns the new key.
+            r'^\S+ /api/.*/(reset_token|rotate_secret_token)/?$',
+        ),
+    ),
+    # The API only; event ingestion (`/api/<project>/envelope/`) authenticates with the DSN.
+    Rule(
+        name='sentry',
+        hosts=('sentry.io', 'us.sentry.io', 'de.sentry.io'),
+        kind='bearer',
+        grant='sentry',
+        path=r'^/api/0/',
+        deny=(
+            r'^\S+ /api/0/api-tokens(/|$)',
+            r'^\S+ /api/0/organizations/[^/]+/org-auth-tokens(/|$)',
+            r'^\S+ /api/0/sentry-apps/[^/]+/(api-tokens|rotate-secret)(/|$)',
+            r'^\S+ /api/0/sentry-app-installations/[^/]+/authorizations(/|$)',
+        ),
+    ),
+    Rule(name='firecrawl', hosts=('api.firecrawl.dev',), kind='bearer', grant='firecrawl'),
+    Rule(name='figma', hosts=('api.figma.com',), kind='figma', grant='figma'),
+    # REST only; the gateway (a WebSocket that carries the token in a message) is not supported.
+    Rule(
+        name='discord',
+        hosts=('discord.com', 'discordapp.com'),
+        kind='bot',
+        grant='discord',
+        path=r'^/api/',
+        deny=(
+            # Webhook objects carry the webhook's own token: listing, creating or reading one by
+            # id returns it. Executing a webhook (`/webhooks/<id>/<token>`) stays possible.
+            r'^\S+ /api(/v\d+)?/(channels|guilds)/\d+/webhooks/?$',
+            r'^\S+ /api(/v\d+)?/webhooks/\d+/?$',
+            r'^\S+ /api(/v\d+)?/oauth2/token(/|$)',
+        ),
+    ),
 )
 
 
@@ -166,10 +212,10 @@ def hermes_rule(host, base_path=''):
 
 def classify_credential(headers):
     """What kind of credential the client sent, without revealing it."""
-    auth = headers.get('authorization', '') or headers.get('x-api-key', '')
+    auth = headers.get('authorization', '') or headers.get('x-api-key', '') or headers.get('x-figma-token', '')
     if not auth:
         return 'none'
-    if PLACEHOLDER_MARK in auth or PLACEHOLDER_AWS_KEY in auth:
+    if PLACEHOLDER_MARK in auth or PLACEHOLDER_COMPACT in auth or PLACEHOLDER_AWS_KEY in auth:
         return 'placeholder'
     if auth.lower().startswith('basic '):
         try:
@@ -432,6 +478,10 @@ def apply(decision, method, url, headers, body, credential):
         out['authorization'] = 'Basic ' + base64.b64encode(f'x-access-token:{credential["token"]}'.encode()).decode()
     elif rule.kind == 'raw':
         out['authorization'] = credential['token']
+    elif rule.kind == 'bot':
+        out['authorization'] = f'Bot {credential["token"]}'
+    elif rule.kind == 'figma':
+        out['x-figma-token'] = credential['token']
     elif rule.kind == 'anthropic':
         out.pop('x-api-key', None)
         if credential['kind'] == 'api_key':
@@ -471,29 +521,39 @@ def public_address(infos):
 # so a bad credential is reported at setup instead of as a 401 in the middle of a task.
 
 VERIFY_ENDPOINTS = {
-    'github': ('GET', 'https://api.github.com/user', b''),
-    'linear': ('POST', 'https://api.linear.app/graphql', b'{"query":"{ viewer { email name } }"}'),
-    'aws': ('POST', 'https://sts.{region}.amazonaws.com/', b'Action=GetCallerIdentity&Version=2011-06-15'),
+    'github': ('GET', ('https://api.github.com/user',), b''),
+    'linear': ('POST', ('https://api.linear.app/graphql',), b'{"query":"{ viewer { email name } }"}'),
+    'aws': ('POST', ('https://sts.{region}.amazonaws.com/',), b'Action=GetCallerIdentity&Version=2011-06-15'),
+    # A key belongs to one region's cloud; the other refuses it.
+    'posthog': ('GET', ('https://us.posthog.com/api/users/@me/', 'https://eu.posthog.com/api/users/@me/'), b''),
+    'sentry': ('GET', ('https://sentry.io/api/0/organizations/',), b''),
+    'firecrawl': ('GET', ('https://api.firecrawl.dev/v2/team/credit-usage',), b''),
+    'figma': ('GET', ('https://api.figma.com/v1/me',), b''),
+    'discord': ('GET', ('https://discord.com/api/v10/users/@me',), b''),
 }
 
 
-def verify_request(connector, credential):
-    """(method, url, headers, body) of the identity call for `connector`."""
-    method, url, body = VERIFY_ENDPOINTS[connector]
-    headers = {'user-agent': 'anchi-egress-verify', 'accept': 'application/json'}
-    if connector == 'github':
-        headers['authorization'] = f'Bearer {credential["token"]}'
-    elif connector == 'linear':
-        headers['authorization'] = credential['token']
-        headers['content-type'] = 'application/json'
-    else:
-        url = url.format(region=credential['region'])
-        headers = {'content-type': 'application/x-www-form-urlencoded'}
-        headers = aws_resign(method, url, headers, body, credential['region'], 'sts', credential)
-    return method, url, headers, body
+def verify_requests(connector, credential):
+    """(method, url, headers, body) of the identity calls for `connector`, to try in order until
+    one is not refused."""
+    method, urls, body = VERIFY_ENDPOINTS[connector]
+    out = []
+    for url in urls:
+        headers = {'user-agent': 'anchi-egress-verify', 'accept': 'application/json'}
+        if connector == 'aws':
+            url = url.format(region=credential['region'])
+            headers = {'content-type': 'application/x-www-form-urlencoded'}
+            headers = aws_resign(method, url, headers, body, credential['region'], 'sts', credential)
+        else:
+            rule = next(r for r in RULES if r.grant == connector and r.kind != 'basic')
+            headers = apply(Decision('inject', rule), method, url, headers, body, credential)
+            if connector == 'linear':
+                headers['content-type'] = 'application/json'
+        out.append((method, url, headers, body))
+    return out
 
 
-def verify_account(connector, status, body):
+def verify_account(connector, status, body, url=''):
     """Account label from the identity call's response; ValueError when the credential is refused."""
     if status in (401, 403):
         raise ValueError('CREDENTIAL_REJECTED')
@@ -503,6 +563,24 @@ def verify_account(connector, status, body):
     try:
         if connector == 'github':
             return str(json.loads(text)['login'])[:100]
+        if connector == 'posthog':
+            region = 'EU' if url.startswith('https://eu.') else 'US'
+            return f'{str(json.loads(text)["email"])[:90]} ({region})'
+        if connector == 'sentry':
+            slugs = [str(o['slug'])[:40] for o in json.loads(text)[:3]]
+            if not slugs:
+                raise ValueError('CREDENTIAL_REJECTED')
+            return ', '.join(slugs)[:100]
+        if connector == 'firecrawl':
+            credits = json.loads(text)['data']['remainingCredits']
+            if not isinstance(credits, int):
+                raise TypeError
+            return f'team with {credits} credits left'
+        if connector == 'figma':
+            data = json.loads(text)
+            return str(data.get('email') or data['handle'])[:100]
+        if connector == 'discord':
+            return str(json.loads(text)['username'])[:100]
         if connector == 'linear':
             data = json.loads(text)
             if data.get('errors'):
@@ -528,6 +606,9 @@ AWS_READ = re.compile(
     r'Check|Validate|Estimate|Preview|Simulate|Test|View|Download|StartQuery|StopQuery)'
 )
 GRAPHQL_MUTATION = re.compile(r'^\s*mutation\b')
+REST_CONNECTORS = ('posthog', 'sentry', 'firecrawl', 'figma', 'discord')
+# PostHog runs HogQL and insight queries as POST; they read.
+POSTHOG_QUERY = re.compile(r'^/api/(projects|environments)/[^/]+/query/?$')
 
 
 def graphql_mutation(body):
@@ -557,6 +638,11 @@ def is_write(decision, method, path, body):
         if ':' in op and ' ' in op.split(':', 1)[1]:  # REST, such as S3: by method
             return not op.split(':', 1)[1].startswith(('GET ', 'HEAD '))
         return not AWS_READ.match(op)
+    if rule.name in REST_CONNECTORS:
+        if rule.name == 'posthog' and method == 'POST' and POSTHOG_QUERY.match(clean):
+            return False
+        # Firecrawl's scrapes, crawls and searches spend credits, so they count as writes too.
+        return method not in ('GET', 'HEAD', 'OPTIONS')
     return False
 
 
@@ -671,6 +757,55 @@ HIGH_RISK = (
         'change who can access an S3 bucket or object',
     ),
     ('linear-delete', 'linear', r'graphql:.*\b\w+(Delete|Archive)\b', 'delete or archive in Linear'),
+    (
+        'posthog-delete',
+        'posthog',
+        r'^DELETE /api/(organizations|projects|environments)/[^/]+/?$',
+        'delete a PostHog organization or project',
+    ),
+    (
+        'posthog-access',
+        'posthog',
+        r'^(POST|PUT|PATCH|DELETE) /api/organizations/[^/]+/(members|invites)(/|$)',
+        'change who can access a PostHog organization',
+    ),
+    (
+        'sentry-delete',
+        'sentry',
+        r'^DELETE /api/0/(organizations/[^/]+|projects/[^/]+/[^/]+|teams/[^/]+/[^/]+)/?$',
+        'delete a Sentry organization, project or team',
+    ),
+    (
+        'sentry-access',
+        'sentry',
+        r'^(POST|PUT|PATCH|DELETE) /api/0/organizations/[^/]+/(members|invite-requests)(/|$)',
+        'change who can access a Sentry organization',
+    ),
+    (
+        'figma-webhook',
+        'figma',
+        r'^(POST|PUT) /v2/(webhooks|teams/[^/]+/webhooks)(/|$)',
+        'create or change a Figma webhook, which sends future events to a URL',
+    ),
+    (
+        'discord-delete',
+        'discord',
+        r'^DELETE /api(/v\d+)?/(channels|guilds)/\d+/?$',
+        'delete a Discord channel or server',
+    ),
+    (
+        'discord-members',
+        'discord',
+        r'^(PUT|PATCH|DELETE) /api(/v\d+)?/guilds/\d+/(bans|members)/\d+',
+        'ban, kick, time out or change roles of Discord members',
+    ),
+    (
+        'discord-access',
+        'discord',
+        r'^((POST|PATCH|PUT|DELETE) /api(/v\d+)?/(guilds/\d+/roles|channels/\d+/permissions)'
+        r'|PATCH /api(/v\d+)?/(guilds/\d+|applications/@me)/?$)',
+        'change Discord roles, channel permissions, server or bot settings',
+    ),
 )
 GIT_OID = rb'(?:[0-9a-f]{40}|[0-9a-f]{64})'
 GIT_UPDATE = re.compile(rb'(' + GIT_OID + rb') (' + GIT_OID + rb') (refs/[^\x00\s]{1,200})')
@@ -769,6 +904,12 @@ BASE_EGRESS = {
     'github': ('github.com', 'api.github.com', 'codeload.github.com', '*.githubusercontent.com'),
     'aws': ('*.amazonaws.com',),
     'linear': ('api.linear.app',),
+    'posthog': ('us.posthog.com', 'eu.posthog.com'),
+    'sentry': ('sentry.io', 'us.sentry.io', 'de.sentry.io'),
+    'firecrawl': ('api.firecrawl.dev',),
+    # Rendered images are links to Figma's S3 bucket.
+    'figma': ('api.figma.com', 'figma-alpha-api.s3.us-west-2.amazonaws.com'),
+    'discord': ('discord.com', 'cdn.discordapp.com', 'media.discordapp.net'),
 }
 
 

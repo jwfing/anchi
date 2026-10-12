@@ -14,6 +14,24 @@ const CONNECTOR_NOTES: Record<string, string> = {
   linear:
     'Linear: call the GraphQL API at https://api.linear.app/graphql with ' +
     '`Authorization: $LINEAR_API_KEY`; the real key is added outside your environment.',
+  posthog:
+    'PostHog: call the API at https://us.posthog.com/api/ (or https://eu.posthog.com/api/ for ' +
+    'an EU account) with `Authorization: Bearer $POSTHOG_PERSONAL_API_KEY`; the real key is ' +
+    'added outside your environment. Managing API keys is refused.',
+  sentry:
+    'Sentry: call the API at https://sentry.io/api/0/ with ' +
+    '`Authorization: Bearer $SENTRY_AUTH_TOKEN` (sentry-cli reads it too); the real token is ' +
+    'added outside your environment. Creating tokens is refused.',
+  firecrawl:
+    'Firecrawl: call the API at https://api.firecrawl.dev with ' +
+    '`Authorization: Bearer $FIRECRAWL_API_KEY`; the real key is added outside your environment.',
+  figma:
+    'Figma: call the REST API at https://api.figma.com with ' +
+    '`X-Figma-Token: $FIGMA_ACCESS_TOKEN`; the real token is added outside your environment.',
+  discord:
+    'Discord: call the REST API at https://discord.com/api/v10 with ' +
+    '`Authorization: Bot $DISCORD_BOT_TOKEN`; the real token is added outside your environment. ' +
+    'The gateway (WebSocket) does not work, and listing or creating webhooks is refused.',
 };
 
 /** Instructions Anchi adds to every agent: where it runs and what it can reach. */

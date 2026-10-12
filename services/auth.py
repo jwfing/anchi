@@ -43,6 +43,13 @@ TOKENS = {
     # Agent-team connectors: only the egress proxy reads these, to inject them into cell traffic.
     'github': {'file': 'github.json', 'pattern': r'(ghp_|gho_|ghu_|github_pat_)[A-Za-z0-9_]{20,255}'},
     'linear': {'file': 'linear.json', 'pattern': r'lin_api_[A-Za-z0-9]{20,100}'},
+    'posthog': {'file': 'posthog.json', 'pattern': r'phx_[A-Za-z0-9]{20,100}'},
+    # A user auth token, or a legacy one without prefix; organization tokens cannot read the API.
+    'sentry': {'file': 'sentry.json', 'pattern': r'(sntryu_)?[a-f0-9]{64}'},
+    'firecrawl': {'file': 'firecrawl.json', 'pattern': r'fc-[A-Za-z0-9]{20,100}'},
+    'figma': {'file': 'figma.json', 'pattern': r'figd_[A-Za-z0-9_-]{20,200}'},
+    # A bot token: user id, timestamp and signature, base64url, separated by dots.
+    'discord': {'file': 'discord.json', 'pattern': r'[A-Za-z0-9_-]{18,40}\.[A-Za-z0-9_-]{4,10}\.[A-Za-z0-9_-]{20,80}'},
 }
 AWS_FILE = 'aws.json'
 # Named Google accounts within one connector. `default` keeps the file names above, so tokens from
@@ -54,7 +61,10 @@ MAX_ACCOUNTS = 8
 # user imported into the vault takes precedence.
 BUILTIN_CLIENT = Path(__file__).resolve().with_name('google_client.json')
 # Connectors whose credentials the egress proxy may read; never exposed to any other caller.
-EGRESS_CONNECTORS = {'github': 'github.json', 'linear': 'linear.json', 'aws': AWS_FILE}
+EGRESS_CONNECTORS = {
+    **{c: TOKENS[c]['file'] for c in ('github', 'linear', 'posthog', 'sentry', 'firecrawl', 'figma', 'discord')},
+    'aws': AWS_FILE,
+}
 
 
 @contextmanager

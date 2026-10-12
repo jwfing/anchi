@@ -6,7 +6,7 @@ Anchi builds a local agent team: each agent works in its own sandbox, never touc
 
 Anchi runs a team of Codex, Claude Code and Hermes agents on your own machine and gives each agent only what its job needs. A misled or compromised agent can still misuse what it was given and leak what it reads, but it never holds a credential, it reaches only the services and directories it was configured with, and with an `egress` list only those hosts:
 
-- **Upstream credentials never enter an agent's sandbox.** Each task runs in a disposable cell inside a Linux VM. A trusted egress proxy injects or re-signs GitHub, AWS, Linear and model credentials on the way out; trusted services in the VM act for agents on Gmail, Drive, Notion and Slack.
+- **Upstream credentials never enter an agent's sandbox.** Each task runs in a disposable cell inside a Linux VM. A trusted egress proxy injects or re-signs GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out; trusted services in the VM act for agents on Gmail, Drive, Notion and Slack.
 - **Each agent gets only what it is configured with:** its connectors, the hosts it may reach (any public host unless you list them), the directories of your Mac it may see, its skills and the agents it may delegate to.
 - **You decide on writes.** High-risk operations of every agent (merges, deletions, pushes to `main`, access changes) always wait for your approval, as do all writes of agents whose `approvals` say `ask`; the dialog shows how the task started.
 - **Checks run by themselves.** Every cell is scanned for real credential values before it is destroyed, and `make verify-anchi` checks the isolation live.
@@ -34,7 +34,7 @@ for Linux prerequisites and the source development workflow.
 | Codex and Claude Code in cells, holding placeholders only | Implemented; the proxy substitutes subscription tokens replace-only; the Codex login is re-imported from your machine as it refreshes |
 | Hermes Agent in cells, on an OpenAI-compatible endpoint you choose | Implemented; your API key stays in the vault and the proxy substitutes it under that endpoint's base URL only; not yet checked against a live endpoint |
 | Each runtime as its own image layer, installed the first time an agent uses it | Implemented; `anchi setup install` builds only the base layer |
-| GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads) and Linear through the egress proxy | Implemented; credential minting denied; credentials verified at import |
+| GitHub, AWS (re-signing, SSO profiles, `aws-chunked` uploads), Linear, PostHog, Sentry, Firecrawl, Figma and Discord (REST) through the egress proxy | Implemented; credential minting denied; credentials verified at import |
 | Gmail, Drive, Notion and Slack through trusted services, reached through a per-cell bridge that names the agent | Implemented; Gmail is read-only; per-service and per-agent write approval |
 | Per-agent egress allowlists, high-risk operations always held, held writes with the task's origin chain | Implemented |
 | Credential scan of every cell before it is destroyed | Implemented; a finding raises a notification |

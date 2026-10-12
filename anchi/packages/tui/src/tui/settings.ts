@@ -1,4 +1,5 @@
 import { MODEL_ID } from '@anchi/core';
+import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
   AgentPatch,
   AgentSettings,
@@ -8,7 +9,7 @@ import type {
 } from '@anchi/protocol';
 
 /** Connectors in the order the panel shows them, also when the VM could not be asked. */
-const CONNECTORS = ['github', 'aws', 'linear', 'gmail', 'drive', 'notion', 'slack'];
+const CONNECTORS = [...CONNECTOR_IDS, 'gmail', 'drive', 'notion', 'slack'];
 const RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
 const EFFORTS: (Effort | '')[] = ['', 'low', 'medium', 'high', 'xhigh'];
 

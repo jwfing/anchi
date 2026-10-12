@@ -635,13 +635,15 @@ class EgressProxy:
             credential = await loop.run_in_executor(None, self.credentials.get, connector)
         except LookupError as exc:
             raise ValueError(f'NO_CREDENTIAL:{exc}') from None
-        method, url, headers, body = rules.verify_request(connector, credential)
-        try:
-            status, content = await loop.run_in_executor(None, self.call, method, url, headers, body)
-        except OSError:
-            raise ValueError('VERIFY_UNREACHABLE') from None
-        audit({'event': 'verify', 'connector': connector, 'status': status})
-        return {'connector': connector, 'account': rules.verify_account(connector, status, content)}
+        for method, url, headers, body in rules.verify_requests(connector, credential):
+            try:
+                status, content = await loop.run_in_executor(None, self.call, method, url, headers, body)
+            except OSError:
+                raise ValueError('VERIFY_UNREACHABLE') from None
+            audit({'event': 'verify', 'connector': connector, 'status': status})
+            if status not in (401, 403):
+                break
+        return {'connector': connector, 'account': rules.verify_account(connector, status, content, url)}
 
     def high_risk_disabled(self, cell):
         """High-risk entries that do not wait for approval in this cell: the user's settings for

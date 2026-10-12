@@ -22,6 +22,7 @@ import type {
   TaskRow,
   TaskStatus,
 } from '@anchi/protocol';
+import { CONNECTOR_IDS } from '@anchi/protocol';
 import type { DaemonClient } from '@anchi/daemon';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
@@ -183,6 +184,11 @@ const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
   ],
   github: [{ key: 'token', label: 'GitHub fine-grained token (github_pat_…)', masked: true }],
   linear: [{ key: 'token', label: 'Linear API key (lin_api_…)', masked: true }],
+  posthog: [{ key: 'token', label: 'PostHog personal API key (phx_…)', masked: true }],
+  sentry: [{ key: 'token', label: 'Sentry user auth token (sntryu_…)', masked: true }],
+  firecrawl: [{ key: 'token', label: 'Firecrawl API key (fc-…)', masked: true }],
+  figma: [{ key: 'token', label: 'Figma personal access token (figd_…)', masked: true }],
+  discord: [{ key: 'token', label: 'Discord bot token', masked: true }],
   aws: [
     { key: 'accessKeyId', label: 'Access key id of a dedicated IAM principal', masked: false },
     { key: 'secretAccessKey', label: 'Secret access key', masked: true },
@@ -903,7 +909,7 @@ export function App({
   const halfPage = Math.floor(transcriptHeight / 2);
   // PgUp and PgDn in the skills list move the cursor by what the list shows.
   const skillPage = skillListRows(bodyHeight - 4);
-  const connectorIds: ConnectorId[] = ['github', 'aws', 'linear'];
+  const connectorIds = CONNECTOR_IDS;
   const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
 
   const performSetup = async (step: SetupAction, vmSize?: VmSize) => {
@@ -2531,6 +2537,11 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
     github: 'API (bearer) and git over HTTPS; key and secret APIs are denied',
     aws: 'requests re-signed by the proxy; use a dedicated least-privilege principal',
     linear: 'GraphQL API key; API key management is denied',
+    posthog: 'US or EU Cloud API; key management is denied',
+    sentry: 'API (sentry.io); token creation is denied',
+    firecrawl: 'scrape, crawl and search; fetches any URL, beyond an egress list',
+    figma: 'REST API; webhooks wait for approval',
+    discord: 'bot REST API, no gateway; webhook tokens are denied',
   };
   return (
     <Box flexDirection="column">

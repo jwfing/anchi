@@ -5,7 +5,7 @@ description: Operate Anchi, a secured agent team on your own computer — set up
 
 # Using Anchi
 
-Anchi runs a team of agents (Codex, Claude Code or Hermes) on the user's computer. Each task runs in a disposable cell inside a local Linux VM (`anchi-vm`, through Lima). Agents never hold credentials: an egress proxy in the VM injects GitHub, AWS, Linear and model credentials on the way out, and trusted services in the VM act for agents on Gmail, Drive, Notion and Slack. Each agent reaches only the connectors, hosts, directories, skills and delegates in its YAML file.
+Anchi runs a team of agents (Codex, Claude Code or Hermes) on the user's computer. Each task runs in a disposable cell inside a local Linux VM (`anchi-vm`, through Lima). Agents never hold credentials: an egress proxy in the VM injects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out, and trusted services in the VM act for agents on Gmail, Drive, Notion and Slack. Each agent reaches only the connectors, hosts, directories, skills and delegates in its YAML file.
 
 Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for people, and the CLI (`anchi <command>`) for scripts and agents. From a source checkout the CLI is `scripts/anchi`.
 
@@ -82,6 +82,7 @@ anchi rm <task>                               # delete a finished task and the t
 | GitHub | `anchi setup connector github` (fine-grained PAT) or `--from-gh` | `gh`, git over HTTPS, the API; the proxy injects the token |
 | AWS | `anchi setup connector aws` (keys) or `--profile <sso-profile>` | AWS CLI and SDKs; the proxy re-signs requests; credential minting is denied |
 | Linear | `anchi setup connector linear` | The GraphQL API; the proxy injects the key |
+| PostHog, Sentry, Firecrawl, Figma, Discord | `anchi setup connector <id>` (token) | Their REST APIs with the placeholder in `POSTHOG_PERSONAL_API_KEY`, `SENTRY_AUTH_TOKEN`, `FIRECRAWL_API_KEY`, `FIGMA_ACCESS_TOKEN`, `DISCORD_BOT_TOKEN`; the proxy injects the real one. Discord: REST only, no gateway. Firecrawl fetches any URL, beyond an `egress` list |
 | Gmail, Drive | `anchi setup service gmail [--account work]` (Google sign-in in the browser) | Tools in the cell (`gmail_*`, `drive_*`); Gmail is read-only |
 | Notion, Slack | `anchi setup service notion` / `slack` (token) | Tools in the cell (`notion_*`, `slack_*`) |
 
@@ -89,7 +90,7 @@ An agent gets a connector only if its file lists it. Several Google accounts: co
 
 ## Approvals
 
-Writes wait for the user when the agent's file says `approvals: { github: ask }` (per connector), and always for high-risk operations (merging a PR, deleting or reconfiguring a repository, pushing to `main`, AWS deletions, Linear deletions…) unless `highRisk: { disable: [...] }` exempts them.
+Writes wait for the user when the agent's file says `approvals: { github: ask }` (per connector), and always for high-risk operations (merging a PR, deleting or reconfiguring a repository, pushing to `main`, AWS deletions, Linear deletions, Discord moderation…) unless `highRisk: { disable: [...] }` exempts them.
 
 ```bash
 anchi approvals          # what is waiting, with the task's origin chain

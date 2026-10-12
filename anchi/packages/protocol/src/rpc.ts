@@ -83,7 +83,29 @@ export interface AgentSummary {
   file: string;
 }
 
-export type ConnectorId = 'github' | 'aws' | 'linear';
+/** Connectors whose credential is one token, which the egress proxy injects. */
+export const TOKEN_CONNECTOR_IDS = [
+  'github',
+  'linear',
+  'posthog',
+  'sentry',
+  'firecrawl',
+  'figma',
+  'discord',
+] as const;
+export type TokenConnectorId = (typeof TOKEN_CONNECTOR_IDS)[number];
+export type ConnectorId = TokenConnectorId | 'aws';
+/** Every proxy connector, in the order clients list them. */
+export const CONNECTOR_IDS: readonly ConnectorId[] = [
+  'github',
+  'aws',
+  'linear',
+  'posthog',
+  'sentry',
+  'firecrawl',
+  'figma',
+  'discord',
+];
 
 export interface ConnectorStatus {
   id: ConnectorId;
@@ -211,8 +233,7 @@ export interface SetupStatus {
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */
 export type ConnectorSecret =
-  | { id: 'github'; token: string }
-  | { id: 'linear'; token: string }
+  | { id: TokenConnectorId; token: string }
   | {
       id: 'aws';
       accessKeyId: string;

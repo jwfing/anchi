@@ -36,6 +36,8 @@ import {
   type ResetPreview,
   type ServiceConnectorId,
   type TaskStatus,
+  TOKEN_CONNECTOR_IDS,
+  type TokenConnectorId,
   type VmSize,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
@@ -183,8 +185,8 @@ function taskId(v: unknown): string {
 
 function connectorSecret(p: unknown): ConnectorSecret {
   const v = (p ?? {}) as Record<string, unknown>;
-  if (v.id === 'github' || v.id === 'linear')
-    return { id: v.id, token: str(v.token, 'token', 1000) };
+  if (TOKEN_CONNECTOR_IDS.includes(v.id as TokenConnectorId))
+    return { id: v.id as TokenConnectorId, token: str(v.token, 'token', 1000) };
   if (v.id === 'aws') {
     return {
       id: 'aws',

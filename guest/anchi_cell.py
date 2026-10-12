@@ -48,7 +48,7 @@ MAX_CELLS = int(os.environ.get('ANCHI_MAX_CELLS', '16'))
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 HASH = re.compile(r'^(base|runtime|[0-9a-f]{16})$')
 # Credentials injected by the egress proxy, and services reached through per-cell sockets.
-PROXY_CONNECTORS = ('github', 'aws', 'linear')
+PROXY_CONNECTORS = ('github', 'aws', 'linear', 'posthog', 'sentry', 'firecrawl', 'figma', 'discord')
 # Codex reads its MCP servers from config.toml; `anchi` is the in-cell Anchi tool server.
 CODEX_CONFIG = '''cli_auth_credentials_store = "file"
 
@@ -651,8 +651,21 @@ def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
         env['AWS_EC2_METADATA_DISABLED'] = 'true'
         if identifiers.get('aws_region'):
             env['AWS_REGION'] = env['AWS_DEFAULT_REGION'] = identifiers['aws_region']
+    # Placeholders in each token's own alphabet, for clients that check the shape.
+    compact = PLACEHOLDER.replace('-', '')
     if 'linear' in connectors:
-        env['LINEAR_API_KEY'] = f'lin_api_{PLACEHOLDER.replace("-", "")}0000'
+        env['LINEAR_API_KEY'] = f'lin_api_{compact}0000'
+    if 'posthog' in connectors:
+        env['POSTHOG_PERSONAL_API_KEY'] = f'phx_{compact}{"0" * 24}'
+    if 'sentry' in connectors:
+        env['SENTRY_AUTH_TOKEN'] = f'sntryu_{compact}{"0" * 48}'
+    if 'firecrawl' in connectors:
+        env['FIRECRAWL_API_KEY'] = f'fc-{compact}{"0" * 16}'
+    if 'figma' in connectors:
+        env['FIGMA_ACCESS_TOKEN'] = f'figd_{PLACEHOLDER}'
+    if 'discord' in connectors:
+        # The first part is a base64 user id, which Discord libraries decode.
+        env['DISCORD_BOT_TOKEN'] = f'MTAwMDAwMDAwMDAwMDAwMDAw.AAAAAA.{compact}{"0" * 16}'
     return env
 
 
@@ -1094,6 +1107,11 @@ def real_secrets():
         for label, file, keys in (
             ('github', 'github.json', ('token',)),
             ('linear', 'linear.json', ('token',)),
+            ('posthog', 'posthog.json', ('token',)),
+            ('sentry', 'sentry.json', ('token',)),
+            ('firecrawl', 'firecrawl.json', ('token',)),
+            ('figma', 'figma.json', ('token',)),
+            ('discord', 'discord.json', ('token',)),
             ('aws', 'aws.json', ('access_key_id', 'secret_access_key', 'session_token')),
             ('codex', 'codex.json', ('access_token',)),
             ('claude', 'claude.json', ('token',)),

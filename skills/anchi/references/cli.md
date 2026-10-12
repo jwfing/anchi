@@ -282,8 +282,9 @@ Commands:
                                   and build the base image
   vault <action>                  init or unlock the VM vault with the key in
                                   ~/.config/anchi/vault.key
-  connector [options] <id>        Connect github, aws or linear (secrets are
-                                  read without echo)
+  connector [options] <id>        Connect github, aws, linear, posthog, sentry,
+                                  firecrawl, figma or discord (secrets are read
+                                  without echo)
   disconnect [options] <id>
   service [options] <id>          Connect gmail or drive (Google sign-in) or
                                   notion or slack (token, without echo)
@@ -380,7 +381,8 @@ init or unlock the VM vault with the key in ~/.config/anchi/vault.key
 ```text
 Usage: anchi setup connector [options] <id>
 
-Connect github, aws or linear (secrets are read without echo)
+Connect github, aws, linear, posthog, sentry, firecrawl, figma or discord
+(secrets are read without echo)
 
 Options:
   --from-gh         github: import the token the gh CLI is logged in with

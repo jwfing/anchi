@@ -26,7 +26,9 @@ AWS = {
 }
 CLAUDE_OAUTH = {'token': 'sk-ant-oat01-fakefakefakefakefakefakefakefake', 'kind': 'oauth'}
 CLAUDE_KEY = {'token': 'sk-ant-api03-fakefakefakefakefakefakefakefake', 'kind': 'api_key'}
-ALL = {'github', 'aws', 'linear', 'codex', 'claude'}
+FAKE = {'token': 'fake-connector-token-0000', 'generation': 'g'}
+REST = ('posthog', 'sentry', 'firecrawl', 'figma', 'discord')
+ALL = {'github', 'aws', 'linear', 'codex', 'claude', *REST}
 
 
 def decide(method, host, path, headers=None, body=b'', grants=ALL):
@@ -179,6 +181,73 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(headers['authorization'], LINEAR['token'])
         mint = json.dumps({'query': 'mutation { apiKeyCreate(input: {label: "x"}) { apiKey { id } } }'}).encode()
         self.assertEqual(decide('POST', 'api.linear.app', '/graphql', body=mint).action, 'deny')
+
+    def test_rest_connectors_inject_their_own_header(self):
+        for host, path, header, value in (
+            ('us.posthog.com', '/api/projects/1/insights/', 'authorization', f'Bearer {FAKE["token"]}'),
+            ('eu.posthog.com', '/api/users/@me/', 'authorization', f'Bearer {FAKE["token"]}'),
+            ('sentry.io', '/api/0/organizations/', 'authorization', f'Bearer {FAKE["token"]}'),
+            ('de.sentry.io', '/api/0/projects/o/p/issues/', 'authorization', f'Bearer {FAKE["token"]}'),
+            ('api.firecrawl.dev', '/v2/scrape', 'authorization', f'Bearer {FAKE["token"]}'),
+            ('api.figma.com', '/v1/files/abc', 'x-figma-token', FAKE['token']),
+            ('discord.com', '/api/v10/channels/1/messages', 'authorization', f'Bot {FAKE["token"]}'),
+            # Executing a webhook needs no credential, and gets the bot's harmlessly.
+            ('discord.com', '/api/v10/webhooks/1/webhook-token', 'authorization', f'Bot {FAKE["token"]}'),
+        ):
+            decision = decide('GET', host, path)
+            self.assertEqual(decision.action, 'inject', (host, path))
+            sent = {header: 'anchi-placeholder', 'accept': 'application/json'}
+            headers = rules.apply(decision, 'GET', f'https://{host}{path}', sent, b'', FAKE)
+            self.assertEqual(headers, {header: value, 'accept': 'application/json'}, host)
+            # An agent without the connector gets nothing.
+            self.assertEqual(decide('GET', host, path, grants={'codex'}).reason, 'not-granted')
+
+    def test_rest_connectors_inject_only_into_their_api(self):
+        for host, path in (
+            ('sentry.io', '/api/123/envelope/'),  # event ingestion, authenticated by the DSN
+            ('discord.com', '/channels/1/2'),  # the web app
+            ('us.posthog.com', '/project/1/insights'),
+            ('us.i.posthog.com', '/capture/'),
+        ):
+            self.assertEqual(decide('POST', host, path).action, 'pass', (host, path))
+
+    def test_rest_connectors_deny_what_returns_a_credential(self):
+        for method, host, path in (
+            ('POST', 'us.posthog.com', '/api/personal_api_keys/'),
+            ('POST', 'eu.posthog.com', '/api/personal_api_keys/k1/roll/'),
+            ('GET', 'us.posthog.com', '/api/personal_api_keys'),
+            ('PATCH', 'us.posthog.com', '/api/projects/1/reset_token/'),
+            ('PATCH', 'us.posthog.com', '/api/environments/1/rotate_secret_token/'),
+            ('POST', 'sentry.io', '/api/0/api-tokens/'),
+            ('GET', 'us.sentry.io', '/api/0/api-tokens/'),
+            ('POST', 'sentry.io', '/api/0/organizations/o/org-auth-tokens/'),
+            ('POST', 'sentry.io', '/api/0/sentry-apps/app/api-tokens/'),
+            ('POST', 'sentry.io', '/api/0/sentry-apps/app/rotate-secret/'),
+            ('POST', 'sentry.io', '/api/0/sentry-app-installations/i1/authorizations/'),
+            ('GET', 'discord.com', '/api/v10/channels/1/webhooks'),
+            ('POST', 'discord.com', '/api/channels/1/webhooks'),
+            ('GET', 'discord.com', '/api/v10/guilds/1/webhooks'),
+            ('GET', 'discordapp.com', '/api/v9/webhooks/1'),
+            ('PATCH', 'discord.com', '/api/v10/webhooks/1/'),
+            ('POST', 'discord.com', '/api/v10/oauth2/token'),
+        ):
+            self.assertEqual(decide(method, host, path).action, 'deny', (method, host, path))
+        for method, host, path in (
+            ('GET', 'us.posthog.com', '/api/projects/1/'),
+            ('GET', 'sentry.io', '/api/0/organizations/o/projects/'),
+            ('POST', 'discord.com', '/api/v10/channels/1/messages'),
+        ):
+            self.assertEqual(decide(method, host, path).action, 'inject', (method, host, path))
+
+    def test_placeholders_in_a_token_alphabet_are_placeholders(self):
+        for headers in (
+            {'authorization': 'lin_api_anchiplaceholder0000'},
+            {'authorization': 'Bot MTAwMDAwMDAwMDAwMDAwMDAw.AAAAAA.anchiplaceholder0000000000000000'},
+            {'x-figma-token': 'figd_anchi-placeholder'},
+        ):
+            self.assertEqual(rules.classify_credential(headers), 'placeholder', headers)
+        # A token of the cell's own, in Figma's header too, is reported.
+        self.assertEqual(rules.classify_credential({'x-figma-token': 'figd_' + 'a' * 40}), 'other')
 
     def test_aws_resigns_signed_requests_only(self):
         body = b'{"logGroupName":"/app"}'
@@ -339,11 +408,11 @@ class DecisionTests(unittest.TestCase):
         self.assertNotIn('proxy-authorization', headers)
 
     def test_verification_requests_and_accounts(self):
-        method, url, headers, _ = rules.verify_request('linear', LINEAR)
+        [(method, url, headers, _)] = rules.verify_requests('linear', LINEAR)
         self.assertEqual(
             (method, url, headers['authorization']), ('POST', 'https://api.linear.app/graphql', LINEAR['token'])
         )
-        method, url, headers, body = rules.verify_request('aws', AWS)
+        [(method, url, headers, body)] = rules.verify_requests('aws', AWS)
         self.assertEqual(url, 'https://sts.us-east-1.amazonaws.com/')
         self.assertIn(f'Credential={AWS["access_key_id"]}/', headers['authorization'])
         self.assertEqual(body, b'Action=GetCallerIdentity&Version=2011-06-15')
@@ -364,6 +433,40 @@ class DecisionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'VERIFY_UNEXPECTED_RESPONSE'):
             rules.verify_account('github', 200, b'<html>')
 
+    def test_rest_connector_verification(self):
+        calls = {c: rules.verify_requests(c, FAKE) for c in REST}
+        # A PostHog key belongs to the US or the EU cloud: both are tried, US first.
+        self.assertEqual(
+            [u for _, u, _, _ in calls['posthog']],
+            ['https://us.posthog.com/api/users/@me/', 'https://eu.posthog.com/api/users/@me/'],
+        )
+        self.assertEqual(calls['figma'][0][2]['x-figma-token'], FAKE['token'])
+        self.assertEqual(calls['discord'][0][2]['authorization'], f'Bot {FAKE["token"]}')
+        for connector in ('posthog', 'sentry', 'firecrawl'):
+            self.assertEqual(calls[connector][0][2]['authorization'], f'Bearer {FAKE["token"]}')
+        # Each identity call is a read that the connector's own rule would inject.
+        for connector, requests in calls.items():
+            for method, url, _, _ in requests:
+                host, path = url[len('https://') :].split('/', 1)
+                self.assertEqual(method, 'GET')
+                self.assertEqual(decide(method, host, '/' + path).action, 'inject', url)
+        account = rules.verify_account
+        eu = 'https://eu.posthog.com/api/users/@me/'
+        self.assertEqual(account('posthog', 200, b'{"email":"a@b.c"}', eu), 'a@b.c (EU)')
+        self.assertEqual(account('sentry', 200, b'[{"slug":"acme"},{"slug":"beta"}]'), 'acme, beta')
+        self.assertEqual(
+            account('firecrawl', 200, b'{"success":true,"data":{"remainingCredits":500}}'), 'team with 500 credits left'
+        )
+        self.assertEqual(account('figma', 200, b'{"handle":"ann","email":"ann@x.y"}'), 'ann@x.y')
+        self.assertEqual(account('discord', 200, b'{"id":"1","username":"helper","bot":true}'), 'helper')
+        with self.assertRaisesRegex(ValueError, 'CREDENTIAL_REJECTED'):
+            account('sentry', 200, b'[]')
+        for connector in REST:
+            with self.assertRaisesRegex(ValueError, 'CREDENTIAL_REJECTED'):
+                account(connector, 401, b'{}')
+            with self.assertRaisesRegex(ValueError, 'VERIFY_UNEXPECTED_RESPONSE'):
+                account(connector, 200, b'{"unexpected": 1}')
+
     def test_writes_are_classified_for_approval(self):
         def write(method, host, path, body=b'', headers=None):
             d = decide(method, host, path, headers or {}, body)
@@ -381,6 +484,17 @@ class DecisionTests(unittest.TestCase):
         self.assertFalse(write('POST', host, '/', headers=headers))
         host, headers = signed('logs', target='Logs_20140328.DeleteLogGroup')
         self.assertTrue(write('POST', host, '/', headers=headers))
+        # REST connectors: by method; PostHog queries are POST reads, Firecrawl scrapes spend credits.
+        self.assertFalse(write('POST', 'us.posthog.com', '/api/projects/1/query/'))
+        self.assertFalse(write('POST', 'eu.posthog.com', '/api/environments/1/query'))
+        self.assertTrue(write('POST', 'us.posthog.com', '/api/projects/1/insights/'))
+        self.assertTrue(write('POST', 'us.posthog.com', '/api/projects/1/query/x/'))
+        self.assertTrue(write('PUT', 'sentry.io', '/api/0/issues/1/'))
+        self.assertFalse(write('GET', 'sentry.io', '/api/0/issues/1/'))
+        self.assertTrue(write('POST', 'api.firecrawl.dev', '/v2/scrape'))
+        self.assertTrue(write('POST', 'api.figma.com', '/v1/files/abc/comments'))
+        self.assertFalse(write('GET', 'api.figma.com', '/v1/files/abc'))
+        self.assertTrue(write('POST', 'discord.com', '/api/v10/channels/1/messages'))
 
     def test_high_risk_operations_are_recognized_for_every_agent(self):
         def risk(method, host, path, body=b'', headers=None, disabled=()):
@@ -433,6 +547,42 @@ class DecisionTests(unittest.TestCase):
         )
         # The user can switch an entry off.
         self.assertIsNone(risk('PUT', 'api.github.com', '/repos/o/r/pulls/7/merge', disabled=('github-merge',)))
+
+    def test_rest_connector_high_risk_operations(self):
+        def risk(method, host, path):
+            found = rules.high_risk(decide(method, host, path), method, path, b'')
+            return found and found[0]
+
+        for method, host, path, entry in (
+            ('DELETE', 'us.posthog.com', '/api/projects/1/', 'posthog-delete'),
+            ('DELETE', 'eu.posthog.com', '/api/organizations/o1', 'posthog-delete'),
+            ('POST', 'us.posthog.com', '/api/organizations/o1/invites/', 'posthog-access'),
+            ('DELETE', 'us.posthog.com', '/api/organizations/o1/members/u1/', 'posthog-access'),
+            ('DELETE', 'sentry.io', '/api/0/projects/o/p/', 'sentry-delete'),
+            ('DELETE', 'sentry.io', '/api/0/organizations/o/', 'sentry-delete'),
+            ('POST', 'sentry.io', '/api/0/organizations/o/members/', 'sentry-access'),
+            ('POST', 'api.figma.com', '/v2/webhooks', 'figma-webhook'),
+            ('PUT', 'api.figma.com', '/v2/webhooks/w1', 'figma-webhook'),
+            ('DELETE', 'discord.com', '/api/v10/channels/1', 'discord-delete'),
+            ('DELETE', 'discord.com', '/api/guilds/1', 'discord-delete'),
+            ('PUT', 'discord.com', '/api/v10/guilds/1/bans/2', 'discord-members'),
+            ('DELETE', 'discord.com', '/api/v10/guilds/1/members/2', 'discord-members'),
+            ('PUT', 'discord.com', '/api/v10/guilds/1/members/2/roles/3', 'discord-members'),
+            ('POST', 'discord.com', '/api/v10/guilds/1/roles', 'discord-access'),
+            ('PUT', 'discord.com', '/api/v10/channels/1/permissions/2', 'discord-access'),
+            ('PATCH', 'discord.com', '/api/v10/guilds/1', 'discord-access'),
+            ('PATCH', 'discord.com', '/api/v10/applications/@me', 'discord-access'),
+        ):
+            self.assertEqual(risk(method, host, path), entry, (method, host, path))
+        for method, host, path in (
+            ('DELETE', 'us.posthog.com', '/api/projects/1/insights/2/'),
+            ('DELETE', 'sentry.io', '/api/0/issues/1/'),
+            ('GET', 'api.figma.com', '/v2/webhooks'),
+            ('DELETE', 'discord.com', '/api/v10/channels/1/messages/2'),
+            ('PATCH', 'discord.com', '/api/v10/guilds/1/members/@me'),
+            ('POST', 'api.firecrawl.dev', '/v2/crawl'),
+        ):
+            self.assertIsNone(risk(method, host, path), (method, host, path))
 
     def test_git_push_summary_names_the_refs(self):
         import egress_proxy

@@ -27,6 +27,11 @@ NAMES = {
     'hermes.json',
     'github.json',
     'linear.json',
+    'posthog.json',
+    'sentry.json',
+    'firecrawl.json',
+    'figma.json',
+    'discord.json',
     'aws.json',
 }
 # Google files of a named account other than `default`, which keeps the names above. The logical
