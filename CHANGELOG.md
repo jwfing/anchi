@@ -14,6 +14,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Cancelling a task that is still waiting for a free cell ends it at once. Before, the cancel was lost: the task stayed running, took a cell when one freed and ran the whole turn anyway, and deleting its agent waited a minute and removed the task while the turn could still start. The wait for a cell now observes the cancel, and a cancel that lands while the cell starts ends the task before the turn runs. (#84)
 - A cell reused for a follow-up turn no longer counts as idle while that turn runs: before, under cell pressure (`maxCells` reached) the daemon could close it as the "longest-idle" cell to make room, killing the running turn (or a turn waiting on a delegation) and failing the task. A reused cell whose turn has finished still makes room as before.
 - A guest command that exits before reading its stdin (VM stopped, guest refuses early, or killed on timeout) no longer crashes the daemon with an unhandled EPIPE; the failure surfaces as the command's result. An agent whose assigned skills exceed 8 MB as a bundle — the most the guest accepts on stdin — now fails the task with a clear message instead of hitting that crash on every start.
 

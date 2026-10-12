@@ -604,13 +604,15 @@ export class Hub extends EventEmitter<HubEvents> {
         await this.syncSkills(agent);
         before = this.snapshotWorkspaces(agent);
         if (signal.aborted) throw new Error('cancelled');
-        cell = await this.cellFor(task, agent, hash);
+        cell = await this.cellFor(task, agent, hash, signal);
       } finally {
         if (queued) {
           this.roomQueue.delete(task.id);
           this.roomChanged();
         }
       }
+      // Cancelled while waiting for room or while the cell came up: the turn must not run.
+      if (signal.aborted) throw new Error('cancelled');
       const turnId = `turn-${Date.now().toString(36)}`;
       const onAbort = () => cell.session.cancel(turnId);
       signal.addEventListener('abort', onAbort, { once: true });
@@ -750,7 +752,12 @@ export class Hub extends EventEmitter<HubEvents> {
     return image.hash;
   }
 
-  private async cellFor(task: TaskRow, agent: ResolvedAgent, hash: string): Promise<LiveCell> {
+  private async cellFor(
+    task: TaskRow,
+    agent: ResolvedAgent,
+    hash: string,
+    signal: AbortSignal,
+  ): Promise<LiveCell> {
     const key = cellKey(agent, hash);
     const existing = this.cells.get(task.id);
     if (existing && !existing.session.closed && existing.key === key) {
@@ -767,8 +774,12 @@ export class Hub extends EventEmitter<HubEvents> {
     // first), then first come, first served. Make room by closing the longest-idle cell, or wait.
     let waitingSince = 0;
     if (!this.roomQueue.has(task.id)) this.roomQueue.set(task.id, task.depth);
+    // A cancel must wake the wait below, or the turn would still start when a cell frees.
+    const onAbort = () => this.roomChanged();
+    signal.addEventListener('abort', onAbort, { once: true });
     try {
       while (!this.hasRoom(task)) {
+        if (signal.aborted) throw new Error('cancelled');
         const idle = [...this.cells.entries()]
           .filter(([, c]) => c.idle)
           .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
@@ -802,6 +813,7 @@ export class Hub extends EventEmitter<HubEvents> {
         });
       }
     } finally {
+      signal.removeEventListener('abort', onAbort);
       // Out of line as soon as it has room (or gave up): the cell starts below without a pause,
       // so no other task can take that room first.
       this.roomQueue.delete(task.id);
