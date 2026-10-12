@@ -2193,6 +2193,37 @@ describe('cell limit', () => {
     expect(notices).toContain('waiting for a free cell: 4 of 4 are working');
   });
 
+  it('cancels a task still waiting for a free cell without running its turn later', async () => {
+    const { client } = await start();
+    const [first] = await busy(client, 5);
+    const fifth = await client.call('tasks.create', { agentId: 'a5', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(transport.starts).toHaveLength(4); // in line, no cell of its own yet
+    await client.call('tasks.cancel', { taskId: fifth.id });
+    // Ends at once, while every cell is still taken: the cancel is not lost in the wait.
+    expect((await client.call('tasks.wait', { taskId: fifth.id })).status).toBe('cancelled');
+    // A cell frees up afterwards: the cancelled task must not take it and run the turn anyway.
+    await client.call('tasks.cancel', { taskId: first!.id });
+    await client.call('tasks.wait', { taskId: first!.id });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(transport.starts.map((s) => s[3])).not.toContain('a5');
+    expect((await client.call('tasks.get', { taskId: fifth.id })).status).toBe('cancelled');
+  });
+
+  it('deletes an agent whose task waits for a free cell without running the turn later', async () => {
+    const { client } = await start();
+    const [first] = await busy(client, 5);
+    await client.call('tasks.create', { agentId: 'a5', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 200));
+    // Settles well under its 60 s bound: the cancelled wait ends the task right away.
+    const done = await client.call('agents.delete', { agentId: 'a5', confirm: 'a5' });
+    expect(done.deletedTasks).toBe(1);
+    await client.call('tasks.cancel', { taskId: first!.id });
+    await client.call('tasks.wait', { taskId: first!.id });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(transport.starts.map((s) => s[3])).not.toContain('a5');
+  });
+
   it('fails a task that waited too long for a cell', async () => {
     roomWaitMs = 300;
     const { client } = await start();
