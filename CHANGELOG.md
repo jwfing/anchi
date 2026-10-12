@@ -17,6 +17,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- The landing page logo, favicon and hero animations use a simpler split-diamond silhouette, with a 7:3 upper-to-lower triangle ratio and a clear central gap.
 - README leads with developer workflows, prerequisites and the first task; guides use the installed `anchi` command, explain source/release differences and document default VM sizing. Skills document release-matched installation and separate host CLI administration from in-cell MCP permissions.
 - Release publication derives version-specific notes from CHANGELOG, preserving migration instructions, and refuses missing, duplicate or empty version entries. Apache-2.0 text is now in `LICENSE`, with copyright in `NOTICE`; packages include both.
 - Landing pages link to releases and support, explain setup and preview limits, and use a supported Linear connector in both animation exports. The approval example requires a choice and confirmation, matching the TUI.
