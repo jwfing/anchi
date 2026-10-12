@@ -2076,6 +2076,111 @@ describe('usability workflows', () => {
     ui.unmount();
   });
 
+  it('shows the VM size, and says when the VM runs but could not be asked', async () => {
+    const status = {
+      vm: 'running',
+      installed: false,
+      vaultUnlocked: false,
+      vaultKeyPresent: true,
+      codex: { connected: false, expiresAt: null },
+      vmSize: {
+        default: { cpus: 5, memoryGiB: 12 },
+        host: { cpus: 10, memoryGiB: 24 },
+        current: { cpus: 5, memoryGiB: 10 },
+      },
+      error: 'GUEST_UNAVAILABLE: sudo: a password is required',
+      guestOutdated: false,
+    };
+    const { client } = fakeClient({}, { 'setup.status': () => status });
+    const ui = render(
+      <App
+        client={client}
+        initialView="runtimes"
+        initialAgents={[agent('dev')]}
+        initialTasks={[]}
+      />,
+    );
+    const frame = await frameWith(ui, 'could not be asked');
+    expect(frame).toContain('running (5 CPUs, 10 GiB)');
+    // The message wraps at the pane's width; its start is on the first line.
+    expect(frame).toContain('could not be asked: GUEST_UNAVAILABLE');
+    ui.unmount();
+    const welcome = render(
+      <App
+        client={client}
+        initialView="welcome"
+        initialAgents={[agent('builder')]}
+        initialTasks={[]}
+      />,
+    );
+    expect(await frameWith(welcome, 'could not be asked')).toContain('r check again');
+    welcome.unmount();
+  });
+
+  it('tells Gmail users without a Google client where to start, keeps ids aligned, and clears a token with ^U', async () => {
+    const service = (id: string) => ({
+      id,
+      connected: false,
+      account: null,
+      reauthRequired: false,
+      mode: 'auto',
+      accounts: [],
+    });
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          codex: { runtime: 'codex', connected: true, accountId: 'a', expiresAt: Date.now() + 1e6 },
+          connectors: [
+            { id: 'github', connected: false, account: null },
+            { id: 'firecrawl', connected: false, account: null },
+          ],
+          services: [service('gmail'), service('notion')],
+          googleClient: false,
+        }),
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="connectors" initialAgents={[]} initialTasks={[]} />,
+    );
+    const frame = await frameWith(ui, 'SERVICES');
+    expect(frame).toMatch(/github +not connected/);
+    expect(frame).toMatch(/firecrawl +not connected/);
+    expect(frame).toMatch(/gmail +needs a Google OAuth client first/);
+    expect(frame).toMatch(/notion +not connected/);
+    ui.stdin.write('\r'); // connect github: the secret dialog
+    await frameWith(ui, 'Connect github');
+    ui.stdin.write('abc');
+    await tick();
+    ui.stdin.write('\u0015'); // ^U clears the mistyped token
+    await tick();
+    ui.stdin.write('x');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'connectors.set')?.[1]).toEqual({ id: 'github', token: 'x' });
+    ui.unmount();
+  });
+
+  it('names the keys to Getting started and the builder when there are no agents', async () => {
+    const { client } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialView="team"
+        initialAgents={[agent('builder')]}
+        initialTasks={[]}
+      />,
+    );
+    expect(await frameWith(ui, 'No agents yet')).toContain(
+      '^X 0 Getting started · ^X b Agent builder',
+    );
+    ui.unmount();
+  });
+
   it('resumes onboarding at the missing vault step', async () => {
     const { client, calls } = fakeClient(
       {},

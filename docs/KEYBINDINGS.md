@@ -55,6 +55,8 @@ An agent's view lists its tasks; its input starts a new task. A task's view show
 
 Drafts, cursor positions and transcript scroll positions are kept per conversation while the TUI stays open. A failed send retains its draft. The composer grows to five lines, wraps Chinese and emoji, and keeps the cursor visible.
 
+The one-line text and secret dialogs (connector tokens, filters, paths, names) take typing, pasting, **Backspace**, **^U** (clear the input) and **^W** (delete the last word); these keys are fixed.
+
 ### Home
 
 Getting started checks host prerequisites, VM, vault and runtime before guiding you to Agent builder and a first task. **Enter** resumes the next step; **↑ ↓** scroll. Installation continues when you leave the view, and **^X L** opens its log. Any connected runtime completes the runtime step (**i** Codex, **c** Claude Code, **h** Hermes); Agent builder runs on the first one connected. After an Anchi update, the guide asks to update the VM's components before anything else.

@@ -232,9 +232,15 @@ export interface SetupStatus {
   workspaces: boolean;
   /**
    * Size choices for the VM `install` creates: half of this computer by default, at most all of
-   * it. Optional for clients connected to an older daemon.
+   * it; `current` is the existing VM's size as Lima reports it. Optional for clients connected
+   * to an older daemon.
    */
-  vmSize?: { default: VmSize; host: VmSize };
+  vmSize?: { default: VmSize; host: VmSize; current?: VmSize };
+  /**
+   * The VM runs but could not be asked (the message of the first guest command that failed);
+   * the fields that come from the guest are then unknown, not false.
+   */
+  error?: string;
   /** This Anchi's version. Optional for clients connected to an older daemon. */
   appVersion?: string;
   /**

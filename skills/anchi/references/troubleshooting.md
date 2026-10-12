@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Start with `anchi setup status` and `anchi daemon status`. Errors from the VM carry a code and usually a hint, as in `cell start failed: HERMES_NOT_CONFIGURED — …`; the codes below are the common ones. Fixes that change an agent's limits or a connector need the user's agreement (rules 3 and 4 in SKILL.md).
+Start with `anchi setup status` (a summary; `--json` for every field) and `anchi daemon status`. Errors from the VM carry a code and usually a hint, as in `cell start failed: HERMES_NOT_CONFIGURED — …`; the codes below are the common ones. Fixes that change an agent's limits or a connector need the user's agreement (rules 3 and 4 in SKILL.md).
 
 ## A task does not start
 
@@ -36,6 +36,7 @@ Start with `anchi setup status` and `anchi daemon status`. Errors from the VM ca
 
 ## Updating and starting over
 
-- `anchi update` installs the latest release; then `anchi setup install` updates the VM's components (it refuses while task cells are live). Until that has run, `anchi setup status` shows `guestOutdated: true` with `guestVersion` and `appVersion`, Getting started and Runtimes ask for it, and each new task starts with a notice saying so: that notice, not the task, is what to act on.
+- `anchi update` installs the latest release; then `anchi setup install` updates the VM's components (it refuses while task cells are live). Until that has run, `anchi setup status` says `Components: installed by Anchi <old>; this is <new>` (`--json`: `guestOutdated`, `guestVersion`, `appVersion`), Getting started and Runtimes ask for it, and each new task starts with a notice saying so: that notice, not the task, is what to act on.
+- `anchi setup status` saying `Could not ask the VM: …`: a guest command failed while the VM runs; the other fields are unknown. Try again; if it keeps failing, `anchi setup install` (with the user's go-ahead) reinstalls the guest components and keeps agents and credentials.
 - After an update, the first task may rebuild the base and runtime image layers (a few minutes).
 - `anchi setup reset` deletes the VM, its vault contents and agent homes, for a fresh start, and refuses while tasks run or wait; `--all` also deletes the vault key and `~/.anchi` (keeping `keybindings.json`). Workspace files on the user's computer are never deleted. Only with the user's go-ahead.

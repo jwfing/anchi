@@ -202,7 +202,8 @@ Commands:
                           skills adds each one
   update [options] [id]   Update GitHub skills to the latest commit of their
                           URL, after showing what changes
-  rm <id>
+  rm <id>                 Remove a skill; agents that list it fail to start
+                          until it is removed from them
 ```
 
 #### `anchi skills add`
@@ -233,6 +234,8 @@ Options:
 
 ```text
 Usage: anchi skills rm [options] <id>
+
+Remove a skill; agents that list it fail to start until it is removed from them
 ```
 
 ### `anchi triggers`
@@ -271,6 +274,8 @@ Deny a write waiting for approval
 
 ```text
 Usage: anchi cancel [options] <task>
+
+Cancel a running or queued task; its work and transcript are kept
 ```
 
 ### `anchi agents`
@@ -314,7 +319,8 @@ Usage: anchi setup [options] [command]
 Runtime and connector setup
 
 Commands:
-  status
+  status [options]                VM, vault, runtimes, connectors and services
+                                  at a glance
   codex [options]                 Import the Codex login from ~/.codex/auth.json
                                   into the VM vault
   claude                          Store a `claude setup-token` token or an
@@ -331,7 +337,8 @@ Commands:
   connector [options] <id>        Connect github, aws, linear, posthog, sentry,
                                   firecrawl, figma or discord (secrets are read
                                   without echo)
-  disconnect [options] <id>
+  disconnect [options] <id>       Remove a connector or service credential from
+                                  the vault (Google accounts are revoked too)
   service [options] <id>          Connect gmail or drive (Google sign-in) or
                                   notion or slack (token, without echo)
   google-client [options] [path]  Store your own Google Cloud Desktop app OAuth
@@ -348,6 +355,11 @@ Commands:
 
 ```text
 Usage: anchi setup status [options]
+
+VM, vault, runtimes, connectors and services at a glance
+
+Options:
+  --json      the full status as JSON
 ```
 
 #### `anchi setup codex`
@@ -441,6 +453,9 @@ Options:
 ```text
 Usage: anchi setup disconnect [options] <id>
 
+Remove a connector or service credential from the vault (Google accounts are
+revoked too)
+
 Options:
   --account <name>  gmail or drive: the account to disconnect (default: default)
 ```
@@ -500,30 +515,39 @@ Usage: anchi daemon [options] [command]
 Manage the background daemon
 
 Commands:
-  start
-  stop
-  status
+  start           Start the daemon in the background if it is not running
+  stop            Stop the daemon; its cells are scanned and closed, running
+                  turns end
+  status          Whether the daemon runs, with its pid, home, start time,
+                  clients and cells, as JSON
   install         Run the daemon at login (launchd on macOS, a systemd user unit
                   on Linux)
-  uninstall
+  uninstall       Stop running the daemon at login
 ```
 
 #### `anchi daemon start`
 
 ```text
 Usage: anchi daemon start [options]
+
+Start the daemon in the background if it is not running
 ```
 
 #### `anchi daemon stop`
 
 ```text
 Usage: anchi daemon stop [options]
+
+Stop the daemon; its cells are scanned and closed, running turns end
 ```
 
 #### `anchi daemon status`
 
 ```text
 Usage: anchi daemon status [options]
+
+Whether the daemon runs, with its pid, home, start time, clients and cells, as
+JSON
 ```
 
 #### `anchi daemon install`
@@ -538,4 +562,6 @@ Run the daemon at login (launchd on macOS, a systemd user unit on Linux)
 
 ```text
 Usage: anchi daemon uninstall [options]
+
+Stop running the daemon at login
 ```
