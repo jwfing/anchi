@@ -80,6 +80,9 @@ export class LimaTransport implements GuestTransport {
           stderr: Buffer.concat(err).toString('utf8'),
         });
       });
+      // A child that exits before draining stdin (VM stopped, guest refuses early, SIGKILL
+      // above) raises EPIPE here; the failure already surfaces through `close`.
+      child.stdin.on('error', () => {});
       child.stdin.end(stdin);
     });
   }
