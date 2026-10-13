@@ -430,7 +430,9 @@ def image_build(image, digest):
             f'lowerdir={lower},upperdir={building / "upper"},workdir={building / "work"}',
             str(merged),
         )
-        egress({'op': 'register', 'task': task, 'agent': 'image-builder', 'connectors': []})
+        # `build`: the cell runs as cell root, outside the cells' group, and gets no credential,
+        # so the proxy keeps its socket reachable (see the proxy's register).
+        egress({'op': 'register', 'task': task, 'agent': 'image-builder', 'connectors': [], 'build': True})
         registered = True
         command = [
             'systemd-run',

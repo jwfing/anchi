@@ -388,14 +388,15 @@ def peer_gid():
         return None
 
 
-def own(path, mode):
+def own(path, mode, group=True):
     """Reachable by the proxy and the cells' group only. The service runs with UMask=0077; a
     cell must traverse its own directory (bound into it) and connect to its sockets, while
     every other VM user, the connector services included, must not: a connection there is
-    served with the cell's credentials, as that cell's agent."""
+    served with the cell's credentials, as that cell's agent. Without `group`, the path keeps
+    the proxy's group and `mode` says who else may use it."""
     os.chmod(path, mode)
     gid = peer_gid()
-    if gid is not None:
+    if group and gid is not None:
         os.chown(path, -1, gid)
 
 
@@ -431,6 +432,9 @@ class Registry:
             for s, a in accounts.items()
         ):
             raise ValueError('BAD_ACCOUNTS')
+        # Only the cell manager's own image builds say so; a cell is never a build by its name.
+        if request.get('build', False) not in (True, False):
+            raise ValueError('BAD_BUILD')
         high_risk = request.get('high_risk_disabled', [])
         known = {entry[0] for entry in rules.HIGH_RISK}
         if not isinstance(high_risk, list) or not all(h in known for h in high_risk):
@@ -458,12 +462,16 @@ class Registry:
             request.get('high_risk_disabled', []),
             extra,
         )
+        # An image build runs as cell root, whose gid outside the cell is not the cells' group,
+        # and its proxy injects nothing: its directory and socket stay reachable by every VM
+        # user, as before the hardening. A task cell's are the cells' group's only.
+        build = request.get('build') is True
         cell.directory.mkdir(parents=True, exist_ok=False)
-        own(cell.directory, 0o750)
+        own(cell.directory, 0o755 if build else 0o750, group=not build)
         path = cell.directory / 'proxy.sock'
         cell.server = await asyncio.start_unix_server(lambda r, w: self.bridge(cell, r, w), path=str(path))
         # Only this cell has the directory bound in, and only the cells' group can connect.
-        own(path, 0o660)
+        own(path, 0o666 if build else 0o660, group=not build)
         cell.services = frozenset(request.get('services', []))
         cell.accounts = {
             s: request.get('accounts', {}).get(s, 'default') for s in cell.services if s in ACCOUNT_SERVICES
