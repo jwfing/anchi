@@ -37,4 +37,15 @@ describe('workspace audit', () => {
     const now = snapshot(ws);
     expect(audit(ws, now, now)).toEqual([]);
   });
+
+  it('snapshots an unreadable executable without a hash instead of throwing', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'audit-'));
+    writeFileSync(join(ws, 'built-tool'), 'binary');
+    // Executable but unreadable, like a root-owned 0700 file left by a Docker bind mount.
+    chmodSync(join(ws, 'built-tool'), 0o311);
+    const before = snapshot(ws);
+    expect(before.get('built-tool')).toMatchObject({ kind: 'file', hash: undefined });
+    // The file that stays unreadable across the turn reports nothing, turn after turn.
+    expect(audit(ws, before, snapshot(ws))).toEqual([]);
+  });
 });

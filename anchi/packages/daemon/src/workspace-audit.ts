@@ -72,19 +72,29 @@ export function snapshot(root: string): Snapshot {
         continue;
       }
       if (!interesting(rel, st)) continue;
+      // An entry the daemon cannot read (a root-owned 0700 file from a bind mount or sudo
+      // build) still lands in the snapshot, without a hash/target; the turn must not fail.
       if (st.isSymbolicLink()) {
-        snap.set(rel, { kind: 'link', mode: st.mode, target: readlinkSync(path) });
+        snap.set(rel, { kind: 'link', mode: st.mode, target: tryRead(() => readlinkSync(path)) });
       } else if (st.isFile() && st.size <= 1 << 20) {
         snap.set(rel, {
           kind: 'file',
           mode: st.mode,
-          hash: createHash('sha256').update(readFileSync(path)).digest('hex'),
+          hash: tryRead(() => createHash('sha256').update(readFileSync(path)).digest('hex')),
         });
       }
     }
   };
   walk(root);
   return snap;
+}
+
+function tryRead<T>(read: () => T): T | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
 }
 
 /** Findings for the transcript: one line each, paths relative to the workspace. */
@@ -95,7 +105,8 @@ export function audit(root: string, before: Snapshot, after: Snapshot): string[]
     const changed = !old || old.hash !== entry.hash || old.target !== entry.target;
     const parts = rel.split(sep);
     if (entry.kind === 'link') {
-      if (!changed) continue;
+      // An unreadable link has no target to check against the workspace root.
+      if (!changed || entry.target === undefined) continue;
       const target = isAbsolute(entry.target!)
         ? entry.target!
         : resolve(dirname(join(root, rel)), entry.target!);
