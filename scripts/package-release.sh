@@ -29,6 +29,25 @@ cp "$stage/node-v$SECURE_NODE_VERSION-$target/bin/node" "$root/runtime/node"
 cp "$stage/node-v$SECURE_NODE_VERSION-$target/LICENSE" "$root/runtime/LICENSE"
 node anchi/scripts/bundle-release.mjs "$root"
 cp -R guest services systemd lima "$root/"
+if [[ -n ${ANCHI_PREBUILT_MANIFEST:-} ]]; then
+  python3 - "$ANCHI_PREBUILT_MANIFEST" "$root" "$version" "$target" <<'PY'
+import importlib.util, json, sys
+from pathlib import Path
+manifest_file, package, version, target = sys.argv[1:]
+guest = Path(package) / 'guest'
+spec = importlib.util.spec_from_file_location('prebuilt', guest / 'anchi_prebuilt.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+manifest = json.loads(Path(manifest_file).read_text())
+if manifest.get('version') != version:
+    raise SystemExit('Prebuilt manifest version does not match the app')
+arch = 'aarch64' if target == 'darwin-arm64' else 'x86_64'
+identity = module.compatibility(guest, guest / 'cell.env')
+for image in ('codex', 'runtime-codex', 'runtime-claude-code', 'runtime-hermes'):
+    module.entry_for(manifest, image, identity, arch)
+PY
+  cp "$ANCHI_PREBUILT_MANIFEST" "$root/guest/prebuilt.json"
+fi
 # The Anchi skill for host-side agents, matched to this version by construction.
 mkdir -p "$root/skills"
 cp -R skills/anchi "$root/skills/"

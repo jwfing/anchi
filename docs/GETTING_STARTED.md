@@ -1,7 +1,8 @@
 # Getting started
 
 Anchi runs its agents in a Lima VM on your machine. You install the `anchi` app, prepare the
-VM's prerequisites, create the VM, then connect a runtime and build your first agent.
+VM's prerequisites, then let Getting started prepare the environment, connect one account and
+review a starter agent.
 
 | Host | Status | VM layer |
 |---|---|---|
@@ -218,11 +219,39 @@ checkout, replace `anchi` with `scripts/anchi`.
 
 ### Guided setup in the TUI
 
-Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**, which detects
-completed steps and guides you through prerequisites, environment installation, vault
-initialization/unlock, runtime login, starter creation and a first task. Press **Enter** for the
-next step; **Ctrl+X, L** shows installation logs and **Ctrl+X, !** opens persistent error
-details and recovery actions. Starter creation uses no model. Any one connected runtime is enough: Agent builder runs on the
+Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**:
+
+1. **Prepare your environment.** Press **Enter**, choose Codex, Claude Code or Hermes, and
+   review the recommended resources. Confirm once to create or start the VM, install its
+   components, initialize or unlock credential storage and prepare that runtime's image.
+   Completed steps are detected and reused on retry. Preparation imports no account and calls
+   no model. Keep a backup of `~/.config/anchi/vault.key`; existing keys are never replaced.
+2. **Connect your account.** Use the protected account dialog. An existing host Codex login
+   is offered for import with confirmation; otherwise run `codex login` first. Claude Code
+   accepts a `claude setup-token` token or API key; Hermes accepts an endpoint, model and key.
+3. **Review your starter and try a task.** Press **Enter** to review `dev` with a connected
+   runtime, then **y** to save. The input contains a small sample code-review request: edit it
+   or press **Enter** to review it, then **Enter** to send. Only sending calls a model.
+
+**Ctrl+X, L** shows preparation logs and **Ctrl+X, !** opens persistent error details and a
+retry action. Advanced CPU/memory choices remain under **Runtimes**, **I**; **Ctrl+X, N**
+chooses a custom agent name and runtime. The CLI preparation equivalent is:
+
+```bash
+anchi setup prepare --runtime codex     # or claude-code / hermes; review and confirm
+```
+
+`--yes` accepts the recommended resources; `--cpus` and `--memory` override them for a new VM.
+This command prepares the environment only; connect the account and create the agent afterwards.
+
+Release installations download prebuilt base and selected runtime layers. Their SHA-256,
+architecture and recipe compatibility are checked against the manifest bundled in the app
+before extraction. A failed download or verification stops preparation and can be retried;
+it does not silently switch to a local build. Source checkouts and locally packaged apps without
+a prebuilt manifest build the layers locally. VM provisioning and trusted-service installation
+still run locally, so download size, network speed and host resources affect setup time.
+
+Any one connected runtime is enough: Agent builder runs on the
 first connected of Codex, Claude Code and Hermes (`builderRuntime` in `~/.anchi/settings.yaml`
 picks one). Teams with setup and a first task complete open on **Team overview**;
 **Ctrl+X, 0** reopens the guide.
@@ -236,7 +265,7 @@ picks one). Teams with setup and a first task complete open on **Team overview**
    ```
 
    Installation creates the `anchi-vm` VM, installs the trusted services and prebuilt cell
-   runners, and builds the base image. It takes several minutes and can be rerun to update;
+   runners, and installs the base image (from the release or a local build). It takes several minutes and can be rerun to update;
    completed steps are reused. A new VM gets half of this computer's CPUs and memory by
    default; the TUI and `anchi setup install` ask before creating it, with half filled in
    (`anchi setup install --cpus 6 --memory 16` skips the questions). An existing VM keeps its
@@ -260,8 +289,8 @@ picks one). Teams with setup and a first task complete open on **Team overview**
      paste the endpoint's API key (or **h** in Runtimes). Any OpenAI-compatible API works; the key
      stays in the VM vault.
 
-   A runtime is installed in the cell image the first time one of its agents runs a task (a few
-   minutes, once); runtimes you never use are never downloaded.
+   Guided preparation installs the selected runtime before the first task. With the manual
+   steps here, its image is installed on first use; runtimes you never select or use are not downloaded.
 4. **Create an agent and run a first task.** Continue in **Getting started**, or press
    **Ctrl+X, N**, choose your connected runtime and name the agent. Review the YAML and press
    **y** to save. The CLI equivalent (substitute your connected runtime) is:
@@ -351,6 +380,7 @@ are deleted locally only; revoke them at the provider if you no longer want them
 ## Recovery
 
 - **Installation failed:** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; workspaces and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
+- **Prebuilt layer download or verification failed:** retry preparation after checking the network and disk space. A checksum or compatibility failure never extracts the archive. Reinstall the matching app release if it persists; source installations use local builds.
 - **"The VM runs but could not be asked":** a guest command failed (shown with the message in Getting started, Runtimes and `anchi setup status`); the rest of the status is unknown, not reset. Press **r** to try again; if it keeps failing, `anchi setup install` reinstalls the guest components, keeping agents and credentials.
 - **Lima too old:** Getting started and `anchi setup status` list `Lima 2.2.0+ (found …)` under what is missing, and `anchi setup install` stops before creating the VM. macOS: `brew upgrade lima`; Linux: [Install Lima on Linux](#install-lima-on-linux).
 - **Installation refused because tasks are running:** installing restarts the egress proxy, which would end them. Wait for them (`anchi tasks`) or cancel them, then run it again; `ANCHI_FORCE_RESTART=1` installs anyway. `make verify-anchi` refuses for the same reason (`ANCHI_CHECK_WITH_TASKS=1` runs it beside them, leaving their cells alone).

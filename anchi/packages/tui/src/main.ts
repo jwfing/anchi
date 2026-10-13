@@ -583,6 +583,42 @@ async function deleteAgentCli(id: string, yes: boolean) {
 const setup = program.command('setup').description('Runtime and connector setup');
 
 setup
+  .command('prepare')
+  .description(
+    'Prepare the environment, credential storage and one runtime; resume completed steps',
+  )
+  .requiredOption('--runtime <runtime>', 'codex, claude-code or hermes')
+  .option('-y, --yes', 'confirm preparation using recommended resources')
+  .option('--cpus <n>', 'CPUs for a new VM (advanced)')
+  .option('--memory <gib>', 'memory for a new VM in GiB (advanced)')
+  .action(
+    (opts: {
+      runtime: 'codex' | 'claude-code' | 'hermes';
+      yes?: boolean;
+      cpus?: string;
+      memory?: string;
+    }) =>
+      withClient(async (client) => {
+        if (!['codex', 'claude-code', 'hermes'].includes(opts.runtime)) fail('unknown runtime');
+        const vmSize = await newVmSize(client, { ...opts, yes: true });
+        const consent =
+          `Prepare ${opts.runtime}, create or start the isolated environment and initialize or unlock credential storage? ` +
+          (vmSize ? `A new VM uses ${vmSize.cpus} CPUs and ${vmSize.memoryGiB} GiB. ` : '') +
+          'Existing keys are kept. No account is imported and no model is called. Back up ~/.config/anchi/vault.key.';
+        if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+        const off = client.on('setup', ({ line }) => console.log(sanitizeLine(line)));
+        try {
+          await client.call('setup.prepare', { runtime: opts.runtime, confirm: true, vmSize });
+        } finally {
+          off();
+        }
+        console.log(
+          `Environment ready. Connect ${opts.runtime} in anchi, then review your starter and run the sample task.`,
+        );
+      }),
+  );
+
+setup
   .command('status')
   .description('VM, vault, runtimes, connectors and services at a glance')
   .option('--json', 'the full status as JSON')

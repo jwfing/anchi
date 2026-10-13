@@ -213,6 +213,14 @@ export interface ResetPreview {
 }
 
 export interface SetupStatus {
+  /** This daemon supports one continuous preparation operation. */
+  quickSetup?: boolean;
+  /** Preparation continues in the daemon if its client disconnects. */
+  preparing?: RuntimeId;
+  /** Installed runtime layers; preparing one never imports an account or calls a model. */
+  preparedRuntimes?: RuntimeId[];
+  /** A host login file exists; importing it still requires consent and validation. */
+  hostCodexLogin?: boolean;
   /** Host-only readiness; optional for clients connected to an older daemon. */
   vaultKeyPresent?: boolean;
   host?: { platform: string; missing: string[]; installHint: string };
@@ -677,6 +685,8 @@ export interface Methods {
   /** Waits until the task's current turn ends (CLI). */
   'tasks.wait': [{ taskId: string }, TaskRow];
   'setup.status': [Record<string, never>, SetupStatus];
+  /** Prepare VM, vault and one runtime, resuming completed steps. No account import or task. */
+  'setup.prepare': [{ runtime: RuntimeId; confirm: true; vmSize?: VmSize }, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
   /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */

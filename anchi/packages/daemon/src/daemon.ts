@@ -89,6 +89,7 @@ import {
   CONNECTOR_IDS,
   connectorStatuses,
   readHostCodexLogin,
+  prepareEnvironment,
   setupStatus,
 } from './setup.ts';
 import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
@@ -107,6 +108,7 @@ import {
 import { type SkillRemote, SkillStore } from './skills.ts';
 import { TriggerRunner } from './triggers.ts';
 import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
 
 function serviceId(v: unknown): ServiceConnectorId {
   if (!SERVICE_IDS.includes(v as ServiceConnectorId)) throw new Error('unknown service connector');
@@ -233,6 +235,7 @@ export class Daemon {
   private startedAt = Date.now();
   private log: (msg: string) => void;
   private setup: SetupRunner;
+  private preparing: Runtime | undefined;
   private hostRun: typeof hostOutput;
   private awsTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
@@ -900,7 +903,46 @@ export class Daemon {
     'setup.status': async () => {
       const status = await setupStatus(this.guest, this.lima, this.services);
       this.noteSetup(status);
-      return status;
+      return { ...status, preparing: this.preparing };
+    },
+    'setup.prepare': async (params) => {
+      const { runtime, vmSize } = z
+        .strictObject({
+          runtime: runtimeSchema,
+          confirm: z.literal(true),
+          vmSize: z
+            .strictObject({ cpus: z.number().int(), memoryGiB: z.number().int() })
+            .optional(),
+        })
+        .parse(params);
+      if (this.preparing || this.setup.running)
+        throw new Error('Environment setup is already running.');
+      const env = vmSize ? vmSizeEnv(vmSize, hostResources()) : {};
+      this.preparing = runtime;
+      try {
+        const status = await prepareEnvironment(
+          runtime,
+          () => setupStatus(this.guest, this.lima, this.services),
+          async (action) => {
+            await this.setup.run(
+              action,
+              (line) => this.broadcast('setup', { action, line }),
+              action === 'install' ? env : {},
+            );
+          },
+          async (selected) => {
+            this.broadcast('setup', {
+              action: 'install',
+              line: `Preparing ${selected} runtime image`,
+            });
+            await this.guest.buildImage(`runtime-${selected}`, 'runtime');
+          },
+        );
+        this.noteSetup(status);
+        return status;
+      } finally {
+        this.preparing = undefined;
+      }
     },
     'setup.importClaude': async ({ token }) => {
       await this.guest.importClaude(str(token, 'token', 500).trim());
@@ -923,6 +965,7 @@ export class Daemon {
       return codexStatus(this.guest);
     },
     'setup.run': async ({ action, vmSize }) => {
+      if (this.preparing) throw new Error('Environment setup is already running.');
       if (!SETUP_ACTIONS.includes(action)) throw new Error('unknown setup step');
       if (vmSize !== undefined && action !== 'install') {
         throw new Error('BAD_VM_SIZE: only install creates a VM');
@@ -939,6 +982,7 @@ export class Daemon {
     },
     'setup.resetPreview': async () => this.resetPreview(),
     'setup.reset': async ({ confirm }) => {
+      if (this.preparing) throw new Error('Environment setup is already running.');
       if (confirm !== 'reset') throw new Error('type reset to confirm');
       const { busy } = await this.resetPreview();
       if (busy) throw new Error(`${busy} task(s) running or queued; cancel them or wait first`);

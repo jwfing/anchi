@@ -29,6 +29,21 @@ the tagged guides. Remove or update README notices about unreleased features whe
 Complete the release gates below before pushing a tag. Published tags and assets are immutable;
 fix a bad build by publishing a new version.
 
+Before packaging, native Linux x86_64 and arm64 CI jobs build the base and all three runtime
+layers in disposable Debian containers with no accounts. `scripts/build-prebuilt.sh` runs the
+same pinned layer scripts on a private ext4 filesystem; it needs a privileged container for
+overlay mounts. The runtime jobs receive no repository credentials. `scripts/prebuilt-manifest.py`
+records the compatibility digest, size and SHA-256 of each archive and calls
+`scripts/check-prebuilt.py` to restore them through the guest extractor and probe the tools.
+The matching manifest is embedded as `guest/prebuilt.json` with `ANCHI_PREBUILT_MANIFEST` when
+packaging. The archives are separate GitHub release assets, so users fetch only the base and
+their selected runtimes. These checksums inherit the app bundle's trust; they are not signatures.
+
+A local package built without `ANCHI_PREBUILT_MANIFEST` keeps local image builds. CI artifacts
+from a manual workflow run contain the manifests and layers for review, but the manifests'
+download URLs become usable only after the matching tag and assets are published. Never test
+a new manifest by overwriting an existing release's assets.
+
 The public installer is `landing/dist/install.sh`, served at
 `https://anchi.elseward.xyz/install.sh` by the existing landing-page deployment. Deploy it
 alongside the website after the first release assets exist. It uses the latest GitHub release,

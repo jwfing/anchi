@@ -8,6 +8,8 @@ import type {
   HermesAccountStatus,
   ConnectorStatus,
   RuntimeAccountStatus,
+  RuntimeId,
+  SetupAction,
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
@@ -171,6 +173,9 @@ export async function setupStatus(
   const vm = await lima.vmStatus();
   const host = hostResources();
   const empty: SetupStatus = {
+    quickSetup: true,
+    hostCodexLogin: existsSync(HOST_CODEX_LOGIN),
+    preparedRuntimes: [],
     vm,
     host: hostReadiness(),
     vaultKeyPresent: existsSync(VAULT_KEY),
@@ -211,8 +216,19 @@ export async function setupStatus(
       googleClient: false,
       googleClientSource: null,
     };
+    const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
+    const prepared = base
+      ? await Promise.all(
+          runtimes.map(async (runtime) =>
+            (await guest.imageStatus(`runtime-${runtime}`, 'runtime').catch(() => false))
+              ? runtime
+              : null,
+          ),
+        )
+      : [];
     return {
       ...empty,
+      preparedRuntimes: prepared.filter((runtime): runtime is RuntimeId => runtime !== null),
       vm,
       vaultUnlocked: vault.unlocked,
       installed: base,
@@ -234,4 +250,43 @@ export async function setupStatus(
     // instead of showing everything as not installed.
     return { ...empty, error: (err as Error).message.slice(0, 300) };
   }
+}
+
+/** Re-read after every completed step, so a failed or interrupted run can safely resume. */
+export async function prepareEnvironment(
+  runtime: RuntimeId,
+  status: () => Promise<SetupStatus>,
+  run: (action: SetupAction) => Promise<void>,
+  prepareRuntime: (runtime: RuntimeId) => Promise<void>,
+): Promise<SetupStatus> {
+  let current = await status();
+  if (current.host?.missing.length) {
+    throw new Error(`Missing: ${current.host.missing.join(', ')}. ${current.host.installHint}`);
+  }
+  if (current.vm === 'unknown')
+    throw new Error('Cannot determine VM state; check setup status and retry.');
+  if (current.vm === 'stopped') {
+    await run('vm-start');
+    current = await status();
+  }
+  if (current.error) throw new Error(current.error);
+  if (current.vm === 'missing' || !current.installed || current.guestOutdated) {
+    await run('install');
+    current = await status();
+  }
+  if (current.error || current.vm !== 'running' || !current.installed || current.guestOutdated) {
+    throw new Error(current.error ?? 'Environment preparation did not finish; retry setup.');
+  }
+  if (!current.vaultUnlocked) {
+    await run(current.vaultKeyPresent === false ? 'vault-init' : 'vault-unlock');
+    current = await status();
+    if (current.error || !current.vaultUnlocked)
+      throw new Error(current.error ?? 'Vault remains locked.');
+  }
+  if (!current.preparedRuntimes?.includes(runtime)) await prepareRuntime(runtime);
+  current = await status();
+  if (current.error || !current.vaultUnlocked || !current.preparedRuntimes?.includes(runtime)) {
+    throw new Error(current.error ?? `Preparation of ${runtime} did not finish; retry setup.`);
+  }
+  return current;
 }

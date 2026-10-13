@@ -4,6 +4,15 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- Getting started prepares the VM, vault and selected runtime in one confirmed, resumable operation with recommended resources. `anchi setup prepare --runtime codex` (also `claude-code` or `hermes`) provides the same preparation from the CLI; existing credentials are kept and account imports still require consent.
+- Release packages include a pinned manifest for prebuilt base and runtime layers. Installation downloads and verifies the needed layers instead of building them locally; source checkouts continue to build locally. Needs `anchi setup install` to update existing VM components.
+
+### Changed
+
+- First-agent setup preselects the connected runtime and the name `dev`, retains the configuration review, and offers an editable sample code-review task before any model call. Advanced resource and agent settings remain available.
+
 ## 0.3.4 — 2026-10-12
 
 Every issue of the 0.3.2 review but one (#115, a product decision) is fixed, twelve of them by the maintainer's own Anchi agents. New: an Approvals view in the sidebar, a desktop notification for every held write, builder and starter defaults that no longer cut an agent off from the network, and the Anchi skill in the release archive. Hardened: the VM's services cannot read the shared directories or reach the cells' sockets, the pre-close credential scan is bounded, and the proxy refuses IPv4-mapped and NAT64 destinations itself. After updating, run `anchi setup install` once: it installs this release's proxy, cell manager, cell runner and services and rebuilds the base image (about a minute); then stop the daemon (`anchi daemon stop`) and start Anchi again so the host side matches.

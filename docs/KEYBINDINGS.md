@@ -62,7 +62,15 @@ The one-line text and secret dialogs (connector tokens, filters, paths, names) t
 
 ### Home
 
-Getting started checks host prerequisites, VM, vault and runtime before guiding you to Agent builder and a first task. **Enter** resumes the next step; **↑ ↓** scroll. Installation continues when you leave the view, and **^X L** opens its log. Any connected runtime completes the runtime step (**i** Codex, **c** Claude Code, **h** Hermes); Agent builder runs on the first one connected. After an Anchi update, the guide asks to update the VM's components before anything else.
+Getting started offers one confirmed preparation operation: **Enter**, **↑ ↓** choose a runtime,
+**Enter** review the recommended resources, **y** prepare. It resumes the VM, credential storage
+and selected runtime without separate confirmations for each step. Installation continues when
+you leave the view; **^X L** opens its log and **^X !**, **r** retries failed preparation.
+Connect an account with **i** (Codex), **c** (Claude Code) or **h** (Hermes), then **Enter** reviews
+a starter named `dev` using a connected runtime. Saving it prefills a sample task; **Enter**
+reviews that request and a second **Enter** sends it. **Ctrl+X, N** keeps the custom starter
+flow, and **Runtimes**, **I** keeps advanced resource choices. After an Anchi update, preparation
+also updates the VM's components.
 
 Team overview lists each agent’s current activity, pending approvals and delegated work. **↑ ↓** selects an agent; **Enter** opens it. Finished task details show the result and artifact links first, ending with the key that reveals the event history (**^X h**); a task you continued from its view keeps showing its transcript when the reply arrives.
 

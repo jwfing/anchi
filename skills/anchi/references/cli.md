@@ -341,6 +341,8 @@ Usage: anchi setup [options] [command]
 Runtime and connector setup
 
 Commands:
+  prepare [options]               Prepare the environment, credential storage
+                                  and one runtime; resume completed steps
   status [options]                VM, vault, runtimes, connectors and services
                                   at a glance
   codex [options]                 Import the Codex login from ~/.codex/auth.json
@@ -371,6 +373,21 @@ Commands:
                                   and the Anchi home)
   service-mode <id> <mode>        Writes of a service: auto, or ask (each write
                                   waits for approval)
+```
+
+#### `anchi setup prepare`
+
+```text
+Usage: anchi setup prepare [options]
+
+Prepare the environment, credential storage and one runtime; resume completed
+steps
+
+Options:
+  --runtime <runtime>  codex, claude-code or hermes
+  -y, --yes            confirm preparation using recommended resources
+  --cpus <n>           CPUs for a new VM (advanced)
+  --memory <gib>       memory for a new VM in GiB (advanced)
 ```
 
 #### `anchi setup status`

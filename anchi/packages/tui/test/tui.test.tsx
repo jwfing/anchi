@@ -20,6 +20,7 @@ import {
   teamActivity,
   turnActivity,
   welcomeStep,
+  FIRST_TASK,
 } from '../src/tui/usability.ts';
 import { App, filterTasks, skillSource, sortSkills } from '../src/tui/App.tsx';
 import { buildKeyMap, keysFor } from '../src/tui/keys.ts';
@@ -2300,6 +2301,109 @@ describe('usability workflows', () => {
 });
 
 describe('onboarding and team state', () => {
+  it('prepares recommended resources only after consent and then offers account import', async () => {
+    const { client: defaults } = fakeClient();
+    const ready = {
+      ...(await defaults.call('setup.status')),
+      quickSetup: true,
+      hostCodexLogin: true,
+      codex: { runtime: 'codex' as const, connected: false, accountId: null, expiresAt: null },
+      preparedRuntimes: ['codex' as const],
+    };
+    let status = {
+      ...ready,
+      vm: 'missing' as 'missing' | 'running',
+      installed: false,
+      vaultUnlocked: false,
+      vmSize: { default: { cpus: 4, memoryGiB: 8 }, host: { cpus: 8, memoryGiB: 16 } },
+    };
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => status,
+        'setup.prepare': () => (status = { ...status, ...ready, vm: 'running' }),
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="welcome" initialAgents={[]} initialTasks={[]} />,
+    );
+    await frameWith(ui, 'Prepare your environment');
+    ui.stdin.write('\r');
+    await frameWith(ui, 'Choose your runtime');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Recommended resources')).toContain('4 CPUs and 8 GiB');
+    expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
+    ui.stdin.write('n');
+    await tick();
+    expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
+    ui.stdin.write('\r');
+    await frameWith(ui, 'Choose your runtime');
+    ui.stdin.write('\r');
+    await frameWith(ui, 'Recommended resources');
+    ui.stdin.write('y');
+    await frameWith(ui, 'Import Codex login');
+    expect(calls.find(([m]) => m === 'setup.prepare')?.[1]).toEqual({
+      runtime: 'codex',
+      confirm: true,
+    });
+    expect(
+      calls.some(
+        ([m]) => m === 'setup.importCodex' || m === 'builder.apply' || m === 'tasks.create',
+      ),
+    ).toBe(false);
+    ui.unmount();
+  });
+
+  it('uses a connected runtime and default name, then prefills the sample without sending it', async () => {
+    const { client: defaults } = fakeClient();
+    const ready = await defaults.call('setup.status');
+    const proposal = {
+      id: 'p-quick',
+      agentId: 'dev',
+      kind: 'create',
+      agentYaml: 'runtime: codex\nconnectors: []\nworkspaces: []',
+      agentDiff: '+ runtime: codex',
+      imageYaml: null,
+      imageDiff: '',
+      errors: [],
+      warnings: [],
+    };
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({ ...ready, quickSetup: true, preparedRuntimes: ['codex'] }),
+        'agents.createPreview': () => proposal,
+        'builder.apply': () => [agent('dev', { connectors: [] })],
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="welcome" initialAgents={[]} initialTasks={[]} />,
+    );
+    await frameWith(ui, 'review your starter');
+    ui.stdin.write('\r');
+    await frameWith(ui, 'Agent proposal');
+    expect(calls.find(([m]) => m === 'agents.createPreview')?.[1]).toEqual({
+      agentId: 'dev',
+      runtime: 'codex',
+    });
+    expect(calls.some(([m]) => m === 'builder.apply' || m === 'tasks.create')).toBe(false);
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m]) => m === 'tasks.create')).toBe(false);
+    ui.stdin.write('\r');
+    await tick();
+    // Long drafts may first open the full-screen review instead of sending.
+    if (!calls.some(([m]) => m === 'tasks.create')) {
+      ui.stdin.write('\r');
+      await tick();
+    }
+    expect(calls.find(([m]) => m === 'tasks.create')?.[1]).toEqual({
+      agentId: 'dev',
+      text: FIRST_TASK,
+    });
+    ui.unmount();
+  });
+
   it.each(['claude-code', 'hermes'] as const)(
     'creates a first %s agent without a Codex login and requires confirmation',
     async (runtime) => {

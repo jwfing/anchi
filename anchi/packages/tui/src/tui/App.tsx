@@ -17,6 +17,7 @@ import type {
   ConnectorSecret,
   SetupStatus,
   SetupAction,
+  RuntimeId,
   VmSize,
   StoredEvent,
   TaskRow,
@@ -80,6 +81,8 @@ import {
   resultLines,
   setupPhase,
   turnActivity,
+  suggestedRuntime,
+  FIRST_TASK,
 } from './usability.ts';
 
 export const SIDEBAR_WIDTH = 28;
@@ -208,6 +211,7 @@ const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
 
 type Modal =
   | { kind: 'createAgent'; pick: number }
+  | { kind: 'quickSetup'; pick: number }
   | {
       kind: 'problem';
       message: string;
@@ -463,6 +467,8 @@ export function App({
     startedAt: number;
   } | null>(null);
   const setupRunning = useRef(false);
+  const watchingPreparation = useRef(false);
+  const quickRuntime = useRef<RuntimeId | null>(null);
   // A notification is newer than the initial list; a late list answer must not undo it.
   const approvalsNotified = useRef(false);
   const [flash, setFlash] = useState('');
@@ -514,6 +520,16 @@ export function App({
       .catch((e: Error) => reportProblem(e, () => client.call('setup.status')));
   }, [client, reportProblem]);
   useEffect(refreshSetup, [refreshSetup]);
+  useEffect(() => {
+    if (!setup?.preparing) {
+      if (watchingPreparation.current && !setupRunning.current) setSetupProgress(null);
+      watchingPreparation.current = false;
+      return;
+    }
+    watchingPreparation.current = true;
+    const timer = setInterval(refreshSetup, 3000);
+    return () => clearInterval(timer);
+  }, [setup?.preparing, refreshSetup]);
 
   // Pending approvals never steal input focus. Only an explicit review action opens one.
   useEffect(() => {
@@ -569,7 +585,7 @@ export function App({
           running: true,
           startedAt: p?.running ? p.startedAt : Date.now(),
           phase:
-            /download|fetch|pulling|anchi-image|base image|rootfs|debootstrap|install-anchi|bootstrap|trusted|egress|services/i.test(
+            /download|fetch|pulling|runtime image|anchi-image|base image|rootfs|debootstrap|install-anchi|bootstrap|trusted|egress|services/i.test(
               line,
             ) || line.startsWith('$ ')
               ? setupPhase(action, line)
@@ -1000,6 +1016,59 @@ export function App({
       setupRunning.current = false;
     }
   };
+  const prepare = async (runtime: RuntimeId) => {
+    if (setupRunning.current) throw new Error('Environment setup is already running.');
+    setupRunning.current = true;
+    quickRuntime.current = runtime;
+    setSetupLog([]);
+    const startedAt = Date.now();
+    setSetupProgress({
+      action: 'install',
+      phase: `Preparing ${runtime}`,
+      running: true,
+      startedAt,
+    });
+    try {
+      const status = await client.call('setup.prepare', { runtime, confirm: true });
+      setSetup(status);
+      setSetupProgress({ action: 'install', phase: 'Ready', running: false, startedAt });
+      setProblem(null);
+      // Authentication stays in a trusted screen. Preparation never imports an account.
+      if (!runtimeReady(status, runtime)) {
+        if (runtime === 'codex' && !status.hostCodexLogin) {
+          say('Run codex login on this computer, then press i to use that login.');
+        } else
+          run(
+            runtime === 'codex'
+              ? 'setup:codex'
+              : runtime === 'claude-code'
+                ? 'setup:claude'
+                : 'setup:hermes',
+          );
+      }
+    } catch (e) {
+      setSetupProgress((p) => p && { ...p, running: false, failed: true });
+      reportProblem(e, () => prepare(runtime));
+      throw e;
+    } finally {
+      setupRunning.current = false;
+    }
+  };
+  const confirmPrepare = (runtime: RuntimeId) => {
+    const size = setup?.vm === 'missing' ? setup.vmSize?.default : undefined;
+    setModal({
+      kind: 'confirm',
+      title: `Prepare ${runtime}`,
+      body:
+        `Prepare an isolated local environment and ${runtime}, and initialize or unlock credential storage. ` +
+        (size
+          ? `Recommended resources: ${size.cpus} CPUs and ${size.memoryGiB} GiB of memory. `
+          : '') +
+        'Existing keys are kept. Back up ~/.config/anchi/vault.key. No accounts or folders are shared and no model is called. ' +
+        'Completed steps are reused if you retry. Advanced resource settings are available in Runtimes (I).',
+      action: () => prepare(runtime),
+    });
+  };
   /** A new VM's CPUs, then its memory: half of this computer, changed before it is created. */
   const askVmSize = ({ default: suggested, host }: NonNullable<SetupStatus['vmSize']>) => {
     const whole = (raw: string, min: number, max: number, what: string) => {
@@ -1219,7 +1288,38 @@ export function App({
       case 'welcome:next': {
         if (!setup) return refreshSetup();
         if (setupRunning.current) return setModal({ kind: 'setupLog', scroll: 0 });
+        if (setup.preparing)
+          return say(`Preparing ${setup.preparing}; this screen refreshes automatically.`);
         if (setup.host?.missing.length) return refreshSetup();
+        const stage = welcomeStep(setup, agents, tasks);
+        if (setup.quickSetup && (stage === 'environment' || stage === 'vault')) {
+          return setModal({
+            kind: 'quickSetup',
+            pick: STARTER_RUNTIMES.indexOf(suggestedRuntime(setup)),
+          });
+        }
+        if (setup.quickSetup && stage === 'runtime') {
+          const runtime = quickRuntime.current ?? suggestedRuntime(setup);
+          return run(
+            runtime === 'codex'
+              ? 'setup:codex'
+              : runtime === 'claude-code'
+                ? 'setup:claude'
+                : 'setup:hermes',
+          );
+        }
+        if (setup.quickSetup && stage === 'agent') {
+          const runtime =
+            quickRuntime.current && runtimeReady(setup, quickRuntime.current)
+              ? quickRuntime.current
+              : suggestedRuntime(setup);
+          return runAction(async () => {
+            if (!setup.preparedRuntimes?.includes(runtime)) await prepare(runtime);
+            const proposal = await client.call('agents.createPreview', { agentId: 'dev', runtime });
+            setProposals((p) => [...p, proposal]);
+            setModal({ kind: 'proposal', proposal, scroll: 0 });
+          }, 'Starter ready for review');
+        }
         const action = nextSetupAction(setup);
         if (action) return setupStep(action);
         const step = welcomeStep(setup, agents, tasks);
@@ -1230,6 +1330,10 @@ export function App({
         if (first) {
           setSelected(first.id);
           setFocus('main');
+          if (setup.quickSetup && !drafts.current[`${first.id}:new`]?.text) {
+            startNewTask(first.id);
+            setDraft(draftOf(FIRST_TASK));
+          }
         }
         return;
       }
@@ -1815,6 +1919,14 @@ export function App({
       }
       return;
     }
+    if (modal?.kind === 'quickSetup') {
+      if (key.escape) return setModal(null);
+      if (key.upArrow) return setModal({ ...modal, pick: Math.max(0, modal.pick - 1) });
+      if (key.downArrow)
+        return setModal({ ...modal, pick: Math.min(STARTER_RUNTIMES.length - 1, modal.pick + 1) });
+      if (key.return) return confirmPrepare(STARTER_RUNTIMES[modal.pick]!);
+      return;
+    }
     if (modal?.kind === 'createAgent') {
       if (key.escape) return setModal(null);
       if (key.upArrow) return setModal({ ...modal, pick: Math.max(0, modal.pick - 1) });
@@ -1864,6 +1976,10 @@ export function App({
             setAgents(updated);
             setSelected(proposal.agentId);
             setFocus('main');
+            if (setup?.quickSetup && !userAgents.length) {
+              startNewTask(proposal.agentId);
+              if (!draftRef.current.text) setDraft(draftOf(FIRST_TASK));
+            }
             say(`@${proposal.agentId} saved`);
           })
           .catch((e: Error) => reportProblem(e));
@@ -2392,7 +2508,9 @@ export function App({
               busy={
                 setupProgress?.running
                   ? `${SPINNER[frame % SPINNER.length]} ${setupProgress.phase} · ${duration(Date.now() - setupProgress.startedAt)}`
-                  : ''
+                  : setup?.preparing
+                    ? `Preparing ${setup.preparing} · completed steps are reused`
+                    : ''
               }
               nextKey={hint('welcome:next', 'continue')}
             />
@@ -3171,7 +3289,7 @@ function ModalView({
       </Box>
     );
   }
-  if (modal.kind === 'createAgent') {
+  if (modal.kind === 'createAgent' || modal.kind === 'quickSetup') {
     return (
       <Box
         flexDirection="column"
@@ -3182,9 +3300,13 @@ function ModalView({
         paddingX={2}
       >
         <Text bold color="cyan">
-          Create a starter agent
+          {modal.kind === 'quickSetup' ? 'Choose your runtime' : 'Create a starter agent'}
         </Text>
-        <Text>Choose a runtime. Connect it in Runtimes before running a task.</Text>
+        <Text>
+          {modal.kind === 'quickSetup'
+            ? 'Choose the account you want to use. Anchi prepares its environment next.'
+            : 'Choose a runtime. Connect it in Runtimes before running a task.'}
+        </Text>
         <Text> </Text>
         {STARTER_RUNTIMES.map((runtime, i) => (
           <Text key={runtime} color={i === modal.pick ? 'cyan' : undefined}>
@@ -3194,8 +3316,9 @@ function ModalView({
         ))}
         <Text> </Text>
         <Text dimColor>
-          No model call · no connectors or shared folders · any public host; the proposal review
-          comes next
+          {modal.kind === 'quickSetup'
+            ? 'Preparation uses no model quota. Your account is connected afterwards.'
+            : 'No model call · no connectors or shared folders · any public host; the proposal review comes next'}
         </Text>
         <Box flexGrow={1} />
         <Text dimColor>

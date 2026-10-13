@@ -10,14 +10,48 @@ permissions:
   contents: read
 
 jobs:
+  images:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build release layers in a disposable container without accounts
+        run: |
+          mkdir -p artifacts/prebuilt
+          docker run --rm --privileged \
+            -v "$PWD:/src:ro" -v "$PWD/artifacts/prebuilt:/output" \
+            debian:bookworm bash /src/scripts/build-prebuilt.sh
+      - uses: actions/upload-artifact@v6
+        with:
+          name: anchi-images-${{ matrix.arch }}
+          path: artifacts/prebuilt/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        with:
+          name: anchi-manifest-${{ matrix.arch }}
+          path: artifacts/prebuilt/prebuilt-*.json
+          if-no-files-found: error
+
   package:
+    needs: images
     strategy:
       matrix:
         include:
           - os: macos-14
             target: darwin-arm64
+            arch: aarch64
           - os: ubuntu-22.04
             target: linux-x64
+            arch: x86_64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -37,7 +71,13 @@ jobs:
       - name: Check release tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
         run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./anchi/package.json').version")"
+      - uses: actions/download-artifact@v7
+        with:
+          name: anchi-manifest-${{ matrix.arch }}
+          path: artifacts/prebuilt
       - run: bash scripts/package-release.sh
+        env:
+          ANCHI_PREBUILT_MANIFEST: artifacts/prebuilt/prebuilt-${{ matrix.arch }}.json
       - run: python scripts/check-release.py artifacts/releases/anchi-${{ matrix.target }}.tar.gz
       - uses: actions/upload-artifact@v6
         with:

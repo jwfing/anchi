@@ -11,7 +11,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as setupModule from '../src/setup.ts';
 import { connectorSchema, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
 import type { QuotaInfo, StoredEvent, TaskRow } from '@anchi/protocol';
@@ -825,6 +826,72 @@ describe('daemon tasks', () => {
     await expect(client.call('setup.run', { action: 'nope' as never })).rejects.toThrow(
       /unknown setup step/,
     );
+  });
+
+  it('refuses unconfirmed or malformed preparation before changing the environment', async () => {
+    const { client } = await start();
+    const lines: string[] = [];
+    client.on('setup', ({ line }) => lines.push(line));
+    for (const params of [
+      { runtime: 'codex' },
+      { runtime: 'codex', confirm: false },
+      { runtime: 'unknown', confirm: true },
+      { runtime: 'codex', confirm: true, token: 'unexpected' },
+      { runtime: 'codex', confirm: true, vmSize: { cpus: 0, memoryGiB: 2 } },
+    ])
+      await expect(client.call('setup.prepare', params as never)).rejects.toThrow();
+    expect(lines).toEqual([]);
+  });
+
+  it('prepares only the selected runtime and refuses concurrent setup and reset', async () => {
+    vmRunning = true;
+    const { client } = await start();
+    const status = await client.call('setup.status');
+    const original = setupModule.setupStatus;
+    const spy = vi.spyOn(setupModule, 'setupStatus').mockImplementation(async (...args) => ({
+      ...(await original(...args)),
+      host: { platform: 'test', missing: [], installHint: '' },
+      vaultUnlocked: true,
+      installed: true,
+      guestOutdated: false,
+    }));
+    transport.images.delete('runtime-claude-code@runtime');
+    let release!: () => void;
+    transport.buildGates.set(
+      'runtime-claude-code',
+      new Promise<void>((done) => {
+        release = done;
+      }),
+    );
+    try {
+      const preparing = client.call('setup.prepare', { runtime: 'claude-code', confirm: true });
+      await vi.waitFor(() =>
+        expect(
+          transport.execs.some(
+            (x) => x.args.join(' ') === 'anchi-image build runtime-claude-code runtime',
+          ),
+        ).toBe(true),
+      );
+      expect((await client.call('setup.status')).preparing).toBe('claude-code');
+      for (const [method, params] of [
+        ['setup.prepare', { runtime: 'codex', confirm: true }],
+        ['setup.run', { action: 'install' }],
+        ['setup.reset', { confirm: 'reset' }],
+      ] as const)
+        await expect(client.call(method, params as never)).rejects.toThrow(/already running/);
+      release();
+      const result = await preparing;
+      expect((await client.call('setup.status')).preparing).toBeUndefined();
+      expect(result.preparedRuntimes).toContain('claude-code');
+      expect(result.codex).toEqual(status.codex);
+      expect(transport.starts).toEqual([]);
+      expect(transport.execs.filter((x) => x.args[1] === 'build').map((x) => x.args[2])).toEqual([
+        'runtime-claude-code',
+      ]);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
   });
 
   it('creates the VM with the size picked, half of this computer by default', async () => {

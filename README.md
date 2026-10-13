@@ -54,10 +54,12 @@ The app bundles Node and its dependencies. No source checkout or pnpm is needed.
 verifies the archive checksum; this is not publisher signing. See [installer options and source
 installation](docs/GETTING_STARTED.md) to inspect the script or pin a version.
 
-Getting started prepares the VM and vault, connects one runtime, and walks you through a first
-agent and task. New VMs default to half your host's CPUs and memory (minimum 1 CPU / 2 GiB);
-you can choose the size. Initial VM setup can take up to half an hour; the first task for each
-runtime also builds its image, which can take several minutes.
+Getting started prepares the VM, vault and your selected runtime in one confirmed operation,
+then helps you connect an account, review a starter and try an editable sample code-review task.
+New VMs use recommended resources (half the host's CPUs and memory, minimum 1 CPU / 2 GiB);
+advanced settings let you choose another size. Release packages download checksum-verified
+base and runtime layers; source installations build them locally. The selected runtime is
+prepared before the first task. Setup time still depends on downloads and VM provisioning.
 Model usage consumes your subscription quota or API credit.
 
 After setup, create a starter with the runtime you connected; creation itself does not call a model:

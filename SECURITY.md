@@ -68,6 +68,21 @@ The agent team (`anchi/`, `guest/anchi_cell.py`, `services/egress_*.py`) runs Co
 
 ## Isolation and platform limits
 
+Guided preparation combines environment installation, vault initialization/unlock and runtime
+image preparation after one trusted confirmation. It never replaces an existing master key,
+imports an account or starts a task. Account import, agent configuration and sending the sample
+task remain separate user actions. A missing key with encrypted credentials still requires
+restoring the original key.
+
+Prebuilt release layers are trusted software, like the app bundle. Their manifest is shipped
+inside that bundle and fixes each archive's version, architecture, recipe compatibility, size
+and SHA-256. The guest checks the full archive before extraction into a private staging directory,
+rejects traversal, links used as parent directories, unmapped owners and unsupported special
+files/xattrs, maps ownership into the cell UID range, and publishes the layer by rename.
+Only overlay whiteouts and opaque-directory markers are supported. Downloads contain no
+accounts, agent homes, workspace data or proxy CA. A checksum failure stops installation;
+these checks do not constitute publisher signing. Source installations build layers locally.
+
 Linux and macOS share the same trust boundaries: services and cells run inside a Lima VM. Linux uses QEMU/KVM and QEMU user-mode NAT; the host administrator grants `/dev/kvm` access. The user installs Lima (Homebrew on macOS); the Linux CI pins Lima by SHA-256. Inside the VM, Node, Codex and Claude Code are pinned by version and SHA-256 in `guest/cell.env`, not by publisher signatures.
 
 The daemon's task store (`~/.anchi/data/anchi.db`, mode 0600 directory) keeps task transcripts, including agent-originated text and tool output, on the host. Finished tasks are deleted after `retentionDays` (default 90), and `anchi rm` deletes a task at once. Full policy audit remains in the VM policy database and the egress audit log; both are read through trusted administration. Cell and service JSON uses UTF-8 byte limits.

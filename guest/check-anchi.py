@@ -155,6 +155,15 @@ def main():
         )
         if built.returncode:
             raise SystemExit(f'cannot build the Codex runtime layer: {built.stdout[-500:]}')
+    cell = manager()
+    expected_uid = int(cell.cell_env()['SECURE_CELL_UID_BASE'])
+    for image, digest, binary in (
+        ('codex', 'base', 'usr/local/go/bin/go'),
+        ('runtime-codex', 'runtime', 'opt/codex/bin/codex'),
+    ):
+        upper = cell.layer_dir(image, digest) / 'upper'
+        check(f'{image} tool belongs to mapped cell root', (upper / binary).stat().st_uid == expected_uid)
+        check(f'{image} layer carries no proxy CA', not any((upper / p).exists() for p in cell.BUILD_CA_PATHS))
     t0 = time.time()
 
     # ── M1: concurrency and isolation ──
