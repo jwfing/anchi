@@ -266,7 +266,12 @@ class RunningLima extends LimaTransport {
 }
 let vmRunning = false;
 
-async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: string) {
+async function start(
+  idleMs = 60_000,
+  turnTimeoutMs?: number,
+  workspaceRoot?: string,
+  extra: Partial<ConstructorParameters<typeof Daemon>[0]> = {},
+) {
   const layout = homeLayout(root);
   const d = new Daemon({
     workspaceRoot: workspaceRoot ?? join(root, 'no-workspaces'),
@@ -286,6 +291,7 @@ async function start(idleMs = 60_000, turnTimeoutMs?: number, workspaceRoot?: st
     quiet: true,
     idleMs,
     roomWaitMs,
+    ...extra,
   });
   await d.start();
   daemon = d;
@@ -806,6 +812,45 @@ describe('daemon tasks', () => {
     await expect(
       client.call('approvals.decide', { id: 'b'.repeat(16), allow: true }),
     ).rejects.toThrow(/unknown/);
+  });
+
+  it('raises a desktop notification for a held write while a client is connected, unless settings say no', async () => {
+    const held = (id: string) =>
+      JSON.stringify({
+        type: 'pending',
+        approval: {
+          id,
+          task: 't-a000000001',
+          agent: 'dev',
+          connector: 'github',
+          operation: 'POST /o/r.git/git-receive-pack',
+          host: 'github.com',
+          summary: 'git push: refs/heads/fix',
+          created_at: 1,
+          timeout: 300,
+          reason: 'high-risk: push to main or master',
+        },
+      });
+    const shown: [string, string][] = [];
+    const notify = async (title: string, message: string) => void shown.push([title, message]);
+    transport.approvalLines = [held('a'.repeat(16))];
+    // `start` connects a client, as an open TUI would.
+    const { client } = await start(60_000, undefined, undefined, { quiet: false, notify });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await client.call('approvals.list')).toHaveLength(1);
+    expect(shown).toEqual([
+      [
+        'Anchi: @dev asks for approval',
+        'github: POST /o/r.git/git-receive-pack · high-risk: push to main or master · 5 min to decide',
+      ],
+    ]);
+    client.close();
+    await daemon!.stop();
+    write('settings.yaml', 'desktopNotifications: false\n');
+    transport.approvalLines = [held('b'.repeat(16))];
+    await start(60_000, undefined, undefined, { quiet: false, notify });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(shown).toHaveLength(1);
   });
 
   it('shows connector-service writes held by the policy service, verified there', async () => {
