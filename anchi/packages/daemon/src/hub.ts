@@ -392,19 +392,16 @@ export class Hub extends EventEmitter<HubEvents> {
     for (const child of this.opts.store.children(taskId)) {
       if (child.status === 'running' || child.status === 'queued') this.cancelTask(child.id);
     }
+    // A task already finished keeps its result: cancelling it again is a no-op.
+    if (task.status !== 'queued' && task.status !== 'running') return;
     const state = this.states.get(task.agentId);
     if (state) {
-      const before = state.queue.length;
       state.queue = state.queue.filter((j) => j.taskId !== taskId);
-      const turn = state.running.get(taskId);
-      if (turn) turn.controller.abort();
-      else if (before !== state.queue.length) this.finish(taskId, 'cancelled', 'cancelled');
+      state.running.get(taskId)?.controller.abort();
     }
     this.closeCell(taskId, 'task cancelled');
-    if (task.status === 'done' || task.status === 'failed') return;
-    if (!state?.running.has(taskId)) {
-      this.finish(taskId, 'cancelled', 'cancelled');
-    }
+    // A running turn finishes through its abort; anything else finishes here, exactly once.
+    if (!state?.running.has(taskId)) this.finish(taskId, 'cancelled', 'cancelled');
   }
 
   /**
