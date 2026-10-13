@@ -1,7 +1,8 @@
 # Releases
 
 Anchi releases include standalone archives for Apple Silicon macOS and glibc Linux x86_64.
-Each archive contains the Node runtime, bundled TUI and daemon, prebuilt cell runners, VM
+Each archive contains the Node runtime, bundled TUI and daemon, prebuilt cell runners, the
+Anchi skill for host-side agents (`skills/anchi`), VM
 installation resources, and license notices. Users need neither a checkout nor pnpm.
 A release is a commit on `main` with a version, a changelog entry and the checks below.
 
