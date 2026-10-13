@@ -35,14 +35,14 @@ curl -fsSL https://anchi.elseward.xyz/install.sh | sh    # macOS (Apple Silicon)
 anchi                                                      # opens Getting started in the TUI
 ```
 
-Prerequisites: macOS needs `brew install lima python`; Linux needs Lima 2.2+, Python 3.11+, QEMU and access to `/dev/kvm`. Getting started prepares the environment and selected runtime after one confirmation, then connects an account and reviews a starter named `dev`. The CLI equivalent for preparation is:
+Prerequisites: macOS needs `brew install lima python`; Linux needs Lima 2.2+, Python 3.11+, QEMU and access to `/dev/kvm`. Getting started prepares the environment and selected runtime after one confirmation, automatically connects available local Codex and Claude Code logins, then reviews a starter named `dev`. The CLI equivalent for preparation is:
 
 ```bash
-anchi setup prepare --runtime codex    # or claude-code / hermes; review and confirm
+anchi setup prepare                   # detected login; --runtime overrides it
 ```
 
 This creates or starts the VM, initializes or unlocks the vault and prepares the selected image;
-it imports no account and calls no model. Existing keys are kept. The user must back up
+it imports available local subscription access tokens and calls no model. Refresh tokens stay on the host. Existing keys are kept. The user must back up
 `~/.config/anchi/vault.key`. Release packages download verified layers; source checkouts build
 locally. Individual steps remain available (also in the TUI's **Runtimes** screen):
 
@@ -53,7 +53,9 @@ anchi setup vault unlock     # after every VM start
 anchi setup status           # VM, vault, runtimes, connectors at a glance
 ```
 
-Then connect at least one runtime:
+If no local login was imported, connect at least one runtime. Automatic imports can be disabled
+with `codexAutoImport: false` or `claudeAutoImport: false` in `~/.anchi/settings.yaml`. Manual
+Claude tokens/API keys are preserved. These commands remain available:
 
 | Runtime | Command | What the user provides |
 |---|---|---|

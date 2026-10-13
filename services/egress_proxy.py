@@ -244,10 +244,18 @@ class Credentials:
 
     def get(self, grant):
         hit = self.cache.get(grant)
-        if hit and hit[0] > self.clock():
+        if (
+            hit
+            and hit[0] > self.clock()
+            and not (
+                grant == 'claude' and hit[1].get('expires_at') is not None and hit[1]['expires_at'] <= time.time() + 30
+            )
+        ):
             return hit[1]
         if grant == 'claude':
             value = self.fetch({'op': 'claude_token'})
+            if value.get('expires_at') is not None and value['expires_at'] <= time.time() + 30:
+                raise LookupError('CLAUDE_TOKEN_EXPIRED_RELOGIN_ON_HOST')
         elif grant == 'hermes':
             value = self.fetch({'op': 'hermes_credential'})
         elif grant == 'codex':

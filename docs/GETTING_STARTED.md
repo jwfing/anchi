@@ -221,14 +221,20 @@ checkout, replace `anchi` with `scripts/anchi`.
 
 Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**:
 
-1. **Prepare your environment.** Press **Enter**, choose Codex, Claude Code or Hermes, and
-   review the recommended resources. Confirm once to create or start the VM, install its
-   components, initialize or unlock credential storage and prepare that runtime's image.
-   Completed steps are detected and reused on retry. Preparation imports no account and calls
-   no model. Keep a backup of `~/.config/anchi/vault.key`; existing keys are never replaced.
-2. **Connect your account.** Use the protected account dialog. An existing host Codex login
-   is offered for import with confirmation; otherwise run `codex login` first. Claude Code
-   accepts a `claude setup-token` token or API key; Hermes accepts an endpoint, model and key.
+1. **Prepare your environment.** Anchi detects installed Codex and Claude Code CLIs and
+   usable local subscription logins. Press **Enter** to review the recommended resources.
+   With a detected login, Anchi skips runtime selection; when both are present, it imports
+   both and prepares Codex by default. Without a usable login, choose a runtime.
+   Confirm once to create or start the VM, install its components, initialize or unlock
+   credential storage and prepare the runtime image. Completed steps are reused on retry.
+   No model is called. Back up `~/.config/anchi/vault.key`; existing keys are never replaced.
+2. **Connect your account automatically.** Once the vault is ready, Anchi imports available
+   Codex and Claude Code access tokens without a separate account selection or import dialog.
+   Codex uses `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Claude Code uses the macOS
+   Keychain, with `.credentials.json` as a fallback, or `~/.claude/.credentials.json` on Linux;
+   `CLAUDE_CONFIG_DIR` selects another configuration directory. macOS may ask for Keychain access.
+   Refresh tokens stay on the host. If no usable login exists, sign in locally or use the
+   manual runtime dialog; Hermes still needs an endpoint, model and key.
 3. **Review your starter and try a task.** Press **Enter** to review `dev` with a connected
    runtime, then **y** to save. The input contains a small sample code-review request: edit it
    or press **Enter** to review it, then **Enter** to send. Only sending calls a model.
@@ -238,11 +244,15 @@ retry action. Advanced CPU/memory choices remain under **Runtimes**, **I**; **Ct
 chooses a custom agent name and runtime. The CLI preparation equivalent is:
 
 ```bash
-anchi setup prepare --runtime codex     # or claude-code / hermes; review and confirm
+anchi setup prepare                    # use the detected login; review and confirm
+anchi setup prepare --runtime claude-code  # explicitly choose a runtime
 ```
 
 `--yes` accepts the recommended resources; `--cpus` and `--memory` override them for a new VM.
-This command prepares the environment only; connect the account and create the agent afterwards.
+Preparation also imports available local logins. Review and create the agent afterwards.
+Anchi checks refreshed logins on file changes and every five minutes. Existing manual Claude
+tokens/API keys are kept. Set `codexAutoImport: false` or `claudeAutoImport: false` in
+`~/.anchi/settings.yaml` to disable that runtime's automatic import.
 
 Release installations download prebuilt base and selected runtime layers. Their SHA-256,
 architecture and recipe compatibility are checked against the manifest bundled in the app
@@ -284,7 +294,8 @@ picks one). Teams with setup and a first task complete open on **Team overview**
    - Codex: install its CLI and run `codex login` on this machine, then `anchi setup codex`.
      Anchi reads `~/.codex/auth.json`; Codex must store its login in that file, not in a
      keyring.
-   - Claude Code: run `claude setup-token`, then `anchi setup claude` and paste the token.
+   - Claude Code: sign in locally for automatic import, or run `claude setup-token`, then
+     `anchi setup claude` and paste the token.
    - Hermes: `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` and
      paste the endpoint's API key (or **h** in Runtimes). Any OpenAI-compatible API works; the key
      stays in the VM vault.

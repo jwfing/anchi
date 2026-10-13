@@ -6,11 +6,12 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
-- Getting started prepares the VM, vault and selected runtime in one confirmed, resumable operation with recommended resources. `anchi setup prepare --runtime codex` (also `claude-code` or `hermes`) provides the same preparation from the CLI; existing credentials are kept and account imports still require consent.
+- Getting started prepares the VM, vault and selected runtime in one confirmed, resumable operation with recommended resources. `anchi setup prepare --runtime codex` (also `claude-code` or `hermes`) provides the same preparation from the CLI; existing keys and manual Claude credentials are kept, and available local runtime logins connect automatically.
 - Release packages include a pinned manifest for prebuilt base and runtime layers. Installation downloads and verifies the needed layers instead of building them locally; source checkouts continue to build locally. Needs `anchi setup install` to update existing VM components.
 
 ### Changed
 
+- First launch detects local Codex and Claude Code installations and subscription logins, imports both available access tokens into the unlocked vault, and skips runtime selection when a usable login exists (Codex wins ties). Claude imports support macOS Keychain and `.credentials.json`, preserve manual tokens/API keys, and follow refreshed host tokens without copying refresh tokens. `anchi setup prepare` now defaults to the detected login; `claudeAutoImport: false` disables Claude synchronization. Needs `anchi setup install` for host-login expiry enforcement in existing VMs.
 - First-agent setup preselects the connected runtime and the name `dev`, retains the configuration review, and offers an editable sample code-review task before any model call. Advanced resource and agent settings remain available.
 
 ## 0.3.4 — 2026-10-12

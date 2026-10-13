@@ -134,6 +134,20 @@ def real_tasks():
 def main():
     if os.getuid() != 0:
         raise SystemExit('run as guest root')
+    # Exercise the installed host-login validator without reading or writing the real vault.
+    sys.path.insert(0, '/opt/secure-vm/services')
+    import claude_admin
+    from common import Denied
+
+    fake_token = 'sk-ant-oat01-' + 'fake' * 12
+    valid = claude_admin.validate({'token': fake_token, 'expires_at': time.time() + 3600})
+    refused = 0
+    for extra in ({'expires_at': 1}, {'refresh_token': 'fake-host-only'}):
+        try:
+            claude_admin.validate({'token': fake_token, **extra})
+        except Denied:
+            refused += 1
+    check('host Claude imports reject expired tokens and refresh tokens', valid['kind'] == 'oauth' and refused == 2)
     # These checks start, kill and reap cells; a real task's cell must never be among them.
     tasks = real_tasks()
     if tasks and os.environ.get('ANCHI_CHECK_WITH_TASKS') != '1':

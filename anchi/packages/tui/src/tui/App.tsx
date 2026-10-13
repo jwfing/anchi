@@ -1033,9 +1033,9 @@ export function App({
       setSetup(status);
       setSetupProgress({ action: 'install', phase: 'Ready', running: false, startedAt });
       setProblem(null);
-      // Authentication stays in a trusted screen. Preparation never imports an account.
+      // Existing host logins are imported by the daemon as soon as the vault is ready.
       if (!runtimeReady(status, runtime)) {
-        if (runtime === 'codex' && !status.hostCodexLogin) {
+        if (runtime === 'codex' && status.hostLogins?.codex.state !== 'ready') {
           say('Run codex login on this computer, then press i to use that login.');
         } else
           run(
@@ -1064,7 +1064,8 @@ export function App({
         (size
           ? `Recommended resources: ${size.cpus} CPUs and ${size.memoryGiB} GiB of memory. `
           : '') +
-        'Existing keys are kept. Back up ~/.config/anchi/vault.key. No accounts or folders are shared and no model is called. ' +
+        'Available Codex and Claude Code logins on this computer are imported automatically into the vault. ' +
+        'Existing keys are kept. Back up ~/.config/anchi/vault.key. No folders are shared and no model is called. ' +
         'Completed steps are reused if you retry. Advanced resource settings are available in Runtimes (I).',
       action: () => prepare(runtime),
     });
@@ -1293,6 +1294,12 @@ export function App({
         if (setup.host?.missing.length) return refreshSetup();
         const stage = welcomeStep(setup, agents, tasks);
         if (setup.quickSetup && (stage === 'environment' || stage === 'vault')) {
+          if (
+            runtimeReady(setup) ||
+            setup.hostLogins?.codex.state === 'ready' ||
+            setup.hostLogins?.claude.state === 'ready'
+          )
+            return confirmPrepare(suggestedRuntime(setup));
           return setModal({
             kind: 'quickSetup',
             pick: STARTER_RUNTIMES.indexOf(suggestedRuntime(setup)),
@@ -3099,13 +3106,17 @@ function RuntimesView({
       </Text>
       <Text>
         Claude Code:{' '}
-        {setup.claude?.connected ? (
+        {setup.claude?.connected && !runtimeReady(setup, 'claude-code') ? (
+          <Text color="yellow">
+            login expired — open Claude Code on this computer to refresh it
+          </Text>
+        ) : setup.claude?.connected ? (
           <Text color="green">
             connected ({setup.claude.kind === 'api_key' ? 'API key' : 'subscription token'})
           </Text>
         ) : (
           <Text color="yellow">
-            not connected — run `claude setup-token` on this computer, then press c
+            not connected — sign in to Claude Code on this computer, or press c to paste a token
           </Text>
         )}
       </Text>

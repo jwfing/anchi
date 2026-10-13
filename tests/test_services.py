@@ -241,6 +241,17 @@ class OAuthTests(unittest.TestCase):
         with self.assertRaises(Denied):
             auth.handle({'op': 'access_token'}, 'notion')
 
+    def test_expired_host_claude_login_is_not_served(self):
+        value = {'token': 'fake-claude-access', 'kind': 'oauth', 'generation': 'g', 'expires_at': 1}
+        auth.write('claude.json', value)
+        with self.assertRaisesRegex(Denied, 'CLAUDE_TOKEN_EXPIRED_RELOGIN_ON_HOST'):
+            auth.handle({'op': 'claude_token'}, 'egress')
+        value['expires_at'] = 9_000_000_000
+        auth.write('claude.json', value)
+        self.assertEqual(auth.handle({'op': 'claude_token'}, 'egress')['token'], value['token'])
+        with self.assertRaises(Denied):
+            auth.handle({'op': 'claude_token'}, 'gmail')
+
     def test_static_tokens_validate_format_and_never_leave_in_status(self):
         auth.import_token('notion', {'token': 'ntn_' + 'a' * 40})
         auth.import_token('slack', {'token': 'xoxb-' + '1' * 40})

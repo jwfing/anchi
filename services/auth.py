@@ -500,9 +500,16 @@ def handle(request, caller):
                 raise Denied('CODEX_TOKEN_EXPIRED_REIMPORT_ON_HOST')
             return credential
         if op == 'claude_token' and caller == 'egress':
-            # A `claude setup-token` token or an API key; no refresh on either side.
+            # Short-lived host logins refresh on the host; never return their expired token.
             value = read('claude.json')
-            return {'token': value['token'], 'kind': value['kind'], 'generation': value['generation']}
+            if value.get('expires_at') is not None and value['expires_at'] <= time.time() + 30:
+                raise Denied('CLAUDE_TOKEN_EXPIRED_RELOGIN_ON_HOST')
+            return {
+                'token': value['token'],
+                'kind': value['kind'],
+                'generation': value['generation'],
+                'expires_at': value.get('expires_at'),
+            }
         if op == 'hermes_credential' and caller == 'egress':
             # The user's OpenAI-compatible endpoint: its key, and the host it may be sent to.
             value = read('hermes.json')

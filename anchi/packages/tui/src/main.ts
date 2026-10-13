@@ -29,6 +29,7 @@ import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeJson, sanitizeLine, sanitizeLines } from './sanitize.ts';
 import { selfUpdate } from './update.ts';
+import { suggestedRuntime, runtimeReady } from './tui/usability.ts';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
@@ -587,34 +588,37 @@ setup
   .description(
     'Prepare the environment, credential storage and one runtime; resume completed steps',
   )
-  .requiredOption('--runtime <runtime>', 'codex, claude-code or hermes')
+  .option('--runtime <runtime>', 'codex, claude-code or hermes (default: detected login)')
   .option('-y, --yes', 'confirm preparation using recommended resources')
   .option('--cpus <n>', 'CPUs for a new VM (advanced)')
   .option('--memory <gib>', 'memory for a new VM in GiB (advanced)')
   .action(
     (opts: {
-      runtime: 'codex' | 'claude-code' | 'hermes';
+      runtime?: 'codex' | 'claude-code' | 'hermes';
       yes?: boolean;
       cpus?: string;
       memory?: string;
     }) =>
       withClient(async (client) => {
-        if (!['codex', 'claude-code', 'hermes'].includes(opts.runtime)) fail('unknown runtime');
+        const runtime = opts.runtime ?? suggestedRuntime(await client.call('setup.status'));
+        if (!['codex', 'claude-code', 'hermes'].includes(runtime)) fail('unknown runtime');
         const vmSize = await newVmSize(client, { ...opts, yes: true });
         const consent =
-          `Prepare ${opts.runtime}, create or start the isolated environment and initialize or unlock credential storage? ` +
+          `Prepare ${runtime}, create or start the isolated environment and initialize or unlock credential storage? ` +
           (vmSize ? `A new VM uses ${vmSize.cpus} CPUs and ${vmSize.memoryGiB} GiB. ` : '') +
-          'Existing keys are kept. No account is imported and no model is called. Back up ~/.config/anchi/vault.key.';
+          'Available local Codex and Claude Code logins connect automatically. Existing keys are kept; no model is called. Back up ~/.config/anchi/vault.key.';
         if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
         const off = client.on('setup', ({ line }) => console.log(sanitizeLine(line)));
         try {
-          await client.call('setup.prepare', { runtime: opts.runtime, confirm: true, vmSize });
+          const status = await client.call('setup.prepare', { runtime, confirm: true, vmSize });
+          console.log(
+            runtimeReady(status, runtime)
+              ? `${runtime} connected. Review your starter in anchi.`
+              : `Environment ready. Sign in to ${runtime} on this computer or connect it in anchi.`,
+          );
         } finally {
           off();
         }
-        console.log(
-          `Environment ready. Connect ${opts.runtime} in anchi, then review your starter and run the sample task.`,
-        );
       }),
   );
 
@@ -646,11 +650,19 @@ setup
             : 'not connected'
         }`,
         `Claude Code: ${
-          s.claude?.connected
-            ? `connected (${s.claude.kind === 'api_key' ? 'API key' : 'subscription token'})`
-            : 'not connected'
+          s.claude?.connected && !runtimeReady(s, 'claude-code')
+            ? 'login expired; open Claude Code on this computer to refresh it'
+            : s.claude?.connected
+              ? `connected (${s.claude.kind === 'api_key' ? 'API key' : 'subscription token'})`
+              : 'not connected'
         }`,
         `Hermes: ${s.hermes?.connected ? `${s.hermes.baseUrl} · ${s.hermes.model}` : 'not set up'}`,
+        ...(s.hostLogins
+          ? Object.entries(s.hostLogins).map(
+              ([name, login]) =>
+                `Local ${name}: ${login.installed ? 'installed' : 'CLI not found'} · login ${login.state}`,
+            )
+          : []),
         `Workspaces: ${s.workspaces ? '~/AnchiWorkspaces is shared with the VM' : 'not shared'}`,
         `Connectors: ${s.connectors.map((c) => `${c.id} ${c.connected ? '●' : '○'}`).join('  ')}`,
         `Services: ${(s.services ?? [])

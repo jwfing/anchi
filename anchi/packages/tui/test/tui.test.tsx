@@ -2301,27 +2301,84 @@ describe('usability workflows', () => {
 });
 
 describe('onboarding and team state', () => {
-  it('prepares recommended resources only after consent and then offers account import', async () => {
+  it.each([
+    ['Codex', true, false, 'codex'],
+    ['Claude Code', false, true, 'claude-code'],
+    ['both', true, true, 'codex'],
+  ] as const)(
+    'detects %s and skips runtime selection and manual import',
+    async (_name, codex, claude, runtime) => {
+      const { client: defaults } = fakeClient();
+      const base = await defaults.call('setup.status');
+      const ready = {
+        ...base,
+        quickSetup: true,
+        hostLogins: {
+          codex: { installed: codex, state: codex ? ('ready' as const) : ('missing' as const) },
+          claude: { installed: claude, state: claude ? ('ready' as const) : ('missing' as const) },
+        },
+        codex: { runtime: 'codex' as const, connected: codex, accountId: null, expiresAt: null },
+        claude: { runtime: 'claude-code' as const, connected: claude, kind: 'oauth' as const },
+        preparedRuntimes: [runtime],
+      };
+      let status = {
+        ...ready,
+        codex: { ...ready.codex, connected: false },
+        claude: { ...ready.claude, connected: false },
+        vm: 'missing' as 'missing' | 'running',
+        installed: false,
+        vaultUnlocked: false,
+        vmSize: { default: { cpus: 4, memoryGiB: 8 }, host: { cpus: 8, memoryGiB: 16 } },
+      };
+      const { client, calls } = fakeClient(
+        {},
+        {
+          'setup.status': () => status,
+          'setup.prepare': () => (status = { ...status, ...ready, vm: 'running' }),
+        },
+      );
+      const ui = render(
+        <App client={client} initialView="welcome" initialAgents={[]} initialTasks={[]} />,
+      );
+      await frameWith(ui, 'local login detected');
+      ui.stdin.write('\r');
+      expect(await frameWith(ui, 'Recommended resources')).toContain('4 CPUs and 8 GiB');
+      expect(ui.lastFrame()).not.toContain('Choose your runtime');
+      expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
+      ui.stdin.write('n');
+      await tick();
+      expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
+      ui.stdin.write('\r');
+      await frameWith(ui, 'Recommended resources');
+      ui.stdin.write('y');
+      await frameWith(ui, 'review your starter');
+      expect(calls.find(([m]) => m === 'setup.prepare')?.[1]).toEqual({ runtime, confirm: true });
+      expect(
+        calls.some(
+          ([m]) =>
+            m === 'setup.importCodex' ||
+            m === 'setup.importClaude' ||
+            m === 'builder.apply' ||
+            m === 'tasks.create',
+        ),
+      ).toBe(false);
+      ui.unmount();
+    },
+  );
+
+  it('keeps runtime selection when no local login is available', async () => {
     const { client: defaults } = fakeClient();
-    const ready = {
-      ...(await defaults.call('setup.status')),
-      quickSetup: true,
-      hostCodexLogin: true,
-      codex: { runtime: 'codex' as const, connected: false, accountId: null, expiresAt: null },
-      preparedRuntimes: ['codex' as const],
-    };
-    let status = {
-      ...ready,
-      vm: 'missing' as 'missing' | 'running',
-      installed: false,
-      vaultUnlocked: false,
-      vmSize: { default: { cpus: 4, memoryGiB: 8 }, host: { cpus: 8, memoryGiB: 16 } },
-    };
+    const base = await defaults.call('setup.status');
     const { client, calls } = fakeClient(
       {},
       {
-        'setup.status': () => status,
-        'setup.prepare': () => (status = { ...status, ...ready, vm: 'running' }),
+        'setup.status': () => ({
+          ...base,
+          quickSetup: true,
+          vm: 'missing',
+          codex: { ...base.codex, connected: false },
+          claude: { ...base.claude, connected: false },
+        }),
       },
     );
     const ui = render(
@@ -2330,27 +2387,7 @@ describe('onboarding and team state', () => {
     await frameWith(ui, 'Prepare your environment');
     ui.stdin.write('\r');
     await frameWith(ui, 'Choose your runtime');
-    ui.stdin.write('\r');
-    expect(await frameWith(ui, 'Recommended resources')).toContain('4 CPUs and 8 GiB');
     expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
-    ui.stdin.write('n');
-    await tick();
-    expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
-    ui.stdin.write('\r');
-    await frameWith(ui, 'Choose your runtime');
-    ui.stdin.write('\r');
-    await frameWith(ui, 'Recommended resources');
-    ui.stdin.write('y');
-    await frameWith(ui, 'Import Codex login');
-    expect(calls.find(([m]) => m === 'setup.prepare')?.[1]).toEqual({
-      runtime: 'codex',
-      confirm: true,
-    });
-    expect(
-      calls.some(
-        ([m]) => m === 'setup.importCodex' || m === 'builder.apply' || m === 'tasks.create',
-      ),
-    ).toBe(false);
     ui.unmount();
   });
 

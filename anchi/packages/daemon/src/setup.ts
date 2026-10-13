@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
@@ -18,50 +17,16 @@ import type { ServiceSetup } from './services.ts';
 
 export { CONNECTOR_IDS };
 
-/**
- * Reads the access token and account id from the host Codex login. Only the access token
- * leaves the host (to the vault); the refresh token stays with the host Codex CLI, which keeps
- * refreshing it. Re-import when the access token expires.
- */
-export const HOST_CODEX_LOGIN = join(
-  process.env.CODEX_HOME ?? join(homedir(), '.codex'),
-  'auth.json',
-);
-
-/** Expiry (ms) in a JWT's claims, without verifying it; the upstream service verifies. */
-export function jwtExpiry(token: string): number | null {
-  try {
-    const claims = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as {
-      exp?: unknown;
-    };
-    return typeof claims.exp === 'number' ? claims.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-export function readHostCodexLogin(file = HOST_CODEX_LOGIN): {
-  accessToken: string;
-  accountId: string;
-} {
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    throw new Error(`no Codex login at ${file}; run \`codex login\` on this computer first`);
-  }
-  const value = JSON.parse(raw) as { tokens?: { access_token?: unknown; account_id?: unknown } };
-  const accessToken = value.tokens?.access_token;
-  const accountId = value.tokens?.account_id;
-  if (typeof accessToken !== 'string' || typeof accountId !== 'string') {
-    throw new Error('the host Codex login is not a ChatGPT subscription login');
-  }
-  return { accessToken, accountId };
-}
+export { HOST_CODEX_LOGIN, jwtExpiry, readHostCodexLogin } from './host-logins.ts';
 
 export async function claudeStatus(guest: Guest): Promise<ClaudeAccountStatus> {
   const s = await guest.claudeStatus();
-  return { runtime: 'claude-code', connected: s.configured, kind: s.kind };
+  return {
+    runtime: 'claude-code',
+    connected: s.configured,
+    kind: s.kind,
+    expiresAt: s.expires_at ? s.expires_at * 1000 : null,
+  };
 }
 
 export async function hermesStatus(guest: Guest): Promise<HermesAccountStatus> {
@@ -174,7 +139,6 @@ export async function setupStatus(
   const host = hostResources();
   const empty: SetupStatus = {
     quickSetup: true,
-    hostCodexLogin: existsSync(HOST_CODEX_LOGIN),
     preparedRuntimes: [],
     vm,
     host: hostReadiness(),

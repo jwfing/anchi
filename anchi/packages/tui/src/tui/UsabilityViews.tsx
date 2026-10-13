@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import type { AgentSummary, Approval, SetupStatus, StoredEvent, TaskRow } from '@anchi/protocol';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
 import { truncate, wrap } from './lines.ts';
-import { teamActivity, welcomeStep } from './usability.ts';
+import { suggestedRuntime, teamActivity, welcomeStep } from './usability.ts';
 
 /** Seconds before the proxy refuses a held write on its own. */
 function secondsLeft(a: Approval, now: number): number {
@@ -159,6 +159,21 @@ export function WelcomeView({
         'Review your starter and try a task',
       ].map((label, i) => `${i < current ? '✓' : i === current ? '→' : '○'} ${label}`),
     );
+    if (setup.hostLogins) {
+      for (const [id, name] of [
+        ['codex', 'Codex'],
+        ['claude', 'Claude Code'],
+      ] as const) {
+        const login = setup.hostLogins[id];
+        if (login.state === 'ready')
+          lines.push(`${name}: local login detected; connects automatically.`);
+        else if (login.installed && login.state !== 'disabled')
+          lines.push(
+            `${name}: installed; ${login.state === 'expired' ? 'login expired' : 'no usable local login'}. Sign in on this computer.`,
+          );
+      }
+      lines.push('');
+    }
   }
   if (busy) lines.push(busy, 'You can leave this screen; installation keeps running.');
   else if (step === 'environment') {
@@ -185,7 +200,9 @@ export function WelcomeView({
           ? 'Start your existing VM to continue.'
           : 'Prepare the VM and agent image. First installation can take up to half an hour.',
         setup.quickSetup
-          ? `${nextKey} choose your runtime and prepare everything · recommended resources`
+          ? setup.hostLogins?.codex.state === 'ready' || setup.hostLogins?.claude.state === 'ready'
+            ? `${nextKey} prepare with ${suggestedRuntime(setup)} · recommended resources`
+            : `${nextKey} choose your runtime and prepare everything · recommended resources`
           : `${nextKey} continue · completed steps are detected automatically`,
       );
   } else if (step === 'vault')
@@ -201,10 +218,10 @@ export function WelcomeView({
   else if (step === 'runtime')
     lines.push(
       'Connect one runtime:',
-      setup.hostCodexLogin
-        ? '[i] Codex — use your existing login on this computer (confirmation required).'
+      setup.hostLogins?.codex.state === 'ready'
+        ? '[i] Codex — local login detected; automatic import retries in the background.'
         : '[i] Codex — run codex login on this computer, then import it.',
-      '[c] Claude Code — run claude setup-token, then paste the token.',
+      '[c] Claude Code — sign in locally for automatic import, or paste a setup-token/API key.',
       '[h] Hermes — an OpenAI-compatible endpoint, its API key and a model.',
       setup.quickSetup
         ? 'Your selected runtime is prepared before the first task. No business accounts are needed.'

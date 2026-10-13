@@ -384,7 +384,7 @@ Prepare the environment, credential storage and one runtime; resume completed
 steps
 
 Options:
-  --runtime <runtime>  codex, claude-code or hermes
+  --runtime <runtime>  codex, claude-code or hermes (default: detected login)
   -y, --yes            confirm preparation using recommended resources
   --cpus <n>           CPUs for a new VM (advanced)
   --memory <gib>       memory for a new VM in GiB (advanced)

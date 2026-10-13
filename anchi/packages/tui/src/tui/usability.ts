@@ -24,12 +24,24 @@ function total(items) {
 
 export function suggestedRuntime(setup: SetupStatus): RuntimeId {
   const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
-  return runtimes.find((r) => runtimeReady(setup, r)) ?? setup.preparedRuntimes?.[0] ?? 'codex';
+  return (
+    runtimes.find((r) => runtimeReady(setup, r)) ??
+    (setup.hostLogins?.codex.state === 'ready'
+      ? 'codex'
+      : setup.hostLogins?.claude.state === 'ready'
+        ? 'claude-code'
+        : undefined) ??
+    setup.preparedRuntimes?.[0] ??
+    'codex'
+  );
 }
 export function runtimeReady(setup: SetupStatus, runtime?: string): boolean {
   const codex =
     setup.codex.connected && (setup.codex.expiresAt === null || setup.codex.expiresAt > Date.now());
-  const claude = Boolean(setup.claude?.connected);
+  const claude = Boolean(
+    setup.claude?.connected &&
+    (setup.claude.expiresAt == null || setup.claude.expiresAt > Date.now()),
+  );
   const hermes = Boolean(setup.hermes?.connected);
   if (runtime === 'codex') return codex;
   if (runtime === 'claude-code') return claude;
