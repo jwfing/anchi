@@ -34,6 +34,12 @@ const DEFAULT_PROTOCOL = '2025-06-18';
 export function socketCall(path = TOOLS_SOCKET): Call {
   return (tool, args) =>
     new Promise((resolve) => {
+      let settled = false;
+      const settle = (answer: Awaited<ReturnType<Call>>) => {
+        if (settled) return;
+        settled = true;
+        resolve(answer);
+      };
       const conn = createConnection(path, () => conn.write(`${JSON.stringify({ tool, args })}\n`));
       let buffer = '';
       conn.on('data', (chunk) => {
@@ -42,14 +48,16 @@ export function socketCall(path = TOOLS_SOCKET): Call {
         if (nl < 0) return;
         conn.end();
         try {
-          resolve(JSON.parse(buffer.slice(0, nl)) as Awaited<ReturnType<Call>>);
+          settle(JSON.parse(buffer.slice(0, nl)) as Awaited<ReturnType<Call>>);
         } catch {
-          resolve({ ok: false, error: 'bad answer from the runner' });
+          settle({ ok: false, error: 'bad answer from the runner' });
         }
       });
       conn.on('error', (err) =>
-        resolve({ ok: false, error: `Anchi is unreachable: ${err.message}` }),
+        settle({ ok: false, error: `Anchi is unreachable: ${err.message}` }),
       );
+      // The runner went away mid-call: answer, so the runtime's tool call does not hang.
+      conn.on('close', () => settle({ ok: false, error: 'Anchi closed the connection' }));
     });
 }
 
@@ -59,6 +67,9 @@ export async function handle(
   call: Call,
   local: LocalTools = connectorTools,
 ): Promise<Json | undefined> {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } };
+  }
   const { id, method } = message;
   const params = (message.params ?? {}) as Json;
   if (id === undefined || id === null) return undefined; // notifications need no answer
@@ -122,16 +133,40 @@ export async function handle(
   }
 }
 
+/**
+ * Answers one line of the MCP stream. A line that is not a request, or a handler that throws,
+ * gets an error reply: the server must outlive bad input, or the runtime loses its Anchi tools
+ * for the rest of the session.
+ */
+export async function mcpLine(
+  line: string,
+  call: Call,
+  write: (m: Json) => void,
+  local?: LocalTools,
+): Promise<void> {
+  let message: unknown;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
+  }
+  const request = message && typeof message === 'object' && !Array.isArray(message);
+  const id = request ? ((message as Json).id ?? null) : null;
+  try {
+    const answer = await handle(message as Json, call, local);
+    if (answer) write(answer);
+  } catch (err) {
+    if (id === null) return;
+    write({
+      jsonrpc: '2.0',
+      id,
+      error: { code: -32603, message: `internal error: ${(err as Error).message}` },
+    });
+  }
+}
+
 /** Serves MCP over stdin and stdout, one JSON message per line. */
 export function serveMcp(call: Call = socketCall()): void {
   const write = (m: Json) => process.stdout.write(`${JSON.stringify(m)}\n`);
-  createInterface({ input: process.stdin }).on('line', (line) => {
-    let message: Json;
-    try {
-      message = JSON.parse(line) as Json;
-    } catch {
-      return write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
-    }
-    void handle(message, call).then((answer) => answer && write(answer));
-  });
+  createInterface({ input: process.stdin }).on('line', (line) => void mcpLine(line, call, write));
 }

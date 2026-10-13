@@ -197,7 +197,7 @@ At the bottom, the panel shows what it cannot change: template, image, sandbox, 
 - removes the agent file;
 - deletes all its tasks and transcripts, with the tasks they delegated to other agents; running and queued ones are cancelled first. A task of another agent that had delegated to it stays, with a note;
 - forgets its triggers and what its polls have seen;
-- removes it from other agents' `delegates`, keeping the rest of their files;
+- removes it from other agents' `delegates` and from the `delegates` of templates in `~/.anchi/templates/`, keeping the rest of their files (an agent that only inherited it is not edited);
 - in the VM, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
 
 Directories of your computer in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.

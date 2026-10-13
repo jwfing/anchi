@@ -1489,6 +1489,7 @@ describe('deleting agents', () => {
     delegated: 1,
     running: 1,
     delegatedBy: ['lead'],
+    delegatedByTemplates: [],
     triggers: 0,
     workspaces: ['projects/web'],
   };
@@ -1498,6 +1499,7 @@ describe('deleting agents', () => {
       agentId: 'dev',
       deletedTasks: 4,
       editedAgents: ['lead'],
+      editedTemplates: [],
       vm: { home: true, skills: true, policy: [] },
       warnings: [],
     }),

@@ -653,6 +653,10 @@ class DecisionTests(unittest.TestCase):
         d = decide('POST', 'github.com', '/o/r.git/git-receive-pack')
         body = b'00a8' + b'0' * 40 + b' ' + b'1' * 40 + b' refs/heads/fix-12\x00 report-status\n0000PACK...'
         self.assertEqual(egress_proxy.write_summary(d, 'POST', '/o/r', body), 'git push: refs/heads/fix-12')
+        # A SHA-256 repository: 64-hex object ids.
+        body = b'00d8' + b'a' * 64 + b' ' + b'b' * 64 + b' refs/heads/sha256\x00 report-status\n0000PACK...'
+        self.assertEqual(egress_proxy.write_summary(d, 'POST', '/o/r', body), 'git push: refs/heads/sha256')
+        self.assertEqual(egress_proxy.write_summary(d, 'POST', '/o/r', b'0000'), 'git push: no ref updates found')
 
     def test_polls_run_fixed_read_only_queries(self):
         method, url, headers, body = rules.poll_request('linear-issues', {'team': 'ENG', 'label': 'agent'}, LINEAR)
@@ -709,11 +713,31 @@ class DestinationTests(unittest.TestCase):
             '::1',
             'fe80::1',
             '0.0.0.0',
+            # Reach a private or a public IPv4 host through IPv6: the kernel backstop rejects
+            # the whole ranges, so the proxy must too.
+            '::ffff:10.0.0.1',
+            '::ffff:140.82.112.3',
+            '64:ff9b::8c52:7003',
+            '2001:db8::1',
+            '100::1',
+            'fc00::1',
+            'ff02::1',
+            '240.0.0.1',
         ):
             address, reason = rules.public_address(self.infos('140.82.112.3', private))
             self.assertIsNone(address, private)
             self.assertIn('non-public', reason)
         self.assertEqual(rules.public_address([])[0], None)
+        for public in ('140.82.112.3', '2606:4700::1', '2a00:1450:4001:80e::200e'):
+            self.assertEqual(rules.public_address(self.infos(public)), (public, None))
+
+    def test_the_proxy_refuses_every_range_the_kernel_backstop_rejects(self):
+        # One definition for both: the first address of each listed range is refused here.
+        import ipaddress
+
+        for text in (rules.PRIVATE_V4 + ', ' + rules.PRIVATE_V6).split(','):
+            first = str(ipaddress.ip_network(text.strip())[0])
+            self.assertIsNone(rules.public_address(self.infos(first))[0], first)
 
 
 class CredentialCacheTests(unittest.TestCase):

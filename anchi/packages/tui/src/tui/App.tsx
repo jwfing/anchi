@@ -1135,8 +1135,8 @@ export function App({
         });
         say(
           `@${id} deleted with ${r.deletedTasks} task${r.deletedTasks === 1 ? '' : 's'}` +
-            (r.editedAgents.length
-              ? `; removed from the delegates of ${r.editedAgents.map((a) => `@${a}`).join(', ')}`
+            (r.editedAgents.length || r.editedTemplates.length
+              ? `; removed from the delegates of ${[...r.editedAgents.map((a) => `@${a}`), ...r.editedTemplates.map((t) => `template ${t}`)].join(', ')}`
               : '') +
             (r.warnings.length ? ` · ${r.warnings.join(' · ')}` : ''),
         );
@@ -3470,10 +3470,10 @@ function ModalView({
           {
             text: '  in the VM: its home (work directory, Codex and Claude sessions), its skills and its policy rules',
           },
-          ...(p.delegatedBy.length
+          ...(p.delegatedBy.length || p.delegatedByTemplates.length
             ? [
                 {
-                  text: `Changed: removed from the delegates of ${p.delegatedBy.map((a) => `@${a}`).join(', ')}`,
+                  text: `Changed: removed from the delegates of ${[...p.delegatedBy.map((a) => `@${a}`), ...p.delegatedByTemplates.map((t) => `template ${t}`)].join(', ')}`,
                 },
               ]
             : []),

@@ -98,8 +98,10 @@ import {
   delegatorsOf,
   parsePatch,
   removeDelegate,
+  removeTemplateDelegate,
   agentSettingsView,
   settingsView,
+  templateDelegatorsOf,
   updateAgentFile,
 } from './settings.ts';
 import { type SkillRemote, SkillStore } from './skills.ts';
@@ -711,6 +713,7 @@ export class Daemon {
       delegated: tree.length - own,
       running: tree.filter((t) => t.status === 'running' || t.status === 'queued').length,
       delegatedBy: delegatorsOf(this.opts.layout, id),
+      delegatedByTemplates: templateDelegatorsOf(this.opts.layout, id),
       triggers: agent?.triggers.length ?? 0,
       workspaces: agent?.workspaces.map((w) => w.path) ?? [],
     };
@@ -726,6 +729,7 @@ export class Daemon {
     const preview = this.deletionPreview(id);
     const warnings: string[] = [];
     const editedAgents: string[] = [];
+    const editedTemplates: string[] = [];
     let deletedTasks = 0;
     this.hub.beginDeleting(id);
     try {
@@ -736,6 +740,18 @@ export class Daemon {
           editedAgents.push(other);
         } catch (err) {
           warnings.push(`@${other} still lists @${id} as a delegate: ${(err as Error).message}`);
+        }
+      }
+      // Templates too: every agent extending one would otherwise inherit a delegate that no
+      // longer exists, and new agents from the template with it.
+      for (const template of preview.delegatedByTemplates) {
+        try {
+          removeTemplateDelegate(this.opts.layout, template, id);
+          editedTemplates.push(template);
+        } catch (err) {
+          warnings.push(
+            `template ${template} still lists @${id} as a delegate: ${(err as Error).message}`,
+          );
         }
       }
       if (preview.exists) rmSync(agentFile(this.opts.layout, id), { force: true });
@@ -754,9 +770,9 @@ export class Daemon {
       );
     }
     this.log(
-      `agent ${id} deleted: ${deletedTasks} tasks, delegates edited in ${editedAgents.length}`,
+      `agent ${id} deleted: ${deletedTasks} tasks, delegates edited in ${editedAgents.length} agents and ${editedTemplates.length} templates`,
     );
-    return { agentId: id, deletedTasks, editedAgents, vm, warnings };
+    return { agentId: id, deletedTasks, editedAgents, editedTemplates, vm, warnings };
   }
 
   private broadcast(method: string, params: unknown) {
@@ -1151,8 +1167,10 @@ export class Daemon {
     this.server = createServer((socket) => {
       const clientId = randomBytes(4).toString('hex');
       const peer = new Peer(socket, async (method, params) => {
-        const handler = this.handlers[method as MethodName] as
-          ((p: unknown, c: string) => unknown) | undefined;
+        // Own keys only: `constructor` or `toString` would otherwise find Object's.
+        const handler = Object.hasOwn(this.handlers, method)
+          ? (this.handlers[method as MethodName] as (p: unknown, c: string) => unknown)
+          : undefined;
         if (!handler) throw new Error(`unknown method ${method}`);
         return handler(params, clientId);
       });

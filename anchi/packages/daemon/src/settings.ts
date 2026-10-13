@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
 import {
   type AgentLayer,
   agentFile,
@@ -247,25 +255,23 @@ export function replaceFile(file: string, text: string): void {
   renameSync(tmp, file);
 }
 
-/** An agent's delegates as resolved, or as written when the agent does not load. */
-function delegatesOf(layout: HomeLayout, id: string): string[] {
+/**
+ * The delegates one file lists itself (an agent's or a template's), not what it inherits: a
+ * delegate inherited from a template is removed in the template, never written into the
+ * agent's own file as an override.
+ */
+function delegatesIn(file: string): string[] {
   try {
-    return resolveAgent(id, layout).delegates;
+    return parseYamlAs(readFileSync(file, 'utf8'), agentLayerSchema).delegates ?? [];
   } catch {
-    try {
-      return (
-        parseYamlAs(readFileSync(agentFile(layout, id), 'utf8'), agentLayerSchema).delegates ?? []
-      );
-    } catch {
-      return [];
-    }
+    return [];
   }
 }
 
-/** Agents that may delegate to `id`. */
+/** Agents whose own file lists `id` among its delegates. */
 export function delegatorsOf(layout: HomeLayout, id: string): string[] {
   return listAgentIds(layout).filter(
-    (other) => other !== id && delegatesOf(layout, other).includes(id),
+    (other) => other !== id && delegatesIn(agentFile(layout, other)).includes(id),
   );
 }
 
@@ -273,7 +279,37 @@ export function delegatorsOf(layout: HomeLayout, id: string): string[] {
 export function removeDelegate(layout: HomeLayout, other: string, id: string): void {
   const file = agentFile(layout, other);
   const next = patchAgentYaml(readFileSync(file, 'utf8'), {
-    delegates: delegatesOf(layout, other).filter((d) => d !== id),
+    delegates: delegatesIn(file).filter((d) => d !== id),
+  });
+  replaceFile(file, next);
+}
+
+function templateIds(layout: HomeLayout): string[] {
+  try {
+    return readdirSync(layout.templatesDir)
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => f.replace(/\.ya?ml$/, ''))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function templateFile(layout: HomeLayout, id: string): string {
+  const yml = join(layout.templatesDir, `${id}.yml`);
+  return existsSync(yml) ? yml : join(layout.templatesDir, `${id}.yaml`);
+}
+
+/** Templates in ~/.anchi/templates whose file lists `id` among its delegates. */
+export function templateDelegatorsOf(layout: HomeLayout, id: string): string[] {
+  return templateIds(layout).filter((t) => delegatesIn(templateFile(layout, t)).includes(id));
+}
+
+/** Removes `id` from a template's delegates, keeping the rest of its file. */
+export function removeTemplateDelegate(layout: HomeLayout, template: string, id: string): void {
+  const file = templateFile(layout, template);
+  const next = patchAgentYaml(readFileSync(file, 'utf8'), {
+    delegates: delegatesIn(file).filter((d) => d !== id),
   });
   replaceFile(file, next);
 }

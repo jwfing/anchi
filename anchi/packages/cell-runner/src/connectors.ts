@@ -162,6 +162,12 @@ export type ServiceCall = (path: string, request: Json) => Promise<Json>;
 /** One request to a connector service: a JSON line each way. */
 export const serviceCall: ServiceCall = (path, request) =>
   new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (outcome: () => void) => {
+      if (settled) return;
+      settled = true;
+      outcome();
+    };
     const conn = createConnection(path, () => conn.write(`${JSON.stringify(request)}\n`));
     let buffer = '';
     conn.setTimeout(120_000, () => conn.destroy(new Error('CONNECTOR_TIMEOUT')));
@@ -176,13 +182,16 @@ export const serviceCall: ServiceCall = (path, request) =>
           result?: Json;
           error?: string;
         };
-        if (answer.ok) resolve(answer.result ?? {});
-        else reject(new Error(answer.error ?? 'CONNECTOR_ERROR'));
+        if (answer.ok) settle(() => resolve(answer.result ?? {}));
+        else settle(() => reject(new Error(answer.error ?? 'CONNECTOR_ERROR')));
       } catch {
-        reject(new Error('CONNECTOR_BAD_ANSWER'));
+        settle(() => reject(new Error('CONNECTOR_BAD_ANSWER')));
       }
     });
-    conn.on('error', (err) => reject(err));
+    conn.on('error', (err) => settle(() => reject(err)));
+    // A service that read the request and closed (restart, crash) never answers, and Node
+    // clears the socket timer on close: without this the call would hang until the turn's limit.
+    conn.on('close', () => settle(() => reject(new Error('CONNECTOR_CLOSED'))));
   });
 
 export interface ConnectorCallOptions {
@@ -214,6 +223,14 @@ export async function callConnector(tool: ConnectorTool, args: Json, o: Connecto
       return await call(socketFor(tool.connector, o.dir), request);
     } catch (err) {
       const message = (err as Error).message;
+      if (message === 'CONNECTOR_CLOSED') {
+        throw new Error(
+          `CONNECTOR_CLOSED: the ${tool.connector} service closed the connection without answering` +
+            (tool.write
+              ? '; the write may or may not have happened, so do not repeat it blindly'
+              : ''),
+        );
+      }
       if (!message.startsWith('APPROVAL_REQUIRED:')) throw err;
       if (now() >= deadline) throw new Error('APPROVAL_WAIT_TIMEOUT');
       const approvalId = message.slice('APPROVAL_REQUIRED:'.length);
