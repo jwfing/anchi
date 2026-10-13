@@ -123,7 +123,8 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
     renderer.render(event);
   });
   // The stored transcript arrives in pages: one can be larger than a frame allows.
-  for (let after = 0; ; ) {
+  let after = 0;
+  for (;;) {
     const page = await client.call('tasks.events', { taskId: task.id, afterSeq: after });
     if (!page.length) break;
     for (const e of page) {

@@ -363,7 +363,8 @@ describe('daemon tasks', () => {
     }
     expect(await client.call('tasks.events', { taskId: task.id, limit: 2 })).toHaveLength(2);
     const pages: StoredEvent[][] = [];
-    for (let after = 0; ; ) {
+    let after = 0;
+    for (;;) {
       const page = await client.call('tasks.events', { taskId: task.id, afterSeq: after });
       if (!page.length) break;
       expect(JSON.stringify(page).length).toBeLessThan(CLIENT_MAX_FRAME_BYTES);
