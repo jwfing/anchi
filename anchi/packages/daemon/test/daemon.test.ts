@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { homeLayout } from '@anchi/core';
+import { connectorSchema, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
 import type { QuotaInfo, StoredEvent, TaskRow } from '@anchi/protocol';
 import {
@@ -1946,6 +1946,22 @@ describe('agent settings', () => {
     ).rejects.toThrow(/changed since you reviewed it/);
   });
 
+  it('saves every connector at once: the limit follows the schema', async () => {
+    const { client } = await start();
+    const connectors = [...connectorSchema.options];
+    const preview = await client.call('agents.update', { agentId: 'dev', patch: { connectors } });
+    expect(preview).toMatchObject({ applied: false, errors: [] });
+    const done = await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { connectors },
+      apply: true,
+      base: preview.base,
+    });
+    expect(done.applied).toBe(true);
+    const settings = await client.call('agents.settings', { agentId: 'dev' });
+    expect(settings.current.connectors).toEqual(connectors);
+  });
+
   it('blocks references to what does not exist and refuses invalid patches', async () => {
     const { client } = await start(60_000, undefined, workspaceTree());
     const bad = await client.call('agents.update', {
@@ -2161,6 +2177,7 @@ describe('agent settings', () => {
 
     expect(patch('triggers: []').errors.join()).toMatch(/send a complete anchi-agent block/);
     expect(patch('skills: [nope]').errors).toEqual(['skill "nope" is not installed']);
+    expect(patch(`connectors: [${connectorSchema.options.join(', ')}]`).errors).toEqual([]);
     expect(patch('runtime: codex').errors).toEqual(['the patch changes nothing']);
     expect(patch('model: x', '\n```anchi-image id=img\npackages: [jq]\n```').errors.join()).toMatch(
       /cannot add an image/,
