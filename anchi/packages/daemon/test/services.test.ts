@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Guest, type ExecResult, type GuestTransport } from '../src/guest.ts';
 import { ServiceSetup } from '../src/services.ts';
 
@@ -79,6 +79,65 @@ describe('service connectors', () => {
     expect(JSON.parse(complete.stdin)).toEqual({ code: 'the-code', state: 'expected-state' });
     expect(results).toEqual([{ id: 'drive', ok: true }]);
     await expect(s.googleLogin('notion')).rejects.toThrow(/Google sign-in/);
+  });
+
+  it('says nothing for a sign-in replaced by a newer attempt for the same account', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let redirect = '';
+      const { guest } = fakeGuest((args, stdin) => {
+        if (args[2] === 'begin') {
+          redirect = JSON.parse(stdin).redirect_uri;
+          return { url: 'https://accounts.google.com/o/oauth2/auth?x', state: 'st' };
+        }
+        return { connected: true };
+      });
+      const results: unknown[] = [];
+      const s = new ServiceSetup(
+        guest,
+        (r) => results.push(r),
+        () => {},
+      );
+      await s.googleLogin('gmail', 'work');
+      const first = redirect;
+      await s.googleLogin('gmail', 'work');
+      expect(redirect).not.toBe(first);
+      expect((await fetch(`${redirect}?state=st&code=c`)).status).toBe(200);
+      await vi.waitFor(() => expect(results).toEqual([{ id: 'gmail', account: 'work', ok: true }]));
+      // Past the first attempt's timeout: it was replaced, so it must not report a failure.
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(results).toEqual([{ id: 'gmail', account: 'work', ok: true }]);
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still times out the attempt that replaced an earlier one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { guest } = fakeGuest((args) =>
+        args[2] === 'begin'
+          ? { url: 'https://accounts.google.com/o/oauth2/auth?x', state: 'st' }
+          : { connected: true },
+      );
+      const results: unknown[] = [];
+      const s = new ServiceSetup(
+        guest,
+        (r) => results.push(r),
+        () => {},
+      );
+      await s.googleLogin('drive');
+      await s.googleLogin('drive');
+      await vi.advanceTimersByTimeAsync(600_000);
+      // One timeout for the live attempt, none for the replaced one.
+      expect(results).toEqual([
+        { id: 'drive', ok: false, error: 'sign-in cancelled or timed out' },
+      ]);
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lists Google accounts, reports the client source and names accounts in VM commands', async () => {
