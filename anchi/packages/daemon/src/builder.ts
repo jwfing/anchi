@@ -279,6 +279,7 @@ export function makeProposal(
       : '',
     errors,
     warnings,
+    base: digest(before),
   };
 }
 
@@ -462,7 +463,9 @@ export class Proposals {
       },
       this.refs?.(),
     )!;
-    const proposal = { ...revised, id };
+    // Keep the kind and base from when the builder proposed the file: a file that appeared or
+    // changed since is still refused at apply.
+    const proposal = { ...revised, id, kind: old.kind, base: old.base };
     this.items.set(id, { ...item, proposal });
     return proposal;
   }
@@ -498,6 +501,13 @@ export class Proposals {
       this.items.delete(id);
       return { agentId: proposal.agentId };
     }
+    // The reviewed diff was made against the file as it was then: refuse when it changed, as
+    // updates do. For `create`, this also refuses a file that appeared after the proposal.
+    if (digest(read(agentFile(this.layout, proposal.agentId))) !== proposal.base) {
+      throw new Error(
+        `@${proposal.agentId}'s file changed since this proposal; ask the builder again`,
+      );
+    }
     // Validate again against the files and what exists now.
     const fresh = makeProposal(
       this.layout,
@@ -514,10 +524,12 @@ export class Proposals {
     if (item.imageId && item.proposal.imageYaml) {
       writeAtomic(imageFile(this.layout, item.imageId), item.proposal.imageYaml);
     }
+    // Every proposal that was a `create` when reviewed writes create-only: a file that appears
+    // between the digest check and the write is never overwritten.
     writeAtomic(
       agentFile(this.layout, item.proposal.agentId),
       item.proposal.agentYaml,
-      item.createOnly,
+      item.createOnly || proposal.kind === 'create',
     );
     this.items.delete(id);
     return { agentId: item.proposal.agentId, imageId: item.imageId };

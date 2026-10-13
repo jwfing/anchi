@@ -1363,6 +1363,41 @@ describe('builder', () => {
     );
   });
 
+  it('refuses replace and create proposals when the file changed since the review', async () => {
+    const { client, daemon } = await start();
+    // The reviewed diff was against the old dev.yaml; a hand edit before `y` must survive.
+    const replace = daemon.proposals.add(
+      parseBlocks('```anchi-agent id=dev\nruntime: codex\nconnectors: []\n```'),
+    )!;
+    expect(replace).toMatchObject({ kind: 'replace', errors: [] });
+    write('agents/dev.yaml', 'runtime: codex\nconnectors: [github]\nmodel: gpt-5.5\n');
+    await expect(client.call('builder.apply', { proposalId: replace.id })).rejects.toThrow(
+      /changed since this proposal; ask the builder again/,
+    );
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toContain('model: gpt-5.5');
+
+    // A file that appeared between the proposal and `y` (another client, `anchi agents
+    // create`) is never replaced, even after a revision.
+    const create = daemon.proposals.add(
+      parseBlocks('```anchi-agent id=fresh\nruntime: codex\n```'),
+    )!;
+    expect(create).toMatchObject({ kind: 'create', errors: [] });
+    write('agents/fresh.yaml', 'runtime: claude-code\n');
+    await client.call('builder.revise', { proposalId: create.id, patch: { description: 'd' } });
+    await expect(client.call('builder.apply', { proposalId: create.id })).rejects.toThrow(
+      /changed since this proposal/,
+    );
+    expect(readFileSync(join(root, 'agents/fresh.yaml'), 'utf8')).toBe('runtime: claude-code\n');
+
+    // An unchanged file still applies: the reviewed YAML replaces the old file.
+    const ok = daemon.proposals.add(
+      parseBlocks('```anchi-agent id=fresh\nname: Fresh\nruntime: codex\n```'),
+    )!;
+    expect(ok).toMatchObject({ kind: 'replace', errors: [] });
+    await client.call('builder.apply', { proposalId: ok.id });
+    expect(readFileSync(join(root, 'agents/fresh.yaml'), 'utf8')).toContain('name: Fresh');
+  });
+
   it('flags invalid proposals and never writes them', async () => {
     const { client, daemon } = await start();
     for (const bad of [
