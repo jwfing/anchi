@@ -17,7 +17,7 @@ Agents are YAML files in `~/.anchi/agents/<id>.yaml`. The file name is the id: 1
 | `name`, `description` | id, none | Shown in the TUI |
 | `runtime` | required | `codex`, `claude-code` or `hermes` |
 | `model`, `effort` | runtime default | Passed to the runtime |
-| `prompt` | `{mode: append, text: ''}` | `text` or `file` (relative to the declaring file). `replace` replaces the runtime's base instructions |
+| `prompt` | `{mode: append, text: ''}` | `text` or `file` (relative to the declaring file). `replace` replaces the runtime's base instructions (Codex, Claude Code); Hermes keeps its own system prompt and takes the text as its persona in either mode |
 | `connectors` | `[]` | `github`, `aws`, `linear`, `posthog`, `sentry`, `firecrawl`, `figma`, `discord`: the proxy injects credentials only for these. `gmail`, `drive`, `notion`, `slack`: reached through per-cell bridge sockets at `/run/anchi/connectors/<id>/api.sock`, which name the agent to the service |
 | `image` | `codex` | An image recipe id in `~/.anchi/images/`, or the built-in `codex` image |
 | `network` | `proxy` | Reserved; `proxy` is the only value in phase 1 |

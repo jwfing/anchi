@@ -12,17 +12,27 @@ const update = (sessionId, u) =>
   send({ method: 'session/update', params: { sessionId, update: u } });
 let sessions = 0;
 let pendingPermission;
+process.on('SIGTERM', () => {
+  log({ event: 'sigterm' });
+  process.exit(0);
+});
 
 createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   log(m);
   if (m.method === undefined && m.id === 'perm') return pendingPermission?.(m.result);
   switch (m.method) {
-    case 'initialize':
-      return send({
-        id: m.id,
-        result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
-      });
+    case 'initialize': {
+      if (process.env.FAKE_HERMES_INIT_ERROR)
+        return send({ id: m.id, error: { code: -32000, message: 'init failed' } });
+      const answer = () =>
+        send({
+          id: m.id,
+          result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+        });
+      const delay = Number(process.env.FAKE_HERMES_SLOW_INIT || 0);
+      return delay ? void setTimeout(answer, delay) : answer();
+    }
     case 'session/new':
       return send({ id: m.id, result: { sessionId: `s-${++sessions}` } });
     case 'session/resume': {

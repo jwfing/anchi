@@ -149,6 +149,27 @@ export interface ClaudeTurn {
   signal: AbortSignal;
 }
 
+/** The events of a query; a failing turn is reported once, not again when the query throws. */
+export async function* claudeEvents(
+  messages: AsyncIterable<SDKMessage>,
+  signal: AbortSignal,
+): AsyncGenerator<RuntimeEvent> {
+  let fatal = false;
+  try {
+    for await (const m of messages) {
+      for (const event of mapClaudeMessage(m)) {
+        if (event.type === 'error' && event.fatal) fatal = true;
+        yield event;
+      }
+    }
+  } catch (err) {
+    // A single-shot query throws after yielding an error result, which was already mapped.
+    if (!signal.aborted && !fatal) {
+      yield { type: 'error', message: text(String((err as Error).message ?? err)), fatal: true };
+    }
+  }
+}
+
 export async function* runClaude(turn: ClaudeTurn): AsyncGenerator<RuntimeEvent> {
   const controller = new AbortController();
   turn.signal.addEventListener('abort', () => controller.abort(), { once: true });
@@ -156,12 +177,5 @@ export async function* runClaude(turn: ClaudeTurn): AsyncGenerator<RuntimeEvent>
     prompt: turn.input,
     options: claudeOptions(turn.options, turn.env, controller, turn.resumeId),
   });
-  try {
-    for await (const m of messages) yield* mapClaudeMessage(m);
-  } catch (err) {
-    // A single-shot query throws after yielding an error result, which was already mapped.
-    if (!turn.signal.aborted) {
-      yield { type: 'error', message: text(String((err as Error).message ?? err)), fatal: true };
-    }
-  }
+  yield* claudeEvents(messages, turn.signal);
 }
