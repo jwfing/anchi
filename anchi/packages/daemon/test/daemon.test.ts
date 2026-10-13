@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -59,17 +60,26 @@ class FakeTransport implements GuestTransport {
   /** The most fake cells alive at once; the guest allows four. */
   maxLive = 0;
 
-  /** Lines the fake `anchi-cell approvals watch` prints, then it stays open. */
+  /** Lines the fake `anchi-cell approvals watch` prints, then it stays open and prints
+   * whatever a test appends to `approvalFeed` (the watcher ends the child's stdin). */
   approvalLines: string[] = [];
+  approvalFeed = join(tmpdir(), `anchi-approval-feed-${process.pid}.txt`);
+  /** `anchi-cell approvals decide` answers as the proxy does once the write expired. */
+  decideFails = false;
 
   spawn(args: string[]) {
     if (args[1] === 'approvals') {
+      writeFileSync(this.approvalFeed, '');
       return spawn(
         process.execPath,
         [
           '-e',
-          'for (const l of JSON.parse(process.argv[1])) console.log(l); setInterval(() => {}, 1e6);',
+          'for (const l of JSON.parse(process.argv[1])) console.log(l);' +
+            'const fs = require("node:fs"); let seen = 0;' +
+            'setInterval(() => { try { const t = fs.readFileSync(process.argv[2], "utf8");' +
+            'if (t.length > seen) { process.stdout.write(t.slice(seen)); seen = t.length; } } catch {} }, 50);',
           JSON.stringify(this.approvalLines),
+          this.approvalFeed,
         ],
         { stdio: ['pipe', 'pipe', 'pipe'] },
       );
@@ -141,8 +151,11 @@ class FakeTransport implements GuestTransport {
       return ok({});
     }
     if (args[0] === 'anchi-cell' && args[1] === 'poll') return ok({ items: this.pollItems });
-    if (args[0] === 'anchi-cell' && args[1] === 'approvals')
+    if (args[0] === 'anchi-cell' && args[1] === 'approvals') {
+      if (this.decideFails)
+        return { code: 1, stdout: '{"error":"APPROVAL_NOT_FOUND"}', stderr: '' };
       return ok({ id: args[3], allowed: args[4] === 'allow' });
+    }
     if (args[0] === 'anchi-cell' && args[1] === 'verify') {
       if (this.rejectCredential)
         return { code: 1, stdout: '{"error":"CREDENTIAL_REJECTED"}', stderr: '' };
@@ -2004,6 +2017,7 @@ describe('deleting agents', () => {
       delegated: 1,
       running: 1,
       delegatedBy: ['lead'],
+      delegatedByTemplates: [],
       triggers: 0,
       workspaces: ['projects/web'],
     });
@@ -2016,6 +2030,7 @@ describe('deleting agents', () => {
       agentId: 'dev',
       deletedTasks: 4,
       editedAgents: ['lead'],
+      editedTemplates: [],
       vm: { agent: 'dev', home: true, skills: true, policy: ['notion:dev'] },
       warnings: [],
     });
@@ -2688,5 +2703,85 @@ describe('quota alerts', () => {
       await step([{ runtime: 'claude-code', ts: 3_600_000, status: 429, headers: {} }]),
     ).toEqual(['Anchi: Claude Code limit reached']);
     expect(sent).toHaveLength(5);
+  });
+});
+
+describe('review gaps: approvals decided late, RPC lookup, template delegates', () => {
+  const held = (id: string, task: string) =>
+    JSON.stringify({
+      type: 'pending',
+      approval: {
+        id,
+        task,
+        agent: 'dev',
+        connector: 'github',
+        operation: 'POST /o/r.git/git-receive-pack',
+        host: 'github.com',
+        summary: 'push: refs/heads/fix',
+        created_at: 1,
+        timeout: 300,
+        reason: 'high-risk: push to main or master',
+      },
+    });
+
+  it('notes an expired write when the proxy refused it before the decision arrived', async () => {
+    const { client: first } = await start();
+    const task = await first.call('tasks.create', { agentId: 'dev', text: 'push it' });
+    await first.call('tasks.wait', { taskId: task.id });
+    await daemon!.stop();
+    daemon = undefined;
+    first.close();
+    transport.approvalLines = [held('a'.repeat(16), task.id)];
+    transport.decideFails = true;
+    const { client } = await start();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await client.call('approvals.list')).toHaveLength(1);
+    await expect(
+      client.call('approvals.decide', { id: 'a'.repeat(16), allow: true }),
+    ).rejects.toThrow(/expired before it was decided/);
+    // The proxy's own refusal follows; it was not decided by the user.
+    appendFileSync(
+      transport.approvalFeed,
+      JSON.stringify({ type: 'resolved', id: 'a'.repeat(16) }) + '\n',
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await client.call('approvals.list')).toEqual([]);
+    const notices = (await client.call('tasks.events', { taskId: task.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notices).toContain('⏹ approval for POST /o/r.git/git-receive-pack expired');
+  });
+
+  it('answers "unknown method" for names inherited from Object', async () => {
+    const { client } = await start();
+    for (const method of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      await expect(client.call(method as never)).rejects.toThrow(/unknown method/);
+    }
+  });
+
+  it('removes a deleted agent from the delegates of templates, and never writes an override into agents that inherit them', async () => {
+    write('templates/team.yaml', 'runtime: codex\ndelegates: [dev, qa]\n');
+    write('agents/lead.yaml', 'extends: team\n');
+    write('agents/solo.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    write('agents/dev.yaml', 'runtime: codex\n');
+    write('agents/qa.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    expect(await client.call('agents.deletePreview', { agentId: 'dev' })).toMatchObject({
+      delegatedBy: ['solo'],
+      delegatedByTemplates: ['team'],
+    });
+    const done = await client.call('agents.delete', { agentId: 'dev', confirm: 'dev' });
+    expect(done).toMatchObject({ editedAgents: ['solo'], editedTemplates: ['team'], warnings: [] });
+    expect(readFileSync(join(root, 'templates/team.yaml'), 'utf8')).toBe(
+      'runtime: codex\ndelegates: [qa]\n',
+    );
+    expect(readFileSync(join(root, 'agents/solo.yaml'), 'utf8')).toBe('runtime: codex\n');
+    // The inheriting agent's file is untouched, and it resolves without a stale delegate.
+    expect(readFileSync(join(root, 'agents/lead.yaml'), 'utf8')).toBe('extends: team\n');
+    const lead = (await client.call('agents.list')).find((a) => a.id === 'lead')!;
+    expect(lead.error ?? null).toBeNull();
+    expect((await client.call('agents.settings', { agentId: 'lead' })).fixed.delegates).toEqual([
+      'qa',
+    ]);
   });
 });

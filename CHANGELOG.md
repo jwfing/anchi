@@ -17,6 +17,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- A held write the proxy refused on its own just before you decided it now leaves the "⏹ approval … expired" note in the task; before, it counted as decided. A request for an RPC method named like an Object property (`constructor`, `toString`) is refused as unknown instead of answering oddly. Deleting an agent also removes it from the `delegates` of templates in `~/.anchi/templates/` (`agents.deletePreview` lists them as `delegatedByTemplates`, `agents.delete` as `editedTemplates`); an agent that only inherited the delegate keeps its own file untouched instead of getting an override written into it.
+- The approval dialog of a push in a SHA-256 repository shows its ref updates instead of "no ref updates found". Needs `scripts/anchi setup install`.
+- The egress proxy refuses IPv4-mapped (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`), reserved and link-local destinations itself, as the kernel backstop for its user already did; both now read one list. Needs `scripts/anchi setup install`.
 - A connector service or the runner that closes a connection without answering now fails the tool call at once (`CONNECTOR_CLOSED`, or "Anchi closed the connection") instead of hanging it until the turn's limit.
 - Hermes: a cancel that arrives while Hermes is still starting is honoured; a Hermes whose `initialize` fails is killed instead of leaking one process per failed turn; text and reasoning keep their order when they alternate; the guides say that `prompt.mode: replace` does not replace Hermes's own system prompt.
 - The in-cell MCP server answers a line that is not a request with `-32600` and a failing handler with `-32603` instead of exiting, which cost the runtime its Anchi tools for the rest of the session; a failing Claude Code turn is reported once, not twice.

@@ -585,8 +585,10 @@ export interface AgentDeletionPreview {
   delegated: number;
   /** Running or queued among them; cancelled first. */
   running: number;
-  /** Agents whose `delegates` list it; it is removed from them. */
+  /** Agents whose own file lists it among `delegates`; it is removed from them. */
   delegatedBy: string[];
+  /** Templates in ~/.anchi/templates whose `delegates` list it; it is removed from them too. */
+  delegatedByTemplates: string[];
   triggers: number;
   /** Its workspaces: directories of the Mac, left as they are. */
   workspaces: string[];
@@ -596,6 +598,7 @@ export interface AgentDeletion {
   agentId: string;
   deletedTasks: number;
   editedAgents: string[];
+  editedTemplates: string[];
   /** What the VM removed; null when it could not be reached (run the deletion again). */
   vm: { home: boolean; skills: boolean; policy: string[] } | null;
   warnings: string[];

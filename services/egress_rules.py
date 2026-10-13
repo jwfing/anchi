@@ -495,6 +495,29 @@ def apply(decision, method, url, headers, body, credential):
     return out
 
 
+# Destinations the proxy never connects to, as the nftables backstop for its UID lists them
+# (`network_rules.egress_proxy_rules`): the two must agree, so the proxy fails closed on its
+# own. IPv4-mapped and NAT64 addresses would reach a private IPv4 host through IPv6.
+PRIVATE_V4 = (
+    '0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, '
+    '192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3'
+)
+PRIVATE_V6 = '::/127, ::ffff:0:0/96, 64:ff9b::/96, 100::/64, 2001:db8::/32, fc00::/7, fe80::/10, ff00::/8'
+PRIVATE_NETWORKS = tuple(ipaddress.ip_network(n.strip()) for n in (PRIVATE_V4 + ', ' + PRIVATE_V6).split(','))
+
+
+def private_destination(ip):
+    """Whether the proxy must not connect to `ip`: not global, multicast, reserved, link-local,
+    or inside a range the kernel backstop rejects."""
+    return (
+        not ip.is_global
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_link_local
+        or any(ip in network for network in PRIVATE_NETWORKS if network.version == ip.version)
+    )
+
+
 def public_address(infos):
     """First address from getaddrinfo results if every one is public, else (None, reason).
 
@@ -507,7 +530,7 @@ def public_address(infos):
             ip = ipaddress.ip_address(str(info[4][0]).split('%', 1)[0])
         except ValueError:
             return None, 'unparsable address'
-        if not ip.is_global or ip.is_multicast:
+        if private_destination(ip):
             return None, f'non-public destination {ip}'
         if chosen is None or (chosen.version == 6 and ip.version == 4):
             chosen = ip

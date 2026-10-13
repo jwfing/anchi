@@ -557,9 +557,9 @@ async function deleteAgentCli(id: string, yes: boolean) {
     console.log(
       '  in the VM: its home (work directory, sessions), its skills and its policy rules',
     );
-    if (p.delegatedBy.length)
+    if (p.delegatedBy.length || p.delegatedByTemplates.length)
       console.log(
-        `It is removed from the delegates of ${p.delegatedBy.map((a) => `@${a}`).join(', ')}.`,
+        `It is removed from the delegates of ${[...p.delegatedBy.map((a) => `@${a}`), ...p.delegatedByTemplates.map((t) => `template ${t}`)].join(', ')}.`,
       );
     console.log(
       styleText(
@@ -572,7 +572,7 @@ async function deleteAgentCli(id: string, yes: boolean) {
     }
     const r = await client.call('agents.delete', { agentId: p.agentId, confirm: p.agentId });
     console.log(
-      `deleted @${r.agentId}: ${r.deletedTasks} task(s)${r.editedAgents.length ? `; delegates edited in ${r.editedAgents.join(', ')}` : ''}`,
+      `deleted @${r.agentId}: ${r.deletedTasks} task(s)${r.editedAgents.length || r.editedTemplates.length ? `; delegates edited in ${[...r.editedAgents, ...r.editedTemplates.map((t) => `template ${t}`)].join(', ')}` : ''}`,
     );
     for (const w of r.warnings) console.log(styleText('yellow', w));
     if (r.warnings.length) process.exitCode = 1;
