@@ -113,6 +113,10 @@ const BY: Record<UsageGroup, string> = {
 
 /** Events kept per task; the oldest are dropped beyond this (bounded session view). */
 export const MAX_EVENTS_PER_TASK = 5000;
+/** Most events in one `tasks.events` page. */
+export const EVENTS_PAGE_LIMIT = 500;
+/** Payload characters per page; at three UTF-8 bytes each it stays well inside a frame. */
+const EVENTS_PAGE_CHARS = 1024 * 1024;
 export const MAX_RESULT_CHARS = 8000;
 
 function rowToTask(r: Record<string, unknown>): TaskRow {
@@ -562,14 +566,28 @@ export class Store {
     return seq;
   }
 
-  events(taskId: string, afterSeq = 0): StoredEvent[] {
-    return this.db
-      .prepare('SELECT seq, ts, payload FROM events WHERE task_id = ? AND seq > ? ORDER BY seq')
-      .all(taskId, afterSeq)
-      .map((r) => ({
+  /**
+   * Events after `afterSeq`, oldest first. A non-negative `limit` returns one bounded page (at
+   * most `limit` events and EVENTS_PAGE_CHARS of payload, so a page always fits a client
+   * frame); the caller pages until a call returns nothing.
+   */
+  events(taskId: string, afterSeq = 0, limit = -1): StoredEvent[] {
+    const rows = this.db
+      .prepare(
+        'SELECT seq, ts, payload FROM events WHERE task_id = ? AND seq > ? ORDER BY seq LIMIT ?',
+      )
+      .all(taskId, afterSeq, limit);
+    const page: StoredEvent[] = [];
+    let chars = 0;
+    for (const r of rows) {
+      chars += (r.payload as string).length;
+      if (limit >= 0 && page.length && chars > EVENTS_PAGE_CHARS) break;
+      page.push({
         seq: r.seq as number,
         ts: r.ts as number,
         event: JSON.parse(r.payload as string) as RuntimeEvent,
-      }));
+      });
+    }
+    return page;
   }
 }

@@ -91,7 +91,7 @@ import {
   readHostCodexLogin,
   setupStatus,
 } from './setup.ts';
-import { Store } from './store.ts';
+import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
 import { ACCOUNT, SERVICE_IDS, ServiceSetup } from './services.ts';
 import {
   allowEgressHost,
@@ -853,8 +853,12 @@ export class Daemon {
       this.hub.cancelTask(taskId(id));
       return null;
     },
-    'tasks.events': ({ taskId: id, afterSeq }) =>
-      this.store.events(taskId(id), Number(afterSeq) || 0),
+    'tasks.events': ({ taskId: id, afterSeq, limit }) =>
+      this.store.events(
+        taskId(id),
+        Number(afterSeq) || 0,
+        Math.min(Math.max(Number(limit) || EVENTS_PAGE_LIMIT, 1), EVENTS_PAGE_LIMIT),
+      ),
     'tasks.wait': ({ taskId: id }) => this.hub.wait(taskId(id)),
     'tasks.scan': async ({ taskId: id }) => {
       const task = taskId(id);

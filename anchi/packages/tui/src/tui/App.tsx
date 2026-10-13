@@ -652,14 +652,22 @@ export function App({
     for (const id of ids) {
       if (logs[id] || loading.current.has(id)) continue;
       loading.current.add(id);
-      void client
-        .call('tasks.events', { taskId: id })
-        .then((events) => {
-          setLogs((all) => {
-            const last = events.at(-1)?.seq ?? 0;
-            return { ...all, [id]: [...events, ...(all[id] ?? []).filter((e) => e.seq > last)] };
+      // A whole transcript can be larger than one frame allows: pages until one comes back empty.
+      void (async () => {
+        const events: StoredEvent[] = [];
+        for (;;) {
+          const page = await client.call('tasks.events', {
+            taskId: id,
+            afterSeq: events.at(-1)?.seq ?? 0,
           });
-        })
+          if (!page.length) break;
+          events.push(...page);
+        }
+        setLogs((all) => {
+          const last = events.at(-1)?.seq ?? 0;
+          return { ...all, [id]: [...events, ...(all[id] ?? []).filter((e) => e.seq > last)] };
+        });
+      })()
         .catch((e) => reportProblem(e))
         .finally(() => loading.current.delete(id));
     }
