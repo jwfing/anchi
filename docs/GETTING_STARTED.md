@@ -397,7 +397,12 @@ are deleted locally only; revoke them at the provider if you no longer want them
 - **Installation refused because tasks are running:** installing restarts the egress proxy, which would end them. Wait for them (`anchi tasks`) or cancel them, then run it again; `ANCHI_FORCE_RESTART=1` installs anyway. `make verify-anchi` refuses for the same reason (`ANCHI_CHECK_WITH_TASKS=1` runs it beside them, leaving their cells alone).
 - **Interrupted installation:** run it again. Installer-marked incomplete root filesystems are kept as `rootfs-incomplete-*` before rebuilding; unmarked ones are never modified automatically.
 - **Stopped VM:** `anchi setup vm`, then `anchi setup vault unlock`.
-- **Vault cannot unlock:** restore the original master key.
+- **`VAULT_KEY_MISSING` when unlocking:** `unlock` requires an existing master key. For a new
+  VM or after `setup reset --all`, run `anchi setup vault init` (from source:
+  `./scripts/anchi setup vault init`) to create the key and unlock the empty vault. Initialization
+  refuses to generate a replacement when encrypted credentials exist; restore the original key
+  from backup in that case. Back up the new `~/.config/anchi/vault.key` after initialization.
+- **Vault cannot unlock with an existing key:** restore the original master key.
 - **Expired Codex token:** run `codex` on this machine once, then `anchi setup codex` again.
 - **Google requires sign-in again:** `anchi setup service gmail` (or `drive`; add `--account <name>` for a named account). Testing-mode OAuth refresh tokens commonly expire after seven days.
 - **Start from scratch:** `anchi setup reset` (see [Start over](#start-over-reset)).

@@ -71,11 +71,22 @@ def main():
             file.write(os.urandom(32))
             file.flush()
             os.fsync(file.fileno())
-    fd = os.open(args.key_file, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        # Inspect special files without blocking on a FIFO before the regular-file check.
+        fd = os.open(args.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise SystemExit(
+            'VAULT_KEY_MISSING: no master key found. For a new or reset vault, run '
+            '`anchi setup vault init` (source checkout: `./scripts/anchi setup vault init`). '
+            'Restore the original master key if the VM still contains encrypted credentials.'
+        ) from None
+    except OSError:
+        raise SystemExit('Key file cannot be opened safely. Check its ownership, permissions and path.') from None
+    info = os.fstat(fd)
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077 or not stat.S_ISREG(info.st_mode):
+        os.close(fd)
+        raise SystemExit('Key file must be owned by you, regular, and inaccessible to group/others (0600).')
     with os.fdopen(fd, 'rb') as file:
-        info = os.fstat(file.fileno())
-        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077 or not stat.S_ISREG(info.st_mode):
-            raise SystemExit('Key file must be owned by you, regular, and inaccessible to group/others (0600).')
         master = file.read(33)
     if len(master) != 32:
         raise SystemExit('Invalid master key file.')
