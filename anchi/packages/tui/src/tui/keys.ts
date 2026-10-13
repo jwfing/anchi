@@ -106,8 +106,11 @@ export const ACTIONS = {
   },
   'scroll:up': { title: 'Scroll up', contexts: ['chat', 'task', 'usage', 'access', 'welcome'] },
   'scroll:down': { title: 'Scroll down', contexts: ['chat', 'task', 'usage', 'access', 'welcome'] },
-  'scroll:pageUp': { title: 'Scroll up a page', contexts: ['chat', 'task'] },
-  'scroll:pageDown': { title: 'Scroll down a page', contexts: ['chat', 'task'] },
+  'scroll:pageUp': { title: 'Scroll up a page', contexts: ['chat', 'task', 'usage', 'access'] },
+  'scroll:pageDown': {
+    title: 'Scroll down a page',
+    contexts: ['chat', 'task', 'usage', 'access'],
+  },
   'chat:submit': { title: 'Send', contexts: ['chat'] },
   'chat:escape': {
     title: 'Back to the sidebar (keep draft and task running)',
@@ -297,6 +300,8 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     k: 'scroll:up',
     down: 'scroll:down',
     j: 'scroll:down',
+    pageup: 'scroll:pageUp',
+    pagedown: 'scroll:pageDown',
   },
   access: {
     ...VIEW,
@@ -307,6 +312,8 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     k: 'scroll:up',
     down: 'scroll:down',
     j: 'scroll:down',
+    pageup: 'scroll:pageUp',
+    pagedown: 'scroll:pageDown',
   },
   skills: {
     ...VIEW,

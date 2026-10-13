@@ -27,3 +27,20 @@ export function sanitize(text: string): string {
 export function sanitizeLine(text: string): string {
   return sanitize(text).replace(/\s+/g, ' ').trim();
 }
+
+/** The first `limit` characters of a multi-line text, one sanitized line per line. */
+export function sanitizeLines(text: string, limit = 300): string[] {
+  return sanitize(text).slice(0, limit).split('\n').map(sanitizeLine);
+}
+
+/**
+ * JSON for a terminal or a pipe. `JSON.stringify` escapes C0 controls but leaves C1 controls
+ * and bidirectional overrides as they are; a `--json` consumer that prints them is as exposed
+ * as a screen, so they go the same way as everywhere else.
+ */
+export function sanitizeJson(value: unknown): string {
+  return JSON.stringify(value, null, 2)
+    .replace(C1_SEQUENCES, '')
+    .replace(CONTROLS, '')
+    .replace(BIDI, '');
+}

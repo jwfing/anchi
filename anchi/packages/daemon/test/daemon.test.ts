@@ -630,6 +630,36 @@ describe('daemon tasks', () => {
     expect(notices).toHaveLength(1);
   });
 
+  it("retry --fresh of a delegated task is the user's own task and names the original", async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    const { client, daemon } = await start();
+    const lead = await client.call('tasks.create', {
+      agentId: 'lead',
+      text: 'call anchi_delegate_task {"agent":"dev","task":"hang"}',
+    });
+    let child: TaskRow | undefined;
+    for (let i = 0; i < 100 && child?.status !== 'running'; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      child = (await client.call('tasks.tree', { taskId: lead.id })).find((t) => t.id !== lead.id);
+    }
+    expect(child?.status).toBe('running');
+    await client.call('tasks.cancel', { taskId: child!.id });
+    await client.call('tasks.wait', { taskId: child!.id });
+    await client.call('tasks.wait', { taskId: lead.id });
+    const fresh = await client.call('tasks.retry', { taskId: child!.id, fresh: true });
+    // No parent waits for it, and its origin says so.
+    expect(fresh).toMatchObject({ agentId: 'dev', trigger: 'user', parentId: null });
+    expect(daemon.hub.origin(fresh.id)).toBe(`you → @dev (${fresh.id})`);
+    const notes = (await client.call('tasks.events', { taskId: fresh.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text);
+    expect(notes).toContain(
+      `↻ a fresh start of ${child!.id} (which @lead had delegated as ${lead.id})`,
+    );
+    await client.call('tasks.cancel', { taskId: fresh.id });
+    await client.call('tasks.wait', { taskId: fresh.id });
+  });
+
   it('builds a missing recipe image before starting the cell', async () => {
     write('images/node.yaml', 'packages: [nodejs]\n');
     write('agents/dev.yaml', 'runtime: codex\nimage: node\n');
