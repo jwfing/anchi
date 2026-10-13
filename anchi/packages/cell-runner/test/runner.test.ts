@@ -1,5 +1,5 @@
-import { mkdtempSync } from 'node:fs';
-import { createConnection } from 'node:net';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -11,9 +11,9 @@ import {
   type RuntimeEvent,
 } from '@anchi/protocol';
 import { codexOptions, mapCodexEvent, NEW_SESSION_WARNING, runCodex } from '../src/codex.ts';
-import { claudeOptions, mapClaudeMessage } from '../src/claude.ts';
-import { callConnector, CONNECTOR_TOOLS } from '../src/connectors.ts';
-import { handle } from '../src/mcp.ts';
+import { claudeEvents, claudeOptions, mapClaudeMessage } from '../src/claude.ts';
+import { callConnector, CONNECTOR_TOOLS, serviceCall } from '../src/connectors.ts';
+import { handle, mcpLine, socketCall } from '../src/mcp.ts';
 import { startRunner, type RunTurn } from '../src/runner.ts';
 
 function harness(runTurn: RunTurn, toolsSocket: string | null = null) {
@@ -342,7 +342,105 @@ describe('MCP server', () => {
   });
 });
 
+describe('sockets that close without answering', () => {
+  /** A peer that reads the request and hangs up: a restarted service, a runner that went away. */
+  const silent = async (path: string) => {
+    const server = createServer((conn) => conn.once('data', () => conn.end()));
+    await new Promise<void>((r) => server.listen(path, r));
+    return () => new Promise<void>((r) => server.close(() => r()));
+  };
+
+  it('fails a connector call at once instead of hanging the turn', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'anchi-silent-'));
+    const close = await silent(join(dir, 'x.sock'));
+    try {
+      await expect(serviceCall(join(dir, 'x.sock'), { op: 'list' })).rejects.toThrow(
+        'CONNECTOR_CLOSED',
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('tells the agent that a write may have happened when the service hung up', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'anchi-silent-'));
+    mkdirSync(join(dir, 'notion'));
+    const close = await silent(join(dir, 'notion/api.sock'));
+    const tool = CONNECTOR_TOOLS.find((t) => t.name === 'notion_append')!;
+    try {
+      await expect(
+        callConnector(tool, { page_id: 'p', paragraphs: ['a'] }, { call: serviceCall, dir }),
+      ).rejects.toThrow(/closed the connection without answering; the write may or may not/);
+    } finally {
+      await close();
+    }
+  });
+
+  it('answers the MCP tool call instead of hanging it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'anchi-silent-'));
+    const close = await silent(join(dir, 'tools.sock'));
+    try {
+      expect(await socketCall(join(dir, 'tools.sock'))('anchi_whoami', {})).toEqual({
+        ok: false,
+        error: 'Anchi closed the connection',
+      });
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('MCP server robustness', () => {
+  it('keeps serving after a line that is not a request or a handler that throws', async () => {
+    const out: Record<string, unknown>[] = [];
+    const write = (m: Record<string, unknown>) => void out.push(m);
+    const call = async () => {
+      throw new Error('boom');
+    };
+    await mcpLine('null', call, write);
+    await mcpLine('42', call, write);
+    await mcpLine('[1]', call, write);
+    await mcpLine('{"jsonrpc":"2.0","id":7,"method":"tools/list"}', call, write);
+    await mcpLine('{"jsonrpc":"2.0","method":"tools/list"}', call, write);
+    await mcpLine('{"jsonrpc":"2.0","id":8,"method":"ping"}', call, write);
+    expect(out).toEqual([
+      { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } },
+      { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } },
+      { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } },
+      { jsonrpc: '2.0', id: 7, error: { code: -32603, message: 'internal error: boom' } },
+      { jsonrpc: '2.0', id: 8, result: {} },
+    ]);
+  });
+});
+
 describe('Claude Code mapping', () => {
+  it('reports a failing single-shot query once', async () => {
+    const result = {
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      usage: { input_tokens: 1, output_tokens: 2 },
+      errors: ['boom'],
+    };
+    async function* failing() {
+      yield result as never;
+      throw new Error('Claude Code process exited with code 1');
+    }
+    const events = [];
+    for await (const e of claudeEvents(failing(), new AbortController().signal)) events.push(e);
+    expect(events.filter((e) => e.type === 'error')).toEqual([
+      { type: 'error', message: 'Claude stopped: error_during_execution (boom)', fatal: true },
+    ]);
+    // A query that throws before any result is still reported.
+    // eslint-disable-next-line require-yield
+    async function* crashing() {
+      throw new Error('spawn failed');
+    }
+    const only = [];
+    for await (const e of claudeEvents(crashing(), new AbortController().signal)) only.push(e);
+    expect(only).toEqual([{ type: 'error', message: 'spawn failed', fatal: true }]);
+  });
+
   it('maps SDK messages to runtime events', () => {
     const events = [
       { type: 'system', subtype: 'init', session_id: 'sess-1' },
