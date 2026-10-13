@@ -19,9 +19,10 @@ export interface TaskRow {
   /** Runtime thread, once the first turn has started. */
   resumeId: string | null;
   /**
-   * The runtime the task runs on, set when its first turn starts; a task keeps it even when its
-   * agent's runtime changes later (its session belongs to that runtime). Optional for clients
-   * connected to an older daemon.
+   * The runtime the task runs on, set when its first turn starts; its session belongs to that
+   * runtime. A built-in agent's task keeps running on it when the agent's runtime changes
+   * later; for other agents such a change refuses follow-ups (`anchi retry --fresh` starts
+   * over). Optional for clients connected to an older daemon.
    */
   runtime?: string | null;
   createdAt: number;

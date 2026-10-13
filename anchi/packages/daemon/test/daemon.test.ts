@@ -489,6 +489,36 @@ describe('daemon tasks', () => {
     expect(notes).toContain(`↻ started again as ${fresh.id}`);
   });
 
+  it('refuses a follow-up or retry once the agent moved to another runtime', async () => {
+    const { client } = await start(60_000, 300);
+    const task = await client.call('tasks.create', { agentId: 'dev', text: 'one' });
+    await client.call('tasks.wait', { taskId: task.id });
+    // A hanging second turn runs into the turn timeout: the task fails with its session kept.
+    await client.call('tasks.send', { taskId: task.id, text: 'hang' });
+    const failed = await client.call('tasks.wait', { taskId: task.id });
+    expect(failed).toMatchObject({ status: 'failed', runtime: 'codex', resumeId: 'thread-1' });
+
+    write('agents/dev.yaml', 'runtime: claude-code\nconnectors: [github]\n');
+    await client.call('agents.reload');
+    // The session belongs to codex: the reply and the retry are refused, and the task keeps
+    // its runtime, so nothing hands the codex thread id to a Claude Code cell.
+    await expect(client.call('tasks.send', { taskId: task.id, text: 'three' })).rejects.toThrow(
+      /session belongs to codex.*claude-code/,
+    );
+    await expect(client.call('tasks.retry', { taskId: task.id })).rejects.toThrow(/retry --fresh/);
+    const kept = await client.call('tasks.get', { taskId: task.id });
+    expect(kept).toMatchObject({ status: 'failed', runtime: 'codex', resumeId: 'thread-1' });
+    // `retry --fresh` starts a new task with the original request on the new runtime.
+    const fresh = await client.call('tasks.retry', { taskId: task.id, fresh: true });
+    expect(fresh.id).not.toBe(task.id);
+    const after = await client.call('tasks.wait', { taskId: fresh.id });
+    expect(after.status).toBe('done');
+    expect(after.runtime).toBe('claude-code');
+    expect(transport.starts.at(-1)![8]).toBe('claude-code');
+    // The new cell started without a thread to resume.
+    expect(after.result).toMatch(/resume=-/);
+  });
+
   it("runs up to the agent's maxTasks turns at once and queues the rest", async () => {
     write('agents/dev.yaml', 'runtime: codex\nconnectors: [github]\nmaxTasks: 2\n');
     transport.mode = 'slow';

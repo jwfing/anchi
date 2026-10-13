@@ -165,13 +165,29 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   /**
-   * The agent a task runs as. A built-in agent's runtime follows what is connected, but a task
-   * keeps the runtime its session started on: another runtime cannot resume that session.
+   * The agent a task runs as. A task keeps the runtime its session started on: another runtime
+   * cannot resume that session. A built-in agent resolves on that runtime even when its
+   * configured one changed; a file-defined agent resolves as its file says now, and
+   * `runtimeMismatch` refuses the turn when that runtime no longer matches the task's.
    */
   private agentFor(task: TaskRow): ResolvedAgent {
     const pinned = runtimeSchema.safeParse(task.runtime);
     return (
       (pinned.success && this.builtin(task.agentId, pinned.data)) || this.resolve(task.agentId)
+    );
+  }
+
+  /**
+   * Why the agent cannot continue the task, or nothing. Its session belongs to the runtime it
+   * started on; an agent file that now names another one (whose model, sandbox and effort the
+   * old runtime may not accept) cannot take the thread over.
+   */
+  private runtimeMismatch(task: TaskRow, agent: ResolvedAgent): string | undefined {
+    if (!task.resumeId || !task.runtime || task.runtime === agent.runtime) return undefined;
+    return (
+      `this task's session belongs to ${task.runtime}, but @${task.agentId} now runs on ` +
+      `${agent.runtime}, which cannot resume it; start a new task, or run a failed one again ` +
+      'with `anchi retry --fresh`'
     );
   }
 
@@ -280,6 +296,8 @@ export class Hub extends EventEmitter<HubEvents> {
     const task = this.getTask(taskId);
     const state = this.state(task.agentId);
     if (!state.agent) throw new Error(`agent "${task.agentId}" has a config error: ${state.error}`);
+    const mismatch = this.runtimeMismatch(task, this.agentFor(task));
+    if (mismatch) throw new Error(mismatch);
     if (state.running.has(taskId) || state.queue.some((j) => j.taskId === taskId)) {
       throw new Error('this task already has a turn in progress');
     }
@@ -566,6 +584,14 @@ export class Hub extends EventEmitter<HubEvents> {
     let task = this.getTask(job.taskId);
     const agent = this.agentFor(task);
     state.agent = agent;
+    // The agent moved to another runtime while this turn sat in the queue (sendTask refuses
+    // earlier): the old resumeId must not reach the new runtime.
+    const mismatch = this.runtimeMismatch(task, agent);
+    if (mismatch) {
+      this.record(task, { type: 'error', message: mismatch, fatal: true });
+      return this.finish(task.id, 'failed', mismatch);
+    }
+    // Set on the first turn; a task that never got a session may still move with its agent.
     if (task.runtime !== agent.runtime) {
       this.opts.store.setRuntime(task.id, agent.runtime);
       task = { ...task, runtime: agent.runtime };
