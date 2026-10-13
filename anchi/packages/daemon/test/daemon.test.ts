@@ -525,6 +525,74 @@ describe('daemon tasks', () => {
     expect(done.status).toBe('cancelled');
   });
 
+  it('cancels a queued task, finishing it exactly once', async () => {
+    write('agents/dev.yaml', 'runtime: codex\nmaxTasks: 1\n');
+    transport.mode = 'slow';
+    const { client } = await start();
+    const running = await client.call('tasks.create', { agentId: 'dev', text: 'one' });
+    const queued = await client.call('tasks.create', { agentId: 'dev', text: 'two' });
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await client.call('tasks.get', { taskId: queued.id })).status).toBe('queued');
+    const seen: string[] = [];
+    client.on('tasks', ({ task }) => {
+      if (task.id === queued.id) seen.push(task.status);
+    });
+    await client.call('tasks.cancel', { taskId: queued.id });
+    expect((await client.call('tasks.wait', { taskId: queued.id })).status).toBe('cancelled');
+    await new Promise((r) => setTimeout(r, 200));
+    expect(seen).toEqual(['cancelled']);
+    await client.call('tasks.cancel', { taskId: running.id });
+  });
+
+  it('re-cancelling a cancelled task keeps its partial reply, links and finish time', async () => {
+    const { client } = await start();
+    const task = await client.call('tasks.create', {
+      agentId: 'dev',
+      text: 'say partial https://github.com/o/r/pull/9 then hang',
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    await client.call('tasks.cancel', { taskId: task.id });
+    const before = await client.call('tasks.wait', { taskId: task.id });
+    expect(before.status).toBe('cancelled');
+    expect(before.result).toContain('partial');
+    expect(before.links).toEqual(['https://github.com/o/r/pull/9']);
+    const seen: TaskRow[] = [];
+    client.on('tasks', ({ task: t }) => {
+      if (t.id === task.id) seen.push(t);
+    });
+    await client.call('tasks.cancel', { taskId: task.id });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(seen).toEqual([]);
+    const after = await client.call('tasks.get', { taskId: task.id });
+    expect(after.result).toBe(before.result);
+    expect(after.links).toEqual(before.links);
+    expect(after.finishedAt).toBe(before.finishedAt);
+  });
+
+  it('cancelling a delegated task again does not repeat the notice in its parent', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    const { client } = await start();
+    const lead = await client.call('tasks.create', {
+      agentId: 'lead',
+      text: 'call anchi_delegate_task {"agent":"dev","task":"hang"}',
+    });
+    let child: TaskRow | undefined;
+    for (let i = 0; i < 100 && child?.status !== 'running'; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      child = (await client.call('tasks.tree', { taskId: lead.id })).find((t) => t.id !== lead.id);
+    }
+    expect(child?.status).toBe('running');
+    await client.call('tasks.cancel', { taskId: child!.id });
+    await client.call('tasks.wait', { taskId: child!.id });
+    await client.call('tasks.cancel', { taskId: child!.id });
+    await client.call('tasks.wait', { taskId: lead.id });
+    const notices = (await client.call('tasks.events', { taskId: lead.id }))
+      .filter((e) => e.event.type === 'notice')
+      .map((e) => (e.event as { text: string }).text)
+      .filter((t) => t.startsWith('\u21b3') && t.includes('cancelled'));
+    expect(notices).toHaveLength(1);
+  });
+
   it('builds a missing recipe image before starting the cell', async () => {
     write('images/node.yaml', 'packages: [nodejs]\n');
     write('agents/dev.yaml', 'runtime: codex\nimage: node\n');

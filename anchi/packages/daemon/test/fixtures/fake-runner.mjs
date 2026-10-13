@@ -51,6 +51,11 @@ rl.on('line', (line) => {
   if (mode === 'bad-frame') return process.stdout.write('not json\n');
   if (mode === 'wrong-turn') return send({ type: 'turn.end', turn: 'other', ok: true });
   if (mode === 'huge') return process.stdout.write('x'.repeat(300 * 1024));
+  // "say <text> then hang": a partial reply arrives, then the turn runs until it is cancelled.
+  const partial = /^say (.*) then hang$/.exec(cmd.input ?? '');
+  if (partial) {
+    return send({ type: 'event', turn: cmd.turn, event: { type: 'message', text: partial[1] } });
+  }
   // "hang" (or the slow mode): the turn runs until it is cancelled.
   if (mode === 'slow' || cmd.input === 'hang') return;
   if (!cmd.resumeId)
