@@ -188,7 +188,7 @@ packages: [postgresql-client]
 
 At the bottom, the panel shows what it cannot change: template, image, sandbox, delegates, approvals, egress and triggers. Edit those in the agent file. For an agent that `extends` a template, an inherited value is marked `from template <id>`. Changing an inherited value writes an override into the agent's own file. A prompt that comes from `prompt.file` is read-only in the panel; edit that file instead.
 
-**Enter** shows the change to the agent file as a diff, checked like a proposal. Errors block saving, for example `sandbox: codex-workspace-write` with runtime `claude-code`. Warnings, such as a runtime that is not connected yet, do not block. **y** saves the change. Only the fields you changed are written; an emptied model, effort or description removes its key. The rest of the file, comments included, stays as it is. The change applies to the agent's next cell.
+**Enter** shows the change to the agent file as a diff, checked like a proposal. Errors block saving, for example `sandbox: codex-workspace-write` with runtime `claude-code`. Warnings, such as a runtime that is not connected yet, do not block. **y** saves the change. Only the fields you changed are written; an emptied model, effort or description removes its key. The rest of the file, comments included, stays as it is. The change applies to the agent's next cell. After a runtime change, a task whose session started on the previous runtime cannot continue — another runtime cannot resume that session — so replies to it are refused; start a new task, or run a failed one again with `anchi retry --fresh`.
 
 ## Delete an agent
 
