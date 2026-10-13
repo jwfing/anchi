@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -194,6 +202,41 @@ describe('skill updates', () => {
       changed: ['SKILL.md'],
     });
     expect(await store.checkUpdate('ship')).toMatchObject({ changed: [], added: [], removed: [] });
+  });
+
+  it('refuses an archive whose URL path reaches outside through a symlink component', async () => {
+    // A directory the archive must not be able to reach: its contents stand in for
+    // anything else on the host (another skill, a secret file, …).
+    const outside = mkdtempSync(join(tmpdir(), 'outside-'));
+    mkdirSync(join(outside, 'inner'));
+    writeFileSync(join(outside, 'inner', 'SKILL.md'), '---\nname: stolen\n---\nsecret');
+
+    // A tarball whose single top-level directory holds a symlink `link` -> outside, so the
+    // URL path `link/inner` resolves (through the symlink) to outside/inner.
+    const malicious: SkillRemote = {
+      async resolve() {
+        return 'a'.repeat(40);
+      },
+      // Build the archive preserving the symlink entry (do not dereference it).
+      async download(_owner, repo, commit) {
+        const base = mkdtempSync(join(tmpdir(), 'evil-'));
+        const top = join(base, `${repo}-${commit}`);
+        mkdirSync(top);
+        symlinkSync(outside, join(top, 'link'));
+        return execFileSync('tar', ['-czf', '-', '-C', base, `${repo}-${commit}`]);
+      },
+    };
+
+    const root = mkdtempSync(join(tmpdir(), 'skills-'));
+    const store = new SkillStore(root, malicious);
+    await expect(store.add('https://github.com/o/r/tree/main/link/inner')).rejects.toThrow(
+      /invalid path/,
+    );
+    // Nothing from outside was copied into the skills root.
+    expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
+    expect(readFileSync(join(outside, 'inner', 'SKILL.md'), 'utf8')).toBe(
+      '---\nname: stolen\n---\nsecret',
+    );
   });
 
   it('refuses to update local skills', async () => {
