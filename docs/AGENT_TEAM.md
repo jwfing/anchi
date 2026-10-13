@@ -144,8 +144,9 @@ prompt:
 
 Run `anchi agents` to check it, then `anchi run dev "Explain what tools you have access to. Do not change anything."`.
 
-The following advanced example requires GitHub and Linear accounts plus an installed `triage`
-skill; it is not a first-run configuration:
+The following example needs a connected GitHub account; the team examples with Linear,
+approvals, triggers and a `triage` skill come under
+[Teams, approvals, triggers and skills](#teams-approvals-triggers-and-skills):
 
 ```yaml
 # ~/.anchi/agents/dev.yaml

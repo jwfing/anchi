@@ -92,6 +92,22 @@ class LimaTemplateTests(unittest.TestCase):
                 self.assertIn(sourced, packaged, f'{name} sources scripts/{sourced}')
         self.assertIn('vm-size.sh', packaged)
 
+    def test_installers_clear_their_staging_directory_before_copying(self):
+        # A VM keeps /tmp between releases; a stale copy would reinstall files a release removed.
+        for script, stage in (('up.sh', '/tmp/secure-vm-bootstrap'), ('install-anchi.sh', '$stage')):
+            text = (ROOT / 'scripts' / script).read_text()
+            self.assertRegex(text, rf'rm -rf {re.escape(stage)} && mkdir -p', script)
+
+    def test_guest_installer_names_a_wrong_cell_peer_gid(self):
+        # Under set -e a bare test exits silently; the message names both gids.
+        text = (ROOT / 'guest/install-gmail.sh').read_text()
+        self.assertIn('secure-cell-peer has gid $peer_gid, expected $agent_host_uid', text)
+
+    def test_release_archive_ships_the_anchi_skill(self):
+        self.assertIn('cp -R skills/anchi "$root/skills/"', (ROOT / 'scripts/package-release.sh').read_text())
+        self.assertIn('skills/anchi/SKILL.md', (ROOT / 'scripts/check-release.py').read_text())
+        self.assertIn('current/skills/anchi', (ROOT / 'skills/README.md').read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

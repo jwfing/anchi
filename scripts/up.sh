@@ -42,8 +42,10 @@ else
   echo "Creating $vm_name with $vm_cpus CPUs and $vm_gib GiB of memory (this computer: $host_cpus CPUs, $host_gib GiB)"
   limactl start --tty=false --name="$vm_name" --vm-type="$vm_type" --cpus="$vm_cpus" --memory="$vm_gib" lima/anchi-vm.yaml
 fi
-# Explicit copy, never a host-home or project filesystem mount.
-limactl shell "$vm_name" -- mkdir -p /tmp/secure-vm-bootstrap
+# Explicit copy, never a host-home or project filesystem mount. The staging directory is
+# cleared first: a VM running since an older release keeps /tmp, and a stale copy would
+# reinstall files this release removed.
+limactl shell "$vm_name" -- bash -c 'rm -rf /tmp/secure-vm-bootstrap && mkdir -p /tmp/secure-vm-bootstrap'
 limactl copy guest/cell.env guest/arch.sh guest/bootstrap.sh guest/cell-run guest/check-cell.py guest/check-gmail.py guest/gmail-cli.py guest/install-gmail.sh "$vm_name":/tmp/secure-vm-bootstrap/
 limactl copy guest/check-security.py guest/check-connectors.py "$vm_name":/tmp/secure-vm-bootstrap/
 limactl copy -r services systemd "$vm_name":/tmp/secure-vm-bootstrap/

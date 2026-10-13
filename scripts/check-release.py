@@ -95,6 +95,9 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
     version = json.loads((current / "manifest.json").read_text())["version"]
     assert run([cli, "--version"], env, root).stdout.strip() == version
     assert "setup" in run([cli, "--help"], env, root).stdout
+    # The Anchi skill ships with the app, so a host-side agent needs no checkout.
+    assert (current / "skills/anchi/SKILL.md").is_file(), "skills/anchi missing from the archive"
+    assert (current / "skills/anchi/references/cli.md").is_file()
     # Exercise the actual bundled updater. Simulate an older installed manifest, while
     # the download remains the real release archive. Keep the custom launcher unchanged.
     (fixtures / "latest.json").write_text(json.dumps({"tag_name": "v" + version}))

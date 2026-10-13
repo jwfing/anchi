@@ -23,7 +23,13 @@ done
 if ! getent group secure-cell-peer >/dev/null; then
   groupadd --gid "$agent_host_uid" secure-cell-peer
 fi
-[[ $(getent group secure-cell-peer | cut -d: -f3) == "$agent_host_uid" ]]
+# The cells' gid, which the services join; an existing group with another gid (the pins in
+# cell.env changed, or the gid was taken) must be named, not fail silently under set -e.
+peer_gid=$(getent group secure-cell-peer | cut -d: -f3)
+[[ $peer_gid == "$agent_host_uid" ]] || {
+  echo "secure-cell-peer has gid $peer_gid, expected $agent_host_uid (SECURE_CELL_UID_BASE + SECURE_CELL_AGENT_UID in cell.env)" >&2
+  exit 1
+}
 install -d -m 0755 /opt/secure-vm/services
 install -m 0644 "$src/cell.env" /opt/secure-vm/cell.env
 install -m 0644 "$src"/services/*.py /opt/secure-vm/services/

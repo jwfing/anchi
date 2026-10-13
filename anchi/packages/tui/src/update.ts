@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -25,6 +25,39 @@ export function managedRoot(app: string): string {
   throw new Error(
     `Self-update requires the active installer-managed copy of Anchi. Install or update with:\n${INSTALL}`,
   );
+}
+
+/** Single-quoted for sh, so a printed command survives spaces and quotes in a path. */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The version directories under `root/versions` other than the one `current` points to,
+ * in name order. They are only listed: a daemon or login service started from one keeps
+ * running from it until the user stops it, so nothing is removed here.
+ */
+export function staleVersions(root: string): string[] {
+  const versions = join(root, 'versions');
+  let active: string;
+  let names: string[];
+  try {
+    active = dirname(realpathSync(join(root, 'current')));
+    names = readdirSync(versions);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => name.startsWith('release.'))
+    .map((name) => join(versions, name))
+    .filter((dir) => {
+      try {
+        return realpathSync(dir) !== active;
+      } catch {
+        return false;
+      }
+    })
+    .sort();
 }
 
 function parts(version: string): number[] {
@@ -126,4 +159,10 @@ export async function selfUpdate(
   io.log(
     `Updated to Anchi ${latest}. Existing tasks and daemons keep running.\nAfter tasks finish, run anchi daemon stop, then reopen anchi.\nIf login startup is enabled, also run anchi daemon install.\nThen run anchi setup install once to update the VM's components (Getting started asks for it too).`,
   );
+  const stale = staleVersions(root!);
+  if (stale.length) {
+    io.log(
+      `Older versions remain under ${join(root!, 'versions')}; this update ran from ${dirname(app)}, which a daemon or login service started before it still uses. Remove them once nothing runs from them:\n  rm -rf ${stale.map(shellQuote).join(' ')}`,
+    );
+  }
 }

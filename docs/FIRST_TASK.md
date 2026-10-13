@@ -46,7 +46,7 @@ and return a nonzero exit code when the turn does not finish successfully.
 
 | Symptom | What to check |
 |---|---|
-| `unknown command 'create'` | Use the source checkout or manual file above; your installed binary predates the starter command. |
+| `unknown command 'create'` | Your installed binary predates the starter command: update it, or write the file by hand as in [Write an agent file](AGENT_TEAM.md#write-an-agent-file). |
 | Missing/stopped VM | `anchi setup status` summarizes the environment (`--json` for every field). Finish `anchi setup install` or start an existing VM with `anchi setup vm`. |
 | Locked vault | `anchi setup vault unlock`; keep the original vault key. Replacing it cannot decrypt stored accounts. |
 | Runtime not configured or expired | Connect the runtime named in `anchi agents`, in **Runtimes** or via `anchi setup`. A Claude/Hermes starter does not need Codex. |
