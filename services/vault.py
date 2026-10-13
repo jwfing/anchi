@@ -13,6 +13,10 @@ from common import Denied
 KEY = Path('/run/secure-vault/master.key')
 NAMES = {
     'client.json',
+    'x-client.json',
+    'x-tokens.json',
+    'x-pending.json',
+    'x-revocation.json',
     'tokens.json',
     'pending.json',
     'revocation.json',

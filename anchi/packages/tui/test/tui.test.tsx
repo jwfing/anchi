@@ -9,6 +9,7 @@ import type {
   TaskRow,
 } from '@anchi/protocol';
 import type { DaemonClient } from '@anchi/daemon';
+import { CONNECTOR_IDS } from '@anchi/protocol';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
@@ -391,6 +392,61 @@ describe('App', () => {
       id: 'github',
       token: 'github_pat_secretvalue123',
     });
+    ui.unmount();
+  });
+
+  it('connects X through a native Client ID and browser sign-in, and keeps publishing on approval', async () => {
+    let configured = false;
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          codex: { runtime: 'codex', connected: true, accountId: 'a', expiresAt: Date.now() + 1e6 },
+          connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
+          services: ['gmail', 'drive', 'notion', 'slack', 'x'].map((id) => ({
+            id,
+            connected: false,
+            account: null,
+            accounts: [],
+            reauthRequired: false,
+            mode: id === 'x' ? 'ask' : 'auto',
+          })),
+          xClient: configured,
+          googleClient: false,
+        }),
+        'services.xClient': () => {
+          configured = true;
+          return null;
+        },
+        'services.xLogin': () => ({ url: 'https://x.com/i/oauth2/authorize?test' }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    await tick();
+    for (let i = 0; i < 3; i++) {
+      ui.stdin.write('\u0010');
+      await tick();
+    }
+    await frameWith(ui, 'SERVICES');
+    for (let i = 0; i < 12; i++) {
+      ui.stdin.write('j');
+      await tick();
+    }
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'X native app Client ID')).toContain('127.0.0.1:48173/callback');
+    ui.stdin.write('test-client');
+    await tick();
+    ui.stdin.write('\r');
+    await frameWith(ui, 'sign in to X');
+    expect(calls.find(([m]) => m === 'services.xClient')?.[1]).toEqual({ clientId: 'test-client' });
+    expect(calls.some(([m]) => m === 'services.xLogin')).toBe(true);
+    expect(calls.some(([m]) => m === 'services.googleLogin')).toBe(false);
+    ui.stdin.write('m');
+    await frameWith(ui, 'X posts always require approval');
+    expect(calls.some(([m]) => m === 'services.setMode')).toBe(false);
     ui.unmount();
   });
 
@@ -1161,7 +1217,7 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write(' '); // the first skill: review
     await tick();
-    for (let i = 0; i < 13; i++) ui.stdin.write('j'); // down to the workspace
+    for (let i = 0; i < 14; i++) ui.stdin.write('j'); // down to the workspace
     await tick();
     ui.stdin.write(' ');
     await tick();

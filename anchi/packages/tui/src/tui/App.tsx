@@ -994,7 +994,7 @@ export function App({
   // PgUp and PgDn in the skills list move the cursor by what the list shows.
   const skillPage = skillListRows(bodyHeight - 4);
   const connectorIds = CONNECTOR_IDS;
-  const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
+  const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x'];
 
   const performSetup = async (step: SetupAction, vmSize?: VmSize) => {
     if (setupRunning.current)
@@ -1268,6 +1268,26 @@ export function App({
       },
       `opened Google sign-in for ${id}${account === DEFAULT_ACCOUNT ? '' : ` (${account})`}`,
     );
+
+  const xLogin = () =>
+    runAction(() => client.call('services.xLogin'), 'opened X sign-in in your browser');
+  const importXClient = () =>
+    setModal({
+      kind: 'text',
+      title: 'X native app Client ID',
+      input: '',
+      label:
+        'Create a Native App with OAuth 2.0 in the X Developer Console. Register callback ' +
+        'http://127.0.0.1:48173/callback, then paste its Client ID here (not an API key or client secret). ' +
+        'X bills API usage: set a spending limit there. Anchi reads posts and mentions; publishing always asks. ' +
+        'Disconnect X before changing the client. See docs/X_SETUP.md.',
+      submit: async (clientId) => {
+        await client.call('services.xClient', { clientId: clientId.trim() });
+        refreshSetup();
+        await client.call('services.xLogin');
+        say('sign in to X in your browser');
+      },
+    });
 
   /** Runs a bound action in the current view. */
   const run = (action: ActionId): void => {
@@ -1715,6 +1735,7 @@ export function App({
     switch (action) {
       case 'connectors:connect':
         if (id) return openConnector(id);
+        if (sid === 'x') return setup?.xClient ? xLogin() : importXClient();
         if (sid === 'notion' || sid === 'slack') {
           return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
         }
@@ -1754,6 +1775,8 @@ export function App({
             refreshSetup();
           },
         });
+      case 'connectors:xClient':
+        return importXClient();
       case 'connectors:ghImport':
         if (id !== 'github') return say('select github first');
         return setModal({
@@ -1777,7 +1800,8 @@ export function App({
           submit: (profile) => client.call('connectors.awsProfile', { profile }),
         });
       case 'connectors:mode': {
-        if (!sid || !status) return say('select a service (gmail, drive, notion, slack) first');
+        if (!sid || !status) return say('select a service (gmail, drive, notion, slack, x) first');
+        if (sid === 'x') return say('X posts always require approval; reads are automatic');
         const mode = status.mode === 'ask' ? 'auto' : 'ask';
         return runAction(
           () => client.call('services.setMode', { id: sid, mode }),
@@ -1807,7 +1831,7 @@ export function App({
             });
           }
           const account = accounts[0]?.name;
-          if (!status?.connected && !account) return;
+          if (!status?.connected && !status?.revocationPending && !account) return;
           return setModal({
             kind: 'confirm',
             title: `Disconnect ${sid}${account && account !== DEFAULT_ACCOUNT ? ` (${account})` : ''}`,
@@ -2425,6 +2449,7 @@ export function App({
                       ['connectors:disconnect', 'disconnect'],
                       ['connectors:account', 'another Google account'],
                       ['connectors:googleClient', 'Google client'],
+                      ['connectors:xClient', 'X client'],
                     ]
                   : context === 'usage'
                     ? [
@@ -2918,16 +2943,22 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
               {c.id.padEnd(idWidth)}
               {c.reauthRequired
                 ? 'sign in again'
-                : c.connected
-                  ? sanitizeLine(c.account ?? 'connected')
-                  : signInPending
-                    ? setup.googleClientSource === 'builtin'
-                      ? 'press Enter to sign in with Google'
-                      : 'client stored — press Enter to sign in'
-                    : (c.id === 'gmail' || c.id === 'drive') && !setup.googleClient
-                      ? 'needs a Google OAuth client first — Enter imports yours (docs/GMAIL_SETUP.md)'
-                      : 'not connected'}
-              {` · writes ${c.mode === 'ask' ? 'ask' : 'auto'}`}
+                : c.revocationPending && c.id === 'x'
+                  ? 'revocation pending — disconnect again'
+                  : c.connected
+                    ? sanitizeLine(c.account ?? 'connected')
+                    : signInPending
+                      ? setup.googleClientSource === 'builtin'
+                        ? 'press Enter to sign in with Google'
+                        : 'client stored — press Enter to sign in'
+                      : (c.id === 'gmail' || c.id === 'drive') && !setup.googleClient
+                        ? 'needs a Google OAuth client first — Enter imports yours (docs/GMAIL_SETUP.md)'
+                        : c.id === 'x'
+                          ? setup.xClient
+                            ? 'press Enter to sign in with X'
+                            : 'needs an X native app Client ID — Enter to configure'
+                          : 'not connected'}
+              {` · writes ${c.id === 'x' ? 'always ask' : c.mode === 'ask' ? 'ask' : 'auto'}`}
             </Text>
             {listAccounts
               ? accounts.map((a) => (

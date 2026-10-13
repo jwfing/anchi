@@ -24,6 +24,14 @@ def ledger(connector):
 
 def credential(connector):
     """Token and account generation for this service identity; the kernel UID selects the credential."""
+    if connector.credential.startswith('oauth:'):
+        value = rpc(AUTH_SOCKET, {'op': 'access_token'})
+        return {
+            'token': value['access_token'],
+            'generation': value['account_generation'],
+            'user_id': value['user_id'],
+            'account': value['account'],
+        }
     if connector.credential.startswith('google:'):
         value = rpc(AUTH_SOCKET, {'op': 'access_token', 'account': ACCOUNT})
     else:

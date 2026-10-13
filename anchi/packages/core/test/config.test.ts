@@ -26,6 +26,13 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'anchi-test-'));
 });
 
+it('allows X on an agent and refuses automatic publishing', () => {
+  write('agents/social.yaml', 'runtime: codex\nconnectors: [x]\napprovals: { x: ask }\n');
+  expect(resolveAgent('social', layout()).connectors).toEqual(['x']);
+  write('agents/social.yaml', 'runtime: codex\nconnectors: [x]\napprovals: { x: auto }\n');
+  expect(() => resolveAgent('social', layout())).toThrow(/X posts always require approval/);
+});
+
 describe('mergeLayers', () => {
   it('merges objects by key and replaces arrays', () => {
     expect(mergeLayers({ a: { x: 1, y: 2 }, l: [1, 2] }, { a: { y: 3 }, l: [9] })).toEqual({

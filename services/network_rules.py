@@ -16,11 +16,13 @@ from common import CELL_AGENT_HOST_UID
 import connectors
 import egress_rules
 import vault
+import x_auth
 
 TARGETS = Path('/run/secure-egress/targets.json')
 # role -> (service user, single allowed host). Connector roles come from the registry.
 ROLES = {
     'auth': ('secure-auth', 'oauth2.googleapis.com'),
+    'xauth': ('secure-auth', 'api.x.com'),
     **{c.id: (c.user, c.hosts[0]) for c in connectors.CONNECTORS.values()},
 }
 
@@ -89,6 +91,12 @@ def configured(role):
     token, a sign-in in progress or a pending revocation of any account."""
     if role == 'auth':
         return auth.client_source() is not None and auth.google_present(('tokens', 'pending', 'revocation'))
+    if role == 'xauth':
+        return vault.exists(auth.STORE, x_auth.CLIENT) and any(
+            vault.exists(auth.STORE, name) for name in (x_auth.TOKENS, x_auth.PENDING, x_auth.REVOCATION)
+        )
+    if role == 'x':
+        return vault.exists(auth.STORE, x_auth.TOKENS)
     kind, name = connectors.CONNECTORS[role].credential.split(':', 1)
     if kind == 'google':
         return bool(auth.account_files(name, 'tokens'))
@@ -115,13 +123,21 @@ def refresh():
     to resolve keeps its previous addresses until they expire, without stopping the others."""
     result, commands, failed = {}, [], []
     previous = previous_targets()
+    resolved = {}
     for role, (_, host) in ROLES.items():
         values = {4: [], 6: []}
         if configured(role):
-            try:
-                addresses = resolve(host)
-            except (OSError, RuntimeError, UnicodeError):
-                failed.append(host)
+            # Auth and X share a hostname. One answer must feed both kernel sets and
+            # the target file, even when DNS rotates its answer between lookups.
+            if host not in resolved:
+                try:
+                    resolved[host] = resolve(host)
+                except (OSError, RuntimeError, UnicodeError):
+                    resolved[host] = None
+            addresses = resolved[host]
+            if addresses is None:
+                if host not in failed:
+                    failed.append(host)
                 # Kernel entries and the target file expire on their own; nothing new is added.
                 if host in previous:
                     result[host] = previous[host]

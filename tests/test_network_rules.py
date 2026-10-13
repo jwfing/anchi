@@ -17,6 +17,7 @@ ADDRESSES = {
     'www.googleapis.com': ['142.250.1.3'],
     'api.notion.com': ['104.18.1.1'],
     'slack.com': ['3.1.1.1'],
+    'api.x.com': ['104.244.42.1'],
 }
 
 
@@ -63,6 +64,30 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(populated, set())
         self.assertEqual(flushed, {f'{role}{v}' for role in network_rules.ROLES for v in (4, 6)})
         self.assertEqual(json.loads(self.targets.read_text()), {})
+
+    def test_x_oauth_and_connector_roles_open_only_when_needed(self):
+        import x_auth
+
+        x_auth.import_client({'client_id': 'test-client'})
+        network_rules.refresh()
+        self.assertEqual(self.lookups, [])
+        x_auth.begin(x_auth.REDIRECT_URI)
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], {'xauth4'})
+        self.assertFalse(network_rules.configured('x'))
+        auth.write(x_auth.TOKENS, {'access_token': 'TEST_ACCESS', 'generation': 'test'})
+        self.lookups.clear()
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], {'xauth4', 'x4'})
+        self.assertEqual(self.lookups, ['api.x.com'])
+        auth.vault.remove(auth.STORE, x_auth.TOKENS)
+        auth.vault.remove(auth.STORE, x_auth.PENDING)
+        auth.write(x_auth.REVOCATION, {'token': 'TEST_REFRESH'})
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], {'xauth4'})
+        auth.vault.remove(auth.STORE, x_auth.REVOCATION)
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], set())
 
     def test_auth_needs_a_client_and_a_sign_in_or_token(self):
         # A client alone is not enough: nothing would use oauth2 yet.

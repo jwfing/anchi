@@ -18,6 +18,73 @@ function fakeGuest(answers: (args: string[], stdin: string) => unknown) {
 }
 
 describe('service connectors', () => {
+  it('signs in to X on the registered callback, rejects forged callbacks and sends the code on stdin', async () => {
+    const { guest, execs } = fakeGuest((args) =>
+      args[2] === 'begin'
+        ? { url: 'https://x.com/i/oauth2/authorize?test', state: 'expected' }
+        : { connected: true },
+    );
+    const results: unknown[] = [];
+    const s = new ServiceSetup(
+      guest,
+      (r) => results.push(r),
+      () => {},
+    );
+    try {
+      await s.setXClient('test-client');
+      const imported = execs.at(-1)!;
+      expect(imported.args.slice(-2)).toEqual(['import-client', 'x']);
+      expect(JSON.parse(imported.stdin)).toEqual({ client_id: 'test-client' });
+      await expect(s.setMode('x', 'auto')).rejects.toThrow('X_WRITES_REQUIRE_APPROVAL');
+      expect(await s.xLogin()).toContain('https://x.com/');
+      const redirect = JSON.parse(execs.find((e) => e.args[2] === 'begin')!.stdin).redirect_uri;
+      expect(redirect).toBe('http://127.0.0.1:48173/callback');
+      for (const query of [
+        'state=wrong&code=c',
+        'state=expecté&code=c',
+        'state=expected&state=expected&code=c',
+      ]) {
+        expect((await fetch(`${redirect}?${query}`)).status).toBe(400);
+      }
+      expect((await fetch(`${redirect}?state=expected&code=c`, { method: 'POST' })).status).toBe(
+        400,
+      );
+      expect(execs.some((e) => e.args[2] === 'complete')).toBe(false);
+      expect((await fetch(`${redirect}?state=expected&code=test-code`)).status).toBe(200);
+      await vi.waitFor(() => expect(results).toEqual([{ id: 'x', ok: true }]));
+      const completed = execs.find((e) => e.args[2] === 'complete')!;
+      expect(completed.args.slice(-2)).toEqual(['complete', 'x']);
+      expect(JSON.parse(completed.stdin)).toEqual({ code: 'test-code', state: 'expected' });
+      expect(completed.args.join(' ')).not.toContain('test-code');
+    } finally {
+      s.stop();
+    }
+  });
+
+  it('reports X client, account, reauthorization and pending revocation without secrets', async () => {
+    const { guest } = fakeGuest((args) =>
+      args[1]!.endsWith('policy_admin.py')
+        ? { rules: { x: 'auto' } }
+        : {
+            x: {
+              connected: true,
+              account: '@example',
+              client_configured: true,
+              reauth_required: true,
+              revocation_pending: true,
+            },
+          },
+    );
+    const status = await new ServiceSetup(guest).status();
+    expect(status.xClient).toBe(true);
+    expect(status.services.find((s) => s.id === 'x')).toMatchObject({
+      connected: true,
+      account: '@example',
+      reauthRequired: true,
+      revocationPending: true,
+      mode: 'ask',
+    });
+  });
   it('reports status and modes, and keeps tokens off the Google connectors', async () => {
     const { guest } = fakeGuest((args) =>
       args[1]!.endsWith('policy_admin.py')

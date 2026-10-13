@@ -9,7 +9,7 @@ import type {
 } from '@anchi/protocol';
 
 /** Connectors in the order the panel shows them, also when the VM could not be asked. */
-const CONNECTORS = [...CONNECTOR_IDS, 'gmail', 'drive', 'notion', 'slack'];
+const CONNECTORS = [...CONNECTOR_IDS, 'gmail', 'drive', 'notion', 'slack', 'x'];
 const RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
 const EFFORTS: (Effort | '')[] = ['', 'low', 'medium', 'high', 'xhigh'];
 
@@ -205,6 +205,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
   fixed('delegates', f.delegates.join(', ') || 'none');
   const approvals = Object.entries(f.approvals).map(([c, m]) => `${c}: ${m}`);
   fixed('approvals', approvals.join(', ') || 'none');
+  if (state.connectors.includes('x')) fixed('X posts', 'always ask for approval');
   if (f.highRisk) fixed('no approval', f.highRisk.join(', '));
   fixed(
     'egress',

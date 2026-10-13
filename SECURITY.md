@@ -29,6 +29,22 @@ In either mode, an agent's own tool calls inside its cell (shell, files, network
 
 ## Authentication and connectors
 
+X is a trusted connector service (`secure-x`) with access only to `api.x.com`. A user-supplied
+native public Client ID starts PKCE sign-in with state and the fixed loopback callback
+`http://127.0.0.1:48173/callback`. Authorization codes reach the VM on stdin; access and refresh
+tokens remain in the encrypted vault. Only the X service's kernel UID can obtain its access
+token; the egress proxy cannot read or inject it. OAuth exchange, refresh and revocation run
+as `secure-auth`, whose separate `xauth` network role permits that provider only while a flow,
+credential or revocation exists. Scopes are checked against the exact requested set.
+
+X exposes bounded post lookup, recent search, own mentions and text publishing only. All X
+publishing requires an exact-content approval, regardless of an old `auto` policy row; reads
+are automatic. The frozen action names the verified account id and handle, text and reply
+target, and binds to the connection generation. Changing the account invalidates the request.
+The shared write ledger prevents replay after success or uncertain execution. Reads reserve
+up to 1,000 requested post resources per UTC day across agents in persistent SQLite, with a
+maximum of 25 per page. These limits do not replace X's monetary spending limit.
+
 The daemon detects host Codex and Claude Code logins at startup, after environment setup, on
 credential file changes and every five minutes. Once the installed VM's vault is unlocked,
 valid local subscription logins are imported automatically. Codex reads `~/.codex/auth.json`

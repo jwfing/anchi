@@ -8,7 +8,8 @@ import sys
 import resource
 
 import auth
-from common import Denied
+import x_auth
+from common import Denied, fields
 
 # Actions that change which provider roles are configured: the egress allowlists follow at once
 # instead of on the next timer run (a sign-in needs oauth2 before the user is back from Google).
@@ -32,7 +33,7 @@ def main():
         raise Denied('GUEST_ADMIN_REQUIRED')
     action = sys.argv[1]
     connector = sys.argv[2] if len(sys.argv) > 2 else 'gmail'
-    if connector not in (*auth.GOOGLE, *auth.TOKENS, 'aws'):
+    if connector not in (*auth.GOOGLE, *auth.TOKENS, 'aws', 'x'):
         raise Denied('UNKNOWN_CONNECTOR')
     if connector == 'aws' and action not in ('import-aws', 'disconnect', 'status', 'set-account'):
         raise Denied('UNKNOWN_ADMIN_ACTION')
@@ -59,7 +60,21 @@ def main():
             raise Denied('INPUT_TOO_LARGE')
         value = json.loads(data)
     with auth.locked():
-        if action == 'import-client':
+        if connector == 'x':
+            if action == 'import-client':
+                result = x_auth.import_client(value)
+            elif action == 'begin':
+                fields(value, ('redirect_uri',), ('redirect_uri',))
+                result = x_auth.begin(value['redirect_uri'])
+            elif action == 'complete':
+                result = x_auth.complete(value)
+            elif action == 'disconnect':
+                result = x_auth.disconnect()
+            elif action == 'status':
+                result = x_auth.status()
+            else:
+                raise Denied('UNKNOWN_ADMIN_ACTION')
+        elif action == 'import-client':
             result = auth.import_client(value)
         elif action == 'remove-client':
             result = auth.remove_client()

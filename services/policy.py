@@ -80,6 +80,8 @@ def normalize(action, principal):
     if connector is None or op not in connector.ops:
         raise Denied('OPERATION_DENIED')
     importlib.import_module(connector.module).validate(op, params)
+    if op == 'x.post' and not {'account_id', 'account_label'} <= set(params):
+        raise Denied('BAD_ACCOUNT')
     # Digest canonical form stays ASCII for stability; the size bound counts UTF-8 bytes.
     encoded = json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     if len(json.dumps(action, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()) > 56000:
@@ -97,7 +99,7 @@ def mode(conn, principal):
     if row:
         return row['mode']
     # An agent without its own rule follows its connector's.
-    return mode(conn, base(principal)) if ':' in principal else 'auto'
+    return mode(conn, base(principal)) if ':' in principal else ('ask' if principal == 'x' else 'auto')
 
 
 def inspect_rules():
@@ -135,6 +137,10 @@ def authorize(action, principal):
         # An agent's own rule holds its writes only; its reads follow the connector's mode.
         write = connectors.CONNECTORS[base(principal)].ops[action['operation']] == connectors.WRITE
         auto = mode(conn, principal if write else base(principal)) == 'auto'
+        # X publishes to a public identity: every post needs an exact-content approval,
+        # including agents with a pre-existing auto rule. Reading remains automatic.
+        if base(principal) == 'x':
+            auto = not write
         if grant and grant['state'] == 'APPROVED':
             grant_id = grant['id']
         elif auto:
@@ -277,6 +283,8 @@ def set_mode(principal, value):
         raise Denied('UNKNOWN_PRINCIPAL')
     if value not in MODES:
         raise Denied('BAD_MODE')
+    if base(principal) == 'x' and value != 'ask':
+        raise Denied('X_WRITES_REQUIRE_APPROVAL')
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         conn.execute(

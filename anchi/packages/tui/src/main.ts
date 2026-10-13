@@ -897,7 +897,7 @@ setup
     }),
   );
 
-const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack'] as const;
+const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack', 'x'] as const;
 type ServiceId = (typeof SERVICE_IDS)[number];
 const isService = (id: string): id is ServiceId => (SERVICE_IDS as readonly string[]).includes(id);
 
@@ -922,14 +922,31 @@ setup
 
 setup
   .command('service <id>')
-  .description('Connect gmail or drive (Google sign-in) or notion or slack (token, without echo)')
+  .description(
+    'Connect gmail, drive or x (browser sign-in), or notion or slack (token, without echo)',
+  )
   .option(
     '--account <name>',
     'gmail or drive: name this Google account (e.g. work) to connect more than one; agents pick it with accounts: { gmail: work }',
   )
   .action((id: string, opts: { account?: string }) =>
     withClient(async (client) => {
-      if (!isService(id)) fail('service must be gmail, drive, notion or slack');
+      if (!isService(id)) fail('service must be gmail, drive, notion, slack or x');
+      if (id === 'x') {
+        if (opts.account) fail('--account applies to gmail and drive');
+        const status = await client.call('setup.status');
+        if (!status.xClient) {
+          if (!process.stdin.isTTY)
+            fail('Configure your X native app first: anchi setup x-client <client-id>');
+          console.log('X native app callback URL: http://127.0.0.1:48173/callback');
+          console.log(
+            'API usage is billed by X; configure a spending limit in the X Developer Console.',
+          );
+          await client.call('services.xClient', {
+            clientId: (await ask('X native app Client ID: ')).trim(),
+          });
+        }
+      }
       if (id === 'notion' || id === 'slack') {
         if (opts.account) fail('--account applies to gmail and drive');
         const token = process.stdin.isTTY ? await askSecret(`${id} token: `) : await readStdin();
@@ -943,11 +960,26 @@ setup
           (r) => r.id === id && (r.account ?? 'default') === account && resolve(r),
         );
       });
-      const { url } = await client.call('services.googleLogin', { id, account: opts.account });
-      console.log(`Sign in to Google in your browser. If it did not open:\n${url}`);
+      const { url } =
+        id === 'x'
+          ? await client.call('services.xLogin')
+          : await client.call('services.googleLogin', { id, account: opts.account });
+      console.log(
+        `Sign in to ${id === 'x' ? 'X' : 'Google'} in your browser. If it did not open:\n${url}`,
+      );
       const r = await done;
       if (!r.ok) fail(r.error ?? 'sign-in failed');
       console.log(`${id} connected${opts.account ? ` (account ${opts.account})` : ''}`);
+    }),
+  );
+
+setup
+  .command('x-client <client-id>')
+  .description('Store an X native app Client ID; register http://127.0.0.1:48173/callback in X')
+  .action((clientId: string) =>
+    withClient(async (client) => {
+      await client.call('services.xClient', { clientId });
+      console.log('X client stored. Run anchi setup service x to sign in.');
     }),
   );
 
@@ -1044,11 +1076,11 @@ setup
 
 setup
   .command('service-mode <id> <mode>')
-  .description('Writes of a service: auto, or ask (each write waits for approval)')
+  .description('Writes of a service: auto, or ask (X always requires approval)')
   .action((id: string, mode: string) =>
     withClient(async (client) => {
       if (!isService(id) || (mode !== 'auto' && mode !== 'ask'))
-        fail('usage: service-mode <gmail|drive|notion|slack> <auto|ask>');
+        fail('usage: service-mode <gmail|drive|notion|slack|x> <auto|ask> (X only allows ask)');
       await client.call('services.setMode', { id, mode });
       console.log(`${id} writes: ${mode}`);
     }),

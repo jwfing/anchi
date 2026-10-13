@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as setupModule from '../src/setup.ts';
 import { HostLogins } from '../src/host-logins.ts';
+import { ServiceSetup } from '../src/services.ts';
 import { connectorSchema, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
 import type { QuotaInfo, StoredEvent, TaskRow } from '@anchi/protocol';
@@ -38,6 +39,7 @@ import { defaultVmSize, hostResources } from '../src/host.ts';
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
 class FakeTransport implements GuestTransport {
+  policyConnector = 'notion';
   mode = 'ok';
   /** The fake VM cannot be reached for agent purges. */
   purgeFails = false;
@@ -206,10 +208,20 @@ class FakeTransport implements GuestTransport {
               id: args[3],
               digest: 'd'.repeat(64),
               state: 'PENDING',
-              principal: 'notion:writer',
+              principal: `${this.policyConnector}:writer`,
               created: Date.now() / 1000,
               expires: Date.now() / 1000 + 600,
-              action: { operation: 'notion.create_page', params: { title: 'Notes' } },
+              action:
+                this.policyConnector === 'x'
+                  ? {
+                      operation: 'x.post',
+                      params: {
+                        text: 'A draft to publish',
+                        account_id: '123',
+                        account_label: '@example',
+                      },
+                    }
+                  : { operation: 'notion.create_page', params: { title: 'Notes' } },
             })
           : { code: 1, stdout: '{"error":"APPROVAL_NOT_FOUND"}', stderr: '' };
       }
@@ -369,6 +381,40 @@ afterEach(async () => {
 });
 
 describe('daemon tasks', () => {
+  it('validates X setup RPCs before touching the guest', async () => {
+    const { client } = await start();
+    const login = vi
+      .spyOn(ServiceSetup.prototype, 'xLogin')
+      .mockResolvedValue('https://x.com/i/oauth2/authorize?test');
+    try {
+      const before = transport.execs.length;
+      await expect(client.call('services.xClient', { clientId: 'bad\nclient' })).rejects.toThrow();
+      await expect(
+        client.call('services.xClient', { clientId: 'test', secret: 'forged' } as never),
+      ).rejects.toThrow();
+      const uncheckedCall = client.call.bind(client) as (
+        method: string,
+        params: unknown,
+      ) => Promise<unknown>;
+      await expect(
+        uncheckedCall('services.xLogin', { redirect: 'https://evil.test' }),
+      ).rejects.toThrow();
+      expect(transport.execs).toHaveLength(before);
+      expect(login).not.toHaveBeenCalled();
+      await client.call('services.xClient', { clientId: 'test-client' });
+      const sent = transport.execs.at(-1)!;
+      expect(sent.args.slice(-2)).toEqual(['import-client', 'x']);
+      expect(JSON.parse(sent.stdin)).toEqual({ client_id: 'test-client' });
+      expect(await client.call('services.xLogin')).toEqual({
+        url: 'https://x.com/i/oauth2/authorize?test',
+      });
+      await expect(client.call('services.setMode', { id: 'x', mode: 'auto' })).rejects.toThrow(
+        'X_WRITES_REQUIRE_APPROVAL',
+      );
+    } finally {
+      login.mockRestore();
+    }
+  });
   it('runs a task in a cell and records result, links and events', async () => {
     const { client, daemon } = await start();
     const task = await client.call('tasks.create', { agentId: 'dev', text: 'fix the bug' });
@@ -1140,39 +1186,46 @@ describe('daemon tasks', () => {
     expect(shown).toHaveLength(1);
   });
 
-  it('shows connector-service writes held by the policy service, verified there', async () => {
-    write('agents/writer.yaml', 'runtime: codex\nconnectors: [notion]\n');
-    const { client } = await start();
-    const turn = async (agentId: string, text: string) => {
-      const task = await client.call('tasks.create', { agentId, text });
-      const done = await client.call('tasks.wait', { taskId: task.id });
-      return JSON.parse(done.result!) as { ok: boolean; error?: string };
-    };
-    const pending = (id: string, connector = 'notion') =>
-      `call anchi.approval_pending ${JSON.stringify({ connector, approval_id: id })}`;
-    expect((await turn('writer', pending('c'.repeat(32)))).ok).toBe(true);
-    const [a] = await client.call('approvals.list');
-    expect(a).toMatchObject({
-      kind: 'policy',
-      connector: 'notion',
-      operation: 'notion.create_page',
-      agent: 'writer',
-    });
-    expect(a!.summary).toContain('"title": "Notes"');
-    // An id the policy service does not know, or a connector the agent lacks, is refused.
-    expect((await turn('writer', pending('e'.repeat(32)))).ok).toBe(false);
-    expect((await turn('writer', pending('c'.repeat(32), 'gmail'))).error).toMatch(
-      /not a connector/,
-    );
-    await client.call('approvals.decide', { id: 'c'.repeat(32), allow: true });
-    expect(transport.execs.at(-1)!.args.slice(2)).toEqual([
-      'approve',
-      'c'.repeat(32),
-      '--digest',
-      'd'.repeat(64),
-    ]);
-    expect(await client.call('approvals.list')).toEqual([]);
-  });
+  it.each(['notion', 'x'])(
+    'shows %s writes held by the policy service, verified there',
+    async (connector) => {
+      transport.policyConnector = connector;
+      write('agents/writer.yaml', `runtime: codex\nconnectors: [${connector}]\n`);
+      const { client } = await start();
+      const turn = async (agentId: string, text: string) => {
+        const task = await client.call('tasks.create', { agentId, text });
+        const done = await client.call('tasks.wait', { taskId: task.id });
+        return JSON.parse(done.result!) as { ok: boolean; error?: string };
+      };
+      const pending = (id: string, selected = connector) =>
+        `call anchi.approval_pending ${JSON.stringify({ connector: selected, approval_id: id })}`;
+      expect((await turn('writer', pending('c'.repeat(32)))).ok).toBe(true);
+      const [a] = await client.call('approvals.list');
+      expect(a).toMatchObject({
+        kind: 'policy',
+        connector,
+        operation: connector === 'x' ? 'x.post' : 'notion.create_page',
+        agent: 'writer',
+      });
+      expect(a!.summary).toContain(
+        connector === 'x' ? '"account_label": "@example"' : '"title": "Notes"',
+      );
+      if (connector === 'x') expect(a!.summary).toContain('A draft to publish');
+      // An id the policy service does not know, or a connector the agent lacks, is refused.
+      expect((await turn('writer', pending('e'.repeat(32)))).ok).toBe(false);
+      expect((await turn('writer', pending('c'.repeat(32), 'gmail'))).error).toMatch(
+        /not a connector/,
+      );
+      await client.call('approvals.decide', { id: 'c'.repeat(32), allow: true });
+      expect(transport.execs.at(-1)!.args.slice(2)).toEqual([
+        'approve',
+        'c'.repeat(32),
+        '--digest',
+        'd'.repeat(64),
+      ]);
+      expect(await client.call('approvals.list')).toEqual([]);
+    },
+  );
 
   it('fires schedules once per due minute and once after a missed run', async () => {
     write(

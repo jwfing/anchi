@@ -66,6 +66,7 @@ describe('settings panel', () => {
       '[ ] drive ',
       '[ ] notion ',
       '[ ] slack ',
+      '[ ] x ',
       '[ro] docs ',
       '[  ] web ',
     ]);

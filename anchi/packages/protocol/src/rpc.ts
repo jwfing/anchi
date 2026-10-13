@@ -172,7 +172,7 @@ export interface HermesAccountStatus {
 }
 
 /** Connectors served by trusted services in the VM (formerly set up in the desktop app). */
-export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack';
+export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack' | 'x';
 
 /** A named Google account of Gmail or Drive (`default` unless the user named it). */
 export interface ServiceAccountStatus {
@@ -187,6 +187,8 @@ export interface ServiceAccountStatus {
 }
 
 export interface ServiceConnectorStatus {
+  /** Remote revocation still needs a retry; local access is already removed. */
+  revocationPending?: boolean;
   id: ServiceConnectorId;
   /** Any account connected. */
   connected: boolean;
@@ -196,7 +198,7 @@ export interface ServiceConnectorStatus {
   reauthRequired: boolean;
   /** `ask`: every write waits for approval. */
   mode: 'auto' | 'ask';
-  /** Gmail and Drive: their accounts, by name; empty for Notion and Slack. */
+  /** Gmail and Drive: their accounts, by name; empty for Notion, Slack and X. */
   accounts: ServiceAccountStatus[];
 }
 
@@ -242,6 +244,8 @@ export interface SetupStatus {
   services: ServiceConnectorStatus[];
   /** Whether a Google OAuth client is available (needed for Gmail and Drive). */
   googleClient: boolean;
+  /** A user-supplied X native app Client ID is stored in the vault. */
+  xClient?: boolean;
   /** Where that client comes from; optional for clients connected to an older daemon. */
   googleClientSource?: GoogleClientSource;
   /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
@@ -289,7 +293,7 @@ export type ConnectorSecret =
  */
 export interface Approval {
   id: string;
-  /** `proxy`: a held HTTP write. `policy`: a connector service write (Gmail, Drive, Notion, Slack). */
+  /** `proxy`: a held HTTP write. `policy`: a connector service write (Gmail, Drive, Notion, Slack, X). */
   kind: 'proxy' | 'policy';
   task: string;
   agent: string;
@@ -501,7 +505,7 @@ export interface TaskAudit {
   held: { operation: string; host: string; risk: string | null; outcome: string }[];
   /** Large requests that left without credentials (see the proxy's streaming limit). */
   streamed: number;
-  /** Calls to Gmail, Drive, Notion and Slack through the bridge. */
+  /** Calls to Gmail, Drive, Notion, Slack and X through the bridge. */
   bridge: { service: string; operation: string; calls: number }[];
   /** The credential scan before the cell closed, as noted in the task. */
   scan: string | null;
@@ -522,7 +526,7 @@ export interface AgentAccess {
   refused: number;
   held: number;
   hosts: number;
-  /** Calls to Gmail, Drive, Notion and Slack through the bridge. */
+  /** Calls to Gmail, Drive, Notion, Slack and X through the bridge. */
   services: number;
 }
 
@@ -534,7 +538,7 @@ export interface AccessSummary {
   /** The hosts most requested, with the agents that requested them (agent-originated). */
   hosts: { host: string; requests: number; agents: string[]; decisions: Record<string, number> }[];
   /**
-   * Calls to Gmail, Drive, Notion and Slack through the bridge, with the Google account the
+   * Calls to Gmail, Drive, Notion, Slack and X through the bridge, with the Google account the
    * bridge pinned. The services reach their providers themselves, so these hosts are not above.
    */
   services: {
@@ -750,6 +754,10 @@ export interface Methods {
   'services.setMode': [{ id: ServiceConnectorId; mode: 'auto' | 'ask' }, null];
   /** The Google Cloud Desktop OAuth client JSON (its text), for Gmail and Drive. */
   'services.googleClient': [{ json: string }, null];
+  /** X native app Client ID. Refuses replacement while connected or revocation is pending. */
+  'services.xClient': [{ clientId: string }, null];
+  /** X PKCE sign-in, fixed loopback callback; access and refresh tokens stay in the VM. */
+  'services.xLogin': [Record<string, never>, { url: string }];
   /** Starts Google sign-in; returns the URL (also opened in the browser). Ends with `oauth`. */
   'services.googleLogin': [{ id: ServiceConnectorId; account?: string }, { url: string }];
   /**
@@ -779,7 +787,7 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
-  /** A Google sign-in finished. */
+  /** A Google or X sign-in finished. */
   oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
   /** One line of `setup.reset` output (host command output; sanitize for display). */
   reset: { line: string };

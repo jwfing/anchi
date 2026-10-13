@@ -85,6 +85,20 @@ CONNECTORS = {
         ops={'slack.status': READ, 'slack.channels': READ, 'slack.history': READ, 'slack.post': WRITE},
         paths=(r'/api/(conversations\.list|conversations\.history|chat\.postMessage|auth\.test|auth\.revoke)(\?.*)?',),
     ),
+    'x': Connector(
+        id='x',
+        user='secure-x',
+        hosts=('api.x.com',),
+        credential='oauth:x',
+        module='x_connector',
+        ops={'x.status': READ, 'x.read': READ, 'x.search': READ, 'x.mentions': READ, 'x.post': WRITE},
+        paths=(
+            r'/2/tweets',
+            r'/2/tweets/[0-9]{1,20}\?.*',
+            r'/2/tweets/search/recent\?.*',
+            r'/2/users/[0-9]{1,20}/mentions\?.*',
+        ),
+    ),
 }
 SERVICE_USERS = tuple(c.user for c in CONNECTORS.values())
 

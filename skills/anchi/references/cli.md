@@ -363,16 +363,18 @@ Commands:
                                   without echo)
   disconnect [options] <id>       Remove a connector or service credential from
                                   the vault (Google accounts are revoked too)
-  service [options] <id>          Connect gmail or drive (Google sign-in) or
-                                  notion or slack (token, without echo)
+  service [options] <id>          Connect gmail, drive or x (browser sign-in),
+                                  or notion or slack (token, without echo)
+  x-client <client-id>            Store an X native app Client ID; register
+                                  http://127.0.0.1:48173/callback in X
   google-client [options] [path]  Store your own Google Cloud Desktop app OAuth
                                   client JSON (Gmail and Drive); it overrides
                                   the built-in client
   reset [options]                 Back to a first launch: delete the VM with
                                   everything in it (--all: also the vault key
                                   and the Anchi home)
-  service-mode <id> <mode>        Writes of a service: auto, or ask (each write
-                                  waits for approval)
+  service-mode <id> <mode>        Writes of a service: auto, or ask (X always
+                                  requires approval)
 ```
 
 #### `anchi setup prepare`
@@ -504,12 +506,21 @@ Options:
 ```text
 Usage: anchi setup service [options] <id>
 
-Connect gmail or drive (Google sign-in) or notion or slack (token, without echo)
+Connect gmail, drive or x (browser sign-in), or notion or slack (token, without
+echo)
 
 Options:
   --account <name>  gmail or drive: name this Google account (e.g. work) to
                     connect more than one; agents pick it with accounts: {
                     gmail: work }
+```
+
+#### `anchi setup x-client`
+
+```text
+Usage: anchi setup x-client [options] <client-id>
+
+Store an X native app Client ID; register http://127.0.0.1:48173/callback in X
 ```
 
 #### `anchi setup google-client`
@@ -543,7 +554,7 @@ Options:
 ```text
 Usage: anchi setup service-mode [options] <id> <mode>
 
-Writes of a service: auto, or ask (each write waits for approval)
+Writes of a service: auto, or ask (X always requires approval)
 ```
 
 ### `anchi daemon`

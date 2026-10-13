@@ -1,4 +1,4 @@
-import type { ResolvedAgent } from '@anchi/core';
+import { SERVICE_CONNECTORS, type ResolvedAgent } from '@anchi/core';
 import type { AgentSummary, TaskRow } from '@anchi/protocol';
 import { z } from 'zod';
 
@@ -26,7 +26,7 @@ export interface ToolHost {
 
 /** The MCP server reports a connector write waiting for approval; not a tool the model sees. */
 export const APPROVAL_PENDING = 'anchi.approval_pending';
-const SERVICE = new Set(['gmail', 'drive', 'notion', 'slack']);
+const SERVICE = new Set<string>(SERVICE_CONNECTORS);
 
 /** Longest a tool call waits for a delegated task; below the 60-minute turn timeout. */
 export const MAX_WAIT_MINUTES = 55;

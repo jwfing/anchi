@@ -150,6 +150,7 @@ export async function setupStatus(
     hermes: { runtime: 'hermes', connected: false, baseUrl: null, model: null },
     services: [],
     googleClient: false,
+    xClient: false,
     googleClientSource: null,
     workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
@@ -178,6 +179,7 @@ export async function setupStatus(
     const svc = (await services?.status().catch(() => undefined)) ?? {
       services: [],
       googleClient: false,
+      xClient: false,
       googleClientSource: null,
     };
     const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
@@ -202,6 +204,7 @@ export async function setupStatus(
       connectors,
       services: svc.services,
       googleClient: svc.googleClient,
+      xClient: svc.xClient,
       googleClientSource: svc.googleClientSource,
       workspaces,
       guestVersion,

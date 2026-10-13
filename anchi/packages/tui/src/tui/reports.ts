@@ -111,7 +111,7 @@ export function accessLines(a: TaskAudit, width: number): ReportLine[] {
     lines.push(gap);
   }
   if (a.bridge.length) {
-    lines.push(head('Gmail, Drive, Notion and Slack calls'));
+    lines.push(head('Gmail, Drive, Notion, Slack and X calls'));
     for (const b of a.bridge)
       lines.push({ text: fit(`  ${clean(b.service)} ${clean(b.operation)}  ${b.calls}`) });
     lines.push(gap);
@@ -217,7 +217,7 @@ export function accessSummaryLines(
   // A daemon started before bridge calls were summed up sends none.
   const services = s.services ?? [];
   if (services.length) {
-    lines.push(gap, head('Gmail, Drive, Notion and Slack calls (through the bridge)'));
+    lines.push(gap, head('Gmail, Drive, Notion, Slack and X calls (through the bridge)'));
     for (const c of services) {
       const name = `${clean(c.service)} ${clean(c.operation)}${c.account ? ` [${clean(c.account)}]` : ''}`;
       lines.push({
@@ -240,7 +240,7 @@ export function accessSummaryLines(
   }
   lines.push(gap, {
     text: fit(
-      'From the egress proxy’s audit rows the daemon keeps with each task; hosts and paths come from the agents. The bridge services reach Google, Notion and Slack themselves, so those hosts are not listed. Press a on a task for its detail.',
+      'From the egress proxy’s audit rows the daemon keeps with each task; hosts and paths come from the agents. The bridge services reach Google, Notion, Slack and X themselves, so those hosts are not listed. Press a on a task for its detail.',
     ),
     dim: true,
   });

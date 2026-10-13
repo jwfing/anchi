@@ -286,16 +286,17 @@ def main():
         stop(b)
 
     # ── service connectors are reached through the per-cell bridge ──
-    c, ready_c = start('chk-c', 'chk-gamma', 'gmail')
+    c, ready_c = start('chk-c', 'chk-gamma', 'gmail,x')
     try:
         _, listing = sh(
             'chk-c',
-            'ls /run/anchi/connectors; test -S /run/anchi/connectors/gmail/api.sock && echo socket; '
+            'ls /run/anchi/connectors; test -S /run/anchi/connectors/gmail/api.sock && '
+            'test -S /run/anchi/connectors/x/api.sock && echo socket; '
             'ls -d /run/secure-* /run/anchi-connectors 2>/dev/null | wc -l',
         )
         check(
             'a cell reaches only its own connector services, through the bridge',
-            ready_c and listing.split() == ['gmail', 'socket', '0'],
+            ready_c and listing.split() == ['gmail', 'x', 'socket', '0'],
             listing[:80],
         )
     finally:

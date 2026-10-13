@@ -64,7 +64,7 @@ startup_timeout_sec = 10
 # Delegation tools wait for another agent's turn; the daemon bounds the wait (55 minutes).
 tool_timeout_sec = 3600
 '''
-SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack')
+SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack', 'x')
 # Google services an agent may name an account of (`accounts:` in its file).
 ACCOUNT_SERVICES = ('gmail', 'drive')
 ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
@@ -1468,6 +1468,9 @@ def real_secrets():
             ('codex', 'codex.json', ('access_token',)),
             ('claude', 'claude.json', ('token',)),
             ('hermes', 'hermes.json', ('api_key',)),
+            ('x', 'x-tokens.json', ('access_token', 'refresh_token')),
+            ('x-revocation', 'x-revocation.json', ('token',)),
+            ('x-pending', 'x-pending.json', ('verifier',)),
         ):
             if not vault.exists(auth.STORE, file):
                 continue

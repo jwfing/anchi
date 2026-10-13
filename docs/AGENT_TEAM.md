@@ -15,6 +15,10 @@ cannot recover stored credentials. `anchi daemon install` starts the daemon at l
 
 ## Connect accounts
 
+For X, see [X setup](X_SETUP.md): configure your native app Client ID, authorize in the browser,
+and enable `x` for the agent. Reading/search/mentions are bounded; publishing text or replies
+always waits for approval of the full text and verified account.
+
 Anchi detects local Codex and Claude Code subscription logins at startup and imports available
 access tokens automatically once the VM and vault are ready. Both are imported when present.
 An installed CLI without a usable login still needs local sign-in. No model is called by import.
