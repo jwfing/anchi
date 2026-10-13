@@ -18,6 +18,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Connectors keeps the selected entry visible in small terminals, including X and Reddit at the bottom of the list. It also explains when a running daemon predates the TUI's connector list, with instructions to restart it and update VM components; reopening the TUI alone keeps using the existing daemon.
 - Connector-service approvals retain the full frozen write content instead of a 4,000-character prefix. The approval dialog wraps long lines and supports arrows, PgUp/PgDn and Home/End; the list labels clipped content as a preview.
 
 - `anchi setup vault unlock` reports a missing master key with initialization and recovery steps instead of a traceback. Unsafe key paths are refused without blocking on pipes; initialization still refuses a replacement key over encrypted credentials.

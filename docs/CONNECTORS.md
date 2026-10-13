@@ -17,6 +17,23 @@ The TUI's **Connectors → Services** does the same with masked input in a full-
 
 Gmail and Drive can hold several Google accounts each, by name (`default` without `--account`). An agent's file picks one per service with `accounts: { gmail: work, drive: personal }`; the bridge pins it to the agent's cells, and grants bind to that account's generation. The client and the choice between Anchi's built-in client and your own are described in [Gmail setup](GMAIL_SETUP.md#1-prepare-google-oauth).
 
+## Missing connectors after an update
+
+Closing and reopening the TUI keeps using the background daemon. If it started before the
+update, it can still return the old connector list, even when both builds report the same
+release version. Connectors names services missing from the daemon's response and shows the
+restart instructions.
+
+The list follows the selection and shows its position, so entries at the bottom remain visible
+in small terminals. Press **↑/↓** or **j/k** in the main pane to reach X and Reddit.
+
+After current tasks finish, run `anchi daemon stop`, then `anchi setup install` from the updated
+installation and reopen Anchi. The install command starts the updated daemon and copies the
+current connector services into the VM; agents, tasks and stored credentials are preserved.
+From a source checkout, use `./scripts/anchi` in place of `anchi` for these commands. Confirm
+that `anchi setup status` lists both `x` and `reddit` under Services. Their CLI identifiers are
+`x` and `reddit`, rather than their website domain names.
+
 ## Authorization modes
 
 X and Reddit are exceptions to the configurable modes below: reads are automatic and publishing

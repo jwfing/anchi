@@ -430,13 +430,13 @@ describe('App', () => {
       ui.stdin.write('\u0010');
       await tick();
     }
-    await frameWith(ui, 'SERVICES');
+    await frameWith(ui, 'connectors · ↑↓ choose');
     for (let i = 0; i < 12; i++) {
       ui.stdin.write('j');
       await tick();
     }
     ui.stdin.write('\r');
-    expect(await frameWith(ui, 'X native app Client ID')).toContain('127.0.0.1:48173/callback');
+    expect(await frameWith(ui, '127.0.0.1:48173/callback')).toContain('X native app Client ID');
     ui.stdin.write('test-client');
     await tick();
     ui.stdin.write('\r');
@@ -485,7 +485,7 @@ describe('App', () => {
       ui.stdin.write('\u0010');
       await tick();
     }
-    await frameWith(ui, 'SERVICES');
+    await frameWith(ui, 'connectors · ↑↓ choose');
     for (let i = 0; i < 13; i++) {
       ui.stdin.write('j');
       await tick();
@@ -2288,6 +2288,71 @@ describe('usability workflows', () => {
     );
     expect(await frameWith(welcome, 'could not be asked')).toContain('r check again');
     welcome.unmount();
+  });
+
+  it('keeps X and Reddit visible while navigating all connectors in a 24-row terminal', async () => {
+    const { client } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
+          services: ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'].map((id) => ({
+            id,
+            connected: false,
+            account: null,
+            mode: 'ask',
+          })),
+        }),
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="connectors" initialAgents={[]} initialTasks={[]} />,
+    );
+    await frameWith(ui, 'github');
+    for (let i = 0; i < 12; i++) {
+      ui.stdin.write('j');
+      await tick();
+    }
+    const x = ui.lastFrame() ?? '';
+    expect(x).toMatch(/○ x +needs an X native app Client ID/);
+    expect(x).toContain('13/14 connectors');
+    expect(x.split('\n')).toHaveLength(24);
+    ui.stdin.write('j');
+    const reddit = await frameWith(ui, '14/14 connectors');
+    expect(reddit).toMatch(/○ reddit +needs an approved Reddit installed app/);
+    expect(reddit.split('\n')).toHaveLength(24);
+    ui.unmount();
+  });
+
+  it('explains missing social connectors when the daemon predates the TUI update', async () => {
+    const { client } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          connectors: [],
+          services: ['gmail', 'drive', 'notion', 'slack'].map((id) => ({
+            id,
+            connected: false,
+            account: null,
+            mode: 'auto',
+          })),
+        }),
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="connectors" initialAgents={[]} initialTasks={[]} />,
+    );
+    const frame = await frameWith(ui, 'Daemon missing connectors: x, reddit');
+    expect(frame).toContain('Daemon missing connectors: x, reddit');
+    expect(frame).toContain('anchi daemon stop');
+    expect(frame).toContain('anchi setup install');
+    ui.unmount();
   });
 
   it('tells Gmail users without a Google client where to start, keeps ids aligned, and clears a token with ^U', async () => {
