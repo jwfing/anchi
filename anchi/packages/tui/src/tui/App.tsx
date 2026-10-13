@@ -234,7 +234,7 @@ type Modal =
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
   | { kind: 'help'; context: Context; scroll: number }
   | { kind: 'palette'; context: Context; active: Context[]; query: string; cursor: number }
-  | { kind: 'approval'; approval: Approval; decision?: boolean }
+  | { kind: 'approval'; approval: Approval; scroll: number; decision?: boolean }
   | {
       kind: 'settings';
       agentId: string;
@@ -994,7 +994,7 @@ export function App({
   // PgUp and PgDn in the skills list move the cursor by what the list shows.
   const skillPage = skillListRows(bodyHeight - 4);
   const connectorIds = CONNECTOR_IDS;
-  const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x'];
+  const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'];
 
   const performSetup = async (step: SetupAction, vmSize?: VmSize) => {
     if (setupRunning.current)
@@ -1269,6 +1269,40 @@ export function App({
       `opened Google sign-in for ${id}${account === DEFAULT_ACCOUNT ? '' : ` (${account})`}`,
     );
 
+  const redditLogin = () =>
+    runAction(() => client.call('services.redditLogin'), 'opened Reddit sign-in in your browser');
+  const importRedditClient = () =>
+    setModal({
+      kind: 'text',
+      title: 'Reddit installed app Client ID',
+      input: '',
+      label:
+        'Use an installed app with approved Reddit Data API access. Register callback ' +
+        'http://127.0.0.1:48174/callback. Paste its Client ID (not a secret or password). ' +
+        'Disconnect Reddit before changing the client. See docs/REDDIT_SETUP.md.',
+      submit: async (clientId) => {
+        if (!/^[A-Za-z0-9_-]{1,256}$/.test(clientId.trim()))
+          throw new Error('BAD_REDDIT_CLIENT_ID');
+        setModal({
+          kind: 'text',
+          title: 'Reddit app developer username',
+          input: '',
+          label:
+            'The Reddit username of the app developer, without u/. Used to identify API requests. ' +
+            'Posts and comments always require your approval.',
+          submit: async (developerUsername) => {
+            await client.call('services.redditClient', {
+              clientId: clientId.trim(),
+              developerUsername: developerUsername.trim(),
+            });
+            refreshSetup();
+            await client.call('services.redditLogin');
+            say('sign in to Reddit in your browser');
+          },
+        });
+      },
+    });
+
   const xLogin = () =>
     runAction(() => client.call('services.xLogin'), 'opened X sign-in in your browser');
   const importXClient = () =>
@@ -1537,6 +1571,7 @@ export function App({
         return setModal({
           kind: 'approval',
           approval: (current === 'approvals' ? chosenApproval : undefined) ?? approvals[0]!,
+          scroll: 0,
         });
       case 'approvals:approve':
       case 'approvals:deny':
@@ -1736,6 +1771,7 @@ export function App({
       case 'connectors:connect':
         if (id) return openConnector(id);
         if (sid === 'x') return setup?.xClient ? xLogin() : importXClient();
+        if (sid === 'reddit') return setup?.redditClient ? redditLogin() : importRedditClient();
         if (sid === 'notion' || sid === 'slack') {
           return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
         }
@@ -1775,6 +1811,8 @@ export function App({
             refreshSetup();
           },
         });
+      case 'connectors:redditClient':
+        return importRedditClient();
       case 'connectors:xClient':
         return importXClient();
       case 'connectors:ghImport':
@@ -1800,8 +1838,12 @@ export function App({
           submit: (profile) => client.call('connectors.awsProfile', { profile }),
         });
       case 'connectors:mode': {
-        if (!sid || !status) return say('select a service (gmail, drive, notion, slack, x) first');
-        if (sid === 'x') return say('X posts always require approval; reads are automatic');
+        if (!sid || !status)
+          return say('select a service (gmail, drive, notion, slack, x, reddit) first');
+        if (sid === 'x' || sid === 'reddit')
+          return say(
+            `${sid === 'x' ? 'X posts' : 'Reddit posts and comments'} always require approval; reads are automatic`,
+          );
         const mode = status.mode === 'ask' ? 'auto' : 'ask';
         return runAction(
           () => client.call('services.setMode', { id: sid, mode }),
@@ -1939,6 +1981,15 @@ export function App({
     if (modal?.kind === 'approval') {
       const { approval } = modal;
       if (key.escape) return setModal(null);
+      if (key.home) return setModal({ ...modal, scroll: 0 });
+      if (key.end) return setModal({ ...modal, scroll: modalMax.current });
+      if (key.upArrow || key.pageUp)
+        return setModal({
+          ...modal,
+          scroll: Math.max(0, modal.scroll - (key.pageUp ? halfPage : 1)),
+        });
+      if (key.downArrow || key.pageDown)
+        return setModal({ ...modal, scroll: down(modal.scroll, key.pageDown ? halfPage : 1) });
       if (ch === 'y' || ch === 'n') return setModal({ ...modal, decision: ch === 'y' });
       if (key.return && modal.decision !== undefined) {
         const allow = modal.decision;
@@ -2450,6 +2501,7 @@ export function App({
                       ['connectors:account', 'another Google account'],
                       ['connectors:googleClient', 'Google client'],
                       ['connectors:xClient', 'X client'],
+                      ['connectors:redditClient', 'Reddit client'],
                     ]
                   : context === 'usage'
                     ? [
@@ -2557,6 +2609,7 @@ export function App({
               keys={{
                 select: `${hint('approvals:approve', 'select approve')} · ${hint('approvals:deny', 'select deny')} · ${hint('approvals:confirm', 'confirm')}`,
                 confirm: hint('approvals:confirm', 'confirm'),
+                open: hint('approvals:open', 'review full content'),
               }}
             />
           ) : current === 'team' ? (
@@ -2943,7 +2996,7 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
               {c.id.padEnd(idWidth)}
               {c.reauthRequired
                 ? 'sign in again'
-                : c.revocationPending && c.id === 'x'
+                : c.revocationPending && (c.id === 'x' || c.id === 'reddit')
                   ? 'revocation pending — disconnect again'
                   : c.connected
                     ? sanitizeLine(c.account ?? 'connected')
@@ -2957,8 +3010,12 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
                           ? setup.xClient
                             ? 'press Enter to sign in with X'
                             : 'needs an X native app Client ID — Enter to configure'
-                          : 'not connected'}
-              {` · writes ${c.id === 'x' ? 'always ask' : c.mode === 'ask' ? 'ask' : 'auto'}`}
+                          : c.id === 'reddit'
+                            ? setup.redditClient
+                              ? 'press Enter to sign in with Reddit'
+                              : 'needs an approved Reddit installed app — Enter to configure'
+                            : 'not connected'}
+              {` · writes ${c.id === 'x' || c.id === 'reddit' ? 'always ask' : c.mode === 'ask' ? 'ask' : 'auto'}`}
             </Text>
             {listAccounts
               ? accounts.map((a) => (
@@ -3405,8 +3462,9 @@ function ModalView({
   if (modal.kind === 'approval') {
     const a = modal.approval;
     const left = Math.max(0, Math.round(a.timeout - (Date.now() - a.createdAt) / 1000));
-    const room = Math.max(3, height - 12);
-    const lines = sanitize(a.summary).split('\n').slice(0, room);
+    const room = Math.max(3, height - 13);
+    const lines = wrap(sanitize(a.summary), Math.max(10, inner));
+    const start = first(modal.scroll, lines.length, room);
     return (
       <Box
         flexDirection="column"
@@ -3426,13 +3484,16 @@ function ModalView({
         <Text dimColor>{`refused automatically in about ${left} s`}</Text>
         <Text> </Text>
         <Box flexDirection="column" height={room}>
-          {lines.map((l, i) => (
+          {lines.slice(start, start + room).map((l, i) => (
             <Text key={i} wrap="truncate">
-              {truncate(l, Math.max(10, width - 6)) || ' '}
+              {l || ' '}
             </Text>
           ))}
         </Box>
         <Box flexGrow={1} />
+        <Text
+          dimColor
+        >{`↑↓ PgUp/PgDn · Home/End · lines ${start + 1}–${Math.min(start + room, lines.length)}/${lines.length}`}</Text>
         <Text dimColor>The content above comes from the agent. This dialog is drawn by Anchi.</Text>
         <Text bold>
           {modal.decision === undefined

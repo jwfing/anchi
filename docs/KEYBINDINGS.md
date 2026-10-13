@@ -88,7 +88,7 @@ Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a fail
 
 - **Runtimes:** s start the VM, I install, u unlock the vault, V initialize a new vault, W share workspaces, i import Codex, c connect Claude Code, h set Hermes's endpoint, r refresh.
 - **Skills:** ↑ ↓ (k j) choose, PgUp PgDn a page, Home End (g G) first and last, a add, u update to the latest commit of its URL, d remove.
-- **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, a another Google account (Gmail, Drive), o your Google OAuth client, x your X native app Client ID, r refresh. X publishing always asks for approval.
+- **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, a another Google account (Gmail, Drive), o your Google OAuth client, x your X native app Client ID, **Shift+R** your Reddit installed app client, r refresh. X and Reddit publishing always ask for approval.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.
 - **Access:** p period (24 hours, 7 days, 30 days), r refresh, ↑ ↓ PgUp PgDn scroll.
 
@@ -122,3 +122,6 @@ Problems are reported, not fatal: the TUI shows how many entries it skipped and 
 Modified keys are read in the usual control-character form, in CSI u form and in xterm modifyOtherKeys form.
 
 Terminals deliver no ⌘ keys to terminal programs, so Anchi binds none. Some multiplexers take keys first: zellij uses Ctrl+P, Ctrl+N and Ctrl+G by default, so inside zellij use the leader bindings or rebind.
+
+In the full approval dialog, **↑/↓**, **PgUp/PgDn**, and **Home/End** scroll the wrapped write
+content. The Approvals list labels shortened content as a preview; **a** opens the full dialog.

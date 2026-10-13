@@ -33,6 +33,18 @@ it('allows X on an agent and refuses automatic publishing', () => {
   expect(() => resolveAgent('social', layout())).toThrow(/X posts always require approval/);
 });
 
+it('allows Reddit on an agent and refuses automatic publishing', () => {
+  write('agents/social.yaml', 'runtime: codex\nconnectors: [reddit]\napprovals: { reddit: ask }\n');
+  expect(resolveAgent('social', layout()).connectors).toEqual(['reddit']);
+  write(
+    'agents/social.yaml',
+    'runtime: codex\nconnectors: [reddit]\napprovals: { reddit: auto }\n',
+  );
+  expect(() => resolveAgent('social', layout())).toThrow(
+    /Reddit posts and comments always require approval/,
+  );
+});
+
 describe('mergeLayers', () => {
   it('merges objects by key and replaces arrays', () => {
     expect(mergeLayers({ a: { x: 1, y: 2 }, l: [1, 2] }, { a: { y: 3 }, l: [9] })).toEqual({

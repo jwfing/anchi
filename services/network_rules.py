@@ -17,12 +17,15 @@ import connectors
 import egress_rules
 import vault
 import x_auth
+import reddit_auth
 
 TARGETS = Path('/run/secure-egress/targets.json')
 # role -> (service user, single allowed host). Connector roles come from the registry.
 ROLES = {
     'auth': ('secure-auth', 'oauth2.googleapis.com'),
     'xauth': ('secure-auth', 'api.x.com'),
+    'redditauth': ('secure-auth', 'www.reddit.com'),
+    'redditidentity': ('secure-auth', 'oauth.reddit.com'),
     **{c.id: (c.user, c.hosts[0]) for c in connectors.CONNECTORS.values()},
 }
 
@@ -91,6 +94,12 @@ def configured(role):
     token, a sign-in in progress or a pending revocation of any account."""
     if role == 'auth':
         return auth.client_source() is not None and auth.google_present(('tokens', 'pending', 'revocation'))
+    if role in ('redditauth', 'redditidentity'):
+        return vault.exists(auth.STORE, reddit_auth.CLIENT) and any(
+            vault.exists(auth.STORE, name) for name in (reddit_auth.TOKENS, reddit_auth.PENDING, reddit_auth.REVOCATION)
+        )
+    if role == 'reddit':
+        return vault.exists(auth.STORE, reddit_auth.TOKENS)
     if role == 'xauth':
         return vault.exists(auth.STORE, x_auth.CLIENT) and any(
             vault.exists(auth.STORE, name) for name in (x_auth.TOKENS, x_auth.PENDING, x_auth.REVOCATION)
@@ -127,7 +136,7 @@ def refresh():
     for role, (_, host) in ROLES.items():
         values = {4: [], 6: []}
         if configured(role):
-            # Auth and X share a hostname. One answer must feed both kernel sets and
+            # Auth and social connectors share hostnames. One answer must feed both kernel sets and
             # the target file, even when DNS rotates its answer between lookups.
             if host not in resolved:
                 try:

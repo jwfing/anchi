@@ -11,22 +11,30 @@ import type {
 import type { Guest } from './guest.ts';
 
 /**
- * Setup of the trusted connector services (Gmail, Drive, Notion, Slack, X), moved from the
+ * Setup of the trusted connector services (Gmail, Drive, Notion, Slack, X, Reddit), moved from the
  * desktop app. Credentials go to the VM over stdin; Google tokens are obtained in the VM from
  * an authorization code, so they never exist on the Mac.
  */
 
-export const SERVICE_IDS: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x'];
+export const SERVICE_IDS: ServiceConnectorId[] = [
+  'gmail',
+  'drive',
+  'notion',
+  'slack',
+  'x',
+  'reddit',
+];
 export const GOOGLE_IDS: ServiceConnectorId[] = ['gmail', 'drive'];
 const SERVICES = '/opt/secure-vm/services';
 const LOGIN_TIMEOUT_MS = 590_000;
 /** X requires an exactly registered callback URL, including the port. */
 export const X_CALLBACK_PORT = 48173;
+export const REDDIT_CALLBACK_PORT = 48174;
 /** A named Google account within Gmail or Drive; `default` is the one used when none is named. */
 export const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 export const DEFAULT_ACCOUNT = 'default';
 
-/** Checks an account name for a Google service; Notion, Slack and X take none. */
+/** Checks an account name for a Google service; Notion, Slack, X and Reddit take none. */
 export function accountArg(id: ServiceConnectorId, account: string | undefined): string[] {
   if (account === undefined) return [];
   if (!GOOGLE_IDS.includes(id)) throw new Error(`${id} has no named accounts`);
@@ -92,6 +100,7 @@ export class ServiceSetup {
     googleClient: boolean;
     googleClientSource: GoogleClientSource;
     xClient: boolean;
+    redditClient: boolean;
   }> {
     const all = await json(this.exec, [`${SERVICES}/admin.py`, 'status']);
     const rules = ((await json(this.exec, [`${SERVICES}/policy_admin.py`, 'rules'])).rules ??
@@ -113,7 +122,10 @@ export class ServiceSetup {
         account: typeof s.account === 'string' ? s.account : null,
         reauthRequired: s.reauth_required === true,
         revocationPending: s.revocation_pending === true,
-        mode: id === 'x' || rules[id] === 'ask' ? ('ask' as const) : ('auto' as const),
+        mode:
+          id === 'x' || id === 'reddit' || rules[id] === 'ask'
+            ? ('ask' as const)
+            : ('auto' as const),
         accounts,
       };
     });
@@ -123,12 +135,13 @@ export class ServiceSetup {
       googleClient: all.client_configured === true,
       googleClientSource: source === 'user' || source === 'builtin' ? source : null,
       xClient: (all.x as Record<string, unknown> | undefined)?.client_configured === true,
+      redditClient: (all.reddit as Record<string, unknown> | undefined)?.client_configured === true,
     };
   }
 
   /** Notion or Slack token, then the account label from the service itself. */
   async setToken(id: ServiceConnectorId, token: string): Promise<void> {
-    if (id === 'x') throw new Error('x connects through X sign-in');
+    if (id === 'x' || id === 'reddit') throw new Error(`${id} connects through browser sign-in`);
     if (id !== 'notion' && id !== 'slack') throw new Error(`${id} connects through Google sign-in`);
     await json(this.exec, [`${SERVICES}/admin.py`, 'import-token', id], JSON.stringify({ token }));
     await this.probe(id);
@@ -160,7 +173,8 @@ export class ServiceSetup {
 
   /** `auto`: standing authorization. `ask`: every write waits for approval in the TUI. */
   async setMode(id: ServiceConnectorId, mode: 'auto' | 'ask'): Promise<void> {
-    if (id === 'x' && mode !== 'ask') throw new Error('X_WRITES_REQUIRE_APPROVAL');
+    if ((id === 'x' || id === 'reddit') && mode !== 'ask')
+      throw new Error(`${id.toUpperCase()}_WRITES_REQUIRE_APPROVAL`);
     await json(this.exec, [`${SERVICES}/policy_admin.py`, 'mode', id, mode]);
   }
 
@@ -183,6 +197,21 @@ export class ServiceSetup {
       [`${SERVICES}/admin.py`, 'import-client', 'x'],
       JSON.stringify({ client_id: clientId }),
     );
+  }
+
+  async setRedditClient(clientId: string, developerUsername: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(clientId)) throw new Error('BAD_REDDIT_CLIENT_ID');
+    if (!/^[A-Za-z0-9_-]{3,20}$/.test(developerUsername))
+      throw new Error('BAD_REDDIT_DEVELOPER_USERNAME');
+    await json(
+      this.exec,
+      [`${SERVICES}/admin.py`, 'import-client', 'reddit'],
+      JSON.stringify({ client_id: clientId, developer_username: developerUsername }),
+    );
+  }
+
+  async redditLogin(): Promise<string> {
+    return this.oauthLogin('reddit', undefined, REDDIT_CALLBACK_PORT);
   }
 
   async xLogin(): Promise<string> {
@@ -284,7 +313,7 @@ export class ServiceSetup {
           [`${SERVICES}/admin.py`, 'complete', id, ...named],
           JSON.stringify(callback),
         );
-        if (id !== 'x') await this.probe(id, account);
+        if (GOOGLE_IDS.includes(id)) await this.probe(id, account);
         this.onLogin({ ...who, ok: true });
       } catch (err) {
         this.onLogin({ ...who, ok: false, error: (err as Error).message });

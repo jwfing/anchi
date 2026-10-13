@@ -167,6 +167,31 @@ class ServerTests(unittest.TestCase):
             'LEDGER_UNAVAILABLE',
         )
 
+    def test_reddit_uid_cannot_fetch_other_credentials_or_accept_a_forged_agent(self):
+        reddit_uid = 1006
+        uids = {**SERVICE_UIDS, reddit_uid: 'reddit'}
+        service = server.Service('auth', uids, cell_uid=CELL_UID, clock=Clock())
+        called = []
+        service.handler = lambda request, caller: called.append(caller) or {}
+        for op in ('token', 'egress_credential', 'codex_token', 'claude_token'):
+            self.assertEqual(self.request(service, reddit_uid, {'op': op})['error'], 'CREDENTIAL_SCOPE_DENIED')
+        self.assertEqual(called, [])
+        self.assertTrue(self.request(service, reddit_uid, {'op': 'access_token'})['ok'])
+        connector = server.Service('reddit', uids, cell_uid=CELL_UID, clock=Clock())
+        for uid, request in (
+            (STRANGER_UID, {'op': 'status'}),
+            (CELL_UID, {'op': 'comment', 'agent': 'other', 'text': 'hi', 'parent': 't3_test'}),
+            (EGRESS_UID, {'op': 'comment', 'agent': '../other', 'text': 'hi', 'parent': 't3_test'}),
+        ):
+            self.assertFalse(self.request(connector, uid, request)['ok'])
+        connector.writes_ready = False
+        self.assertEqual(
+            self.request(connector, EGRESS_UID, {'op': 'comment', 'agent': 'dev', 'text': 'hi', 'parent': 't3_test'})[
+                'error'
+            ],
+            'LEDGER_UNAVAILABLE',
+        )
+
     def test_utf8_wire_is_bounded_by_bytes_not_escapes(self):
         service = self.service('gmail', lambda request: {'text': request['text']})
         text = '你' * 20000  # 60000 UTF-8 bytes; ASCII escaping would need 120000

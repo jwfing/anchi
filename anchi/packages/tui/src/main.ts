@@ -897,7 +897,7 @@ setup
     }),
   );
 
-const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack', 'x'] as const;
+const SERVICE_IDS = ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'] as const;
 type ServiceId = (typeof SERVICE_IDS)[number];
 const isService = (id: string): id is ServiceId => (SERVICE_IDS as readonly string[]).includes(id);
 
@@ -923,7 +923,7 @@ setup
 setup
   .command('service <id>')
   .description(
-    'Connect gmail, drive or x (browser sign-in), or notion or slack (token, without echo)',
+    'Connect gmail, drive, x or reddit (browser sign-in), or notion or slack (token, without echo)',
   )
   .option(
     '--account <name>',
@@ -931,7 +931,24 @@ setup
   )
   .action((id: string, opts: { account?: string }) =>
     withClient(async (client) => {
-      if (!isService(id)) fail('service must be gmail, drive, notion, slack or x');
+      if (!isService(id)) fail('service must be gmail, drive, notion, slack, x or reddit');
+      if (id === 'reddit') {
+        if (opts.account) fail('--account applies to gmail and drive');
+        const status = await client.call('setup.status');
+        if (!status.redditClient) {
+          if (!process.stdin.isTTY)
+            fail(
+              'Configure Reddit first: anchi setup reddit-client <client-id> <developer-username>',
+            );
+          console.log(
+            'Reddit requires approved Data API access and an installed app. Callback: http://127.0.0.1:48174/callback',
+          );
+          await client.call('services.redditClient', {
+            clientId: (await ask('Reddit installed app Client ID: ')).trim(),
+            developerUsername: (await ask('App developer Reddit username (without u/): ')).trim(),
+          });
+        }
+      }
       if (id === 'x') {
         if (opts.account) fail('--account applies to gmail and drive');
         const status = await client.call('setup.status');
@@ -963,13 +980,27 @@ setup
       const { url } =
         id === 'x'
           ? await client.call('services.xLogin')
-          : await client.call('services.googleLogin', { id, account: opts.account });
+          : id === 'reddit'
+            ? await client.call('services.redditLogin')
+            : await client.call('services.googleLogin', { id, account: opts.account });
       console.log(
-        `Sign in to ${id === 'x' ? 'X' : 'Google'} in your browser. If it did not open:\n${url}`,
+        `Sign in to ${id === 'x' ? 'X' : id === 'reddit' ? 'Reddit' : 'Google'} in your browser. If it did not open:\n${url}`,
       );
       const r = await done;
       if (!r.ok) fail(r.error ?? 'sign-in failed');
       console.log(`${id} connected${opts.account ? ` (account ${opts.account})` : ''}`);
+    }),
+  );
+
+setup
+  .command('reddit-client <client-id> <developer-username>')
+  .description(
+    'Store an approved Reddit installed app client; callback http://127.0.0.1:48174/callback',
+  )
+  .action((clientId: string, developerUsername: string) =>
+    withClient(async (client) => {
+      await client.call('services.redditClient', { clientId, developerUsername });
+      console.log('Reddit client stored. Run anchi setup service reddit to sign in.');
     }),
   );
 

@@ -151,6 +151,7 @@ export async function setupStatus(
     services: [],
     googleClient: false,
     xClient: false,
+    redditClient: false,
     googleClientSource: null,
     workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
@@ -180,6 +181,7 @@ export async function setupStatus(
       services: [],
       googleClient: false,
       xClient: false,
+      redditClient: false,
       googleClientSource: null,
     };
     const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
@@ -205,6 +207,7 @@ export async function setupStatus(
       services: svc.services,
       googleClient: svc.googleClient,
       xClient: svc.xClient,
+      redditClient: svc.redditClient,
       googleClientSource: svc.googleClientSource,
       workspaces,
       guestVersion,

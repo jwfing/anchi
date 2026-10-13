@@ -286,7 +286,7 @@ def main():
         stop(b)
 
     # ── service connectors are reached through the per-cell bridge ──
-    c, ready_c = start('chk-c', 'chk-gamma', 'gmail,x')
+    c, ready_c = start('chk-c', 'chk-gamma', 'gmail,x,reddit')
     try:
         _, listing = sh(
             'chk-c',
@@ -296,7 +296,7 @@ def main():
         )
         check(
             'a cell reaches only its own connector services, through the bridge',
-            ready_c and listing.split() == ['gmail', 'x', 'socket', '0'],
+            ready_c and listing.split() == ['gmail', 'reddit', 'x', 'socket', '0'],
             listing[:80],
         )
     finally:

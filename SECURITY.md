@@ -29,6 +29,24 @@ In either mode, an agent's own tool calls inside its cell (shell, files, network
 
 ## Authentication and connectors
 
+Reddit uses a separate trusted service (`secure-reddit`) with only `oauth.reddit.com` egress.
+An approved installed app starts authorization-code sign-in with one-time state and the fixed
+callback `http://127.0.0.1:48174/callback`; this provider flow does not use PKCE. The Client ID
+and developer username identify the app; no password, client secret or browser cookie is
+imported. The host sends the code on stdin. Only `secure-auth` exchanges, refreshes or revokes
+tokens, at `www.reddit.com`, and verifies the account at `oauth.reddit.com`. Separate auth roles
+open those destinations only while a flow, credential or revocation exists. Scopes are exactly
+`identity`, `read`, `submit`; only the Reddit service UID gets its access token, never refresh
+tokens. Disconnect holds the refresh lock and retains failed revocation for retry.
+
+Reddit exposes bounded list/search/read/comment-tree tools and text self posts/comments.
+All publishing requires exact-content approval of the verified account, full content and
+subreddit/title or parent id, bound to the connection generation. An old `auto` rule cannot
+bypass that gate. Reads are automatic; fields and output bytes are bounded and marked untrusted.
+HTTP 200 API errors are checked explicitly; ambiguous writes remain UNKNOWN in the shared
+ledger and are not replayed. Reddit content can persist in task histories and model sessions;
+there is no automatic deletion synchronization with Reddit.
+
 X is a trusted connector service (`secure-x`) with access only to `api.x.com`. A user-supplied
 native public Client ID starts PKCE sign-in with state and the fixed loopback callback
 `http://127.0.0.1:48173/callback`. Authorization codes reach the VM on stdin; access and refresh

@@ -583,6 +583,36 @@ describe('connector tools', () => {
     expect(requests[0]).toMatchObject({ op: 'post', text: 'hello', reply_to: '123' });
     expect(requests[0]).not.toHaveProperty('account_id');
   });
+  it('offers bounded Reddit tools and keeps a comment request stable while approval is pending', async () => {
+    const names = CONNECTOR_TOOLS.filter((t) => t.connector === 'reddit').map((t) => t.name);
+    expect(names).toEqual([
+      'reddit_list',
+      'reddit_search',
+      'reddit_read',
+      'reddit_comments',
+      'reddit_submit',
+      'reddit_comment',
+    ]);
+    const tool = CONNECTOR_TOOLS.find((t) => t.name === 'reddit_comment')!;
+    const requests: Record<string, unknown>[] = [];
+    await callConnector(
+      tool,
+      { text: 'hello', parent: 't3_abc', account_id: 'forged' },
+      {
+        call: async (path, request) => {
+          expect(path).toBe('/run/anchi/connectors/reddit/api.sock');
+          requests.push({ ...request });
+          if (requests.length === 1) throw new Error('APPROVAL_REQUIRED:' + 'a'.repeat(32));
+          return { id: '456' };
+        },
+        wait: async () => {},
+      },
+    );
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toEqual(requests[1]);
+    expect(requests[0]).toMatchObject({ op: 'comment', text: 'hello', parent: 't3_abc' });
+    expect(requests[0]).not.toHaveProperty('account_id');
+  });
   it('keeps one request id while a write waits for approval', async () => {
     const tool = CONNECTOR_TOOLS.find((t) => t.name === 'notion_create_page')!;
     const requests: Record<string, unknown>[] = [];

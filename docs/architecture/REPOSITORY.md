@@ -15,9 +15,9 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `services/egress_rules.py`, `egress_proxy.py` | Egress proxy: injection, deny, write, high-risk, egress and poll rules independent of mitmproxy (with `aws-chunked` re-signing), and the mitmproxy addon with per-cell sockets, the connector bridge, the approval queue and connector verification |
 | `services/connectors.py` | Connector service registry |
 | `services/ledger.py`, `connector_base.py` | Shared execution ledger and connector read/write flow |
-| `services/drive.py`, `notion.py`, `slack.py`, `gmail.py`, `x_connector.py` | Provider handlers |
+| `services/drive.py`, `notion.py`, `slack.py`, `gmail.py`, `x_connector.py`, `reddit_connector.py` | Provider handlers |
 | `services/connector_admin.py` | Account probes and disconnect |
-| `services/auth.py`, `x_auth.py`, `vault.py`, `policy.py`, `server.py` and `*_admin.py` | Vault, credential service, policy service and their administration |
+| `services/auth.py`, `x_auth.py`, `reddit_auth.py`, `vault.py`, `policy.py`, `server.py` and `*_admin.py` | Vault, credential service, policy service and their administration |
 | `guest/` | VM bring-up (`bootstrap.sh`), service and agent-team installers, live checks; `cell.env` owns UID and version pins, `arch.sh` maps architecture |
 | `systemd/`, `lima/` | Service identities, sockets, resource limits and the outer VM |
 | `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.py`) and explicit live checks |

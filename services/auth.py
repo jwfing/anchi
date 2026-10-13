@@ -143,10 +143,11 @@ def account_status(connector, account):
 
 
 def connector_status(connector, account=None):
-    if connector == 'x':
+    if connector in ('x', 'reddit'):
         import x_auth
+        import reddit_auth
 
-        return x_auth.status()
+        return (x_auth if connector == 'x' else reddit_auth).status()
     if connector in GOOGLE:
         spec = GOOGLE[connector]
         common = {'scope_text': ' '.join(sorted(spec['scopes'])), 'auth': 'google'}
@@ -210,7 +211,7 @@ def status(connector=None):
         return aws_status()
     if connector:
         return connector_status(connector)
-    value = {name: connector_status(name) for name in (*GOOGLE, *TOKENS, 'x')}
+    value = {name: connector_status(name) for name in (*GOOGLE, *TOKENS, 'x', 'reddit')}
     value['aws'] = aws_status()
     value['client_source'] = client_source()
     value['client_configured'] = value['client_source'] is not None
@@ -492,12 +493,13 @@ def handle(request, caller):
             token = access_token(caller, account)
             generation = read(google_file(caller, 'tokens', account))['generation']
             return {'access_token': token, 'account_generation': generation}
-        if op == 'access_token' and caller == 'x':
+        if op == 'access_token' and caller in ('x', 'reddit'):
             import x_auth
+            import reddit_auth
 
             if 'connector' in request:
                 raise Denied('BAD_REQUEST')
-            return x_auth.credential()
+            return (x_auth if caller == 'x' else reddit_auth).credential()
         if op == 'token' and caller in TOKENS:
             value = read(TOKENS[caller]['file'])
             return {'token': value['token'], 'account_generation': value['generation']}

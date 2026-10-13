@@ -341,40 +341,23 @@ Usage: anchi setup [options] [command]
 Runtime and connector setup
 
 Commands:
-  prepare [options]               Prepare the environment, credential storage
-                                  and one runtime; resume completed steps
-  status [options]                VM, vault, runtimes, connectors and services
-                                  at a glance
-  codex [options]                 Import the Codex login from ~/.codex/auth.json
-                                  into the VM vault
-  claude                          Store a `claude setup-token` token or an
-                                  Anthropic API key in the VM vault
-  hermes [options]                Store Hermes's OpenAI-compatible endpoint, API
-                                  key and default model in the VM vault
-  workspaces [options]            Share ~/AnchiWorkspaces with the VM (macOS and
-                                  Linux; restarts the VM once)
-  vm                              Start the VM
-  install [options]               Create or update the VM, install the services
-                                  and build the base image
-  vault <action>                  init or unlock the VM vault with the key in
-                                  ~/.config/anchi/vault.key
-  connector [options] <id>        Connect github, aws, linear, posthog, sentry,
-                                  firecrawl, figma or discord (secrets are read
-                                  without echo)
-  disconnect [options] <id>       Remove a connector or service credential from
-                                  the vault (Google accounts are revoked too)
-  service [options] <id>          Connect gmail, drive or x (browser sign-in),
-                                  or notion or slack (token, without echo)
-  x-client <client-id>            Store an X native app Client ID; register
-                                  http://127.0.0.1:48173/callback in X
-  google-client [options] [path]  Store your own Google Cloud Desktop app OAuth
-                                  client JSON (Gmail and Drive); it overrides
-                                  the built-in client
-  reset [options]                 Back to a first launch: delete the VM with
-                                  everything in it (--all: also the vault key
-                                  and the Anchi home)
-  service-mode <id> <mode>        Writes of a service: auto, or ask (X always
-                                  requires approval)
+  prepare [options]                               Prepare the environment, credential storage and one runtime; resume completed steps
+  status [options]                                VM, vault, runtimes, connectors and services at a glance
+  codex [options]                                 Import the Codex login from ~/.codex/auth.json into the VM vault
+  claude                                          Store a `claude setup-token` token or an Anthropic API key in the VM vault
+  hermes [options]                                Store Hermes's OpenAI-compatible endpoint, API key and default model in the VM vault
+  workspaces [options]                            Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)
+  vm                                              Start the VM
+  install [options]                               Create or update the VM, install the services and build the base image
+  vault <action>                                  init or unlock the VM vault with the key in ~/.config/anchi/vault.key
+  connector [options] <id>                        Connect github, aws, linear, posthog, sentry, firecrawl, figma or discord (secrets are read without echo)
+  disconnect [options] <id>                       Remove a connector or service credential from the vault (Google accounts are revoked too)
+  service [options] <id>                          Connect gmail, drive, x or reddit (browser sign-in), or notion or slack (token, without echo)
+  reddit-client <client-id> <developer-username>  Store an approved Reddit installed app client; callback http://127.0.0.1:48174/callback
+  x-client <client-id>                            Store an X native app Client ID; register http://127.0.0.1:48173/callback in X
+  google-client [options] [path]                  Store your own Google Cloud Desktop app OAuth client JSON (Gmail and Drive); it overrides the built-in client
+  reset [options]                                 Back to a first launch: delete the VM with everything in it (--all: also the vault key and the Anchi home)
+  service-mode <id> <mode>                        Writes of a service: auto, or ask (X always requires approval)
 ```
 
 #### `anchi setup prepare`
@@ -506,13 +489,22 @@ Options:
 ```text
 Usage: anchi setup service [options] <id>
 
-Connect gmail, drive or x (browser sign-in), or notion or slack (token, without
-echo)
+Connect gmail, drive, x or reddit (browser sign-in), or notion or slack (token,
+without echo)
 
 Options:
   --account <name>  gmail or drive: name this Google account (e.g. work) to
                     connect more than one; agents pick it with accounts: {
                     gmail: work }
+```
+
+#### `anchi setup reddit-client`
+
+```text
+Usage: anchi setup reddit-client [options] <client-id> <developer-username>
+
+Store an approved Reddit installed app client; callback
+http://127.0.0.1:48174/callback
 ```
 
 #### `anchi setup x-client`
