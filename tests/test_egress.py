@@ -773,7 +773,9 @@ class RegistryTests(unittest.TestCase):
             result = await registry.register({'task': 't1', 'agent': 'dev', 'connectors': ['github']})
             self.assertEqual(registry.cells['t1'].grants, frozenset({'github', 'codex'}))
             sock = Path(result['directory']) / 'proxy.sock'
-            self.assertEqual(oct(sock.stat().st_mode & 0o777), '0o666')
+            # The cell's user connects through its group; no other VM user can.
+            self.assertEqual(oct(sock.stat().st_mode & 0o777), '0o660')
+            self.assertEqual(oct(sock.parent.stat().st_mode & 0o777), '0o750')
             reader, writer = await asyncio.open_unix_connection(str(sock))
             writer.write(b'ping\n')
             await writer.drain()
@@ -783,6 +785,35 @@ class RegistryTests(unittest.TestCase):
             await registry.unregister('t1')
             self.assertFalse(sock.parent.exists())
             server.close()
+
+        asyncio.run(scenario())
+
+    def test_cell_directories_and_sockets_belong_to_the_cells_group(self):
+        """The service runs with UMask=0077. A cell reaches its sockets through the cells' group;
+        the connector services, which are not in it, cannot connect as a cell."""
+        import os
+
+        groups = [g for g in os.getgroups() if g != os.getgid()]
+        if not groups:
+            self.skipTest('needs a supplementary group to hand files to')
+        # Unix socket paths are short-lived and short: macOS caps them at 104 bytes.
+        cells = Path(tempfile.mkdtemp(prefix='c', dir='/tmp'))
+        self.addCleanup(shutil.rmtree, cells, True)
+
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            with patch.object(self.module, 'peer_gid', lambda: groups[0]), patch.object(self.module, 'CELLS', cells):
+                result = await registry.register({'task': 'tg', 'agent': 'a', 'connectors': [], 'services': ['gmail']})
+            directory = Path(result['directory'])
+            for path, mode in (
+                (directory, '0o750'),
+                (directory / 'proxy.sock', '0o660'),
+                (directory / 'connectors', '0o750'),
+                (directory / 'connectors/gmail', '0o750'),
+                (directory / 'connectors/gmail/api.sock', '0o660'),
+            ):
+                self.assertEqual((oct(path.stat().st_mode & 0o777), path.stat().st_gid), (mode, groups[0]), path)
+            await registry.unregister('tg')
 
         asyncio.run(scenario())
 
