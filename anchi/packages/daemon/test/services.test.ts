@@ -85,6 +85,76 @@ describe('service connectors', () => {
       mode: 'ask',
     });
   });
+  it('signs in to Reddit on the registered callback, rejects forged callbacks and sends the code on stdin', async () => {
+    const { guest, execs } = fakeGuest((args) =>
+      args[2] === 'begin'
+        ? { url: 'https://www.reddit.com/api/v1/authorize?test', state: 'expected' }
+        : { connected: true },
+    );
+    const results: unknown[] = [];
+    const s = new ServiceSetup(
+      guest,
+      (r) => results.push(r),
+      () => {},
+    );
+    try {
+      await s.setRedditClient('test-client', 'developer');
+      const imported = execs.at(-1)!;
+      expect(imported.args.slice(-2)).toEqual(['import-client', 'reddit']);
+      expect(JSON.parse(imported.stdin)).toEqual({
+        client_id: 'test-client',
+        developer_username: 'developer',
+      });
+      await expect(s.setMode('reddit', 'auto')).rejects.toThrow('REDDIT_WRITES_REQUIRE_APPROVAL');
+      expect(await s.redditLogin()).toContain('https://www.reddit.com/');
+      const redirect = JSON.parse(execs.find((e) => e.args[2] === 'begin')!.stdin).redirect_uri;
+      expect(redirect).toBe('http://127.0.0.1:48174/callback');
+      for (const query of [
+        'state=wrong&code=c',
+        'state=expecté&code=c',
+        'state=expected&state=expected&code=c',
+      ]) {
+        expect((await fetch(`${redirect}?${query}`)).status).toBe(400);
+      }
+      expect((await fetch(`${redirect}?state=expected&code=c`, { method: 'POST' })).status).toBe(
+        400,
+      );
+      expect(execs.some((e) => e.args[2] === 'complete')).toBe(false);
+      expect((await fetch(`${redirect}?state=expected&code=test-code`)).status).toBe(200);
+      await vi.waitFor(() => expect(results).toEqual([{ id: 'reddit', ok: true }]));
+      const completed = execs.find((e) => e.args[2] === 'complete')!;
+      expect(completed.args.slice(-2)).toEqual(['complete', 'reddit']);
+      expect(JSON.parse(completed.stdin)).toEqual({ code: 'test-code', state: 'expected' });
+      expect(completed.args.join(' ')).not.toContain('test-code');
+    } finally {
+      s.stop();
+    }
+  });
+
+  it('reports Reddit client, account, reauthorization and pending revocation without secrets', async () => {
+    const { guest } = fakeGuest((args) =>
+      args[1]!.endsWith('policy_admin.py')
+        ? { rules: { reddit: 'auto' } }
+        : {
+            reddit: {
+              connected: true,
+              account: 'u/example',
+              client_configured: true,
+              reauth_required: true,
+              revocation_pending: true,
+            },
+          },
+    );
+    const status = await new ServiceSetup(guest).status();
+    expect(status.redditClient).toBe(true);
+    expect(status.services.find((s) => s.id === 'reddit')).toMatchObject({
+      connected: true,
+      account: 'u/example',
+      reauthRequired: true,
+      revocationPending: true,
+      mode: 'ask',
+    });
+  });
   it('reports status and modes, and keeps tokens off the Google connectors', async () => {
     const { guest } = fakeGuest((args) =>
       args[1]!.endsWith('policy_admin.py')

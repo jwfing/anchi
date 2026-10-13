@@ -1136,6 +1136,20 @@ export class Daemon {
       await this.services.setGoogleClient(str(json, 'client JSON', 16_384));
       return null;
     },
+    'services.redditClient': async (params) => {
+      const { clientId, developerUsername } = z
+        .strictObject({
+          clientId: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/),
+          developerUsername: z.string().regex(/^[A-Za-z0-9_-]{3,20}$/),
+        })
+        .parse(params);
+      await this.services.setRedditClient(clientId, developerUsername);
+      return null;
+    },
+    'services.redditLogin': async (params) => {
+      z.strictObject({}).parse(params);
+      return { url: await this.services.redditLogin() };
+    },
     'services.xClient': async (params) => {
       const { clientId } = z
         .strictObject({ clientId: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/) })

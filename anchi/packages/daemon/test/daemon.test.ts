@@ -221,7 +221,17 @@ class FakeTransport implements GuestTransport {
                         account_label: '@example',
                       },
                     }
-                  : { operation: 'notion.create_page', params: { title: 'Notes' } },
+                  : this.policyConnector === 'reddit'
+                    ? {
+                        operation: 'reddit.comment',
+                        params: {
+                          parent: 't3_post',
+                          text: 'A Reddit draft',
+                          account_id: 'abc',
+                          account_label: 'u/example',
+                        },
+                      }
+                    : { operation: 'notion.create_page', params: { title: 'Notes' } },
             })
           : { code: 1, stdout: '{"error":"APPROVAL_NOT_FOUND"}', stderr: '' };
       }
@@ -410,6 +420,55 @@ describe('daemon tasks', () => {
       });
       await expect(client.call('services.setMode', { id: 'x', mode: 'auto' })).rejects.toThrow(
         'X_WRITES_REQUIRE_APPROVAL',
+      );
+    } finally {
+      login.mockRestore();
+    }
+  });
+  it('validates Reddit setup RPCs before touching the guest', async () => {
+    const { client } = await start();
+    const login = vi
+      .spyOn(ServiceSetup.prototype, 'redditLogin')
+      .mockResolvedValue('https://www.reddit.com/api/v1/authorize?test');
+    try {
+      const before = transport.execs.length;
+      await expect(
+        client.call('services.redditClient', {
+          clientId: 'bad\nclient',
+          developerUsername: 'developer',
+        }),
+      ).rejects.toThrow();
+      await expect(
+        client.call('services.redditClient', {
+          clientId: 'test',
+          developerUsername: 'developer',
+          secret: 'forged',
+        } as never),
+      ).rejects.toThrow();
+      const uncheckedCall = client.call.bind(client) as (
+        method: string,
+        params: unknown,
+      ) => Promise<unknown>;
+      await expect(
+        uncheckedCall('services.redditLogin', { redirect: 'https://evil.test' }),
+      ).rejects.toThrow();
+      expect(transport.execs).toHaveLength(before);
+      expect(login).not.toHaveBeenCalled();
+      await client.call('services.redditClient', {
+        clientId: 'test-client',
+        developerUsername: 'developer',
+      });
+      const sent = transport.execs.at(-1)!;
+      expect(sent.args.slice(-2)).toEqual(['import-client', 'reddit']);
+      expect(JSON.parse(sent.stdin)).toEqual({
+        client_id: 'test-client',
+        developer_username: 'developer',
+      });
+      expect(await client.call('services.redditLogin')).toEqual({
+        url: 'https://www.reddit.com/api/v1/authorize?test',
+      });
+      await expect(client.call('services.setMode', { id: 'reddit', mode: 'auto' })).rejects.toThrow(
+        'REDDIT_WRITES_REQUIRE_APPROVAL',
       );
     } finally {
       login.mockRestore();
@@ -1186,7 +1245,7 @@ describe('daemon tasks', () => {
     expect(shown).toHaveLength(1);
   });
 
-  it.each(['notion', 'x'])(
+  it.each(['notion', 'x', 'reddit'])(
     'shows %s writes held by the policy service, verified there',
     async (connector) => {
       transport.policyConnector = connector;
@@ -1204,13 +1263,26 @@ describe('daemon tasks', () => {
       expect(a).toMatchObject({
         kind: 'policy',
         connector,
-        operation: connector === 'x' ? 'x.post' : 'notion.create_page',
+        operation:
+          connector === 'x'
+            ? 'x.post'
+            : connector === 'reddit'
+              ? 'reddit.comment'
+              : 'notion.create_page',
         agent: 'writer',
       });
       expect(a!.summary).toContain(
-        connector === 'x' ? '"account_label": "@example"' : '"title": "Notes"',
+        connector === 'x'
+          ? '"account_label": "@example"'
+          : connector === 'reddit'
+            ? '"account_label": "u/example"'
+            : '"title": "Notes"',
       );
       if (connector === 'x') expect(a!.summary).toContain('A draft to publish');
+      if (connector === 'reddit') {
+        expect(a!.summary).toContain('A Reddit draft');
+        expect(a!.summary).toContain('t3_post');
+      }
       // An id the policy service does not know, or a connector the agent lacks, is refused.
       expect((await turn('writer', pending('e'.repeat(32)))).ok).toBe(false);
       expect((await turn('writer', pending('c'.repeat(32), 'gmail'))).error).toMatch(

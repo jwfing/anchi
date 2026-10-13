@@ -13,7 +13,7 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 | Approvals | ^X 5 | Every write waiting for your decision; ↑ ↓ choose, y / n select, Enter confirms, a the full dialog, o the write's task |
 | Configure → Runtimes | ^X 1 | s start the VM, I install/update, u unlock the vault, V new vault, W share workspaces, i Codex, c Claude Code, h Hermes, r refresh |
 | Configure → Skills | ^X 1, ↓ | One line per skill: ↑ ↓ choose, PgUp PgDn page, Home End (g G) first and last; a add (directory or GitHub URL), u update after reviewing which files are added, changed or removed, d remove |
-| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client, x X native app Client ID; X publishing always asks |
+| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client, x X native app Client ID, Shift+R Reddit installed app client; X and Reddit publishing always ask |
 | Configure → Usage | ^X 1, ↓↓↓ | Tokens and subscription limits; p period, b group by agent, model, runtime or day, r refresh |
 | Configure → Access | ^X 1, ↓↓↓↓ | Hosts, injections and refusals per agent; p period, r refresh |
 | Agents | ^X 2 | An agent's view lists its tasks; its input starts a new task |
@@ -42,3 +42,6 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 Key bindings can be changed in `~/.anchi/keybindings.json` (`anchi keys init` writes one; `anchi keys` shows the result). The full list is `docs/KEYBINDINGS.md` in the Anchi repository.
 
 In the TUI, security decisions (builder proposals, settings changes, approvals, deletions, secret input) are full-screen dialogs drawn by Anchi, which agent output cannot imitate. They are not the only way: the CLI makes the same changes without a dialog (`anchi approve`/`deny`, `agents allow-host`, `agents rm -y`, `skills add`/`update`/`rm`, `setup service-mode`), and so does editing agent files or `settings.yaml`. An agent operating Anchi must still follow the rules in SKILL.md before using any of them.
+
+The full approval dialog (**^X a**, or **a** in Approvals) wraps long content. Use arrows,
+PgUp/PgDn or Home/End to inspect it before selecting y/n and confirming with Enter.

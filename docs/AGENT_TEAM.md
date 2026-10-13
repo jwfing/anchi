@@ -1,6 +1,6 @@
 # Agent team
 
-Anchi runs a secured team of Codex, Claude Code and Hermes agents. Each task runs in a disposable cell inside the `anchi-vm` VM, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the VM vault: an egress proxy adds GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion and Slack. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
+Anchi runs a secured team of Codex, Claude Code and Hermes agents. Each task runs in a disposable cell inside the `anchi-vm` VM, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the VM vault: an egress proxy adds GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion, Slack, X and Reddit. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
 
 ## Install
 
@@ -14,6 +14,10 @@ can remain alive for 10 minutes after a task turn; an image build under way coun
 cannot recover stored credentials. `anchi daemon install` starts the daemon at login.
 
 ## Connect accounts
+
+For Reddit, see [Reddit setup](REDDIT_SETUP.md): use an approved Data API installed app, sign in
+in the browser and enable `reddit` for the agent. Reads are bounded; posts and comments always
+wait for approval of the full content, destination and verified account.
 
 For X, see [X setup](X_SETUP.md): configure your native app Client ID, authorize in the browser,
 and enable `x` for the agent. Reading/search/mentions are bounded; publishing text or replies

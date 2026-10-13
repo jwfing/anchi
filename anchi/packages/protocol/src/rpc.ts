@@ -172,7 +172,7 @@ export interface HermesAccountStatus {
 }
 
 /** Connectors served by trusted services in the VM (formerly set up in the desktop app). */
-export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack' | 'x';
+export type ServiceConnectorId = 'gmail' | 'drive' | 'notion' | 'slack' | 'x' | 'reddit';
 
 /** A named Google account of Gmail or Drive (`default` unless the user named it). */
 export interface ServiceAccountStatus {
@@ -246,6 +246,8 @@ export interface SetupStatus {
   googleClient: boolean;
   /** A user-supplied X native app Client ID is stored in the vault. */
   xClient?: boolean;
+  /** A Reddit installed app Client ID and developer username are stored in the vault. */
+  redditClient?: boolean;
   /** Where that client comes from; optional for clients connected to an older daemon. */
   googleClientSource?: GoogleClientSource;
   /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
@@ -288,12 +290,12 @@ export type ConnectorSecret =
 
 /**
  * A write held by the egress proxy until the user decides (agent `approvals: {x: ask}`).
- * `summary` shows what would be written: git refs, or the start of the request body. It is
- * agent-originated text.
+ * `summary` is the full frozen parameters for a policy write (at most 64 KiB UTF-8), or
+ * git refs / a request body preview for a proxy write. It is agent-originated text.
  */
 export interface Approval {
   id: string;
-  /** `proxy`: a held HTTP write. `policy`: a connector service write (Gmail, Drive, Notion, Slack, X). */
+  /** `proxy`: a held HTTP write. `policy`: a connector service write (Drive, Notion, Slack, X, Reddit). */
   kind: 'proxy' | 'policy';
   task: string;
   agent: string;
@@ -758,6 +760,10 @@ export interface Methods {
   'services.xClient': [{ clientId: string }, null];
   /** X PKCE sign-in, fixed loopback callback; access and refresh tokens stay in the VM. */
   'services.xLogin': [Record<string, never>, { url: string }];
+  /** Reddit installed public client; refuses replacement until disconnected. */
+  'services.redditClient': [{ clientId: string; developerUsername: string }, null];
+  /** Reddit code sign-in with fixed loopback callback; tokens stay in the VM. */
+  'services.redditLogin': [Record<string, never>, { url: string }];
   /** Starts Google sign-in; returns the URL (also opened in the browser). Ends with `oauth`. */
   'services.googleLogin': [{ id: ServiceConnectorId; account?: string }, { url: string }];
   /**
@@ -787,7 +793,7 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
-  /** A Google or X sign-in finished. */
+  /** A Google, X or Reddit sign-in finished. */
   oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
   /** One line of `setup.reset` output (host command output; sanitize for display). */
   reset: { line: string };

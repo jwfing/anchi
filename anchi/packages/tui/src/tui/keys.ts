@@ -156,6 +156,10 @@ export const ACTIONS = {
     title: 'Google OAuth client: use your own, or go back to the built-in one',
     contexts: ['connectors'],
   },
+  'connectors:redditClient': {
+    title: 'Reddit: configure your installed app client',
+    contexts: ['connectors'],
+  },
   'connectors:xClient': {
     title: 'X: configure your native app Client ID',
     contexts: ['connectors'],
@@ -346,6 +350,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     a: 'connectors:account',
     o: 'connectors:googleClient',
     x: 'connectors:xClient',
+    R: 'connectors:redditClient',
     r: 'setup:refresh',
   },
 };

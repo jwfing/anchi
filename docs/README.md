@@ -13,7 +13,8 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | [Roadmap](ROADMAP.md) | Current priorities, preview status and contribution routes |
 | [Agent team](AGENT_TEAM.md) | Connect accounts; create, configure and delete agents; delegation, approvals, egress, triggers, skills, workspaces and tasks |
 | [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
-| [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, Slack and X operations, scopes, and authorization |
+| [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, Slack, X and Reddit operations, scopes, and authorization |
+| [Reddit setup](REDDIT_SETUP.md) | Approved Data API client, browser OAuth, posts and comment tools |
 | [X setup](X_SETUP.md) | Native app OAuth, post tools, approval and billing limits |
 | [Gmail setup](GMAIL_SETUP.md) | Create the Google OAuth client for Gmail and Drive |
 | [Anchi skill](../skills/README.md) | A skill for a host-side agent to operate Anchi, with separate limits for agents inside cells |
