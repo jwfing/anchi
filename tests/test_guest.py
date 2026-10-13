@@ -462,3 +462,169 @@ class CellCleanupTests(unittest.TestCase):
         ):
             anchi_cell.cleanup('t1')
         self.assertFalse(work.exists())
+
+
+class CellProcessTests(unittest.TestCase):
+    def test_cell_pids_follow_descent_into_nested_pid_namespaces(self):
+        import tempfile
+
+        proc = Path(tempfile.mkdtemp(prefix='anchi-proc-'))
+        self.addCleanup(__import__('shutil').rmtree, proc, True)
+
+        def process(pid, ppid):
+            (proc / str(pid)).mkdir()
+            (proc / str(pid) / 'status').write_text(f'Name:\tx\nPPid:\t{ppid}\nNSpid:\t{pid}\n')
+
+        process(1, 0)
+        process(100, 1)  # the cell's init
+        process(101, 100)  # the runner
+        process(102, 101)  # bwrap, which unshares pid
+        process(103, 102)  # what runs inside the sandbox: another pid namespace
+        process(200, 1)  # another cell
+        process(201, 200)
+        (proc / 'self').mkdir()  # not a process entry
+        (proc / '300').mkdir()  # gone before its status could be read
+        self.assertEqual(anchi_cell.cell_pids(100, proc=proc), [100, 101, 102, 103])
+        self.assertEqual(anchi_cell.cell_pids(200, proc=proc), [200, 201])
+
+
+class ScanTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-scan-'))
+        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
+        self.root = self.tmp / 'root'
+        for relative, text in (
+            ('etc/app.conf', 'token=abc'),
+            ('home/agent/work/notes.txt', 'hello'),
+            ('home/agent/workspaces/repo/.env', 'the Mac side'),
+            ('opt/claude/bin/claude', 'toolchain'),
+            ('usr/local/go/bin/go', 'toolchain'),
+            ('proc/1/environ', 'kernel'),
+        ):
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        (self.root / 'etc/link').symlink_to(self.root / 'etc/app.conf')
+
+    def scan(self, **kw):
+        seen = []
+        result = anchi_cell.scan_files(self.root, lambda blob, where: seen.append((where, blob)), **kw)
+        return sorted(w for w, _ in seen), result
+
+    def test_reads_the_writable_tree_but_not_toolchains_workspaces_or_links(self):
+        where, result = self.scan()
+        self.assertEqual(where, ['/etc/app.conf', '/home/agent/work/notes.txt'])
+        self.assertEqual(result, {'files': 2, 'bytes': 14, 'unchanged': 0, 'partial': False})
+
+    def test_reads_only_files_changed_since_the_cell_started(self):
+        import time
+
+        where, result = self.scan(since=time.time() + 60)
+        self.assertEqual((where, result['files'], result['unchanged']), ([], 0, 2))
+        where, _ = self.scan(since=time.time() - 60)
+        self.assertEqual(len(where), 2)
+
+    def test_stops_at_its_limits_and_says_which(self):
+        from unittest.mock import patch
+
+        with patch.object(anchi_cell, 'SCAN_MAX_FILES', 1):
+            where, result = self.scan()
+        self.assertEqual((len(where), result['partial'], result['stopped_at']), (1, True, 'files'))
+        with patch.object(anchi_cell, 'SCAN_MAX_BYTES', 3):
+            where, result = self.scan()
+        self.assertEqual((where, result['stopped_at']), ([], 'bytes'))
+        ticks = iter(range(0, 10_000, 100))
+        where, result = self.scan(clock=lambda: next(ticks))
+        self.assertEqual((where, result['stopped_at']), ([], 'time'))
+
+    def test_scan_since_is_the_cell_start_with_a_margin(self):
+        from unittest.mock import patch
+
+        (self.tmp / 't1').mkdir()
+        (self.tmp / 't1/meta.json').write_text(json.dumps({'task': 't1', 'started_at': 1000.0}))
+        with patch.object(anchi_cell, 'CELLS', self.tmp):
+            self.assertEqual(anchi_cell.scan_since('t1'), 995.0)
+            self.assertIsNone(anchi_cell.scan_since('t2'))
+
+
+class ReapTests(unittest.TestCase):
+    def test_reap_keeps_a_running_image_build_and_its_mounts(self):
+        import tempfile
+        from unittest.mock import patch
+
+        cells = Path(tempfile.mkdtemp(prefix='anchi-cells-'))
+        self.addCleanup(__import__('shutil').rmtree, cells, True)
+        for d in ('t-old', 'build-abc', 'build-done'):
+            (cells / d).mkdir()
+        cleaned, unregistered, umounts, out = [], [], [], []
+
+        def egress(request, timeout=15):
+            if request['op'] == 'list':
+                return ['t-old', 'build-abc', 't-registered-only']
+            unregistered.append(request['task'])
+
+        with patch.multiple(
+            anchi_cell,
+            CELLS=cells,
+            cleanup=cleaned.append,
+            active=lambda u: u == 'anchi-cell-build-abc.service',
+            egress=egress,
+            mount_points=lambda below: [f'{cells}/build-abc/root', f'{cells}/t-gone/root', str(cells)],
+            run=lambda *a, **k: umounts.append(a),
+            emit=out.append,
+        ):
+            anchi_cell.cell_reap([])
+        self.assertEqual(sorted(cleaned), ['build-done', 't-old'])
+        self.assertEqual(unregistered, ['t-registered-only'])
+        self.assertEqual(umounts, [('umount', '-l', f'{cells}/t-gone/root')])
+        self.assertEqual(
+            out, [{'reaped': ['build-done', 't-old', 't-registered-only'], 'unmounted': [f'{cells}/t-gone/root']}]
+        )
+
+
+class WorkspaceNameTests(unittest.TestCase):
+    """nspawn splits a bind argument on `:` and unescapes `\\`. Masks are mounted by descriptor,
+    so no name inside a workspace reaches an argument: only the validated workspace name and
+    the staging path do."""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-ws-'))
+        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
+
+    def test_masks_under_names_with_colons_and_backslashes_are_found_by_descriptor(self):
+        import os
+
+        ws = self.tmp / 'ws'
+        (ws / 'a:b/.git/hooks').mkdir(parents=True)
+        (ws / 'c\\d/.git').mkdir(parents=True)
+        (ws / 'c\\d/.git/config').write_text('[core]\n')
+        found = []
+        fd = os.open(ws, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            anchi_cell.workspace_masks(fd, lambda rel, f: (found.append(rel), os.close(f)))
+        finally:
+            os.close(fd)
+        self.assertEqual(sorted(found), ['a:b/.git/hooks', 'c\\d/.git/config'])
+
+    def test_the_bind_argument_names_only_the_staging_path_and_the_workspace(self):
+        import os
+        from unittest.mock import patch
+
+        share = self.tmp / 'share'
+        (share / 'proj/a:b/.git/hooks').mkdir(parents=True)
+        cells = self.tmp / 'cells'
+        attached = []
+        with patch.multiple(
+            anchi_cell,
+            CELLS=cells,
+            WORKSPACE_ROOT=share,
+            bind_tree=lambda fd, read_only: os.open(os.devnull, os.O_RDONLY),
+            attach=lambda tree, target: attached.append(target),
+        ):
+            binds = anchi_cell.stage_workspaces('t1', [('rw', share / 'proj', 'rw')])
+        self.assertEqual(binds, [f'--bind={cells}/t1/ws/rw:/home/agent/workspaces/rw'])
+        self.assertEqual(len(attached), 1)  # the workspace itself; its masks go by descriptor

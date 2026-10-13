@@ -507,6 +507,13 @@ export class Daemon {
     );
     this.hub.on('event', (e) => this.broadcast('event', e));
     this.hub.on('agents', (agents) => this.broadcast('agents', { agents }));
+    this.hub.on('scanPartial', ({ taskId, agentId, files, reason }) => {
+      this.log(`credential scan of ${taskId} stopped at its ${reason} limit after ${files} files`);
+      this.notify(
+        `Anchi: the credential scan of @${agentId}'s cell was cut short`,
+        `${taskId}: ${files} files checked before the ${reason} limit; the rest was not scanned. See the task.`,
+      );
+    });
     this.hub.on('scanFinding', ({ taskId, agentId, labels }) => {
       this.log(`credential scan of ${taskId} found ${labels.join(', ')}`);
       this.notify(

@@ -31,6 +31,16 @@ export interface ExecResult {
   stderr: string;
 }
 
+/** `anchi-cell scan`: findings by label, and whether a limit stopped the scan early. */
+export interface ScanResult {
+  clean: boolean;
+  findings: unknown[];
+  files: number;
+  /** A limit (`files`, `bytes` or `time`) stopped the scan before the end. */
+  partial?: boolean;
+  stopped_at?: string;
+}
+
 export interface GuestTransport {
   /** Runs a guest-root command to completion. */
   exec(args: string[], stdin?: string, timeoutMs?: number): Promise<ExecResult>;
@@ -240,11 +250,13 @@ export class Guest {
     parse(await this.transport.exec(['anchi-cell', 'stop', check(task, 'task')]));
   }
 
-  async listCells(): Promise<{ task: string; agent: string; active: boolean }[]> {
+  /** Cells in the VM; an image build under way is listed with `kind: 'build'`. */
+  async listCells(): Promise<{ task: string; agent: string; active: boolean; kind?: string }[]> {
     return parse(await this.transport.exec(['anchi-cell', 'list'])).cells as {
       task: string;
       agent: string;
       active: boolean;
+      kind?: string;
     }[];
   }
 
@@ -255,10 +267,10 @@ export class Guest {
     return out.reaped as string[];
   }
 
-  async scan(task: string): Promise<{ clean: boolean; findings: unknown[]; files: number }> {
+  async scan(task: string): Promise<ScanResult> {
     return parse(
       await this.transport.exec(['anchi-cell', 'scan', check(task, 'task')], '', 600_000),
-    ) as { clean: boolean; findings: unknown[]; files: number };
+    ) as unknown as ScanResult;
   }
 
   /**
