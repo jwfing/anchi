@@ -158,6 +158,8 @@ export interface DaemonOptions {
   triggers?: boolean;
   /** Watch the egress proxy's approval queue (default true). */
   approvals?: boolean;
+  /** Shows a desktop notification; tests replace it. */
+  notify?: (title: string, message: string) => Promise<void>;
   /** Reap guest cells at start (default true). */
   reap?: boolean;
 }
@@ -276,6 +278,15 @@ export class Daemon {
     } catch {
       return {};
     }
+  }
+
+  /**
+   * A desktop notification (macOS; Linux with notify-send), unless `quiet` (tests) or
+   * `desktopNotifications: false` in ~/.anchi/settings.yaml.
+   */
+  private notify(title: string, message: string): void {
+    if (this.opts.quiet || this.settings().desktopNotifications === false) return;
+    void (this.opts.notify ?? desktopNotify)(title, message);
   }
 
   /**
@@ -434,12 +445,12 @@ export class Daemon {
         a.task,
         `⏸ waiting for your approval: ${a.operation} (${a.reason || a.connector})`,
       );
-      if (!this.opts.quiet && this.clients.size === 0) {
-        void desktopNotify(
-          `Anchi: @${a.agent} asks for approval`,
-          `${a.connector}: ${a.operation}`,
-        );
-      }
+      // Also while the TUI is open: the user may be in another window, and the write is
+      // refused when nobody answers in time.
+      this.notify(
+        `Anchi: @${a.agent} asks for approval`,
+        `${a.connector}: ${a.operation}${a.reason ? ` · ${a.reason}` : ''} · ${Math.max(1, Math.round(a.timeout / 60))} min to decide`,
+      );
     });
     this.approvals.on('credential', (c) => {
       const task = this.store.getTask(c.task);
@@ -449,12 +460,10 @@ export class Daemon {
         `⚠ the cell sent a credential of its own (not an Anchi placeholder) to ${c.host}: ${c.method} ${c.path}`,
       );
       this.log(`${task.id} sent a credential of its own to ${c.host}`);
-      if (!this.opts.quiet) {
-        void desktopNotify(
-          `Anchi: @${task.agentId} sent a credential of its own`,
-          `${task.id}: to ${c.host}. Anchi's credentials never enter a cell; see the task's access (a).`,
-        );
-      }
+      this.notify(
+        `Anchi: @${task.agentId} sent a credential of its own`,
+        `${task.id}: to ${c.host}. Anchi's credentials never enter a cell; see the task's access (a).`,
+      );
     });
     this.approvals.on('notice', ({ task, text }) => {
       if (this.store.getTask(task)) this.hub.notice(task, text);
@@ -500,27 +509,25 @@ export class Daemon {
     this.hub.on('agents', (agents) => this.broadcast('agents', { agents }));
     this.hub.on('scanFinding', ({ taskId, agentId, labels }) => {
       this.log(`credential scan of ${taskId} found ${labels.join(', ')}`);
-      if (!this.opts.quiet) {
-        void desktopNotify(
-          `Anchi: credential found in @${agentId}'s cell`,
-          `${taskId}: ${labels.join(', ')}`,
-        );
-      }
+      this.notify(
+        `Anchi: credential found in @${agentId}'s cell`,
+        `${taskId}: ${labels.join(', ')}`,
+      );
     });
     this.hub.on('task', (task) => {
       this.broadcast('tasks', { task });
       if (task.status === 'done' || task.status === 'failed') {
         this.log(`task ${task.id} (${task.agentId}) ${task.status}`);
-        if (!this.opts.quiet && this.clients.size === 0) {
-          void desktopNotify(`@${task.agentId} ${task.status}`, task.result ?? '');
-        }
+        // Only without a client: the TUI shows the result itself.
+        if (this.clients.size === 0)
+          this.notify(`@${task.agentId} ${task.status}`, task.result ?? '');
       }
     });
     this.quotaAlerts = new QuotaAlerts(
       () => this.quota(),
       (title, message) => {
         this.log(`${title}: ${message}`);
-        if (!this.opts.quiet) void desktopNotify(title, message);
+        this.notify(title, message);
       },
     );
     this.hub.on('turnEnded', () => {

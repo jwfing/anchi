@@ -113,5 +113,6 @@ The recipe's content hash names the built layer; a changed recipe is built again
 | `maxCells` | Cells working at once across all agents (1–16, default 4); a cell waiting for a task it delegated does not count. Give the VM more memory before raising it much |
 | `highRisk: {disable: [...]}` | Exemptions for every agent |
 | `approvalTimeoutMinutes` | How long the egress proxy holds a write for approval (1–720, default 5); Gmail, Drive, Notion and Slack approvals keep the policy service's ten minutes |
+| `desktopNotifications` | `false` turns off desktop notifications (approvals, credential alerts, scan findings, subscription limits, finished tasks while no TUI is open); default on, macOS or Linux with `notify-send` |
 
 Key bindings: `~/.anchi/keybindings.json` (`anchi keys` shows the merged map).

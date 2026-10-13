@@ -10,6 +10,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- A write that starts waiting for approval raises a desktop notification also while the TUI is open (before, only when no TUI or CLI was connected); the notification names the connector, operation, reason and the minutes left to decide. `desktopNotifications: false` in `~/.anchi/settings.yaml` turns desktop notifications off (approvals, credential alerts, scan findings, subscription limits, finished tasks while no TUI is open).
 - The Agent builder no longer writes `egress: []` on its own: the builder prompt now says to omit `egress` unless you ask to limit the agent's hosts (without it the agent reaches any public host), to write an empty list only when you ask for an agent without network access, and to omit `maxTasks` unless you want another limit. Before, builder-made agents often got `egress: []`, which allows nothing beyond the runtime and connectors, so their package installs and web fetches failed.
 - `anchi agents create` and **Ctrl+X, N** write a starter without `egress: []` and `maxTasks: 1`: the starter reaches any public host and runs up to three tasks at a time, like an agent file that leaves both fields out.
 - A task's view keeps showing the full transcript after a reply when you continued the task from that view (more than one message of yours); before, the view folded to the last result as soon as the turn ended. The result view ends with the key that shows the transcript (`^X h` by default).
