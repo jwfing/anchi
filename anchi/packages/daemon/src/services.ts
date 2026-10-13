@@ -67,8 +67,8 @@ export function openInBrowser(url: string): void {
 }
 
 export class ServiceSetup {
-  /** Sign-ins in progress, by `<service>:<account>`. */
-  private logins = new Map<string, Server>();
+  /** Sign-ins in progress, by `<service>:<account>`; `supersede` settles a replaced attempt silently. */
+  private logins = new Map<string, { server: Server; supersede: () => void }>();
 
   constructor(
     private guest: Guest,
@@ -177,10 +177,12 @@ export class ServiceSetup {
     if (!GOOGLE_IDS.includes(id)) throw new Error(`${id} does not use Google sign-in`);
     const named = accountArg(id, account);
     const key = `${id}:${account ?? DEFAULT_ACCOUNT}`;
-    this.logins.get(key)?.close();
+    this.logins.get(key)?.supersede();
     let expected = { host: '', state: '' };
-    let finish: (r: { code: string; state: string } | null) => void = () => {};
-    const result = new Promise<{ code: string; state: string } | null>((r) => (finish = r));
+    let finish: (r: { code: string; state: string } | 'superseded' | null) => void = () => {};
+    const result = new Promise<{ code: string; state: string } | 'superseded' | null>(
+      (r) => (finish = r),
+    );
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       const state = url.searchParams.get('state') ?? '';
@@ -204,7 +206,13 @@ export class ServiceSetup {
       finish(code && !url.searchParams.has('error') ? { code, state } : null);
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-    this.logins.set(key, server);
+    this.logins.set(key, {
+      server,
+      supersede: () => {
+        server.close();
+        finish('superseded');
+      },
+    });
     const { port } = server.address() as AddressInfo;
     expected.host = `127.0.0.1:${port}`;
     const flow = await json(
@@ -220,7 +228,9 @@ export class ServiceSetup {
     void result.then(async (callback) => {
       clearTimeout(timer);
       server.close();
-      if (this.logins.get(key) === server) this.logins.delete(key);
+      if (this.logins.get(key)?.server === server) this.logins.delete(key);
+      // A replaced attempt says nothing; the newer attempt reports for this account.
+      if (callback === 'superseded') return;
       const who = account === undefined ? { id } : { id, account };
       if (!callback)
         return this.onLogin({ ...who, ok: false, error: 'sign-in cancelled or timed out' });
@@ -242,6 +252,6 @@ export class ServiceSetup {
   }
 
   stop(): void {
-    for (const server of this.logins.values()) server.close();
+    for (const { server } of this.logins.values()) server.close();
   }
 }
