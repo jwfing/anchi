@@ -37,7 +37,7 @@ runtime: claude-code
 model: claude-sonnet-5-5
 connectors: [github]
 approvals: { github: ask }
-egress: []                      # only GitHub and the runtime's own hosts
+egress: []                      # an empty list: GitHub and the runtime's hosts only; omit the line for any public host
 prompt:
   text: |
     Review the pull request you are given. Comment on correctness and tests.

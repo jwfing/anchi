@@ -1105,9 +1105,11 @@ describe('builder', () => {
       const agents = await client.call('builder.apply', { proposalId: p.id });
       expect(agents.find((a) => a.id === agentId)).toMatchObject({ runtime, connectors: [] });
       const yaml = readFileSync(file, 'utf8');
-      expect(yaml).toContain('egress: []');
+      expect(yaml).toContain('connectors: []');
       expect(yaml).toContain('workspaces: []');
-      expect(yaml).not.toMatch(/highRisk|delegates|triggers/);
+      // No egress list (an empty one would cut the agent off from every host but its
+      // runtime's) and no maxTasks: both stay at their defaults.
+      expect(yaml).not.toMatch(/egress|maxTasks|highRisk|delegates|triggers/);
     }
     expect(transport.starts).toEqual([]);
   });

@@ -71,9 +71,10 @@ Every field, with examples, is in [references/agent-config.md](references/agent-
 For a minimal starter, use `anchi agents create dev --runtime claude-code --preview`
 (or `codex` / `hermes`). Review the YAML, then run without `--preview` to confirm in a terminal;
 use `--yes` non-interactively only when the user authorized creating that reviewed starter.
-No model is called and no connector, workspace or extra egress host is granted. Existing ids
+No model is called and no connector or workspace is granted; egress stays open (no list). Existing ids
 are refused. **Ctrl+X, N** opens this workflow in the TUI. On an older binary, use a manual file
-with `connectors: []`, `egress: []` and `workspaces: []`.
+with `connectors: []` and `workspaces: []`, and no `egress` line: an empty list would cut the
+agent off from every host but its runtime's and connectors'.
 
 People can also create agents with the **Agent builder** in the TUI (**^X b**): using a connected runtime, they describe the agent, the builder proposes a file, and a full-screen dialog shows it before anything is written. **^X s** opens an agent's settings panel (runtime, model, prompt, skills, connectors, workspaces), which also shows a diff before saving.
 
