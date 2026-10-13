@@ -1,6 +1,6 @@
 # Account connectors
 
-Gmail, Google Drive, Notion, Slack and X are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X reads automatically and always requires approval to publish. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
+Gmail, Google Drive, Notion, Slack, X and Reddit are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X and Reddit read automatically and always require approval to publish. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
 
 ## Account setup
 
@@ -10,6 +10,7 @@ Gmail, Google Drive, Notion, Slack and X are registered in `services/connectors.
 | Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `anchi setup service drive [--account <name>]`; tokens are stored independently from Gmail |
 | Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | `anchi setup service notion`, then enter the `ntn_` token without echo |
 | Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | `anchi setup service slack`, then enter the `xoxb-` Bot User OAuth Token |
+| Reddit | Approved Data API access and an installed OAuth app; see [Reddit setup](REDDIT_SETUP.md) | `anchi setup reddit-client <client-id> <developer-username>`, then `anchi setup service reddit` |
 | X | Native OAuth 2.0 app, exact loopback callback and API credits; see [X setup](X_SETUP.md) | `anchi setup x-client <client-id>`, then `anchi setup service x` |
 
 The TUI's **Connectors → Services** does the same with masked input in a full-screen dialog that agent output cannot draw over; **Tab** shows the input to check it and hides it again. Tokens go from the client to the daemon and over stdin to the encrypted vault; they are never logged or stored on the Mac. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
@@ -18,8 +19,9 @@ Gmail and Drive can hold several Google accounts each, by name (`default` withou
 
 ## Authorization modes
 
-X is an exception to the configurable modes below: reads are automatic and publishing always
-asks, even when an agent omits `approvals`. `service-mode x auto` is refused.
+X and Reddit are exceptions to the configurable modes below: reads are automatic and publishing
+always asks, even when an agent omits `approvals`. `service-mode x auto` and
+`service-mode reddit auto` are refused.
 
 New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation in Anchi's approval dialog. Any mode change revokes all unconsumed grants. The mode is per connector service and applies to every agent. An agent can additionally have its writes held with `approvals: {notion: ask}` in its file (the policy principal `notion:<agent>`): agents reach the services through a bridge that names them, so policy can tell them apart.
 
@@ -38,19 +40,20 @@ Older databases without a mode use `auto`; explicit modes are preserved. The old
 | Notion | `notion_search`: up to 10 results; `notion_read`: page blocks as text, up to 40 KB | `notion_create_page`: child page; `notion_append`: paragraphs bound to current edit time |
 | Slack | `slack_channels`: joined channels; `slack_history`: up to 50 messages | `slack_post`: message, optionally in a thread |
 | Gmail | Status, list and read; see [Gmail setup](GMAIL_SETUP.md) | None |
+| Reddit | `reddit_list`, `reddit_search`, `reddit_read`, `reddit_comments`; at most 25 items per call | `reddit_submit`, `reddit_comment`: text posts/replies, always approved; see [Reddit limits](REDDIT_SETUP.md#limits-and-recovery) |
 | X | `x_read`, `x_search`, `x_mentions`; at most 25 posts per page and 1,000 requested post resources per UTC day | `x_post`: text or reply, always approved; see [X limits](X_SETUP.md#limits-and-disconnect) |
 
 Write bodies are limited to 48 KB and each connector to 200 writes per day. Updates bind to the target revision in either mode. Agents see tools only for the connectors bound into their cell.
 
 ## Reviewing writes in approval mode
 
-The approval dialog shows the agent, task, operation and the parameters the policy service recorded. Approval authorizes one execution of exactly that content. Updates recheck the target immediately before execution; changes fail with `TARGET_CHANGED` without retry.
+The approval dialog shows the agent, task, operation and the parameters the policy service recorded. The list shows a preview; open the full dialog (**a** or **^X a**) and use **↑/↓**, **PgUp/PgDn**, or **Home/End** to review wrapped long text. Policy parameters are preserved in full, with an oversized action refused instead of truncated. Approval authorizes one execution of exactly that content. Updates recheck the target immediately before execution; changes fail with `TARGET_CHANGED` without retry.
 
 The in-cell tool keeps the same request ID while waiting and times out after ten minutes. Prepared actions are persisted; retries do not freeze a newer target version. Successful requests return cached results. Timeouts, dropped connections, upstream 5xx or unparseable success responses are recorded as UNKNOWN and are not automatically replayed. Check the remote service before taking further action.
 
 ## Disconnecting
 
-- X: remove local access first and attempt remote revocation; retry disconnect while revocation is pending. The Client ID remains stored.
+- X/Reddit: remove local access first and attempt remote revocation; retry disconnect while revocation is pending. The Client ID remains stored.
 - Gmail/Drive: revoke local access, remove tokens and attempt Google revocation, per account (`--account <name>`, `default` otherwise). Failed remote revocation is shown as pending retry.
 - Slack: revoke local access, call `auth.revoke`, then remove the token.
 - Notion: revoke local access and remove the token. No remote revoke API is available; remove the integration in Notion settings yourself.

@@ -67,6 +67,7 @@ describe('settings panel', () => {
       '[ ] notion ',
       '[ ] slack ',
       '[ ] x ',
+      '[ ] reddit ',
       '[ro] docs ',
       '[  ] web ',
     ]);

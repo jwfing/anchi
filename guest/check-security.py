@@ -54,6 +54,9 @@ check(
             'tokens.json',
             'pending.json',
             'model.json',
+            'reddit-tokens.json',
+            'reddit-pending.json',
+            'reddit-revocation.json',
             'x-tokens.json',
             'x-pending.json',
             'x-revocation.json',
@@ -86,7 +89,7 @@ import network_rules
 # roles (a credential or sign-in exists) are resolved; the others must have no target at all.
 for role, (user, host) in network_rules.ROLES.items():
     if not network_rules.configured(role):
-        # X's auth and connector roles share a hostname, but have separate kernel UID rules.
+        # Social auth and connector roles can share a hostname, but have separate kernel UID rules.
         # A shared target may exist for the other role; this identity must still be refused.
         unreachable = (
             "from common import target_ips, Denied; import json, socket\ntry:\n addresses=target_ips("
@@ -135,6 +138,16 @@ for operation in ('token', 'codex_token', 'egress_credential'):
 check(
     'x_cannot_approve_a_post',
     rpc_as('secure-x', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
+)
+for operation in ('token', 'codex_token', 'egress_credential'):
+    check(
+        'reddit_cannot_get_' + operation,
+        rpc_as('secure-reddit', '/run/secure-auth/token.sock', {'op': operation}).get('error')
+        == 'CREDENTIAL_SCOPE_DENIED',
+    )
+check(
+    'reddit_cannot_approve_a_post',
+    rpc_as('secure-reddit', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
 )
 # Synthetic action only: the policy service authorizes it, nothing is posted to Slack.
 action = {

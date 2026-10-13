@@ -99,6 +99,29 @@ CONNECTORS = {
             r'/2/users/[0-9]{1,20}/mentions\?.*',
         ),
     ),
+    'reddit': Connector(
+        id='reddit',
+        user='secure-reddit',
+        hosts=('oauth.reddit.com',),
+        credential='oauth:reddit',
+        module='reddit_connector',
+        ops={
+            'reddit.status': READ,
+            'reddit.list': READ,
+            'reddit.search': READ,
+            'reddit.read': READ,
+            'reddit.comments': READ,
+            'reddit.submit': WRITE,
+            'reddit.comment': WRITE,
+        },
+        paths=(
+            r'/r/[A-Za-z0-9_]{2,21}/(hot|new|top)\?.*',
+            r'(/r/[A-Za-z0-9_]{2,21})?/search\?.*',
+            r'/api/info\?.*',
+            r'/comments/[a-z0-9]{1,20}\?.*',
+            r'/api/(submit|comment)',
+        ),
+    ),
 }
 SERVICE_USERS = tuple(c.user for c in CONNECTORS.values())
 

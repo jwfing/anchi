@@ -9,6 +9,7 @@ import resource
 
 import auth
 import x_auth
+import reddit_auth
 from common import Denied, fields
 
 # Actions that change which provider roles are configured: the egress allowlists follow at once
@@ -33,7 +34,7 @@ def main():
         raise Denied('GUEST_ADMIN_REQUIRED')
     action = sys.argv[1]
     connector = sys.argv[2] if len(sys.argv) > 2 else 'gmail'
-    if connector not in (*auth.GOOGLE, *auth.TOKENS, 'aws', 'x'):
+    if connector not in (*auth.GOOGLE, *auth.TOKENS, 'aws', 'x', 'reddit'):
         raise Denied('UNKNOWN_CONNECTOR')
     if connector == 'aws' and action not in ('import-aws', 'disconnect', 'status', 'set-account'):
         raise Denied('UNKNOWN_ADMIN_ACTION')
@@ -60,18 +61,19 @@ def main():
             raise Denied('INPUT_TOO_LARGE')
         value = json.loads(data)
     with auth.locked():
-        if connector == 'x':
+        if connector in ('x', 'reddit'):
+            oauth = x_auth if connector == 'x' else reddit_auth
             if action == 'import-client':
-                result = x_auth.import_client(value)
+                result = oauth.import_client(value)
             elif action == 'begin':
                 fields(value, ('redirect_uri',), ('redirect_uri',))
-                result = x_auth.begin(value['redirect_uri'])
+                result = oauth.begin(value['redirect_uri'])
             elif action == 'complete':
-                result = x_auth.complete(value)
+                result = oauth.complete(value)
             elif action == 'disconnect':
-                result = x_auth.disconnect()
+                result = oauth.disconnect()
             elif action == 'status':
-                result = x_auth.status()
+                result = oauth.status()
             else:
                 raise Denied('UNKNOWN_ADMIN_ACTION')
         elif action == 'import-client':

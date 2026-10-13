@@ -6,6 +6,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
+- Reddit connector: configure an approved installed app with `anchi setup reddit-client <client-id> <developer-username>`, then browser sign-in with `anchi setup service reddit`. Agents can browse/search/read posts and comments; text posts and replies always require approval. Needs `anchi setup install` and a daemon restart; see `docs/REDDIT_SETUP.md`.
 - X connector: connect a native OAuth app with `anchi setup x-client <client-id>` and `anchi setup service x`, or in Connectors. Agents can read/search posts, read mentions and publish text posts or replies after approval; credentials and refresh stay in the vault. Reads have per-request and daily limits. Needs `anchi setup install` and a daemon restart; X API usage is billed separately.
 - Getting started prepares the VM, vault and selected runtime in one confirmed, resumable operation with recommended resources. `anchi setup prepare --runtime codex` (also `claude-code` or `hermes`) provides the same preparation from the CLI; existing keys and manual Claude credentials are kept, and available local runtime logins connect automatically.
 - Release packages include a pinned manifest for prebuilt base and runtime layers. Installation downloads and verifies the needed layers instead of building them locally; source checkouts continue to build locally. Needs `anchi setup install` to update existing VM components.
@@ -16,6 +17,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 - First-agent setup preselects the connected runtime and the name `dev`, retains the configuration review, and offers an editable sample code-review task before any model call. Advanced resource and agent settings remain available.
 
 ### Fixed
+
+- Connector-service approvals retain the full frozen write content instead of a 4,000-character prefix. The approval dialog wraps long lines and supports arrows, PgUp/PgDn and Home/End; the list labels clipped content as a preview.
 
 - `anchi setup vault unlock` reports a missing master key with initialization and recovery steps instead of a traceback. Unsafe key paths are refused without blocking on pipes; initialization still refuses a replacement key over encrypted credentials.
 

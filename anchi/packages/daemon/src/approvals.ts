@@ -72,6 +72,11 @@ export class ApprovalWatcher extends EventEmitter<{
     if (g.state !== 'PENDING' || g.principal !== `${connector}:${task.agentId}`) {
       throw new Error('no such pending approval');
     }
+    const summary = JSON.stringify(g.action.params ?? {}, null, 2);
+    // A user must be able to inspect the whole frozen action, including a long post's tail.
+    if (Buffer.byteLength(summary, 'utf8') > 65_536) {
+      throw new Error('approval content too large to review');
+    }
     const approval: Approval = {
       id,
       kind: 'policy',
@@ -80,7 +85,7 @@ export class ApprovalWatcher extends EventEmitter<{
       connector,
       operation: String(g.action.operation ?? '').slice(0, 300),
       host: connector,
-      summary: JSON.stringify(g.action.params ?? {}, null, 2).slice(0, 4000),
+      summary,
       createdAt: g.created * 1000,
       timeout: Math.max(0, Math.round(g.expires - g.created)),
       reason: `${connector} writes ask for approval`,

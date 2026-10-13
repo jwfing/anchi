@@ -37,7 +37,7 @@ AUTH_SOCKET = os.environ.get('ANCHI_EGRESS_AUTH', '/run/secure-auth/token.sock')
 CREDENTIAL_TTL = 60
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
-SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack', 'x')
+SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack', 'x', 'reddit')
 # Services with named Google accounts; the bridge pins one per cell.
 ACCOUNT_SERVICES = ('gmail', 'drive')
 ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
