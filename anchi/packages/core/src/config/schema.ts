@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseCron } from '../cron.ts';
 
 export const idSchema = z
   .string()
@@ -76,9 +77,16 @@ export function highRiskConnector(id: string): Connector {
 }
 
 /** Five-field cron expression (minute hour day-of-month month day-of-week). */
-const cronSchema = z
-  .string()
-  .regex(/^(\S+\s+){4}\S+$/, 'use a five-field cron expression such as "0 9 * * 1-5"');
+const cronSchema = z.string().superRefine((expr, ctx) => {
+  try {
+    parseCron(expr);
+  } catch (err) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `${(err as Error).message}; use a five-field cron expression such as "0 9 * * 1-5"`,
+    });
+  }
+});
 
 const pollSchema = z.discriminatedUnion('type', [
   z.strictObject({
@@ -94,13 +102,18 @@ const pollSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+const triggerText = z
+  .string()
+  .max(20_000)
+  .refine((t) => t.trim().length > 0, 'text must not be blank');
+
 /** Starts tasks without the user: on a schedule, or for each new item a poll finds. */
 export const triggerSchema = z.union([
-  z.strictObject({ schedule: cronSchema, text: z.string().min(1).max(20_000) }),
+  z.strictObject({ schedule: cronSchema, text: triggerText }),
   z.strictObject({
     poll: pollSchema,
     /** Task text; `{title}`, `{url}` and `{id}` are replaced with the new item's values. */
-    text: z.string().min(1).max(20_000),
+    text: triggerText,
     every: z.number().int().min(1).max(1440).default(5).optional(),
   }),
 ]);

@@ -150,8 +150,12 @@ describe('loadImage', () => {
     expect(() => resolveAgent('self', layout())).toThrow(/delegate to itself/);
     write('agents/sb.yaml', 'runtime: claude-code\nsandbox: codex-workspace-write\n');
     expect(() => resolveAgent('sb', layout())).toThrow(/needs runtime codex/);
-    write('agents/cron.yaml', "runtime: codex\ntriggers: [{ schedule: 'daily', text: x }]\n");
-    expect(() => resolveAgent('cron', layout())).toThrow();
+    for (const bad of ['daily', '0 9 * * MON-FRI', '0 25 * * *', '*/0 * * * *']) {
+      write('agents/cron.yaml', `runtime: codex\ntriggers: [{ schedule: '${bad}', text: x }]\n`);
+      expect(() => resolveAgent('cron', layout()), bad).toThrow(ConfigError);
+    }
+    write('agents/cron.yaml', "runtime: codex\ntriggers: [{ schedule: '0 9 * * *', text: ' ' }]\n");
+    expect(() => resolveAgent('cron', layout())).toThrow(/must not be blank/);
   });
 
   it('pins Google accounts for connectors the agent has', () => {
