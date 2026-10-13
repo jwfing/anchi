@@ -38,7 +38,7 @@ const patchSchema = z.strictObject({
     })
     .optional(),
   skills: z.array(idSchema).max(50).optional(),
-  connectors: z.array(connectorSchema).max(7).optional(),
+  connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
 });
 
