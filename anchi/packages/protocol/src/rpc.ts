@@ -337,8 +337,9 @@ export interface BuilderProposal {
   errors: string[];
   /** Worth knowing but not blocking, such as a connector that is not connected yet. */
   warnings: string[];
-  /** For `update`: the patch, and the digest of the file it was made against. */
+  /** For `update`: the patch the proposal applies. */
   patch?: AgentPatch;
+  /** Digest of the agent's file when the proposal was made; apply refuses when it changed. */
   base?: string;
 }
 
