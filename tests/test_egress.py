@@ -812,6 +812,38 @@ class RegistryTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_a_build_cell_keeps_its_socket_reachable_by_every_user(self):
+        """An image build runs as cell root, whose gid outside the cell is not the cells'
+        group, and its proxy injects no credential: its directory and socket stay open, as
+        before the hardening, or `apt-get` in the build could not reach the proxy."""
+
+        async def scenario():
+            registry = self.module.Registry(('127.0.0.1', 1))
+            chowned = []
+            with (
+                patch.object(self.module, 'peer_gid', lambda: 4242),
+                patch.object(self.module.os, 'chown', lambda path, uid, gid: chowned.append((Path(path), gid))),
+            ):
+                build = await registry.register(
+                    {'task': 'build-abc', 'agent': 'image-builder', 'connectors': [], 'build': True}
+                )
+                task = await registry.register({'task': 't2', 'agent': 'dev', 'connectors': []})
+            directory, task_dir = Path(build['directory']), Path(task['directory'])
+            self.assertEqual(oct(directory.stat().st_mode & 0o777), '0o755')
+            self.assertEqual(oct((directory / 'proxy.sock').stat().st_mode & 0o777), '0o666')
+            self.assertFalse([p for p, _ in chowned if p == directory or p.parent == directory])
+            # A task cell with the same registration shape is still the cells' group's only.
+            self.assertEqual(oct(task_dir.stat().st_mode & 0o777), '0o750')
+            self.assertEqual(oct((task_dir / 'proxy.sock').stat().st_mode & 0o777), '0o660')
+            self.assertEqual(sorted(p for p, gid in chowned if gid == 4242), [task_dir, task_dir / 'proxy.sock'])
+            # Only the guest's own registration may say so: a cell is not a build by name.
+            with self.assertRaises(ValueError):
+                await registry.register({'task': 't3', 'agent': 'dev', 'connectors': [], 'build': 'yes'})
+            await registry.unregister('build-abc')
+            await registry.unregister('t2')
+
+        asyncio.run(scenario())
+
     def test_cell_directories_and_sockets_belong_to_the_cells_group(self):
         """The service runs with UMask=0077. A cell reaches its sockets through the cells' group;
         the connector services, which are not in it, cannot connect as a cell."""
