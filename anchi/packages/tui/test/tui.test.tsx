@@ -72,7 +72,10 @@ function fakeClient(
     call: vi.fn(async (method: string, params?: unknown) => {
       calls.push([method, params]);
       if (answers[method]) return answers[method]!(params);
-      if (method === 'tasks.events') return events[(params as { taskId: string }).taskId] ?? [];
+      if (method === 'tasks.events') {
+        const { taskId, afterSeq = 0 } = params as { taskId: string; afterSeq?: number };
+        return (events[taskId] ?? []).filter((e) => e.seq > afterSeq);
+      }
       if (method === 'tasks.create')
         return task('t-new0000000', (params as { agentId: string }).agentId, { status: 'queued' });
       if (method === 'tasks.send') {
@@ -526,6 +529,44 @@ describe('App', () => {
     ui.stdin.write('t');
     await tick();
     expect(ui.lastFrame()).not.toContain('▾');
+    ui.unmount();
+  });
+
+  it('loads a transcript page by page until the daemon has no more', async () => {
+    // The daemon bounds a page so it fits one frame; the TUI pages with the last seq.
+    const stored: StoredEvent[] = Array.from({ length: 5 }, (_, i) => ({
+      seq: i + 1,
+      ts: 0,
+      event: { type: 'message', text: `part ${i + 1}` },
+    }));
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'tasks.events': (params) => {
+          const { afterSeq = 0 } = params as { afterSeq?: number };
+          return stored.filter((e) => e.seq > afterSeq).slice(0, 2);
+        },
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev')]}
+      />,
+    );
+    await tick();
+    await openTask(ui);
+    ui.stdin.write('\u0018'); // ^X h: the transcript instead of the result
+    await tick();
+    ui.stdin.write('h');
+    const frame = await frameWith(ui, 'part 5');
+    expect(frame).toContain('part 1');
+    expect(frame).toContain('part 5');
+    const cursors = calls
+      .filter(([method]) => method === 'tasks.events')
+      .map(([, p]) => (p as { afterSeq?: number }).afterSeq);
+    expect(cursors).toEqual([0, 2, 4, 5]);
     ui.unmount();
   });
 

@@ -658,7 +658,12 @@ export interface Methods {
   'tasks.cancel': [{ taskId: string }, null];
   /** The task's external access, from the egress audit log in the VM. */
   'tasks.audit': [{ taskId: string }, TaskAudit];
-  'tasks.events': [{ taskId: string; afterSeq?: number }, StoredEvent[]];
+  /**
+   * One page of the task's stored events after `afterSeq`, oldest first. A page is bounded in
+   * events and bytes so it always fits a client frame, whatever the transcript's size: page
+   * with the last seq as `afterSeq` until a call returns an empty page.
+   */
+  'tasks.events': [{ taskId: string; afterSeq?: number; limit?: number }, StoredEvent[]];
   /**
    * Credential-invariant scan of the task's live cell (before its idle timeout destroys it):
    * process environments, command lines and files, compared against the vault's real values.

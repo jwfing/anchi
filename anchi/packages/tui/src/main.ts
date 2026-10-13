@@ -122,10 +122,16 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
     last = seq;
     renderer.render(event);
   });
-  for (const e of await client.call('tasks.events', { taskId: task.id })) {
-    if (e.seq > last) {
-      last = e.seq;
-      renderer.render(e.event);
+  // The stored transcript arrives in pages: one can be larger than a frame allows.
+  for (let after = 0; ; ) {
+    const page = await client.call('tasks.events', { taskId: task.id, afterSeq: after });
+    if (!page.length) break;
+    for (const e of page) {
+      after = e.seq;
+      if (e.seq > last) {
+        last = e.seq;
+        renderer.render(e.event);
+      }
     }
   }
   const done = await client.call('tasks.wait', { taskId: task.id });

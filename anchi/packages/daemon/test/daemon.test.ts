@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { homeLayout } from '@anchi/core';
-import type { QuotaInfo, TaskRow } from '@anchi/protocol';
+import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
+import type { QuotaInfo, StoredEvent, TaskRow } from '@anchi/protocol';
 import {
   APP_VERSION,
   chooseBuilderRuntime,
@@ -345,6 +346,36 @@ describe('daemon tasks', () => {
       'message',
       'turn.completed',
     ]);
+  });
+
+  it('pages tasks.events so a transcript larger than a client frame can be read', async () => {
+    const { client, daemon } = await start();
+    const task = await client.call('tasks.create', { agentId: 'dev', text: 'long' });
+    await client.call('tasks.wait', { taskId: task.id });
+    const turn = (await client.call('tasks.events', { taskId: task.id })).length;
+    // More stored payload than one client frame may carry.
+    const extra = Math.ceil((CLIENT_MAX_FRAME_BYTES / MAX_EVENT_TEXT) * 1.5);
+    for (let i = 0; i < extra; i++) {
+      daemon.store.appendEvent(task.id, {
+        type: 'message',
+        text: `${i} `.padEnd(MAX_EVENT_TEXT, 'x'),
+      });
+    }
+    expect(await client.call('tasks.events', { taskId: task.id, limit: 2 })).toHaveLength(2);
+    const pages: StoredEvent[][] = [];
+    for (let after = 0; ; ) {
+      const page = await client.call('tasks.events', { taskId: task.id, afterSeq: after });
+      if (!page.length) break;
+      expect(JSON.stringify(page).length).toBeLessThan(CLIENT_MAX_FRAME_BYTES);
+      after = page.at(-1)!.seq;
+      pages.push(page);
+    }
+    expect(pages.length).toBeGreaterThan(1);
+    const events = pages.flat();
+    expect(events).toHaveLength(turn + extra);
+    expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
+    // The connection survived every page; before paging, one oversized frame closed it.
+    expect((await client.call('tasks.get', { taskId: task.id })).status).toBe('done');
   });
 
   it('resets only when confirmed and nothing runs', async () => {
