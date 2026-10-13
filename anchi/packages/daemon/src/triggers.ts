@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { ResolvedAgent, Trigger } from '@anchi/core';
+import { nextRun, parseCron, type ResolvedAgent, type Trigger } from '@anchi/core';
 import type { TriggerInfo } from '@anchi/protocol';
-import { nextRun, parseCron } from './cron.ts';
 import type { Guest } from './guest.ts';
 import type { Store, TriggerState } from './store.ts';
 
@@ -95,14 +94,19 @@ export class TriggerRunner {
       baseline: false,
     };
     if ('schedule' in trigger) {
-      const cron = parseCron(trigger.schedule);
-      if (state.nextRun === null) {
-        state.nextRun = nextRun(cron, now);
-      } else if (now >= state.nextRun) {
-        const task = this.host.start(agent.id, trigger.text, 'schedule');
-        state.lastRun = now;
-        state.lastResult = `started ${task.id}`;
-        state.nextRun = nextRun(cron, now);
+      try {
+        const cron = parseCron(trigger.schedule);
+        if (state.nextRun === null) {
+          state.nextRun = nextRun(cron, now);
+        } else if (now >= state.nextRun) {
+          // Advance first: a failing start waits for the next minute, not for the next tick.
+          state.nextRun = nextRun(cron, now);
+          const task = this.host.start(agent.id, trigger.text, 'schedule');
+          state.lastRun = now;
+          state.lastResult = `started ${task.id}`;
+        }
+      } catch (err) {
+        state.lastResult = `error: ${(err as Error).message}`;
       }
       return this.store.saveTriggerState(state);
     }
