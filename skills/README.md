@@ -23,11 +23,11 @@ fi
 
 Releases before 0.3.4 did not include it: fetch the skill from the tag matching
 `anchi --version` instead, and run the copy step from the checkout's root (`main` can
-document unreleased commands). For example, for Anchi 0.3.3:
+document unreleased commands). For example, for Anchi 0.3.4:
 
 ```bash
-git clone --depth 1 --branch v0.3.3 https://github.com/jwfing/anchi.git anchi-skills-v0.3.3
-cd anchi-skills-v0.3.3
+git clone --depth 1 --branch v0.3.4 https://github.com/jwfing/anchi.git anchi-skills-v0.3.4
+cd anchi-skills-v0.3.4
 cp -R skills/anchi ~/.claude/skills/anchi
 ```
 
@@ -48,7 +48,7 @@ release from GitHub:
 
 ```bash
 anchi skills add ~/.local/share/anchi/current/skills/anchi
-anchi skills add https://github.com/jwfing/anchi/tree/v0.3.3/skills/anchi
+anchi skills add https://github.com/jwfing/anchi/tree/v0.3.4/skills/anchi
 ```
 
 Then select the skill in the agent's settings. A directory is copied as it is at that moment;
