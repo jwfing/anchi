@@ -15,15 +15,29 @@ cannot recover stored credentials. `anchi daemon install` starts the daemon at l
 
 ## Connect accounts
 
-Codex uses your ChatGPT subscription. Log in on the Mac with `codex login`, then import the login:
+Anchi detects local Codex and Claude Code subscription logins at startup and imports available
+access tokens automatically once the VM and vault are ready. Both are imported when present.
+An installed CLI without a usable login still needs local sign-in. No model is called by import.
+
+Codex uses your ChatGPT subscription. Log in on the host with `codex login`. To import manually:
 
 ```bash
 anchi setup codex
 ```
 
-This stores the access token and account id in the vault. The refresh token stays with the Codex CLI on the Mac. Afterwards the daemon keeps the vault current: when the Codex CLI on the Mac has refreshed its login, the daemon imports the newer access token (checked on every change of `~/.codex/auth.json` and every five minutes). Set `codexAutoImport: false` in `~/.anchi/settings.yaml` to import only by hand. If the Mac has not used Codex for a while, run `codex` once to refresh its login.
+This stores the access token and account id in the vault. The refresh token stays with the Codex CLI on the Mac. Afterwards the daemon keeps the vault current: when the Codex CLI on the Mac has refreshed its login, the daemon imports the newer access token for the same account (checked on every change of `~/.codex/auth.json` and every five minutes). Set `codexAutoImport: false` in `~/.anchi/settings.yaml` to import only by hand. If the Mac has not used Codex for a while, run `codex` once to refresh its login.
 
-Claude Code uses a long-lived subscription token, or an Anthropic API key:
+Claude Code imports the `claudeAiOauth.accessToken` from its macOS Keychain entry or
+`~/.claude/.credentials.json` on Linux (also the macOS fallback). `CLAUDE_CONFIG_DIR` selects
+a separate file and Keychain entry. Only the access token and expiry go to the vault; the
+refresh token stays with Claude Code on the host. Anchi checks file changes and polls every
+five minutes for newer tokens. Expired logins require opening Claude Code locally to refresh
+or sign in again. macOS can ask for Keychain access. This follows Claude Code's
+[credential storage](https://code.claude.com/docs/en/authentication#credential-management).
+
+Set `claudeAutoImport: false` in `~/.anchi/settings.yaml` to disable automatic Claude imports.
+Anchi preserves a manually supplied Claude token/API key and does not replace it with a host
+login. For a manual long-lived subscription token or an Anthropic API key:
 
 ```bash
 claude setup-token          # on the Mac; prints a token

@@ -767,7 +767,7 @@ export class Hub extends EventEmitter<HubEvents> {
           const meta = await this.opts.guest.buildImage(id, hash, recipe);
           this.record(task, {
             type: 'notice',
-            text: `Image "${id}" built in ${meta.seconds}s (${Math.round(meta.size / 1e6)} MB).`,
+            text: `Image "${id}" prepared in ${meta.seconds}s (${Math.round(meta.size / 1e6)} MB).`,
           });
         })().finally(() => this.builds.delete(key));
         this.builds.set(key, pending);

@@ -1,8 +1,12 @@
 # Your first task
 
 Goal: run one task with one runtime, without connecting a business account or sharing files.
-Complete [installation, VM setup, vault unlock and one runtime connection](GETTING_STARTED.md#set-up-the-vm-and-your-first-agent)
-first. The task consumes model quota or API credit; creating the starter does not.
+Use [Getting started](GETTING_STARTED.md#guided-setup-in-the-tui) to prepare the environment and
+one runtime in a single confirmed operation, then connect its account. The guide offers a
+starter named `dev` and an editable sample code-review task with a small function included in
+the request. Review the agent before saving and the request before sending. No project folder
+or business account is needed. The task consumes model quota or API credit; preparation and
+creating the starter do not. The following CLI steps remain available.
 
 ## Create and inspect the agent
 
@@ -25,7 +29,8 @@ anchi run dev "Explain what tools you have access to. Do not change anything."
 anchi tasks --agent dev
 ```
 
-The first task for a runtime builds its image, which can take several minutes. The response
+Guided preparation installs the selected runtime's image ahead of this task. Otherwise first
+use downloads its pinned release layer, or builds it locally in a source installation. The response
 varies by model. Success means a response, exit code 0 and task status `done`; no GitHub token,
 repository or connector is needed. A response's claims about access are not authoritative:
 `anchi agents` and the access report describe the actual configuration and network activity.

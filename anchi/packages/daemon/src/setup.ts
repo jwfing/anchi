@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
@@ -8,6 +7,8 @@ import type {
   HermesAccountStatus,
   ConnectorStatus,
   RuntimeAccountStatus,
+  RuntimeId,
+  SetupAction,
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, LimaTransport } from './guest.ts';
@@ -16,50 +17,16 @@ import type { ServiceSetup } from './services.ts';
 
 export { CONNECTOR_IDS };
 
-/**
- * Reads the access token and account id from the host Codex login. Only the access token
- * leaves the host (to the vault); the refresh token stays with the host Codex CLI, which keeps
- * refreshing it. Re-import when the access token expires.
- */
-export const HOST_CODEX_LOGIN = join(
-  process.env.CODEX_HOME ?? join(homedir(), '.codex'),
-  'auth.json',
-);
-
-/** Expiry (ms) in a JWT's claims, without verifying it; the upstream service verifies. */
-export function jwtExpiry(token: string): number | null {
-  try {
-    const claims = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as {
-      exp?: unknown;
-    };
-    return typeof claims.exp === 'number' ? claims.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-export function readHostCodexLogin(file = HOST_CODEX_LOGIN): {
-  accessToken: string;
-  accountId: string;
-} {
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    throw new Error(`no Codex login at ${file}; run \`codex login\` on this computer first`);
-  }
-  const value = JSON.parse(raw) as { tokens?: { access_token?: unknown; account_id?: unknown } };
-  const accessToken = value.tokens?.access_token;
-  const accountId = value.tokens?.account_id;
-  if (typeof accessToken !== 'string' || typeof accountId !== 'string') {
-    throw new Error('the host Codex login is not a ChatGPT subscription login');
-  }
-  return { accessToken, accountId };
-}
+export { HOST_CODEX_LOGIN, jwtExpiry, readHostCodexLogin } from './host-logins.ts';
 
 export async function claudeStatus(guest: Guest): Promise<ClaudeAccountStatus> {
   const s = await guest.claudeStatus();
-  return { runtime: 'claude-code', connected: s.configured, kind: s.kind };
+  return {
+    runtime: 'claude-code',
+    connected: s.configured,
+    kind: s.kind,
+    expiresAt: s.expires_at ? s.expires_at * 1000 : null,
+  };
 }
 
 export async function hermesStatus(guest: Guest): Promise<HermesAccountStatus> {
@@ -171,6 +138,8 @@ export async function setupStatus(
   const vm = await lima.vmStatus();
   const host = hostResources();
   const empty: SetupStatus = {
+    quickSetup: true,
+    preparedRuntimes: [],
     vm,
     host: hostReadiness(),
     vaultKeyPresent: existsSync(VAULT_KEY),
@@ -211,8 +180,19 @@ export async function setupStatus(
       googleClient: false,
       googleClientSource: null,
     };
+    const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
+    const prepared = base
+      ? await Promise.all(
+          runtimes.map(async (runtime) =>
+            (await guest.imageStatus(`runtime-${runtime}`, 'runtime').catch(() => false))
+              ? runtime
+              : null,
+          ),
+        )
+      : [];
     return {
       ...empty,
+      preparedRuntimes: prepared.filter((runtime): runtime is RuntimeId => runtime !== null),
       vm,
       vaultUnlocked: vault.unlocked,
       installed: base,
@@ -234,4 +214,43 @@ export async function setupStatus(
     // instead of showing everything as not installed.
     return { ...empty, error: (err as Error).message.slice(0, 300) };
   }
+}
+
+/** Re-read after every completed step, so a failed or interrupted run can safely resume. */
+export async function prepareEnvironment(
+  runtime: RuntimeId,
+  status: () => Promise<SetupStatus>,
+  run: (action: SetupAction) => Promise<void>,
+  prepareRuntime: (runtime: RuntimeId) => Promise<void>,
+): Promise<SetupStatus> {
+  let current = await status();
+  if (current.host?.missing.length) {
+    throw new Error(`Missing: ${current.host.missing.join(', ')}. ${current.host.installHint}`);
+  }
+  if (current.vm === 'unknown')
+    throw new Error('Cannot determine VM state; check setup status and retry.');
+  if (current.vm === 'stopped') {
+    await run('vm-start');
+    current = await status();
+  }
+  if (current.error) throw new Error(current.error);
+  if (current.vm === 'missing' || !current.installed || current.guestOutdated) {
+    await run('install');
+    current = await status();
+  }
+  if (current.error || current.vm !== 'running' || !current.installed || current.guestOutdated) {
+    throw new Error(current.error ?? 'Environment preparation did not finish; retry setup.');
+  }
+  if (!current.vaultUnlocked) {
+    await run(current.vaultKeyPresent === false ? 'vault-init' : 'vault-unlock');
+    current = await status();
+    if (current.error || !current.vaultUnlocked)
+      throw new Error(current.error ?? 'Vault remains locked.');
+  }
+  if (!current.preparedRuntimes?.includes(runtime)) await prepareRuntime(runtime);
+  current = await status();
+  if (current.error || !current.vaultUnlocked || !current.preparedRuntimes?.includes(runtime)) {
+    throw new Error(current.error ?? `Preparation of ${runtime} did not finish; retry setup.`);
+  }
+  return current;
 }

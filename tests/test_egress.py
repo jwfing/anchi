@@ -770,6 +770,16 @@ class CredentialCacheTests(unittest.TestCase):
         with self.assertRaises(LookupError):
             cache.get('codex')
 
+    def test_host_claude_expiry_is_checked_even_for_a_cached_token(self):
+        import egress_proxy
+
+        cache = egress_proxy.Credentials(lambda r: {'token': 'fake-claude', 'expires_at': 200})
+        with patch('egress_proxy.time.time', return_value=100):
+            self.assertEqual(cache.get('claude')['token'], 'fake-claude')
+        with patch('egress_proxy.time.time', return_value=201):
+            with self.assertRaisesRegex(LookupError, 'CLAUDE_TOKEN_EXPIRED_RELOGIN_ON_HOST'):
+                cache.get('claude')
+
 
 class RegistryTests(unittest.TestCase):
     def setUp(self):
@@ -900,6 +910,24 @@ class RegistryTests(unittest.TestCase):
         ):
             with self.assertRaises(Exception):
                 claude_admin.validate({'token': bad})
+
+    def test_claude_host_import_refuses_expired_tokens_keys_and_refresh_tokens(self):
+        import claude_admin
+
+        for extra in (
+            {'expires_at': 1},
+            {'expires_at': 'later'},
+            {'expires_at': float('inf')},
+            {'expires_at': True},
+            {'refresh_token': 'fake-host-only'},
+        ):
+            with self.assertRaises(Exception):
+                claude_admin.validate({'token': CLAUDE_OAUTH['token'], **extra})
+        with self.assertRaises(Exception):
+            claude_admin.validate({'token': CLAUDE_KEY['token'], 'expires_at': 9_000_000_000})
+        value = claude_admin.validate({'token': CLAUDE_OAUTH['token'], 'expires_at': 9_000_000_000})
+        self.assertEqual(value['expires_at'], 9_000_000_000)
+        self.assertNotIn('refresh_token', value)
 
     def test_approvals_wait_for_the_user_and_time_out(self):
         async def scenario():

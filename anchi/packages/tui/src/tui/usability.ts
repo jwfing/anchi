@@ -3,6 +3,7 @@ import type {
   Approval,
   SetupAction,
   SetupStatus,
+  RuntimeId,
   StoredEvent,
   TaskRow,
 } from '@anchi/protocol';
@@ -11,10 +12,36 @@ import { summarizeInput, truncate, wrap, type Line } from './lines.ts';
 import { markdownLines } from './markdown.ts';
 
 export type WelcomeStep = 'environment' | 'vault' | 'runtime' | 'agent' | 'task' | 'done';
+export const FIRST_TASK = `Review this small JavaScript function. Identify the bug, show a corrected version, and suggest two tests. Do not access the network or change files.
+
+function total(items) {
+  let sum = 0;
+  for (let i = 0; i <= items.length; i++) {
+    sum += items[i].price * items[i].quantity;
+  }
+  return sum;
+}`;
+
+export function suggestedRuntime(setup: SetupStatus): RuntimeId {
+  const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
+  return (
+    runtimes.find((r) => runtimeReady(setup, r)) ??
+    (setup.hostLogins?.codex.state === 'ready'
+      ? 'codex'
+      : setup.hostLogins?.claude.state === 'ready'
+        ? 'claude-code'
+        : undefined) ??
+    setup.preparedRuntimes?.[0] ??
+    'codex'
+  );
+}
 export function runtimeReady(setup: SetupStatus, runtime?: string): boolean {
   const codex =
     setup.codex.connected && (setup.codex.expiresAt === null || setup.codex.expiresAt > Date.now());
-  const claude = Boolean(setup.claude?.connected);
+  const claude = Boolean(
+    setup.claude?.connected &&
+    (setup.claude.expiresAt == null || setup.claude.expiresAt > Date.now()),
+  );
   const hermes = Boolean(setup.hermes?.connected);
   if (runtime === 'codex') return codex;
   if (runtime === 'claude-code') return claude;
@@ -108,6 +135,7 @@ export function recoveryFor(message: string): Recovery {
   };
 }
 export function setupPhase(action: SetupAction, line: string): string {
+  if (/Preparing .* runtime image/.test(line)) return line;
   if (action === 'vault-init') return 'Initializing the vault';
   if (action === 'vault-unlock') return 'Unlocking credentials';
   if (action === 'vm-start') return 'Starting the VM';

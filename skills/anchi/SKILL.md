@@ -35,7 +35,16 @@ curl -fsSL https://anchi.elseward.xyz/install.sh | sh    # macOS (Apple Silicon)
 anchi                                                      # opens Getting started in the TUI
 ```
 
-Prerequisites: macOS needs `brew install lima python`; Linux needs Lima 2.2+, Python 3.11+, QEMU and access to `/dev/kvm`. Then, in order (each also in the TUI's **Runtimes** screen):
+Prerequisites: macOS needs `brew install lima python`; Linux needs Lima 2.2+, Python 3.11+, QEMU and access to `/dev/kvm`. Getting started prepares the environment and selected runtime after one confirmation, automatically connects available local Codex and Claude Code logins, then reviews a starter named `dev`. The CLI equivalent for preparation is:
+
+```bash
+anchi setup prepare                   # detected login; --runtime overrides it
+```
+
+This creates or starts the VM, initializes or unlocks the vault and prepares the selected image;
+it imports available local subscription access tokens and calls no model. Refresh tokens stay on the host. Existing keys are kept. The user must back up
+`~/.config/anchi/vault.key`. Release packages download verified layers; source checkouts build
+locally. Individual steps remain available (also in the TUI's **Runtimes** screen):
 
 ```bash
 anchi setup install          # create the VM, install the trusted services, build the base image (minutes)
@@ -44,7 +53,9 @@ anchi setup vault unlock     # after every VM start
 anchi setup status           # VM, vault, runtimes, connectors at a glance
 ```
 
-Then connect at least one runtime:
+If no local login was imported, connect at least one runtime. Automatic imports can be disabled
+with `codexAutoImport: false` or `claudeAutoImport: false` in `~/.anchi/settings.yaml`. Manual
+Claude tokens/API keys are preserved. These commands remain available:
 
 | Runtime | Command | What the user provides |
 |---|---|---|
@@ -52,7 +63,9 @@ Then connect at least one runtime:
 | Claude Code | `anchi setup claude` | `claude setup-token` output, or an Anthropic API key |
 | Hermes | `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` | An API key for any OpenAI-compatible HTTPS endpoint |
 
-A runtime is installed into the cell image the first time one of its agents runs a task (a few minutes, once). One connected runtime is enough: the Agent builder runs on the first connected of Codex, Claude Code and Hermes, or on `builderRuntime` from `~/.anchi/settings.yaml`.
+Guided preparation installs the selected runtime before the first task; other runtimes are
+installed on first use. One connected runtime is enough: the Agent builder runs on the first
+connected of Codex, Claude Code and Hermes, or on `builderRuntime` from `~/.anchi/settings.yaml`.
 
 ## Agents
 

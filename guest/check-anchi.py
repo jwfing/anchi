@@ -134,6 +134,20 @@ def real_tasks():
 def main():
     if os.getuid() != 0:
         raise SystemExit('run as guest root')
+    # Exercise the installed host-login validator without reading or writing the real vault.
+    sys.path.insert(0, '/opt/secure-vm/services')
+    import claude_admin
+    from common import Denied
+
+    fake_token = 'sk-ant-oat01-' + 'fake' * 12
+    valid = claude_admin.validate({'token': fake_token, 'expires_at': time.time() + 3600})
+    refused = 0
+    for extra in ({'expires_at': 1}, {'refresh_token': 'fake-host-only'}):
+        try:
+            claude_admin.validate({'token': fake_token, **extra})
+        except Denied:
+            refused += 1
+    check('host Claude imports reject expired tokens and refresh tokens', valid['kind'] == 'oauth' and refused == 2)
     # These checks start, kill and reap cells; a real task's cell must never be among them.
     tasks = real_tasks()
     if tasks and os.environ.get('ANCHI_CHECK_WITH_TASKS') != '1':
@@ -155,6 +169,15 @@ def main():
         )
         if built.returncode:
             raise SystemExit(f'cannot build the Codex runtime layer: {built.stdout[-500:]}')
+    cell = manager()
+    expected_uid = int(cell.cell_env()['SECURE_CELL_UID_BASE'])
+    for image, digest, binary in (
+        ('codex', 'base', 'usr/local/go/bin/go'),
+        ('runtime-codex', 'runtime', 'opt/codex/bin/codex'),
+    ):
+        upper = cell.layer_dir(image, digest) / 'upper'
+        check(f'{image} tool belongs to mapped cell root', (upper / binary).stat().st_uid == expected_uid)
+        check(f'{image} layer carries no proxy CA', not any((upper / p).exists() for p in cell.BUILD_CA_PATHS))
     t0 = time.time()
 
     # ── M1: concurrency and isolation ──

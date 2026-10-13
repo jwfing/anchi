@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import type { AgentSummary, Approval, SetupStatus, StoredEvent, TaskRow } from '@anchi/protocol';
 import { sanitize, sanitizeLine } from '../sanitize.ts';
 import { truncate, wrap } from './lines.ts';
-import { teamActivity, welcomeStep } from './usability.ts';
+import { suggestedRuntime, teamActivity, welcomeStep } from './usability.ts';
 
 /** Seconds before the proxy refuses a held write on its own. */
 function secondsLeft(a: Approval, now: number): number {
@@ -141,6 +141,40 @@ export function WelcomeView({
     ...labels.map((label, i) => `${i < at ? '✓' : i === at ? '→' : '○'} ${label}`),
     '',
   ];
+  if (setup.quickSetup) {
+    const current =
+      step === 'environment' || step === 'vault'
+        ? 0
+        : step === 'runtime'
+          ? 1
+          : step === 'done'
+            ? 3
+            : 2;
+    lines.splice(
+      3,
+      labels.length,
+      ...[
+        'Prepare your environment',
+        'Connect your account',
+        'Review your starter and try a task',
+      ].map((label, i) => `${i < current ? '✓' : i === current ? '→' : '○'} ${label}`),
+    );
+    if (setup.hostLogins) {
+      for (const [id, name] of [
+        ['codex', 'Codex'],
+        ['claude', 'Claude Code'],
+      ] as const) {
+        const login = setup.hostLogins[id];
+        if (login.state === 'ready')
+          lines.push(`${name}: local login detected; connects automatically.`);
+        else if (login.installed && login.state !== 'disabled')
+          lines.push(
+            `${name}: installed; ${login.state === 'expired' ? 'login expired' : 'no usable local login'}. Sign in on this computer.`,
+          );
+      }
+      lines.push('');
+    }
+  }
   if (busy) lines.push(busy, 'You can leave this screen; installation keeps running.');
   else if (step === 'environment') {
     if (setup.host?.missing.length)
@@ -165,10 +199,17 @@ export function WelcomeView({
         setup.vm === 'stopped'
           ? 'Start your existing VM to continue.'
           : 'Prepare the VM and agent image. First installation can take up to half an hour.',
-        `${nextKey} continue · completed steps are detected automatically`,
+        setup.quickSetup
+          ? setup.hostLogins?.codex.state === 'ready' || setup.hostLogins?.claude.state === 'ready'
+            ? `${nextKey} prepare with ${suggestedRuntime(setup)} · recommended resources`
+            : `${nextKey} choose your runtime and prepare everything · recommended resources`
+          : `${nextKey} continue · completed steps are detected automatically`,
       );
   } else if (step === 'vault')
     lines.push(
+      ...(setup.quickSetup
+        ? ['Anchi resumes preparation and unlocks your existing credentials.']
+        : []),
       setup.vaultKeyPresent === false
         ? 'Initialize the vault. Keep a backup of ~/.config/anchi/vault.key.'
         : 'Unlock the vault for this VM session.',
@@ -177,24 +218,40 @@ export function WelcomeView({
   else if (step === 'runtime')
     lines.push(
       'Connect one runtime:',
-      '[i] Codex — run codex login on this computer, then import it.',
-      '[c] Claude Code — run claude setup-token, then paste the token.',
+      setup.hostLogins?.codex.state === 'ready'
+        ? '[i] Codex — local login detected; automatic import retries in the background.'
+        : '[i] Codex — run codex login on this computer, then import it.',
+      '[c] Claude Code — sign in locally for automatic import, or paste a setup-token/API key.',
       '[h] Hermes — an OpenAI-compatible endpoint, its API key and a model.',
-      agents.some((a) => a.id !== 'builder')
-        ? 'Connect the runtime used by your agent.'
-        : 'Agent builder uses the first one connected (Codex, then Claude Code, then Hermes); builderRuntime in ~/.anchi/settings.yaml picks one.',
+      setup.quickSetup
+        ? 'Your selected runtime is prepared before the first task. No business accounts are needed.'
+        : agents.some((a) => a.id !== 'builder')
+          ? 'Connect the runtime used by your agent.'
+          : 'Agent builder uses the first one connected (Codex, then Claude Code, then Hermes); builderRuntime in ~/.anchi/settings.yaml picks one.',
     );
   else if (step === 'agent')
     lines.push(
-      'Create a starter using your connected runtime; review its YAML before saving.',
+      setup.quickSetup
+        ? 'Your starter is named dev and uses a connected runtime. Review its access before saving.'
+        : 'Create a starter using your connected runtime; review its YAML before saving.',
       'No model call, connectors or shared folders are needed to create it.',
-      `${nextKey} create a starter agent`,
+      ...(setup.quickSetup ? ['Sending the sample task afterwards consumes model quota.'] : []),
+      setup.quickSetup
+        ? `${nextKey} review your starter · custom name and runtime: Ctrl+X, N`
+        : `${nextKey} create a starter agent`,
       'Agent builder is also available for custom roles using a connected runtime.',
     );
   else if (step === 'task')
     lines.push(
       'Give your agent a small first task, for example:',
-      '“Explain what tools you have access to. Do not change anything.”',
+      setup.quickSetup
+        ? 'Review a small example function: find the bug, propose a fix and tests.'
+        : '“Explain what tools you have access to. Do not change anything.”',
+      ...(setup.quickSetup
+        ? [
+            'The sample uses no project files or business accounts. Sending it consumes model quota.',
+          ]
+        : []),
       `${nextKey} open your agent`,
     );
   else lines.push('Your team is ready.', `${nextKey} open the team overview`);

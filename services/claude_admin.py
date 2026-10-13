@@ -1,11 +1,13 @@
 """Trusted import of a Claude Code credential for agent cells, via stdin only.
 
 A `claude setup-token` subscription token (`sk-ant-oat01-…`, long-lived, no refresh) or an
-Anthropic API key (`sk-ant-api03-…`). Cells hold a placeholder; the egress proxy substitutes
+Anthropic API key (`sk-ant-api03-…`), or a host OAuth access token with its expiry.
+Host refresh tokens stay on the host. Cells hold a placeholder; the egress proxy substitutes
 this value on api.anthropic.com.
 """
 
 import json
+import math
 import os
 import re
 import resource
@@ -22,7 +24,7 @@ KINDS = {'oauth': 'sk-ant-oat01-', 'api_key': 'sk-ant-api03-'}
 
 
 def validate(value):
-    fields(value, ('token',), ('token',))
+    fields(value, ('token', 'expires_at'), ('token',))
     token = value['token']
     if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{40,500}', token):
         raise Denied('CLAUDE_TOKEN_REQUIRED')
@@ -30,7 +32,18 @@ def validate(value):
         if token.startswith(prefix):
             if 'anchi-placeholder' in token:
                 raise Denied('CLAUDE_TOKEN_REQUIRED')
-            return {'token': token, 'kind': kind}
+            credential = {'token': token, 'kind': kind}
+            if 'expires_at' in value:
+                expires = value['expires_at']
+                if (
+                    kind != 'oauth'
+                    or type(expires) not in (int, float)
+                    or not math.isfinite(expires)
+                    or expires <= time.time() + 120
+                ):
+                    raise Denied('CLAUDE_TOKEN_EXPIRED_RELOGIN_ON_HOST')
+                credential['expires_at'] = expires
+            return credential
     raise Denied('CLAUDE_TOKEN_REQUIRED')
 
 
@@ -41,6 +54,7 @@ def status():
         'configured': value is not None,
         'kind': value and value['kind'],
         'imported_at': value and value['imported_at'],
+        'expires_at': value and value.get('expires_at'),
     }
 
 

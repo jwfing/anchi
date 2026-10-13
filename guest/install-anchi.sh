@@ -71,6 +71,13 @@ for runtime in codex claude-code hermes; do
   install -m 0644 "$src/anchi-build-runtime-$runtime.sh" "/opt/secure-vm/anchi/build-runtime-$runtime.sh"
 done
 install -m 0755 "$src/anchi_cell.py" /opt/secure-vm/anchi/anchi_cell.py
+install -m 0644 "$src/anchi_prebuilt.py" "$src/bootstrap.sh" "$src/install-anchi.sh" /opt/secure-vm/anchi/
+if [[ -f $src/prebuilt.json ]]; then
+  install -m 0644 "$src/prebuilt.json" /opt/secure-vm/anchi/prebuilt.json
+else
+  # A checkout uses local builds, even if the VM previously ran a binary release.
+  rm -f /opt/secure-vm/anchi/prebuilt.json
+fi
 install -m 0755 "$src/check-anchi.py" /opt/secure-vm/check-anchi.py
 install -m 0755 "$src/anchi-workspaces.sh" /opt/secure-vm/anchi/workspaces.sh
 ln -sf /opt/secure-vm/anchi/anchi_cell.py /usr/local/sbin/anchi-cell

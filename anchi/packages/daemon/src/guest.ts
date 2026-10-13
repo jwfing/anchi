@@ -462,18 +462,25 @@ export class Guest {
     return r.code === 0;
   }
 
-  async claudeStatus(): Promise<{ configured: boolean; kind: 'oauth' | 'api_key' | null }> {
+  async claudeStatus(): Promise<{
+    configured: boolean;
+    kind: 'oauth' | 'api_key' | null;
+    expires_at?: number | null;
+  }> {
     return parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'status']),
-    ) as { configured: boolean; kind: 'oauth' | 'api_key' | null };
+    ) as { configured: boolean; kind: 'oauth' | 'api_key' | null; expires_at?: number | null };
   }
 
   /** A `claude setup-token` token or an API key, on stdin only. */
-  async importClaude(token: string): Promise<void> {
+  async importClaude(token: string, expiresAt?: number): Promise<void> {
     parse(
       await this.transport.exec(
         ['/usr/bin/python3', `${SERVICES}/claude_admin.py`, 'import-token'],
-        JSON.stringify({ token }),
+        JSON.stringify({
+          token,
+          ...(expiresAt === undefined ? {} : { expires_at: expiresAt / 1000 }),
+        }),
       ),
     );
   }

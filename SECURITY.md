@@ -29,7 +29,17 @@ In either mode, an agent's own tool calls inside its cell (shell, files, network
 
 ## Authentication and connectors
 
-The Codex login is imported from the host's `~/.codex/auth.json`, by the user or automatically when the host's Codex CLI refreshes it: only the access token and account id go to the vault, over stdin; the refresh token stays on the host.
+The daemon detects host Codex and Claude Code logins at startup, after environment setup, on
+credential file changes and every five minutes. Once the installed VM's vault is unlocked,
+valid local subscription logins are imported automatically. Codex reads `~/.codex/auth.json`
+(or `$CODEX_HOME/auth.json`); Claude reads its directory-specific macOS Keychain entry or
+`.credentials.json` in `CLAUDE_CONFIG_DIR` (default `~/.claude`). Reads are bounded and reject
+non-regular or symlinked credential files. Only access tokens, Codex's account id and Claude's
+expiry enter the vault, over stdin. Refresh tokens stay on the host, where the CLIs refresh
+them. Discovery reports only installation/login state; errors and logs contain no token data.
+`codexAutoImport: false` and `claudeAutoImport: false` disable each automatic import. A stored
+Codex account is not switched automatically; manually supplied Claude tokens/API keys are not
+overwritten. The trusted auth service refuses expired host Claude tokens just as it does Codex tokens.
 
 Google sign-in uses the system browser, an ephemeral `127.0.0.1` port opened by the daemon, state and PKCE. Google tokens enter only the VM authentication layer. Invalid refresh credentials set reauthentication-required and stop further Google requests until the user reconnects. Gmail has no task-scoped sender/folder restrictions. Cancelling a local task cannot withdraw an upstream request or automatically revoke pending approvals.
 
@@ -67,6 +77,21 @@ The agent team (`anchi/`, `guest/anchi_cell.py`, `services/egress_*.py`) runs Co
 - **Subscription limits.** The proxy reads the limits of the Codex and Claude subscriptions from responses it injected credentials into: Codex's rate-limit message in the model stream (plan, percent used, window length and reset time, all bounded) and Claude's `anthropic-ratelimit-*` headers (printable, bounded). It parses only that message type and keeps nothing else of the stream. The values live in the proxy's memory and are not a security control.
 
 ## Isolation and platform limits
+
+Guided preparation combines environment installation, vault initialization/unlock and runtime
+image preparation after one trusted confirmation. It never replaces an existing master key or starts a task. Available local runtime logins
+connect automatically after the vault is ready; agent configuration and sending the sample
+task remain separate user actions. A missing key with encrypted credentials still requires
+restoring the original key.
+
+Prebuilt release layers are trusted software, like the app bundle. Their manifest is shipped
+inside that bundle and fixes each archive's version, architecture, recipe compatibility, size
+and SHA-256. The guest checks the full archive before extraction into a private staging directory,
+rejects traversal, links used as parent directories, unmapped owners and unsupported special
+files/xattrs, maps ownership into the cell UID range, and publishes the layer by rename.
+Only overlay whiteouts and opaque-directory markers are supported. Downloads contain no
+accounts, agent homes, workspace data or proxy CA. A checksum failure stops installation;
+these checks do not constitute publisher signing. Source installations build layers locally.
 
 Linux and macOS share the same trust boundaries: services and cells run inside a Lima VM. Linux uses QEMU/KVM and QEMU user-mode NAT; the host administrator grants `/dev/kvm` access. The user installs Lima (Homebrew on macOS); the Linux CI pins Lima by SHA-256. Inside the VM, Node, Codex and Claude Code are pinned by version and SHA-256 in `guest/cell.env`, not by publisher signatures.
 

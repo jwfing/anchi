@@ -142,7 +142,11 @@ export function chooseBuilderRuntime(
 ): Runtime {
   const { codex } = status;
   if (codex.connected && (codex.expiresAt === null || codex.expiresAt > now)) return 'codex';
-  if (status.claude?.connected) return 'claude-code';
+  if (
+    status.claude?.connected &&
+    (status.claude.expiresAt == null || status.claude.expiresAt > now)
+  )
+    return 'claude-code';
   if (status.hermes?.connected) return 'hermes';
   return 'codex';
 }

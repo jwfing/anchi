@@ -156,6 +156,8 @@ export interface ClaudeAccountStatus {
   runtime: 'claude-code';
   connected: boolean;
   kind: 'oauth' | 'api_key' | null;
+  /** Host login expiry in ms; null for manually supplied tokens and API keys. */
+  expiresAt?: number | null;
 }
 
 /**
@@ -212,7 +214,20 @@ export interface ResetPreview {
   vaultKey: string;
 }
 
+export interface HostLoginStatus {
+  installed: boolean;
+  state: 'ready' | 'missing' | 'expired' | 'unavailable' | 'disabled';
+}
+
 export interface SetupStatus {
+  /** This daemon supports one continuous preparation operation. */
+  quickSetup?: boolean;
+  /** Preparation continues in the daemon if its client disconnects. */
+  preparing?: RuntimeId;
+  /** Installed runtime layers. */
+  preparedRuntimes?: RuntimeId[];
+  /** Host discovery metadata only; access and refresh tokens never appear in status. */
+  hostLogins?: { codex: HostLoginStatus; claude: HostLoginStatus };
   /** Host-only readiness; optional for clients connected to an older daemon. */
   vaultKeyPresent?: boolean;
   host?: { platform: string; missing: string[]; installHint: string };
@@ -677,6 +692,8 @@ export interface Methods {
   /** Waits until the task's current turn ends (CLI). */
   'tasks.wait': [{ taskId: string }, TaskRow];
   'setup.status': [Record<string, never>, SetupStatus];
+  /** Prepare VM, vault and one runtime, then import available host logins. Never starts a task. */
+  'setup.prepare': [{ runtime: RuntimeId; confirm: true; vmSize?: VmSize }, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
   /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */

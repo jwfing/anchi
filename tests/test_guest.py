@@ -95,6 +95,25 @@ class StartCommandTests(unittest.TestCase):
 
 
 class BaseImageTests(unittest.TestCase):
+    def test_downloads_count_as_busy_before_a_build_cell_exists(self):
+        import fcntl
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(anchi_cell, 'LAYERS', Path(tmp)):
+            self.assertFalse(anchi_cell.image_busy())
+            with (Path(tmp) / '.build.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                self.assertTrue(anchi_cell.image_busy())
+                with patch.object(anchi_cell, 'cell_metas', return_value=[]), patch.object(anchi_cell, 'emit') as emit:
+                    anchi_cell.cell_list()
+                    self.assertEqual(emit.call_args.args[0]['cells'][0]['active'], True)
+            self.assertFalse(anchi_cell.image_busy())
+
+    def test_cached_base_does_not_accept_a_forged_runtime_hash(self):
+        with self.assertRaisesRegex(anchi_cell.Failure, 'BAD_HASH'):
+            anchi_cell.image_build('codex', 'runtime')
+
     def test_a_changed_build_script_or_runtime_pin_is_a_new_base(self):
         import tempfile
         from unittest.mock import patch

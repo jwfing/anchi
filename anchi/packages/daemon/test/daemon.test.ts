@@ -11,7 +11,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as setupModule from '../src/setup.ts';
+import { HostLogins } from '../src/host-logins.ts';
 import { connectorSchema, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
 import type { QuotaInfo, StoredEvent, TaskRow } from '@anchi/protocol';
@@ -169,8 +171,20 @@ class FakeTransport implements GuestTransport {
     if (args[1]?.endsWith('vault_admin.py') && this.guestFails) {
       return { code: 1, stdout: '{"error":"GUEST_SUDO_FAILED"}', stderr: '' };
     }
-    if (args[1]?.endsWith('claude_admin.py') && args[2] === 'status') {
-      return ok({ configured: this.claude, kind: this.claude ? 'oauth' : null });
+    if (args[1]?.endsWith('vault_admin.py') && args[2] === 'status')
+      return ok({ unlocked: this.vaultUnlocked });
+    if (args[1]?.endsWith('claude_admin.py')) {
+      if (args[2] === 'status')
+        return ok({
+          configured: this.claude,
+          kind: this.claude ? 'oauth' : null,
+          expires_at: this.claudeExpiry,
+        });
+      if (this.rejectHostClaude) return { code: 1, stdout: '', stderr: 'fake-private-error' };
+      this.claudeImports.push(JSON.parse(stdin));
+      this.claude = true;
+      this.claudeExpiry = JSON.parse(stdin).expires_at ?? null;
+      return ok({});
     }
     if (args[1]?.endsWith('hermes_admin.py') && args[2] === 'status') {
       return ok({ configured: this.hermes, base_url: null, model: null });
@@ -223,6 +237,10 @@ class FakeTransport implements GuestTransport {
   codex: number | null = null;
   /** Whether the vault holds a Claude Code token or a Hermes endpoint. */
   claude = false;
+  claudeExpiry: number | null = null;
+  vaultUnlocked = false;
+  rejectHostClaude = false;
+  claudeImports: Record<string, unknown>[] = [];
   hermes = false;
   /** What `anchi-cell version` reports; null for a guest from before the command. */
   guestVersion: string | null = APP_VERSION;
@@ -305,7 +323,13 @@ async function start(
     turnTimeoutMs,
     // Tests drive triggers with their own clock through daemon.triggers.tick().
     triggers: false,
-    codexSync: false,
+    hostLoginSync: false,
+    hostLogins: new HostLogins({
+      codexFile: join(root, 'auth.json'),
+      claudeDir: root,
+      path: root,
+      platform: 'linux',
+    }),
     hostRun,
     setupSteps: SETUP_STEPS,
     // Never the real `limactl delete`.
@@ -827,6 +851,83 @@ describe('daemon tasks', () => {
     );
   });
 
+  it('refuses unconfirmed or malformed preparation before changing the environment', async () => {
+    const { client } = await start();
+    const lines: string[] = [];
+    client.on('setup', ({ line }) => lines.push(line));
+    for (const params of [
+      { runtime: 'codex' },
+      { runtime: 'codex', confirm: false },
+      { runtime: 'unknown', confirm: true },
+      { runtime: 'codex', confirm: true, token: 'unexpected' },
+      { runtime: 'codex', confirm: true, vmSize: { cpus: 0, memoryGiB: 2 } },
+    ])
+      await expect(client.call('setup.prepare', params as never)).rejects.toThrow();
+    expect(lines).toEqual([]);
+  });
+
+  it('prepares only the selected runtime and refuses concurrent setup and reset', async () => {
+    vmRunning = true;
+    const { client } = await start();
+    const status = await client.call('setup.status');
+    const original = setupModule.setupStatus;
+    const spy = vi.spyOn(setupModule, 'setupStatus').mockImplementation(async (...args) => ({
+      ...(await original(...args)),
+      host: { platform: 'test', missing: [], installHint: '' },
+      vaultUnlocked: true,
+      installed: true,
+      guestOutdated: false,
+    }));
+    transport.images.delete('runtime-claude-code@runtime');
+    write(
+      '.credentials.json',
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'sk-ant-oat01-' + 'fake'.repeat(12),
+          expiresAt: Date.now() + 3_600_000,
+        },
+      }),
+    );
+    let release!: () => void;
+    transport.buildGates.set(
+      'runtime-claude-code',
+      new Promise<void>((done) => {
+        release = done;
+      }),
+    );
+    try {
+      const preparing = client.call('setup.prepare', { runtime: 'claude-code', confirm: true });
+      await vi.waitFor(() =>
+        expect(
+          transport.execs.some(
+            (x) => x.args.join(' ') === 'anchi-image build runtime-claude-code runtime',
+          ),
+        ).toBe(true),
+      );
+      expect((await client.call('setup.status')).preparing).toBe('claude-code');
+      for (const [method, params] of [
+        ['setup.prepare', { runtime: 'codex', confirm: true }],
+        ['setup.run', { action: 'install' }],
+        ['setup.reset', { confirm: 'reset' }],
+      ] as const)
+        await expect(client.call(method, params as never)).rejects.toThrow(/already running/);
+      release();
+      const result = await preparing;
+      expect((await client.call('setup.status')).preparing).toBeUndefined();
+      expect(result.preparedRuntimes).toContain('claude-code');
+      expect(result.claude.connected).toBe(true);
+      expect(transport.claudeImports).toHaveLength(1);
+      expect(result.codex).toEqual(status.codex);
+      expect(transport.starts).toEqual([]);
+      expect(transport.execs.filter((x) => x.args[1] === 'build').map((x) => x.args[2])).toEqual([
+        'runtime-claude-code',
+      ]);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+
   it('creates the VM with the size picked, half of this computer by default', async () => {
     const { client } = await start();
     const host = hostResources();
@@ -1292,7 +1393,7 @@ describe('daemon tasks', () => {
     const { daemon } = await start();
     const login = join(root, 'codex-auth.json');
     const jwt = (exp: number) =>
-      `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
+      `h.${Buffer.from(JSON.stringify({ exp, 'https://api.openai.com/auth': { chatgpt_account_id: 'acct' } })).toString('base64url')}.s`;
     const writeLogin = (exp: number) =>
       writeFileSync(
         login,
@@ -1315,6 +1416,88 @@ describe('daemon tasks', () => {
     expect(transport.codexImports).toHaveLength(2);
   });
 
+  it('discovers host logins but refuses imports before the vault is ready or when disabled', async () => {
+    vmRunning = true;
+    const { daemon, client } = await start();
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const access = `h.${Buffer.from(JSON.stringify({ exp, 'https://api.openai.com/auth': { chatgpt_account_id: 'acct' } })).toString('base64url')}.s`;
+    write(
+      'auth.json',
+      JSON.stringify({
+        tokens: { access_token: access, account_id: 'acct', refresh_token: 'fake-refresh-local' },
+      }),
+    );
+    write(
+      '.credentials.json',
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'sk-ant-oat01-' + 'fake'.repeat(12),
+          expiresAt: exp * 1000,
+          refreshToken: 'fake-refresh-local',
+        },
+      }),
+    );
+    await daemon.syncHostLogins();
+    expect((await client.call('setup.status')).hostLogins?.claude.state).toBe('ready');
+    expect(transport.codexImports).toEqual([]);
+    expect(transport.claudeImports).toEqual([]);
+    transport.vaultUnlocked = true;
+    write('settings.yaml', 'codexAutoImport: false\nclaudeAutoImport: false\n');
+    await daemon.syncHostLogins();
+    expect(transport.codexImports).toEqual([]);
+    expect(transport.claudeImports).toEqual([]);
+    write('settings.yaml', 'codexAutoImport: true\nclaudeAutoImport: true\n');
+    transport.guestVersion = '0.0.0';
+    await daemon.syncHostLogins();
+    expect(transport.claudeImports).toEqual([]);
+    transport.guestVersion = APP_VERSION;
+    await Promise.all([daemon.syncHostLogins(), daemon.syncHostLogins()]);
+    expect(transport.codexImports).toEqual([{ access_token: access, account_id: 'acct' }]);
+    expect(transport.claudeImports).toEqual([
+      { token: 'sk-ant-oat01-' + 'fake'.repeat(12), expires_at: exp },
+    ]);
+    const status = await client.call('setup.status');
+    expect(status.claude.expiresAt).toBe(exp * 1000);
+    expect(JSON.stringify(status)).not.toContain(access);
+    expect(JSON.stringify(status)).not.toContain('sk-ant-oat01-');
+    expect(JSON.stringify(transport.execs)).not.toContain('fake-refresh-local');
+    expect(JSON.stringify(transport.execs.map((e) => e.args))).not.toContain(access);
+    expect(logs.join()).not.toContain(access);
+    await daemon.syncHostLogins();
+    expect(transport.claudeImports).toHaveLength(1);
+  });
+
+  it('imports Claude on startup, refreshes newer host tokens, and preserves manual credentials', async () => {
+    vmRunning = true;
+    transport.vaultUnlocked = true;
+    let expires = Date.now() + 3_600_000;
+    const local = () =>
+      write(
+        '.credentials.json',
+        JSON.stringify({
+          claudeAiOauth: { accessToken: 'sk-ant-oat01-' + 'fake'.repeat(12), expiresAt: expires },
+        }),
+      );
+    local();
+    const { daemon, client } = await start(60_000, undefined, undefined, { hostLoginSync: true });
+    expect((await client.call('setup.status')).claude.connected).toBe(true);
+    expect(transport.claudeImports).toHaveLength(1);
+    expires += 3_600_000;
+    local();
+    await daemon.syncHostLogins();
+    expect(transport.claudeImports).toHaveLength(2);
+    transport.claudeExpiry = null;
+    expires += 3_600_000;
+    local();
+    await daemon.syncHostLogins();
+    expect(transport.claudeImports).toHaveLength(2);
+    transport.claude = false;
+    transport.rejectHostClaude = true;
+    await daemon.syncHostLogins();
+    expect(logs.join()).not.toContain('fake-private-error');
+    expect(logs.join()).toContain('claude host login import failed');
+  });
+
   it('accepts a task for an agent file written just before it', async () => {
     const { client } = await start();
     write('agents/fresh.yaml', 'runtime: codex\n');
@@ -1324,6 +1507,42 @@ describe('daemon tasks', () => {
 });
 
 describe('builder', () => {
+  it('prepares from the CLI without a runtime option using the connected login', async () => {
+    vmRunning = true;
+    transport.vaultUnlocked = true;
+    transport.claude = true;
+    transport.images.delete('runtime-claude-code@runtime');
+    await start();
+    const original = setupModule.setupStatus;
+    const spy = vi.spyOn(setupModule, 'setupStatus').mockImplementation(async (...args) => ({
+      ...(await original(...args)),
+      host: { platform: 'test', missing: [], installHint: '' },
+    }));
+    try {
+      const result = await promisify(execFile)(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          join(import.meta.dirname, '../../tui/src/main.ts'),
+          'setup',
+          'prepare',
+          '--yes',
+        ],
+        { env: { ...process.env, ANCHI_HOME: root } },
+      );
+      expect(result.stdout).toContain('claude-code connected');
+      expect(
+        transport.execs.some(
+          (call) => call.args.join(' ') === 'anchi-image build runtime-claude-code runtime',
+        ),
+      ).toBe(true);
+      expect(transport.starts).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  }, 30_000);
+
   it('preserves numeric and YAML-keyword ids as starter display names', async () => {
     const { client } = await start();
     for (const agentId of ['123', 'true', 'null']) {

@@ -84,14 +84,15 @@ import {
   claudeStatus,
   hermesStatus,
   codexStatus,
-  HOST_CODEX_LOGIN,
   jwtExpiry,
   CONNECTOR_IDS,
   connectorStatuses,
   readHostCodexLogin,
+  prepareEnvironment,
   setupStatus,
 } from './setup.ts';
 import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
+import { HostLogins, type ClaudeLogin } from './host-logins.ts';
 import { ACCOUNT, SERVICE_IDS, ServiceSetup } from './services.ts';
 import {
   allowEgressHost,
@@ -107,6 +108,7 @@ import {
 import { type SkillRemote, SkillStore } from './skills.ts';
 import { TriggerRunner } from './triggers.ts';
 import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
 
 function serviceId(v: unknown): ServiceConnectorId {
   if (!SERVICE_IDS.includes(v as ServiceConnectorId)) throw new Error('unknown service connector');
@@ -146,10 +148,10 @@ export interface DaemonOptions {
    * Off unless set: only the real daemon may stop and rename the machine's VM.
    */
   migrateVm?: boolean;
-  /** Keep the vault's Codex token in step with the Mac's login (default true). */
-  codexSync?: boolean;
-  /** The Mac's Codex login file; tests point it elsewhere. */
-  codexLogin?: string;
+  /** Keep runtime access tokens in step with host logins (default true). */
+  hostLoginSync?: boolean;
+  /** Host credential readers; tests use temporary files and a fake Keychain. */
+  hostLogins?: HostLogins;
   /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
   workspaceRoot?: string;
   /** Where GitHub skills are fetched from; tests replace it. */
@@ -233,10 +235,15 @@ export class Daemon {
   private startedAt = Date.now();
   private log: (msg: string) => void;
   private setup: SetupRunner;
+  private preparing: Runtime | undefined;
   private hostRun: typeof hostOutput;
   private awsTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
-  private codexTimer?: NodeJS.Timeout;
+  private hostLoginTimer?: NodeJS.Timeout;
+  private hostLoginDebounce?: NodeJS.Timeout;
+  private stopping = false;
+  private hostLogins: HostLogins;
+  private hostLoginSync?: Promise<void>;
   private codexImporting = false;
 
   /**
@@ -245,7 +252,7 @@ export class Daemon {
    * access token and the account id are imported, as `setup codex` does; the refresh token
    * stays on the Mac.
    */
-  async syncCodex(file = this.opts.codexLogin ?? HOST_CODEX_LOGIN): Promise<boolean> {
+  async syncCodex(file = this.hostLogins.codexFile): Promise<boolean> {
     if (this.settings().codexAutoImport === false || this.codexImporting) return false;
     let login: { accessToken: string; accountId: string };
     try {
@@ -258,17 +265,78 @@ export class Daemon {
     this.codexImporting = true;
     try {
       const vault = await codexStatus(this.guest).catch(() => null);
-      if (!vault || (vault.connected && (vault.expiresAt ?? 0) >= hostExpiry)) return false;
+      if (
+        !vault ||
+        (vault.connected &&
+          (vault.accountId !== login.accountId || (vault.expiresAt ?? 0) >= hostExpiry))
+      )
+        return false;
       await this.guest.importCodex(login.accessToken, login.accountId);
       this.log(`codex token imported; valid until ${new Date(hostExpiry).toISOString()}`);
       void this.refreshSetup();
       return true;
-    } catch (err) {
-      this.log(`codex token import failed: ${(err as Error).message}`);
+    } catch {
+      this.log('codex token import failed; retry from Runtimes');
       return false;
     } finally {
       this.codexImporting = false;
     }
+  }
+
+  /** Discovery is read-only until the existing VM and vault are ready. Never replaces a manual Claude token. */
+  async syncHostLogins(): Promise<void> {
+    if (this.stopping) return;
+    if (this.hostLoginSync) return this.hostLoginSync;
+    this.hostLoginSync = this.importHostLogins();
+    try {
+      await this.hostLoginSync;
+    } finally {
+      this.hostLoginSync = undefined;
+    }
+  }
+
+  private async importHostLogins(): Promise<void> {
+    const settings = this.settings();
+    const found = await this.hostLogins.read({
+      codex: settings.codexAutoImport !== false,
+      claude: settings.claudeAutoImport !== false,
+    });
+    const status = await setupStatus(this.guest, this.lima, this.services).catch(() => null);
+    if (
+      !status ||
+      status.vm !== 'running' ||
+      !status.installed ||
+      !status.vaultUnlocked ||
+      status.error ||
+      status.guestOutdated
+    )
+      return;
+    if (found.codex) await this.syncCodex();
+    if (found.claude) await this.syncClaude(found.claude);
+  }
+
+  private async syncClaude(login: ClaudeLogin): Promise<void> {
+    try {
+      const vault = await this.guest.claudeStatus();
+      // A null expiry is a manually supplied setup-token or API key, including older installs.
+      if (
+        vault.configured &&
+        (vault.expires_at == null || vault.expires_at * 1000 >= login.expiresAt)
+      )
+        return;
+      await this.guest.importClaude(login.token, login.expiresAt);
+      this.log('claude host login imported');
+    } catch {
+      this.log('claude host login import failed; retry from Runtimes');
+    }
+  }
+
+  private async readSetupStatus(): Promise<SetupStatus> {
+    await this.hostLoginSync;
+    return {
+      ...(await setupStatus(this.guest, this.lima, this.services)),
+      hostLogins: this.hostLogins.status,
+    };
   }
 
   private settings(): Record<string, unknown> {
@@ -426,6 +494,7 @@ export class Daemon {
   private awsRefreshFailing = false;
 
   constructor(private opts: DaemonOptions) {
+    this.hostLogins = opts.hostLogins ?? new HostLogins();
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
     this.lima = opts.lima ?? new LimaTransport();
     this.guest = opts.guest ?? new Guest(this.lima);
@@ -898,11 +967,53 @@ export class Daemon {
       return this.guest.scan(task);
     },
     'setup.status': async () => {
-      const status = await setupStatus(this.guest, this.lima, this.services);
+      const status = await this.readSetupStatus();
       this.noteSetup(status);
-      return status;
+      return { ...status, preparing: this.preparing };
+    },
+    'setup.prepare': async (params) => {
+      const { runtime, vmSize } = z
+        .strictObject({
+          runtime: runtimeSchema,
+          confirm: z.literal(true),
+          vmSize: z
+            .strictObject({ cpus: z.number().int(), memoryGiB: z.number().int() })
+            .optional(),
+        })
+        .parse(params);
+      if (this.preparing || this.setup.running)
+        throw new Error('Environment setup is already running.');
+      const env = vmSize ? vmSizeEnv(vmSize, hostResources()) : {};
+      this.preparing = runtime;
+      try {
+        await prepareEnvironment(
+          runtime,
+          () => setupStatus(this.guest, this.lima, this.services),
+          async (action) => {
+            await this.setup.run(
+              action,
+              (line) => this.broadcast('setup', { action, line }),
+              action === 'install' ? env : {},
+            );
+          },
+          async (selected) => {
+            this.broadcast('setup', {
+              action: 'install',
+              line: `Preparing ${selected} runtime image`,
+            });
+            await this.guest.buildImage(`runtime-${selected}`, 'runtime');
+          },
+        );
+        await this.syncHostLogins();
+        const status = await this.readSetupStatus();
+        this.noteSetup(status);
+        return status;
+      } finally {
+        this.preparing = undefined;
+      }
     },
     'setup.importClaude': async ({ token }) => {
+      await this.hostLoginSync;
       await this.guest.importClaude(str(token, 'token', 500).trim());
       void this.refreshSetup();
       return claudeStatus(this.guest);
@@ -917,12 +1028,14 @@ export class Daemon {
       return hermesStatus(this.guest);
     },
     'setup.importCodex': async () => {
-      const login = readHostCodexLogin();
+      await this.hostLoginSync;
+      const login = readHostCodexLogin(this.hostLogins.codexFile);
       await this.guest.importCodex(login.accessToken, login.accountId);
       void this.refreshSetup();
       return codexStatus(this.guest);
     },
     'setup.run': async ({ action, vmSize }) => {
+      if (this.preparing) throw new Error('Environment setup is already running.');
       if (!SETUP_ACTIONS.includes(action)) throw new Error('unknown setup step');
       if (vmSize !== undefined && action !== 'install') {
         throw new Error('BAD_VM_SIZE: only install creates a VM');
@@ -933,12 +1046,14 @@ export class Daemon {
       );
       await this.setup.run(action, (line) => this.broadcast('setup', { action, line }), env);
       this.log(`setup ${action} done`);
-      const status = await setupStatus(this.guest, this.lima);
+      await this.syncHostLogins();
+      const status = await this.readSetupStatus();
       this.noteSetup(status);
       return status;
     },
     'setup.resetPreview': async () => this.resetPreview(),
     'setup.reset': async ({ confirm }) => {
+      if (this.preparing) throw new Error('Environment setup is already running.');
       if (confirm !== 'reset') throw new Error('type reset to confirm');
       const { busy } = await this.resetPreview();
       if (busy) throw new Error(`${busy} task(s) running or queued; cancel them or wait first`);
@@ -1193,19 +1308,24 @@ export class Daemon {
     if (this.opts.approvals !== false) this.approvals.start();
     if (this.opts.triggers !== false) this.triggers.start();
     void this.pushEgressSettings();
-    if (this.opts.codexSync !== false) {
-      void this.syncCodex();
-      this.codexTimer = setInterval(() => void this.syncCodex(), 5 * 60_000);
-      this.codexTimer.unref();
-      try {
-        const file = this.opts.codexLogin ?? HOST_CODEX_LOGIN;
-        this.watchers.push(
-          watch(dirname(file), (_e, name) => {
-            if (String(name) === basename(file)) setTimeout(() => void this.syncCodex(), 1000);
-          }),
-        );
-      } catch {
-        // No ~/.codex yet; the timer still checks.
+    if (this.opts.hostLoginSync !== false) {
+      void this.syncHostLogins();
+      this.hostLoginTimer = setInterval(() => void this.syncHostLogins(), 5 * 60_000);
+      this.hostLoginTimer.unref();
+      for (const file of [this.hostLogins.codexFile, this.hostLogins.claudeFile]) {
+        try {
+          this.watchers.push(
+            watch(dirname(file), (_e, name) => {
+              if (String(name) === basename(file)) {
+                clearTimeout(this.hostLoginDebounce);
+                this.hostLoginDebounce = setTimeout(() => void this.syncHostLogins(), 1000);
+                this.hostLoginDebounce.unref();
+              }
+            }),
+          );
+        } catch {
+          // A CLI not installed yet is picked up by the timer.
+        }
       }
     }
     // Retention: finished tasks older than the configured number of days.
@@ -1258,12 +1378,15 @@ export class Daemon {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    clearTimeout(this.hostLoginDebounce);
+    await this.hostLoginSync;
     await this.hub.shutdown();
     this.approvals.stop();
     this.triggers.stop();
     this.services.stop();
     clearInterval(this.purgeTimer);
-    clearInterval(this.codexTimer);
+    clearInterval(this.hostLoginTimer);
     clearInterval(this.awsTimer);
     for (const w of this.watchers) w.close();
     for (const p of this.clients.values()) p.close();

@@ -20,6 +20,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tarfile
 import time
 
 BASE = Path('/var/lib/secure-vm/rootfs')
@@ -360,6 +361,20 @@ def proxy_env():
 
 
 def image_build(image, digest):
+    """Serialize installation with task-triggered builds and reuse completed layers."""
+    name(image, 'BAD_IMAGE')
+    runtime = image in RUNTIME_IMAGES.values()
+    if not HASH.fullmatch(digest) or (digest == 'base') != (image == BASE_IMAGE) or (digest == 'runtime') != runtime:
+        raise Failure('BAD_HASH')
+    LAYERS.mkdir(parents=True, exist_ok=True)
+    with (LAYERS / '.build.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if meta := layer_meta(image, digest):
+            return emit(meta)
+        return build_image_locked(image, digest)
+
+
+def build_image_locked(image, digest):
     name(image, 'BAD_IMAGE')
     runtime = image in RUNTIME_IMAGES.values()
     if not HASH.fullmatch(digest) or (digest == 'base') != (image == BASE_IMAGE) or (digest == 'runtime') != runtime:
@@ -380,6 +395,15 @@ def image_build(image, digest):
         script = recipe_script(recipe)
         lower = lowerdirs(BASE_IMAGE, 'base')
     target = layer_dir(image, digest)
+    if image == BASE_IMAGE or runtime:
+        # The manifest is shipped inside the app, never fetched alongside the archive.
+        from anchi_prebuilt import install
+
+        try:
+            if install(image, digest, target, base_version(), LIB, CELL_ENV):
+                return emit(layer_meta(image, digest))
+        except (OSError, ValueError, tarfile.TarError) as error:
+            raise Failure(f'PREBUILT_INSTALL_FAILED: {error}') from None
     building = target.with_name(target.name + '.building')
     task = 'build-' + hashlib.sha256(f'{image}/{digest}/{time.time()}'.encode()).hexdigest()[:12]
     work = CELLS / task
@@ -1301,7 +1325,23 @@ def cell_list():
     for meta in cell_metas():
         meta['active'] = active(unit(meta['task']))
         cells.append(meta)
+    if image_busy():
+        # Downloads/extraction have no nspawn unit, but installing must not replace their
+        # recipes or lower root midway through the operation.
+        cells.append({'task': 'build-image-install', 'agent': 'image-builder', 'kind': 'build', 'active': True})
     emit({'cells': cells})
+
+
+def image_busy():
+    try:
+        with (LAYERS / '.build.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return False
+            except BlockingIOError:
+                return True
+    except FileNotFoundError:
+        return False
 
 
 def building(work):
