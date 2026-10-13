@@ -318,7 +318,8 @@ components: Anchi compares the version that installed them (`/opt/secure-vm/inst
 with its own, and until they match **Getting started** opens on its environment step with
 **Enter** running the update, **Runtimes** shows both versions in red with `I`, and every
 new task carries a notice. Older packages remain under `~/.local/share/anchi/versions` and
-can be removed once no daemon or login service uses them.
+can be removed once no daemon or login service uses them; `anchi update` and the installer
+print the removable directories with the `rm -rf` command, and never delete them on their own.
 
 To remove the app, first run `anchi daemon uninstall` and `anchi daemon stop`, then delete
 only the installed `anchi` launcher and the install root. Your `~/.anchi` data, vault and Lima

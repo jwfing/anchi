@@ -88,6 +88,16 @@ main() {
   ln -s "$dest/app" "$tmp/current"
   # rename(2) replaces a symlink atomically on both supported operating systems.
   "$dest/app/runtime/node" -e 'require("fs").renameSync(process.argv[1], process.argv[2])' "$tmp/current" "$base/current"
+  # Older versions are listed, never removed: a daemon or login service may still run from one.
+  stale=
+  for dir in "$base"/versions/release.*; do
+    [ -d "$dir" ] || continue
+    [ "$dir" = "$dest" ] && continue
+    stale="$stale $(quote "$dir")"
+  done
+  if [ -n "$stale" ]; then
+    printf 'Older versions remain under %s; remove them once no daemon or login service runs from them:\n  rm -rf%s\n' "$base/versions" "$stale"
+  fi
   if [ "$update_only" = 1 ]; then
     printf 'Installed Anchi %s.\n' "$version"
     return

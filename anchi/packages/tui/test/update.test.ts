@@ -1,8 +1,23 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { compareVersions, latestVersion, managedRoot, selfUpdate } from '../src/update.ts';
+import {
+  compareVersions,
+  latestVersion,
+  managedRoot,
+  selfUpdate,
+  shellQuote,
+  staleVersions,
+} from '../src/update.ts';
 
 const dirs: string[] = [];
 function fixture() {
@@ -55,6 +70,37 @@ describe('self update', () => {
     await selfUpdate(app, '0.2.1', false, io);
     expect(io.install).toHaveBeenCalledExactlyOnceWith(app, realpathSync(root), '0.2.2');
     expect(io.log).toHaveBeenLastCalledWith(expect.stringContaining('After tasks finish'));
+  });
+  it('lists the older versions to remove after an update, and removes none of them', async () => {
+    const { root, app } = fixture();
+    const older = join(root, 'versions/release.older/app');
+    mkdirSync(older, { recursive: true });
+    const io = {
+      latest: vi.fn(async () => '0.2.2'),
+      install: vi.fn(async () => {
+        // The installer adds a version directory and points `current` at it.
+        const next = join(root, 'versions/release.next/app');
+        mkdirSync(next, { recursive: true });
+        rmSync(join(root, 'current'));
+        symlinkSync(next, join(root, 'current'));
+      }),
+      log: vi.fn(),
+    };
+    await selfUpdate(app, '0.2.1', false, io);
+    const listed = io.log.mock.calls.map((c) => String(c[0])).find((m) => m.includes('rm -rf'));
+    // The managed root is resolved; the fixture path carries a quote, so the printed command
+    // must be quoted for sh.
+    const real = realpathSync(root);
+    expect(listed).toContain(`rm -rf ${shellQuote(join(real, 'versions/release.older'))}`);
+    expect(listed).toContain(shellQuote(join(real, 'versions/release.test')));
+    expect(listed).not.toContain('release.next');
+    expect(listed).toContain(`ran from ${join(root, 'versions/release.test')}`);
+    expect(existsSync(older)).toBe(true);
+    expect(staleVersions(root)).toEqual([
+      join(root, 'versions/release.older'),
+      join(root, 'versions/release.test'),
+    ]);
+    expect(staleVersions(join(root, 'nowhere'))).toEqual([]);
   });
   it.each(['0.2.1', '0.2.0'])('does not reinstall or downgrade to %s', async (latest) => {
     const { app } = fixture();
