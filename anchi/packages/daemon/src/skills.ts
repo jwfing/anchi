@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -285,8 +286,15 @@ export class SkillStore {
       await run('tar', ['-xzf', join(work, 'src.tgz'), '-C', join(work, 'x'), '--no-same-owner']);
       const top = readdirSync(join(work, 'x'))[0];
       if (!top) throw new Error('empty archive');
-      const dir = resolve(join(work, 'x', top), g.path);
-      if (!dir.startsWith(join(work, 'x', top))) throw new Error('invalid path in URL');
+      // The archive is untrusted and `tar` recreates its symlinks, so resolve symlink
+      // components (not just `..`) before checking containment: a path that escapes the
+      // extracted root through a link would otherwise copy host files into the skill.
+      const root = realpathSync(join(work, 'x', top));
+      const dir = resolve(root, g.path);
+      if (existsSync(dir)) {
+        const real = realpathSync(dir);
+        if (real !== root && !real.startsWith(root + sep)) throw new Error('invalid path in URL');
+      }
       return use(dir);
     } finally {
       rmSync(work, { recursive: true, force: true });
