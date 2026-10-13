@@ -12,7 +12,7 @@ import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
-import { sanitize } from '../src/sanitize.ts';
+import { sanitize, sanitizeJson, sanitizeLines } from '../src/sanitize.ts';
 import {
   continued,
   nextSetupAction,
@@ -22,7 +22,7 @@ import {
   welcomeStep,
 } from '../src/tui/usability.ts';
 import { App, filterTasks, skillSource, sortSkills } from '../src/tui/App.tsx';
-import { buildKeyMap } from '../src/tui/keys.ts';
+import { buildKeyMap, keysFor } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';
 import { type MouseEvent, normalizeKeys, parseMouse } from '../src/tui/mouse.ts';
 
@@ -2347,7 +2347,9 @@ describe('onboarding and team state', () => {
       );
       expect(await frameWith(ui, 'create a starter agent')).toContain('create a starter agent');
       ui.stdin.write('\r');
-      expect(await frameWith(ui, `› ${runtime}`)).toContain(`› ${runtime}`);
+      const picker = await frameWith(ui, `› ${runtime}`);
+      expect(picker).toContain(`› ${runtime}`);
+      expect(picker).toContain('this screen is drawn by Anchi');
       ui.stdin.write('\r');
       await frameWith(ui, 'Name your starter');
       ui.stdin.write('dev');
@@ -2638,5 +2640,186 @@ describe('the Approvals view', () => {
       allow: true,
     });
     ui.unmount();
+  });
+});
+
+describe('review gaps (#98–#103)', () => {
+  const LEADER = '\u0018';
+  const DOWN = '\u001b[B';
+  const UP = '\u001b[A';
+
+  it('sanitizes remote file names in the skill-update confirmation', async () => {
+    const skill = {
+      id: 'review',
+      name: 'review',
+      description: 'Reviews',
+      source: 'https://github.com/acme/s/tree/main/review',
+      commit: '1'.repeat(40),
+    };
+    const { client } = fakeClient(
+      {},
+      {
+        'skills.list': () => [skill],
+        'skills.checkUpdate': () => ({
+          id: 'review',
+          url: `${skill.source}${ESC}]52;c;AAAA\u0007`,
+          current: '1'.repeat(40),
+          latest: '2'.repeat(40),
+          upToDate: false,
+          added: [`notes${ESC}[2J.md`],
+          changed: ['SKILL.md'],
+          removed: [],
+        }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('1');
+    await tick();
+    ui.stdin.write('\u000e');
+    await frameWith(ui, 'acme/s');
+    ui.stdin.write('u');
+    const frame = await frameWith(ui, 'Update skill review');
+    expect(frame).toContain('added: notes.md');
+    expect(frame).not.toContain(`${ESC}[2J`);
+    expect(frame).not.toContain(']52;');
+    ui.unmount();
+  });
+
+  it('keeps live events that arrive while a task history is being fetched', async () => {
+    let release!: (events: StoredEvent[]) => void;
+    const history = new Promise<StoredEvent[]>((r) => (release = r));
+    const { client, emit } = fakeClient(
+      {},
+      { 'tasks.events': (p) => ((p as { afterSeq?: number }).afterSeq ? [] : history) },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { status: 'running' })]}
+      />,
+    );
+    await tick();
+    await openTask(ui);
+    await tick();
+    // The turn moves on while the history is still on its way.
+    emit('event', {
+      taskId: 't-a000000001',
+      agentId: 'dev',
+      seq: 3,
+      event: { type: 'tool.result', id: 'c1', output: 'ok', isError: false },
+    });
+    emit('event', {
+      taskId: 't-a000000001',
+      agentId: 'dev',
+      seq: 4,
+      event: { type: 'message', text: 'arrived while loading' },
+    });
+    release([
+      { seq: 1, ts: 0, event: { type: 'input', text: 'go', source: 'user' } },
+      {
+        seq: 2,
+        ts: 0,
+        event: { type: 'tool.call', id: 'c1', name: 'Bash', input: '{"command":"ls"}' },
+      },
+    ]);
+    const frame = await frameWith(ui, 'arrived while loading');
+    expect(frame).toContain('arrived while loading');
+    expect(frame).toContain('› go');
+    // The result was not lost either: the working line no longer names the call as running.
+    expect(frame).not.toMatch(/working[^\n]*Bash/);
+    ui.unmount();
+  });
+
+  it('binds PgUp and PgDn in Usage and Access, and lists the input actions in a task palette', async () => {
+    const { keymap, warnings } = buildKeyMap({
+      bindings: [{ context: 'access', bindings: { 'ctrl+f': 'scroll:pageDown' } }],
+    });
+    expect(warnings).toEqual([]);
+    expect(keysFor(keymap, ['usage'], 'scroll:pageUp')).toContain('pageup');
+    expect(keysFor(keymap, ['access'], 'scroll:pageDown')).toEqual(
+      expect.arrayContaining(['pagedown', 'ctrl+f']),
+    );
+    const { client } = fakeClient();
+    const ui = render(
+      <App
+        client={client}
+        initialAgents={[agent('dev')]}
+        initialTasks={[task('t-a000000001', 'dev', { status: 'running' })]}
+      />,
+    );
+    await tick();
+    await openTask(ui);
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write(' ');
+    const palette = await frameWith(ui, 'Compose in $EDITOR');
+    expect(palette).toContain('Insert a new line');
+    ui.unmount();
+  });
+
+  it('stops scrolling at the end of a dialog, so the other direction answers at once', async () => {
+    const { client } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write('\u001b');
+    await tick();
+    ui.stdin.write('?');
+    await frameWith(ui, 'Keys');
+    for (let i = 0; i < 80; i++) ui.stdin.write(DOWN);
+    await tick();
+    const bottom = ui.lastFrame();
+    ui.stdin.write(UP);
+    await tick();
+    expect(ui.lastFrame()).not.toBe(bottom);
+    ui.unmount();
+  });
+
+  it('keeps a proposal the daemon refused to apply, so ^X o shows it again', async () => {
+    const { client, emit } = fakeClient(
+      {},
+      {
+        'builder.apply': () => {
+          throw new Error('the file changed since the review');
+        },
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    emit('proposal', {
+      proposal: {
+        id: 'p-9',
+        agentId: 'dev',
+        kind: 'create',
+        agentYaml: 'runtime: codex\n',
+        imageYaml: null,
+        agentDiff: '+ runtime: codex',
+        imageDiff: '',
+        errors: [],
+        warnings: [],
+      },
+    });
+    await frameWith(ui, 'Agent proposal');
+    ui.stdin.write('y');
+    await frameWith(ui, 'the file changed since the review');
+    expect(ui.lastFrame()).not.toContain('Agent proposal');
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('o');
+    expect(await frameWith(ui, 'Agent proposal')).toContain('Agent proposal');
+    ui.unmount();
+  });
+
+  it('strips C1 controls and bidi overrides from JSON output and keeps summary lines apart', () => {
+    expect(sanitizeJson({ t: 'a\u0085b‮c', n: 1 })).toBe(
+      JSON.stringify({ t: 'abc', n: 1 }, null, 2),
+    );
+    expect(sanitizeLines(`refs/heads/a\n${ESC}[2Jrefs/heads/b`)).toEqual([
+      'refs/heads/a',
+      'refs/heads/b',
+    ]);
+    expect(sanitizeLines('x'.repeat(400), 300)).toEqual(['x'.repeat(300)]);
   });
 });
