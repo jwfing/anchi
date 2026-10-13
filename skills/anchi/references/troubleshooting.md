@@ -16,6 +16,7 @@ Start with `anchi setup status` (a summary; `--json` for every field) and `anchi
 | `EGRESS_UNAVAILABLE` | The VM's proxy is down | `anchi setup install` |
 | `AGENT_HOME_LINK:<path>` | A link, file or directory sits where Anchi writes `<path>` in the agent's home (`.codex/auth.json`, `.codex/config.toml`); the cell is refused rather than written through it | `limactl shell anchi-vm -- sudo rm -rf /var/lib/anchi/agents/<agent>/home/<path>` (a link is removed, not followed), or delete the agent, which purges its home |
 | `WORKSPACE_TOO_MANY_MASKS:<name>` | The `rw` workspace has more git hooks, config and editor folders than Anchi masks read-only (1000) | Share a smaller folder, or make it `ro` |
+| `DISK_FULL` | The VM's disk has under 512 MB free | Free space in the VM (`limactl shell anchi-vm -- sudo du -sh /var/lib/anchi/*`: agents' homes, image layers), or recreate the VM with a larger disk |
 | Vault locked | The VM restarted | `anchi setup vault unlock` |
 | VM `stopped` or `missing` | | `anchi setup vm` (then unlock), or `anchi setup install` |
 | An agent file error in `anchi agents` | Unknown field, bad id or value | Fix the YAML; the message names the field |

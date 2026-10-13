@@ -9,7 +9,7 @@ the installed `anchi` command. From a source checkout, use `scripts/anchi` inste
 development needs Node and pnpm. With no arguments, `anchi` opens the TUI.
 
 `anchi setup install` creates or updates the VM and refuses while task cells are live (cells
-can remain alive for 10 minutes after a task turn). `anchi setup vm` starts a stopped VM;
+can remain alive for 10 minutes after a task turn; an image build under way counts too). `anchi setup vm` starts a stopped VM;
 `anchi setup vault unlock` unlocks it. Back up `~/.config/anchi/vault.key`: a replacement key
 cannot recover stored credentials. `anchi daemon install` starts the daemon at login.
 

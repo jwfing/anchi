@@ -79,7 +79,30 @@ CA_IN_CELL = '/etc/ssl/certs/ca-certificates.crt'
 PLACEHOLDER = 'anchi-placeholder'
 PLACEHOLDER_AWS_KEY = 'AKIAANCHIPLACEHOLDER'
 SCAN_MAX_FILE = 32 * 1024 * 1024
-SCAN_SKIP = ('proc', 'sys', 'dev', 'opt/codex', 'opt/node', 'usr/lib', 'usr/share')
+# Not read by the scan: kernel trees, the image's read-only toolchains, and the Mac's own
+# directories (audited per turn by the daemon instead).
+SCAN_SKIP = (
+    'proc',
+    'sys',
+    'dev',
+    'opt/codex',
+    'opt/node',
+    'opt/claude',
+    'opt/hermes',
+    'opt/rustup',
+    'opt/cargo',
+    'usr/lib',
+    'usr/share',
+    'usr/local',
+    'home/agent/workspaces',
+)
+# Where the scan stops and reports itself partial, so a cell cannot make it run forever.
+SCAN_MAX_FILES = 200_000
+SCAN_MAX_BYTES = 2 * 1024 * 1024 * 1024
+SCAN_MAX_SECONDS = 90
+# Free space /var/lib/anchi needs before a cell starts: a full disk fails the proxy's audit
+# and the services' databases for every agent.
+START_FREE_BYTES = 512 * 1024 * 1024
 
 
 class Failure(Exception):
@@ -232,7 +255,7 @@ def script_version(path):
     text = path.read_bytes()
     env = cell_env()
     digest = hashlib.sha256(text)
-    for key in sorted(set(re.findall(rb'\$\{?(ANCHI_[A-Z0-9_]+)', text))):
+    for key in sorted(set(re.findall(rb'\$\{?(ANCHI_[A-Z0-9_]+|SECURE_CELL_AGENT_UID)', text))):
         digest.update(b'\n' + key + b'=' + env.get(key.decode(), '').encode())
     return digest.hexdigest()[:12]
 
@@ -365,6 +388,20 @@ def image_build(image, digest):
     (building / 'upper').mkdir()
     (building / 'work').mkdir()
     work.mkdir(parents=True, mode=0o700)
+    # Listed like a task cell, so the install guard and `reap` know a build is under way.
+    (work / 'meta.json').write_text(
+        json.dumps(
+            {
+                'task': task,
+                'agent': 'image-builder',
+                'kind': 'build',
+                'image': image,
+                'hash': digest,
+                'connectors': [],
+                'started_at': time.time(),
+            }
+        )
+    )
     merged = work / 'root'
     merged.mkdir()
     build_dir = work / 'build'
@@ -372,7 +409,11 @@ def image_build(image, digest):
     (build_dir / 'build.sh').write_text(script)
     env = cell_env()
     (build_dir / 'env').write_text(
-        ''.join(f'export {k}={shell_quote(v)}\n' for k, v in env.items() if k.startswith('ANCHI_'))
+        ''.join(
+            f'export {k}={shell_quote(v)}\n'
+            for k, v in env.items()
+            if k.startswith('ANCHI_') or k == 'SECURE_CELL_AGENT_UID'
+        )
         + ''.join(f'export {k}={shell_quote(v)}\n' for k, v in proxy_env().items())
     )
     log_path = building / 'build.log'
@@ -1103,8 +1144,20 @@ def cell_start(
         raise Failure('BAD_HIGH_RISK')
     env = cell_env()
     uid = int(env['SECURE_CELL_UID_BASE']) + int(env['SECURE_CELL_AGENT_UID'])
+    if disk_free(ROOT) < START_FREE_BYTES:
+        raise Failure('DISK_FULL')
     work = CELLS / task
     CELLS.mkdir(parents=True, exist_ok=True)
+
+    # From here on a signal (the daemon stopping, `limactl shell` dying) must release what the
+    # steps below create: the work directory, the overlay, the proxy registration. Python's
+    # default action would kill the process without them; cleanup is idempotent.
+    def stop(signum, frame):
+        cleanup(task)
+        sys.exit(128 + signum)
+
+    for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(signum, stop)
     with (RUN / 'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if work.exists() or active(unit(task)):
@@ -1226,13 +1279,6 @@ def cell_start(
     except BaseException:
         cleanup(task)
         raise
-
-    def stop(signum, frame):
-        cleanup(task)
-        sys.exit(128 + signum)
-
-    for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-        signal.signal(signum, stop)
     try:
         # The runner's stdin/stdout are ours: the daemon talks to it through this process.
         result = subprocess.run(command)
@@ -1256,26 +1302,37 @@ def cell_list():
     emit({'cells': cells})
 
 
+def building(work):
+    """Whether `work` is the cell of an image build still running: reaping it would end the
+    build half-way (`anchi setup install`, `verify-anchi`, a daemon restart)."""
+    return work.name.startswith('build-') and active(unit(work.name))
+
+
 def cell_reap(keep):
     for task in keep:
         name(task, 'BAD_TASK')
-    reaped = []
+    reaped, kept = [], set(keep)
     if CELLS.exists():
         for work in CELLS.iterdir():
-            if work.is_dir() and work.name not in keep:
-                cleanup(work.name)
-                reaped.append(work.name)
+            if not work.is_dir() or work.name in keep:
+                continue
+            if building(work):
+                kept.add(work.name)
+                continue
+            cleanup(work.name)
+            reaped.append(work.name)
     try:
         for task in egress({'op': 'list'}):
-            if task not in keep and not (CELLS / task).exists():
+            if task not in kept and not (CELLS / task).exists():
                 egress({'op': 'unregister', 'task': task})
                 reaped.append(task)
     except Failure:
         pass
+    # Mounts left under the cells directory by a cell that is gone; a kept cell's are its own.
     stale = [
-        line.split()[1]
-        for line in Path('/proc/mounts').read_text().splitlines()
-        if line.split()[1].startswith(str(CELLS) + '/')
+        point
+        for point in mount_points(CELLS)
+        if point != str(CELLS) and Path(point).relative_to(CELLS).parts[0] not in kept
     ]
     for mount_point in stale:
         run('umount', '-l', mount_point, check=False)
@@ -1302,17 +1359,26 @@ def cell_leader(task):
     raise Failure('CELL_NOT_RUNNING')
 
 
-def cell_pids(leader):
-    namespace = os.readlink(f'/proc/{leader}/ns/pid')
-    pids = []
-    for entry in Path('/proc').iterdir():
-        if entry.name.isdigit():
-            try:
-                if os.readlink(entry / 'ns/pid') == namespace:
-                    pids.append(int(entry.name))
-            except OSError:
-                continue
-    return pids
+def cell_pids(leader, proc=Path('/proc')):
+    """Every process of the cell: the leader (its init) and its descendants. By descent rather
+    than by pid namespace, so a sandbox that unshares pid inside the cell (bwrap under
+    codex-workspace-write) does not hide what it runs; orphans reparent to an init of the cell."""
+    children = {}
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            parent = re.search(r'^PPid:\s+(\d+)', (entry / 'status').read_text(), re.M)
+        except OSError:
+            continue
+        if parent:
+            children.setdefault(int(parent.group(1)), []).append(int(entry.name))
+    pids, queue = [], [leader]
+    while queue:
+        pid = queue.pop()
+        pids.append(pid)
+        queue.extend(children.get(pid, []))
+    return sorted(pids)
 
 
 def cell_exec(task, command):
@@ -1321,13 +1387,14 @@ def cell_exec(task, command):
         raise Failure('BAD_COMMAND')
     leader = cell_leader(task)
     env = dict(line.split('=', 1) for line in Path(f'/proc/{leader}/environ').read_text().split('\0') if '=' in line)
+    agent_uid = int(cell_env()['SECURE_CELL_AGENT_UID'])
     result = subprocess.run(
         [
             'nsenter',
             f'--target={leader}',
             '--all',
-            '--setuid=1000',
-            '--setgid=1000',
+            f'--setuid={agent_uid}',
+            f'--setgid={agent_uid}',
             '--wdns=/home/agent',
             'env',
             '-i',
@@ -1369,15 +1436,77 @@ def real_secrets():
     return secrets
 
 
+def disk_free(path):
+    """Free bytes of the file system holding `path` (or its nearest existing parent)."""
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return shutil.disk_usage(path).free
+
+
+def scan_since(task):
+    """Files changed before the cell started cannot hold what the cell did: its image layers
+    were built earlier and its agent home was scanned when the previous cell closed. The
+    threshold is the cell's start, by ctime, which a cell cannot set back (that needs the
+    file system's root or CAP_SYS_TIME, and cells have neither)."""
+    try:
+        meta = json.loads((CELLS / task / 'meta.json').read_text())
+        return float(meta['started_at']) - 5
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def scan_files(root, check, since=None, clock=time.monotonic):
+    """Reads every regular file under `root` outside SCAN_SKIP that changed after `since`
+    (every file when None) and hands it to `check`. Stops at SCAN_MAX_FILES, SCAN_MAX_BYTES
+    or SCAN_MAX_SECONDS: the result then says `partial` and what stopped it, so the daemon can
+    treat a scan a cell dragged out as it treats a finding."""
+    root = Path(root)
+    files = read_bytes = unchanged = 0
+    stopped = None
+    deadline = clock() + SCAN_MAX_SECONDS
+    for directory, dirnames, filenames in os.walk(root, followlinks=False):
+        relative = os.path.relpath(directory, root)
+        dirnames[:] = [d for d in dirnames if os.path.normpath(os.path.join(relative, d)) not in SCAN_SKIP]
+        for filename in filenames:
+            path = Path(directory, filename)
+            try:
+                st = path.lstat()
+                if not stat.S_ISREG(st.st_mode) or st.st_size > SCAN_MAX_FILE:
+                    continue
+                if since is not None and st.st_ctime < since:
+                    unchanged += 1
+                    continue
+                if files >= SCAN_MAX_FILES:
+                    stopped = 'files'
+                elif read_bytes + st.st_size > SCAN_MAX_BYTES:
+                    stopped = 'bytes'
+                elif clock() > deadline:
+                    stopped = 'time'
+                if stopped:
+                    break
+                files += 1
+                read_bytes += st.st_size
+                check(path.read_bytes(), '/' + str(path.relative_to(root)))
+            except OSError:
+                continue
+        if stopped:
+            break
+    result = {'files': files, 'bytes': read_bytes, 'unchanged': unchanged, 'partial': stopped is not None}
+    if stopped:
+        result['stopped_at'] = stopped
+    return result
+
+
 def cell_scan(task):
     """Credential-invariant scan of a running cell: process environments and command lines, and
-    every readable file in the cell's root (its writable layers and the agent home)."""
+    the files of the cell's root (its writable layers and the agent home) changed since it
+    started."""
     name(task, 'BAD_TASK')
     leader = cell_leader(task)
     secrets = real_secrets()
     if not secrets:
         raise Failure('NO_CREDENTIALS_TO_SCAN_FOR')
-    findings, files, processes = [], 0, 0
+    findings, processes = [], 0
 
     def check(blob, where):
         for label, secret in secrets.items():
@@ -1391,20 +1520,8 @@ def cell_scan(task):
                 check(Path(f'/proc/{pid}/{part}').read_bytes(), f'process {pid} {part}')
             except OSError:
                 continue
-    root = Path(f'/proc/{leader}/root')
-    for directory, dirnames, filenames in os.walk(root, followlinks=False):
-        relative = os.path.relpath(directory, root)
-        dirnames[:] = [d for d in dirnames if os.path.normpath(os.path.join(relative, d)) not in SCAN_SKIP]
-        for filename in filenames:
-            path = Path(directory, filename)
-            try:
-                if path.is_symlink() or not path.is_file() or path.stat().st_size > SCAN_MAX_FILE:
-                    continue
-                files += 1
-                check(path.read_bytes(), '/' + str(path.relative_to(root)))
-            except OSError:
-                continue
-    emit({'task': task, 'clean': not findings, 'findings': findings, 'files': files, 'processes': processes})
+    walked = scan_files(f'/proc/{leader}/root', check, scan_since(task))
+    emit({'task': task, 'clean': not findings, 'findings': findings, 'processes': processes, **walked})
 
 
 def main(argv):

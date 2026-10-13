@@ -80,9 +80,9 @@ The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`.
 | `anchi-cell skills set AGENT` | Replaces the agent's skill bundle (`{files: {path: base64}}` on stdin) |
 | `anchi-cell purge-agent AGENT` | Removes a deleted agent's home, skills bundle and `<service>:AGENT` policy rules. Refused while the agent has a cell or a mount point exists under its home; removal does not cross file systems |
 | `anchi-cell stop TASK` | Stop a cell and release its overlay, sockets and proxy registration |
-| `anchi-cell list` | Running cells, as JSON |
-| `anchi-cell reap [TASK...]` | Stop every cell not named, and unmount stale overlays |
-| `anchi-cell scan TASK` | Credential-invariant scan of a running cell: environment, process list and writable layer |
+| `anchi-cell list` | Running cells, as JSON; an image build under way is listed with `kind: build` and agent `image-builder` |
+| `anchi-cell reap [TASK...]` | Stop every cell not named (an image build still running is kept), and unmount stale overlays |
+| `anchi-cell scan TASK` | Credential-invariant scan of a running cell: environment and command line of every process (nested pid namespaces included) and the files of its writable layers changed since it started; `partial: true` with `stopped_at` (`files`, `bytes` or `time`) when a limit stopped it |
 | `anchi-cell verify CONNECTOR` | Has the egress proxy call the connector's identity endpoint (GitHub `/user`, Linear `viewer`, AWS `GetCallerIdentity`, PostHog `/api/users/@me/` on the US then the EU cloud, Sentry `/api/0/organizations/`, Firecrawl `/v2/team/credit-usage`, Figma `/v1/me`, Discord `/api/v10/users/@me`) with the stored credential. Prints the account, or `CREDENTIAL_REJECTED` |
 | `anchi-cell audit TASK` | The task's rows of the egress audit log and its rotated file, the latest 2000, as JSON with their total |
 | `anchi-cell quota` | The latest subscription limits the egress proxy saw in runtime responses, as JSON |

@@ -13,6 +13,7 @@ Run:  mitmdump -s egress_proxy.py --listen-host 127.0.0.1 --listen-port 18080
 """
 
 import asyncio
+import grp
 import json
 import logging
 import os
@@ -374,6 +375,30 @@ class Cell:
         return CELLS / self.task
 
 
+# The cells' group on the VM: the agent user's host uid, created at install, with the proxy as
+# its only other member. Per-cell directories and sockets belong to it.
+PEER_GROUP = 'secure-cell-peer'
+
+
+def peer_gid():
+    """The gid of the cells' group, or None where it does not exist (the offline tests)."""
+    try:
+        return grp.getgrnam(PEER_GROUP).gr_gid
+    except KeyError:
+        return None
+
+
+def own(path, mode):
+    """Reachable by the proxy and the cells' group only. The service runs with UMask=0077; a
+    cell must traverse its own directory (bound into it) and connect to its sockets, while
+    every other VM user, the connector services included, must not: a connection there is
+    served with the cell's credentials, as that cell's agent."""
+    os.chmod(path, mode)
+    gid = peer_gid()
+    if gid is not None:
+        os.chown(path, -1, gid)
+
+
 class Registry:
     """Cells, bridge connections and mitmproxy client connections, all in this process."""
 
@@ -434,12 +459,11 @@ class Registry:
             extra,
         )
         cell.directory.mkdir(parents=True, exist_ok=False)
-        # The service runs with UMask=0077; the cell's agent user must traverse this directory.
-        os.chmod(cell.directory, 0o755)
+        own(cell.directory, 0o750)
         path = cell.directory / 'proxy.sock'
         cell.server = await asyncio.start_unix_server(lambda r, w: self.bridge(cell, r, w), path=str(path))
-        # Only this cell has the directory bound in; the agent user must be able to connect.
-        os.chmod(path, 0o666)
+        # Only this cell has the directory bound in, and only the cells' group can connect.
+        own(path, 0o660)
         cell.services = frozenset(request.get('services', []))
         cell.accounts = {
             s: request.get('accounts', {}).get(s, 'default') for s in cell.services if s in ACCOUNT_SERVICES
@@ -447,14 +471,14 @@ class Registry:
         for service in sorted(cell.services):
             directory = cell.directory / 'connectors' / service
             directory.mkdir(parents=True)
-            os.chmod(directory.parent, 0o755)
-            os.chmod(directory, 0o755)
+            own(directory.parent, 0o750)
+            own(directory, 0o750)
             server = await asyncio.start_unix_server(
                 lambda r, w, s=service: self.service_bridge(cell, s, r, w),
                 path=str(directory / 'api.sock'),
                 limit=SERVICE_MAX,
             )
-            os.chmod(directory / 'api.sock', 0o666)
+            own(directory / 'api.sock', 0o660)
             cell.service_servers.append(server)
         self.cells[task] = cell
         audit(
@@ -589,7 +613,11 @@ class EgressProxy:
 
         self.registry.listen = (ctx.options.listen_host or '127.0.0.1', ctx.options.listen_port)
         CELLS.mkdir(parents=True, exist_ok=True)
-        os.chmod(CELLS, 0o755)
+        if peer_gid() is None:
+            log.error(
+                f'group {PEER_GROUP} is missing: cells cannot connect to their sockets; run `anchi setup install`'
+            )
+        own(CELLS, 0o750)
         for stale in CELLS.glob('*'):
             for path in stale.glob('*'):
                 path.unlink(missing_ok=True)

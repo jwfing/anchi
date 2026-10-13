@@ -62,7 +62,7 @@ for bin in /opt/cargo/bin/*; do ln -sf "$bin" "/usr/local/bin/$(basename "$bin")
 echo "base: $(RUSTUP_HOME=/opt/rustup rustc --version); $(RUSTUP_HOME=/opt/rustup cargo --version)"
 
 # Agent home mount point; Codex refuses to create helpers under /tmp.
-install -d -o 1000 -g 1000 -m 0700 /home/agent
+install -d -o "$SECURE_CELL_AGENT_UID" -g "$SECURE_CELL_AGENT_UID" -m 0700 /home/agent
 usermod -d /home/agent agent 2>/dev/null || true
 git config --system url."https://github.com/".insteadOf git@github.com:
 git config --system --add url."https://github.com/".insteadOf ssh://git@github.com/

@@ -143,3 +143,21 @@ class ConnectorListTests(unittest.TestCase):
             self.ts_list('anchi/packages/core/src/config/schema.ts', 'HIGH_RISK_IDS'),
             [entry[0] for entry in egress_rules.HIGH_RISK],
         )
+
+
+class InCellUidTests(unittest.TestCase):
+    """The agent's uid inside a cell is `SECURE_CELL_AGENT_UID` in cell.env; nothing else may
+    spell it out, so a changed pin reaches `exec`, the base image and the live checks."""
+
+    def test_in_cell_uid_is_never_hard_coded(self):
+        pattern = re.compile(r"(?:--setuid=|--setgid=|-o |-g |-u )1000\b|startswith\('1000")
+        offenders = []
+        for file in sorted((ROOT / 'guest').iterdir()):
+            if file.suffix in ('.py', '.sh') and pattern.search(file.read_text(errors='ignore')):
+                offenders.append(str(file.relative_to(ROOT)))
+        self.assertEqual(offenders, [])
+        # The base build reads the pin from the build environment the cell manager exports.
+        self.assertIn('"$SECURE_CELL_AGENT_UID"', (ROOT / 'guest/anchi-build-base.sh').read_text())
+        manager = (ROOT / 'guest/anchi_cell.py').read_text()
+        self.assertIn("k == 'SECURE_CELL_AGENT_UID'", manager)
+        self.assertIn('|SECURE_CELL_AGENT_UID)', manager)  # a changed pin names a new layer

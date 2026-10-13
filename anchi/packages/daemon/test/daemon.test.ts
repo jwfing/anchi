@@ -229,7 +229,13 @@ class FakeTransport implements GuestTransport {
   /** The VM runs but guest commands fail (sudo, a missing script). */
   guestFails = false;
   codexImports: Record<string, string>[] = [];
-  scanResult: { clean: boolean; findings: unknown[]; files: number } | null = {
+  scanResult: {
+    clean: boolean;
+    findings: unknown[];
+    files: number;
+    partial?: boolean;
+    stopped_at?: string;
+  } | null = {
     clean: true,
     findings: [],
     files: 3,
@@ -1255,13 +1261,31 @@ describe('daemon tasks', () => {
       message: expect.stringContaining('github.token in process 12 environ'),
     });
     expect(found).toHaveLength(1);
+    // A scan the guest stopped at a limit is recorded and raised, never taken as clean.
+    const cut: unknown[] = [];
+    daemon.hub.on('scanPartial', (p) => cut.push(p));
+    transport.scanResult = {
+      clean: true,
+      findings: [],
+      files: 200_000,
+      partial: true,
+      stopped_at: 'files',
+    };
+    const partial = await run();
+    expect(partial.at(-1)).toMatchObject({
+      type: 'notice',
+      text: expect.stringContaining('stopped at its files limit after 200000 files'),
+    });
+    expect(cut).toEqual([
+      { taskId: expect.any(String), agentId: 'dev', files: 200_000, reason: 'files' },
+    ]);
     transport.scanResult = null;
     const failed = await run();
     expect(failed.at(-1)).toMatchObject({
       type: 'notice',
       text: expect.stringContaining('did not complete'),
     });
-    expect(transport.scans).toHaveLength(3);
+    expect(transport.scans).toHaveLength(4);
   });
 
   it('imports a newer Codex login from the Mac, and only a newer one', async () => {

@@ -34,6 +34,15 @@ def manager():
     return module
 
 
+def agent_uid():
+    """The cell agent's uid inside a cell, pinned in cell.env."""
+    for line in Path('/opt/secure-vm/cell.env').read_text().splitlines():
+        key, sep, value = line.strip().partition('=')
+        if sep and key == 'SECURE_CELL_AGENT_UID':
+            return int(value)
+    raise SystemExit('SECURE_CELL_AGENT_UID missing from /opt/secure-vm/cell.env')
+
+
 def check(name, ok, detail=''):
     results.append((name, bool(ok), detail))
     print(f'{"PASS" if ok else "FAIL"}  {name}{f"  ({detail})" if detail else ""}', flush=True)
@@ -168,7 +177,11 @@ def main():
             ps_b[:200],
         )
         _, who = sh('chk-a', 'id -u; cat /proc/self/status | grep -E "^CapEff"')
-        check('agent runs unprivileged', who.startswith('1000') and 'CapEff:\t0000000000000000' in who, who)
+        check(
+            'agent runs unprivileged',
+            who.startswith(f'{agent_uid()}\n') and 'CapEff:\t0000000000000000' in who,
+            who,
+        )
         _, ro = sh('chk-a', 'touch /usr/anchi-probe 2>&1 && echo writable-root; ls /run/anchi-egress 2>&1 | head -1')
         check('cell cannot reach VM paths', 'No such file' in ro, ro)
 

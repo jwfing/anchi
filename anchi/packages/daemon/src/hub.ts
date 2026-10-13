@@ -108,6 +108,8 @@ export interface HubEvents {
   turnEnded: [{ task: TaskRow; reply: string }];
   /** The credential scan taken before a cell closed found real credential values. */
   scanFinding: [{ taskId: string; agentId: string; labels: string[] }];
+  /** The scan stopped at a limit before the end: what came after was not checked. */
+  scanPartial: [{ taskId: string; agentId: string; files: number; reason: string }];
 }
 
 function cellKey(agent: ResolvedAgent, imageHash: string): string {
@@ -1034,6 +1036,16 @@ export class Hub extends EventEmitter<HubEvents> {
           fatal: false,
         });
         this.emit('scanFinding', { taskId, agentId: task.agentId, labels });
+      }
+      if (r.partial) {
+        // A cell can drag the scan out with many or large files; the guest stops at its limits
+        // and says so. Treated like a finding: recorded and notified, never silently clean.
+        const reason = String(r.stopped_at ?? 'limit').slice(0, 20);
+        this.record(task, {
+          type: 'notice',
+          text: `credential scan before closing the cell stopped at its ${reason} limit after ${r.files} files; what came after was not checked`,
+        });
+        this.emit('scanPartial', { taskId, agentId: task.agentId, files: r.files, reason });
       }
     } catch (err) {
       if (!this.opts.store.getTask(taskId)) return;
