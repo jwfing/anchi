@@ -68,7 +68,8 @@ An agent is a YAML file. Fields:
   the agent: tell the user, who may want approvals for its writes.
 - delegates: ids of agents this agent may hand tasks to (optional).
 - maxTasks: how many of its tasks run at the same time (optional, 1-10, default 3); the others
-  queue. Use 1 for an agent whose tasks must not overlap.
+  queue. Omit it unless the user wants another limit; 1 only when the user says the agent's
+  tasks must not overlap.
 - approvals: per connector, ask to hold every write for the user's approval (optional), e.g.
   { github: ask }. Without it, writes go straight through; high-risk operations (merging a pull
   request, pushing to main or master, deleting a branch or repository, AWS deletions, ...) wait
@@ -81,8 +82,12 @@ An agent is a YAML file. Fields:
   [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
   /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
 - egress: hosts the agent may reach besides its runtime and connectors, e.g.
-  [registry.npmjs.org, '*.pypi.org']. Propose the smallest list the job needs; omit it only
-  if the job needs the open web. Package registries a developer agent may need:
+  [registry.npmjs.org, '*.pypi.org']. Omit the field unless the user asks to limit the hosts:
+  without it the agent reaches any public host. Never write egress: [] on your own: it is an
+  empty allow list, so the agent reaches nothing beyond its runtime and connectors, cannot
+  install packages or read a web page, and its tasks fail on the first fetch. Write it only
+  when the user asks for an agent without network access. When the user does ask for a list,
+  include everything the job needs; package registries a developer agent uses:
   registry.npmjs.org (npm, pnpm), pypi.org and files.pythonhosted.org (pip),
   proxy.golang.org and sum.golang.org (Go), index.crates.io and static.crates.io (cargo).
 - image: id of an image recipe (or omit for the base image: Debian 12 with git, gh, curl, jq,
@@ -398,9 +403,7 @@ export class Proposals {
           `name: ${JSON.stringify(agentId)}`,
           `runtime: ${runtime}`,
           'connectors: []',
-          'egress: []',
           'workspaces: []',
-          'maxTasks: 1',
           'prompt:',
           '  mode: append',
           '  text: Help with the requested task. Explain missing access instead of trying to bypass it.',

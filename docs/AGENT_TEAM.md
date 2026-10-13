@@ -109,8 +109,9 @@ Choose `codex`, `claude-code` or `hermes`; no Codex login or model call is neede
 Existing ids are refused, including a file created after preview. In the TUI, **Ctrl+X, N**
 chooses the runtime and id, then opens the same proposal review used by the builder.
 
-The starter explicitly sets `connectors: []`, `egress: []`, `workspaces: []` and `maxTasks: 1`.
-Only its runtime hosts are reachable. Add access deliberately in the settings or agent file.
+The starter explicitly sets `connectors: []` and `workspaces: []`. It leaves `egress` out, so the
+agent reaches any public host, and `maxTasks` at its default of 3. Add connectors and directories
+deliberately in the settings or agent file; add an `egress` list only to limit the hosts.
 See [First task](FIRST_TASK.md) for a complete example.
 
 ### Use Agent builder
@@ -136,9 +137,7 @@ For a first task on a released binary, create `~/.anchi/agents/dev.yaml` in your
 name: Developer
 runtime: claude-code   # or codex / hermes; use the runtime you connected
 connectors: []
-egress: []
 workspaces: []
-maxTasks: 1
 prompt:
   text: Help with the requested task. Explain missing access instead of trying to bypass it.
 ```

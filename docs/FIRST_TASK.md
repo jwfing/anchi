@@ -13,8 +13,8 @@ anchi agents create dev --runtime claude-code --preview
 anchi agents create dev --runtime claude-code
 ```
 
-Review the YAML and confirm. The starter grants no connectors or workspaces, uses `egress: []`
-(runtime hosts only) and runs one task at a time. An existing `dev` is never overwritten; choose
+Review the YAML and confirm. The starter grants no connectors or workspaces; it reaches any public host (no `egress`
+list) and runs up to three tasks at a time. An existing `dev` is never overwritten; choose
 another id. In the TUI, **Ctrl+X, N** selects a runtime and name, then shows the proposal;
 **y** saves, **n** discards. **Esc** closes the dialog without saving.
 
@@ -51,7 +51,7 @@ and return a nonzero exit code when the turn does not finish successfully.
 | Locked vault | `anchi setup vault unlock`; keep the original vault key. Replacing it cannot decrypt stored accounts. |
 | Runtime not configured or expired | Connect the runtime named in `anchi agents`, in **Runtimes** or via `anchi setup`. A Claude/Hermes starter does not need Codex. |
 | Image build failed | **Ctrl+X, L** shows setup logs; inspect the task error. Retry after fixing the reported dependency or network problem. |
-| A host is refused | This starter intentionally allows runtime hosts only. Check `anchi audit <task-id>` and decide whether the job needs more access. Do not remove the list just to silence an error. |
+| A host is refused | Only an agent with an `egress` list refuses hosts (the starter has none). Check `anchi audit <task-id>` and decide whether the job needs that host; add it with `anchi agents allow-host` rather than removing the list to silence an error. |
 | Task failed or was cancelled | Inspect the error, then `anchi retry <task-id>` to continue; `--fresh` creates a new task with the original request. |
 
 More error explanations: [Troubleshooting](../skills/anchi/references/troubleshooting.md).
