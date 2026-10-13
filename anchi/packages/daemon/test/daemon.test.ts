@@ -1,6 +1,13 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1147,6 +1154,22 @@ describe('daemon tasks', () => {
     expect(notices).toEqual([
       `⚠ workspace app: ${join('.git', 'hooks', 'post-checkout')}: git hook added or changed`,
     ]);
+  });
+
+  it('runs the turn when an rw workspace holds a file the daemon cannot read', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
+    mkdirSync(join(ws, 'app'));
+    writeFileSync(join(ws, 'app', 'built-tool'), 'binary');
+    // Executable but unreadable, like a root-owned 0700 file left by a Docker bind mount.
+    chmodSync(join(ws, 'app', 'built-tool'), 0o311);
+    write('agents/coder.yaml', 'runtime: codex\nworkspaces: [{ path: app, mode: rw }]\n');
+    const { client } = await start(60_000, undefined, ws);
+    const t = await client.call('tasks.create', { agentId: 'coder', text: 'go' });
+    const done = await client.call('tasks.wait', { taskId: t.id });
+    expect(done.status).toBe('done');
+    // The audit after the turn reports nothing: the unreadable file was already there.
+    const events = (await client.call('tasks.events', { taskId: t.id })).map((e) => e.event);
+    expect(events.filter((e) => e.type === 'notice' || e.type === 'error')).toEqual([]);
   });
 
   it("passes an agent's high-risk exceptions to its cells, and nothing extra otherwise", async () => {
