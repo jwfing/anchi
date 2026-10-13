@@ -15,12 +15,12 @@ from ledger import Ledger
 
 class RegistryTests(unittest.TestCase):
     def test_registry_shape(self):
-        self.assertEqual(set(connectors.CONNECTORS), {'gmail', 'drive', 'notion', 'slack'})
+        self.assertEqual(set(connectors.CONNECTORS), {'gmail', 'drive', 'notion', 'slack', 'x'})
         for name, connector in connectors.CONNECTORS.items():
             self.assertEqual(connector.id, name)
             self.assertEqual(connector.user, 'secure-' + name)
             self.assertTrue(connector.hosts)
-            self.assertIn(connector.credential.split(':')[0], ('google', 'token'))
+            self.assertIn(connector.credential.split(':')[0], ('google', 'token', 'oauth'))
             for op, kind in connector.ops.items():
                 self.assertTrue(op.startswith(name + '.'), op)
                 self.assertIn(kind, (connectors.READ, connectors.WRITE))
@@ -32,7 +32,9 @@ class RegistryTests(unittest.TestCase):
         self.assertIsNone(connectors.by_user('secure-inference'))
         with self.assertRaisesRegex(Denied, 'OPERATION_DENIED'):
             connectors.by_op('drive.delete')
-        self.assertEqual(connectors.SERVICE_USERS, ('secure-gmail', 'secure-drive', 'secure-notion', 'secure-slack'))
+        self.assertEqual(
+            connectors.SERVICE_USERS, ('secure-gmail', 'secure-drive', 'secure-notion', 'secure-slack', 'secure-x')
+        )
 
 
 class LedgerTests(unittest.TestCase):

@@ -13,7 +13,7 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 | Approvals | ^X 5 | Every write waiting for your decision; ↑ ↓ choose, y / n select, Enter confirms, a the full dialog, o the write's task |
 | Configure → Runtimes | ^X 1 | s start the VM, I install/update, u unlock the vault, V new vault, W share workspaces, i Codex, c Claude Code, h Hermes, r refresh |
 | Configure → Skills | ^X 1, ↓ | One line per skill: ↑ ↓ choose, PgUp PgDn page, Home End (g G) first and last; a add (directory or GitHub URL), u update after reviewing which files are added, changed or removed, d remove |
-| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client |
+| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client, x X native app Client ID; X publishing always asks |
 | Configure → Usage | ^X 1, ↓↓↓ | Tokens and subscription limits; p period, b group by agent, model, runtime or day, r refresh |
 | Configure → Access | ^X 1, ↓↓↓↓ | Hosts, injections and refusals per agent; p period, r refresh |
 | Agents | ^X 2 | An agent's view lists its tasks; its input starts a new task |

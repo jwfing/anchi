@@ -187,6 +187,7 @@ def provider_request(
     max_bytes=2 * 1024 * 1024,
     with_etag=False,
     write=False,
+    success_statuses=(200,),
 ):
     """One request to a connector's single host; the path must match the connector's allowlist."""
     if (
@@ -208,7 +209,7 @@ def provider_request(
     status, payload = response[:2]
     etag = response[2] if len(response) > 2 else None
     uncertain = ExecutionUnknown if write else Denied
-    if status != 200:
+    if status not in success_statuses:
         # Never reflect provider error bodies: they can echo tokens or private content.
         if status == 412:
             raise Denied('TARGET_CHANGED')

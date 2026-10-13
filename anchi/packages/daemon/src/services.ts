@@ -11,20 +11,22 @@ import type {
 import type { Guest } from './guest.ts';
 
 /**
- * Setup of the trusted connector services (Gmail, Drive, Notion, Slack), moved from the
+ * Setup of the trusted connector services (Gmail, Drive, Notion, Slack, X), moved from the
  * desktop app. Credentials go to the VM over stdin; Google tokens are obtained in the VM from
  * an authorization code, so they never exist on the Mac.
  */
 
-export const SERVICE_IDS: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack'];
+export const SERVICE_IDS: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x'];
 export const GOOGLE_IDS: ServiceConnectorId[] = ['gmail', 'drive'];
 const SERVICES = '/opt/secure-vm/services';
 const LOGIN_TIMEOUT_MS = 590_000;
+/** X requires an exactly registered callback URL, including the port. */
+export const X_CALLBACK_PORT = 48173;
 /** A named Google account within Gmail or Drive; `default` is the one used when none is named. */
 export const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 export const DEFAULT_ACCOUNT = 'default';
 
-/** Checks an account name for a Google service; Notion and Slack take none. */
+/** Checks an account name for a Google service; Notion, Slack and X take none. */
 export function accountArg(id: ServiceConnectorId, account: string | undefined): string[] {
   if (account === undefined) return [];
   if (!GOOGLE_IDS.includes(id)) throw new Error(`${id} has no named accounts`);
@@ -89,6 +91,7 @@ export class ServiceSetup {
     services: ServiceConnectorStatus[];
     googleClient: boolean;
     googleClientSource: GoogleClientSource;
+    xClient: boolean;
   }> {
     const all = await json(this.exec, [`${SERVICES}/admin.py`, 'status']);
     const rules = ((await json(this.exec, [`${SERVICES}/policy_admin.py`, 'rules'])).rules ??
@@ -109,7 +112,8 @@ export class ServiceSetup {
         connected: s.connected === true,
         account: typeof s.account === 'string' ? s.account : null,
         reauthRequired: s.reauth_required === true,
-        mode: rules[id] === 'ask' ? ('ask' as const) : ('auto' as const),
+        revocationPending: s.revocation_pending === true,
+        mode: id === 'x' || rules[id] === 'ask' ? ('ask' as const) : ('auto' as const),
         accounts,
       };
     });
@@ -118,11 +122,13 @@ export class ServiceSetup {
       services,
       googleClient: all.client_configured === true,
       googleClientSource: source === 'user' || source === 'builtin' ? source : null,
+      xClient: (all.x as Record<string, unknown> | undefined)?.client_configured === true,
     };
   }
 
   /** Notion or Slack token, then the account label from the service itself. */
   async setToken(id: ServiceConnectorId, token: string): Promise<void> {
+    if (id === 'x') throw new Error('x connects through X sign-in');
     if (id !== 'notion' && id !== 'slack') throw new Error(`${id} connects through Google sign-in`);
     await json(this.exec, [`${SERVICES}/admin.py`, 'import-token', id], JSON.stringify({ token }));
     await this.probe(id);
@@ -143,6 +149,7 @@ export class ServiceSetup {
 
   /** Gmail and Drive: one account (`default` when omitted). */
   async disconnect(id: ServiceConnectorId, account?: string): Promise<void> {
+    this.logins.get(`${id}:${account ?? DEFAULT_ACCOUNT}`)?.supersede();
     await json(this.exec, [
       `${SERVICES}/connector_admin.py`,
       id,
@@ -153,6 +160,7 @@ export class ServiceSetup {
 
   /** `auto`: standing authorization. `ask`: every write waits for approval in the TUI. */
   async setMode(id: ServiceConnectorId, mode: 'auto' | 'ask'): Promise<void> {
+    if (id === 'x' && mode !== 'ask') throw new Error('X_WRITES_REQUIRE_APPROVAL');
     await json(this.exec, [`${SERVICES}/policy_admin.py`, 'mode', id, mode]);
   }
 
@@ -168,6 +176,19 @@ export class ServiceSetup {
     await json(this.exec, [`${SERVICES}/admin.py`, 'remove-client']);
   }
 
+  async setXClient(clientId: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(clientId)) throw new Error('BAD_X_CLIENT_ID');
+    await json(
+      this.exec,
+      [`${SERVICES}/admin.py`, 'import-client', 'x'],
+      JSON.stringify({ client_id: clientId }),
+    );
+  }
+
+  async xLogin(): Promise<string> {
+    return this.oauthLogin('x', undefined, X_CALLBACK_PORT);
+  }
+
   /**
    * Starts Google sign-in for Gmail or Drive: a loopback callback on 127.0.0.1, the
    * authorization URL from the VM, and the code back to the VM. Returns the URL to open.
@@ -175,6 +196,14 @@ export class ServiceSetup {
    */
   async googleLogin(id: ServiceConnectorId, account?: string): Promise<string> {
     if (!GOOGLE_IDS.includes(id)) throw new Error(`${id} does not use Google sign-in`);
+    return this.oauthLogin(id, account, 0);
+  }
+
+  private async oauthLogin(
+    id: ServiceConnectorId,
+    account: string | undefined,
+    port: number,
+  ): Promise<string> {
     const named = accountArg(id, account);
     const key = `${id}:${account ?? DEFAULT_ACCOUNT}`;
     this.logins.get(key)?.supersede();
@@ -184,12 +213,22 @@ export class ServiceSetup {
       (r) => (finish = r),
     );
     const server = createServer((req, res) => {
-      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      let url: URL;
+      try {
+        url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      } catch {
+        res.writeHead(400).end();
+        return;
+      }
       const state = url.searchParams.get('state') ?? '';
       const valid =
+        req.method === 'GET' &&
         url.pathname === '/callback' &&
         req.headers.host === expected.host &&
-        state.length === expected.state.length &&
+        expected.state.length > 0 &&
+        Buffer.byteLength(state) === Buffer.byteLength(expected.state) &&
+        url.searchParams.getAll('state').length === 1 &&
+        url.searchParams.getAll('code').length <= 1 &&
         timingSafeEqual(Buffer.from(state), Buffer.from(expected.state));
       if (!valid) {
         res.writeHead(400).end();
@@ -203,9 +242,14 @@ export class ServiceSetup {
           'referrer-policy': 'no-referrer',
         })
         .end('Authorization received. You can close this tab and return to Anchi.');
-      finish(code && !url.searchParams.has('error') ? { code, state } : null);
+      finish(
+        code && code.length <= 4096 && !url.searchParams.has('error') ? { code, state } : null,
+      );
     });
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', () => reject(new Error('OAUTH_CALLBACK_PORT_UNAVAILABLE')));
+      server.listen(port, '127.0.0.1', resolve);
+    });
     this.logins.set(key, {
       server,
       supersede: () => {
@@ -213,14 +257,14 @@ export class ServiceSetup {
         finish('superseded');
       },
     });
-    const { port } = server.address() as AddressInfo;
-    expected.host = `127.0.0.1:${port}`;
+    expected.host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
     const flow = await json(
       this.exec,
       [`${SERVICES}/admin.py`, 'begin', id, ...named],
       JSON.stringify({ redirect_uri: `http://${expected.host}/callback` }),
     ).catch((err: Error) => {
       server.close();
+      if (this.logins.get(key)?.server === server) this.logins.delete(key);
       throw err;
     });
     expected = { ...expected, state: String(flow.state) };
@@ -240,7 +284,7 @@ export class ServiceSetup {
           [`${SERVICES}/admin.py`, 'complete', id, ...named],
           JSON.stringify(callback),
         );
-        await this.probe(id, account);
+        if (id !== 'x') await this.probe(id, account);
         this.onLogin({ ...who, ok: true });
       } catch (err) {
         this.onLogin({ ...who, ok: false, error: (err as Error).message });
@@ -252,6 +296,6 @@ export class ServiceSetup {
   }
 
   stop(): void {
-    for (const { server } of this.logins.values()) server.close();
+    for (const { supersede } of this.logins.values()) supersede();
   }
 }

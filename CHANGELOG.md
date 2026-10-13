@@ -6,6 +6,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
+- X connector: connect a native OAuth app with `anchi setup x-client <client-id>` and `anchi setup service x`, or in Connectors. Agents can read/search posts, read mentions and publish text posts or replies after approval; credentials and refresh stay in the vault. Reads have per-request and daily limits. Needs `anchi setup install` and a daemon restart; X API usage is billed separately.
 - Getting started prepares the VM, vault and selected runtime in one confirmed, resumable operation with recommended resources. `anchi setup prepare --runtime codex` (also `claude-code` or `hermes`) provides the same preparation from the CLI; existing keys and manual Claude credentials are kept, and available local runtime logins connect automatically.
 - Release packages include a pinned manifest for prebuilt base and runtime layers. Installation downloads and verifies the needed layers instead of building them locally; source checkouts continue to build locally. Needs `anchi setup install` to update existing VM components.
 

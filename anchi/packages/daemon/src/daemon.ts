@@ -1136,6 +1136,17 @@ export class Daemon {
       await this.services.setGoogleClient(str(json, 'client JSON', 16_384));
       return null;
     },
+    'services.xClient': async (params) => {
+      const { clientId } = z
+        .strictObject({ clientId: z.string().regex(/^[A-Za-z0-9_-]{1,256}$/) })
+        .parse(params);
+      await this.services.setXClient(clientId);
+      return null;
+    },
+    'services.xLogin': async (params) => {
+      z.strictObject({}).parse(params);
+      return { url: await this.services.xLogin() };
+    },
     'services.googleLogin': async ({ id, account }) => ({
       url: await this.services.googleLogin(serviceId(id), optionalAccount(account)),
     }),

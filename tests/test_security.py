@@ -48,7 +48,7 @@ class SecurityTests(unittest.TestCase):
             'CREATE TABLE config(id INTEGER PRIMARY KEY, epoch INTEGER, gmail_read INTEGER); INSERT INTO config VALUES(1,7,0);'
         )
         conn.close()
-        self.assertTrue(all(mode == 'auto' for mode in policy.inspect_rules()['rules'].values()))
+        self.assertEqual(policy.inspect_rules()['rules'], {p: 'ask' if p == 'x' else 'auto' for p in policy.PRINCIPALS})
         policy.set_mode('gmail', 'ask')
         self.assertEqual(policy.inspect_rules()['rules']['gmail'], 'ask')
         self.assertEqual(policy.inspect_rules()['rules']['drive'], 'auto')
@@ -256,7 +256,7 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(policy.authorize(search, 'drive')['decision'], 'allow')
         self.assertEqual(policy.authorize(create, 'drive')['decision'], 'allow')
         self.assertEqual(policy.authorize(post, 'slack')['decision'], 'allow')
-        self.assertEqual(policy.inspect_rules()['rules'], {p: 'auto' for p in policy.PRINCIPALS})
+        self.assertEqual(policy.inspect_rules()['rules'], {p: 'ask' if p == 'x' else 'auto' for p in policy.PRINCIPALS})
         # Switching a principal to ask mode revokes outstanding grants and requires approval again.
         issued = policy.authorize(create, 'drive')
         policy.set_mode('drive', 'ask')

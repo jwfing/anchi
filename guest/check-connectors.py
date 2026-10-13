@@ -15,11 +15,12 @@ def check(name, ok):
 
 
 STATUS_KEYS = {'connected', 'reauth_required', 'account', 'scope_text', 'revocation_pending', 'auth'}
-for connector in ('drive', 'notion', 'slack'):
+for connector in ('drive', 'notion', 'slack', 'x'):
     sock = f'/run/secure-{connector}/api.sock'
     check(f'{connector}_socket_visible', Path(sock).exists())
     status = rpc(sock, {'op': 'status'})
-    check(f'{connector}_status_has_no_secret', set(status) == STATUS_KEYS)
+    expected = (STATUS_KEYS - {'scope_text'}) | {'client_configured'} if connector == 'x' else STATUS_KEYS
+    check(f'{connector}_status_has_no_secret', set(status) == expected)
     probes = [
         ('forged_delete', {'op': 'delete', 'request_id': 'a' * 32}),
         ('token_export', {'op': 'token'}),

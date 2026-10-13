@@ -1,0 +1,14 @@
+[Unit]
+Description=Secure VM cell-facing X connector RPC socket
+After=systemd-tmpfiles-setup.service
+
+[Socket]
+ListenStream=/run/secure-x/api.sock
+SocketUser=secure-x
+SocketGroup=secure-cell-peer
+SocketMode=0660
+DirectoryMode=0750
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

@@ -38,7 +38,7 @@ def credential_ops(caller):
     connector = connectors.CONNECTORS.get(caller)
     if connector is None:
         return ()
-    return ('status', 'access_token') if connector.credential.startswith('google:') else ('status', 'token')
+    return ('status', 'access_token') if connector.credential.startswith(('google:', 'oauth:')) else ('status', 'token')
 
 
 def recover_connector(mode):

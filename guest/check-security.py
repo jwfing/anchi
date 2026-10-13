@@ -49,7 +49,15 @@ check(
     'no_plaintext_credentials',
     not any(
         (Path('/var/lib/secure-auth') / n).exists()
-        for n in ('client.json', 'tokens.json', 'pending.json', 'model.json')
+        for n in (
+            'client.json',
+            'tokens.json',
+            'pending.json',
+            'model.json',
+            'x-tokens.json',
+            'x-pending.json',
+            'x-revocation.json',
+        )
     ),
 )
 check(
@@ -78,10 +86,12 @@ import network_rules
 # roles (a credential or sign-in exists) are resolved; the others must have no target at all.
 for role, (user, host) in network_rules.ROLES.items():
     if not network_rules.configured(role):
+        # X's auth and connector roles share a hostname, but have separate kernel UID rules.
+        # A shared target may exist for the other role; this identity must still be refused.
         unreachable = (
-            "from common import target_ips, Denied; import json\ntry:\n target_ips("
+            "from common import target_ips, Denied; import json, socket\ntry:\n addresses=target_ips("
             + repr(host)
-            + ")\n print('false')\nexcept Denied:\n print('true')"
+            + "); socket.create_connection((addresses[0],443),timeout=2).close()\n print('false')\nexcept (Denied,OSError):\n print('true')"
         )
         check(user + '_' + host + '_unconfigured_has_no_target', as_user(user, unreachable))
         continue
@@ -116,6 +126,15 @@ check(
 check(
     'service_cannot_approve',
     rpc_as('secure-slack', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
+)
+for operation in ('token', 'codex_token', 'egress_credential'):
+    check(
+        'x_cannot_get_' + operation,
+        rpc_as('secure-x', '/run/secure-auth/token.sock', {'op': operation}).get('error') == 'CREDENTIAL_SCOPE_DENIED',
+    )
+check(
+    'x_cannot_approve_a_post',
+    rpc_as('secure-x', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
 )
 # Synthetic action only: the policy service authorizes it, nothing is posted to Slack.
 action = {

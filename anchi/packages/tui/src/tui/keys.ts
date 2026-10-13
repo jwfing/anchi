@@ -156,6 +156,10 @@ export const ACTIONS = {
     title: 'Google OAuth client: use your own, or go back to the built-in one',
     contexts: ['connectors'],
   },
+  'connectors:xClient': {
+    title: 'X: configure your native app Client ID',
+    contexts: ['connectors'],
+  },
 } as const satisfies Record<string, ActionInfo>;
 export type ActionId = keyof typeof ACTIONS;
 export const isAction = (s: string): s is ActionId => Object.hasOwn(ACTIONS, s);
@@ -341,6 +345,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     d: 'connectors:disconnect',
     a: 'connectors:account',
     o: 'connectors:googleClient',
+    x: 'connectors:xClient',
     r: 'setup:refresh',
   },
 };

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
 /**
- * Tools for the trusted connector services (Gmail, Drive, Notion, Slack). The cell manager
+ * Tools for the trusted connector services (Gmail, Drive, Notion, Slack, X). The cell manager
  * binds a connector's socket into the cell only when the agent has that connector, so the
  * tools offered are exactly the sockets present. The services check every request themselves
  * (operation allowlist, policy, one-time grants, write ledger); this file only shapes calls.
@@ -67,6 +67,45 @@ const t = (
 });
 
 export const CONNECTOR_TOOLS: ConnectorTool[] = [
+  t('x', 'read', `Read one X post. API usage is billed; do not poll repeatedly.${UNTRUSTED}`, {
+    id: { type: 'string', pattern: '^[0-9]{1,20}$' },
+  }),
+  t(
+    'x',
+    'search',
+    `Search recent X posts (last 7 days). API usage is billed.${UNTRUSTED}`,
+    {
+      query,
+      limit: { type: 'integer', minimum: 10, maximum: 25 },
+      cursor: { type: 'string', maxLength: 2048 },
+    },
+    false,
+    ['query', 'limit'],
+  ),
+  t(
+    'x',
+    'mentions',
+    `Read mentions of the connected X account. API usage is billed.${UNTRUSTED}`,
+    {
+      limit: { type: 'integer', minimum: 10, maximum: 25 },
+      cursor: { type: 'string', maxLength: 2048 },
+    },
+    false,
+    ['limit'],
+  ),
+  t(
+    'x',
+    'post',
+    'Publish a text post or reply as the connected X account. Always waits for approval of the full text and account. ' +
+      'Draft in conversation first. X also enforces weighted character limits and reply eligibility. ' +
+      'Never repeat a write whose result is unknown.',
+    {
+      text: { type: 'string', minLength: 1, maxLength: 280 },
+      reply_to: { type: 'string', pattern: '^[0-9]{1,20}$' },
+    },
+    true,
+    ['text'],
+  ),
   t('gmail', 'list', 'List up to 10 Gmail message ids matching a query. Read-only.', {
     query,
     limit: limit(10),
