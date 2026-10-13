@@ -122,7 +122,9 @@ export class ApprovalWatcher extends EventEmitter<{
       await guest.policyDecide(id, allow, p.digest);
       return this.dropPolicy(id, true);
     }
-    if (!ID.test(id) || !this.pending.has(id)) throw new Error('unknown or expired approval');
+    const a = ID.test(id) ? this.pending.get(id) : undefined;
+    if (!a) throw new Error('unknown or expired approval');
+    // Marked before the exec: the proxy's `resolved` line may arrive first.
     this.decided.add(id);
     const r = await this.transport.exec([
       'anchi-cell',
@@ -131,7 +133,14 @@ export class ApprovalWatcher extends EventEmitter<{
       id,
       allow ? 'allow' : 'deny',
     ]);
-    if (r.code !== 0) throw new Error('the approval expired before it was decided');
+    if (r.code !== 0) {
+      // The proxy refused the write on its own first: nobody decided it. If its `resolved`
+      // line was counted as decided meanwhile, say so now, so the task gets its notice.
+      if (!this.decided.delete(id) && !this.pending.has(id)) {
+        this.emit('resolved', { approval: a, decided: false });
+      }
+      throw new Error('the approval expired before it was decided');
+    }
   }
 
   private connect() {

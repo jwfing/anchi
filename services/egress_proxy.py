@@ -86,7 +86,6 @@ QUOTA_MAX_HEADERS = 40
 # Codex sends its plan's windows in the model stream (WebSocket), as one JSON message of this type.
 CODEX_RATE_LIMITS = b'codex.rate_limits'
 QUOTA_MESSAGE_MAX = 16 * 1024
-GIT_REF_UPDATE = re.compile(rb'[0-9a-f]{40} [0-9a-f]{40} (refs/[^\x00\s]{1,200})')
 log = logging.getLogger('anchi-egress')
 
 
@@ -280,7 +279,8 @@ def https_call(method, url, headers, body):
 def write_summary(decision, method, path, body):
     """What the user approves: the git refs a push updates, or the start of the request body."""
     if decision.rule.name == 'github-git':
-        refs = [r.decode() for r in GIT_REF_UPDATE.findall(body[:65536])]
+        # SHA-1 and SHA-256 object ids alike, as the high-risk check reads them.
+        refs = [ref.decode() for _old, _new, ref in rules.GIT_UPDATE.findall(body[:65536])]
         return 'git push: ' + (', '.join(refs) if refs else 'no ref updates found')
     if not body:
         return f'{method} {path[:300]}'
