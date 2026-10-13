@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { compareVersions, managedRoot, selfUpdate } from '../src/update.ts';
+import { compareVersions, latestVersion, managedRoot, selfUpdate } from '../src/update.ts';
 
 const dirs: string[] = [];
 function fixture() {
@@ -20,6 +20,15 @@ afterEach(() => {
 });
 
 describe('self update', () => {
+  it('explains a non-JSON answer from GitHub instead of failing with a parse error', async () => {
+    await expect(latestVersion(async () => '<html>captive portal</html>')).rejects.toThrow(
+      'Could not check GitHub for updates',
+    );
+    await expect(latestVersion(async () => 'null')).rejects.toThrow('supported stable release');
+    await expect(latestVersion(async () => JSON.stringify({ tag_name: 'v1.2.3' }))).resolves.toBe(
+      '1.2.3',
+    );
+  });
   it('compares numeric versions and rejects unsupported tags', () => {
     expect(compareVersions('0.10.0', '0.9.9')).toBe(1);
     expect(compareVersions('1.0.0', '1.0.0')).toBe(0);

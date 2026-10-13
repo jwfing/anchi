@@ -43,24 +43,27 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export async function latestVersion(): Promise<string> {
-  let stdout: string;
+/** The latest-release document from GitHub; tests replace it. */
+async function fetchLatest(): Promise<string> {
+  const { stdout } = await exec(
+    'curl',
+    ['-fsSL', '--connect-timeout', '15', '--max-time', '30', LATEST],
+    { maxBuffer: 1024 * 1024 },
+  );
+  return stdout;
+}
+
+export async function latestVersion(fetch: () => Promise<string> = fetchLatest): Promise<string> {
+  let release: { tag_name?: unknown; draft?: boolean; prerelease?: boolean };
   try {
-    ({ stdout } = await exec(
-      'curl',
-      ['-fsSL', '--connect-timeout', '15', '--max-time', '30', LATEST],
-      { maxBuffer: 1024 * 1024 },
-    ));
+    // A captive portal or proxy answers 200 with HTML: as unusable as no answer.
+    release = JSON.parse(await fetch()) as typeof release;
   } catch {
     throw new Error(
       'Could not check GitHub for updates (network or API rate limit). Try again later. Nothing was changed.',
     );
   }
-  const release = JSON.parse(stdout) as {
-    tag_name?: unknown;
-    draft?: boolean;
-    prerelease?: boolean;
-  };
+  if (typeof release !== 'object' || release === null) release = {};
   if (
     release.draft ||
     release.prerelease ||

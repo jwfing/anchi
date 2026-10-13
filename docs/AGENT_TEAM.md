@@ -197,7 +197,7 @@ At the bottom, the panel shows what it cannot change: template, image, sandbox, 
 - removes the agent file;
 - deletes all its tasks and transcripts, with the tasks they delegated to other agents; running and queued ones are cancelled first. A task of another agent that had delegated to it stays, with a note;
 - forgets its triggers and what its polls have seen;
-- removes it from other agents' `delegates`, keeping the rest of their files;
+- removes it from other agents' `delegates` and from the `delegates` of templates in `~/.anchi/templates/`, keeping the rest of their files (an agent that only inherited it is not edited);
 - in the VM, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
 
 Directories of your computer in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.
@@ -268,7 +268,7 @@ An agent runs up to three of its tasks at the same time; more wait in its queue.
 - A failed or cancelled task can run again: **^X r** in its view (or `anchi retry <task>`) either continues its session, telling the agent why the last turn stopped so it keeps the work it had done, or starts over as a new task with the same request (`--fresh`).
 - **^X n** in a task's view goes to its agent's view, for a new task. In the builder's view it starts a new conversation; **Enter** otherwise continues the one shown.
 - The input edits like a shell line (**Ctrl+A**, **Ctrl+E**, **Ctrl+W**, **Ctrl+U**, arrows). **Ctrl+G** (or **^X e**) composes the message in `$EDITOR`, which helps if your terminal's IME misbehaves.
-- The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript, with an input to reply to it; **^X r** runs a failed one again, **^X c** cancels it, **^X D** deletes it. In the sidebar, **[** and **]** turn the page. Clicking works too.
+- The sidebar has three sections: **Configure** (runtimes, skills, connectors), **Agents** (the builder and your agents) and **Tasks** (every task, newest first, in pages). Select a task to see its status, times, links and transcript, with an input to reply to it; **^X r** runs a failed one again, **^X c** cancels it, **^X D** deletes it. In the sidebar, **[** and **]** turn the page. Clicking works too. The sidebar lists the newest 500 tasks; older ones are reachable with `anchi tasks` (`--since`, `--search`).
 - **^X l** in a task's view shows its external access: see [Access and usage](#access-and-usage).
 - Consecutive tool calls fold into one line: while the turn runs it shows the count and the latest call; afterwards a click (or **^X t**) expands the list.
 

@@ -229,7 +229,7 @@ type Modal =
     }
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
   | { kind: 'help'; context: Context; scroll: number }
-  | { kind: 'palette'; context: Context; query: string; cursor: number }
+  | { kind: 'palette'; context: Context; active: Context[]; query: string; cursor: number }
   | { kind: 'approval'; approval: Approval; decision?: boolean }
   | {
       kind: 'settings';
@@ -467,6 +467,8 @@ export function App({
   const approvalsNotified = useRef(false);
   const [flash, setFlash] = useState('');
   const loading = useRef(new Set<string>());
+  /** Live events of a task whose history is still being fetched, by task. */
+  const arriving = useRef<Record<string, StoredEvent[]>>({});
 
   const userAgents = agents.filter((a) => a.id !== BUILDER);
   const shownTasks = useMemo(() => filterTasks(tasks, taskFilter), [tasks, taskFilter]);
@@ -548,11 +550,16 @@ export function App({
       ),
       client.on('event', ({ taskId, seq, event }) => {
         if (seq === undefined) return;
+        const stored = { seq, ts: Date.now(), event };
+        // While the history is being fetched, keep what arrives meanwhile for the fetch to
+        // merge (kept here, not in state: a state updater runs later, when the fetch may be
+        // over). A task nobody looks at is not kept.
+        if (loading.current.has(taskId)) (arriving.current[taskId] ??= []).push(stored);
         setLogs((all) => {
           const cur = all[taskId];
           if (!cur) return all;
           if (cur.length && cur.at(-1)!.seq >= seq) return all;
-          return { ...all, [taskId]: [...cur, { seq, ts: Date.now(), event }] };
+          return { ...all, [taskId]: [...cur, stored] };
         });
       }),
       client.on('setup', ({ action, line }) => {
@@ -664,12 +671,23 @@ export function App({
           events.push(...page);
         }
         setLogs((all) => {
+          // The fetch ends here, when its result lands: events that arrived meanwhile follow
+          // the last page, once each, and later ones append to the state as usual.
+          const live = arriving.current[id] ?? [];
+          delete arriving.current[id];
+          loading.current.delete(id);
           const last = events.at(-1)?.seq ?? 0;
-          return { ...all, [id]: [...events, ...(all[id] ?? []).filter((e) => e.seq > last)] };
+          const seen = new Set<number>();
+          const tail = [...(all[id] ?? []), ...live]
+            .filter((e) => e.seq > last && !seen.has(e.seq) && seen.add(e.seq))
+            .sort((a, b) => a.seq - b.seq);
+          return { ...all, [id]: [...events, ...tail] };
         });
-      })()
-        .catch((e) => reportProblem(e))
-        .finally(() => loading.current.delete(id));
+      })().catch((e) => {
+        delete arriving.current[id];
+        loading.current.delete(id);
+        reportProblem(e);
+      });
     }
   }, [client, current, tasks, task?.id]);
 
@@ -942,6 +960,21 @@ export function App({
 
   const back = () => setFocus('side');
   const halfPage = Math.floor(transcriptHeight / 2);
+  // Usage and Access scroll from the top; their lines, computed once here, say how far.
+  const reportLines = useMemo<ReportLine[]>(
+    () =>
+      current === 'access'
+        ? accessSummaryLines(access, accessPeriod, textWidth)
+        : current === 'usage'
+          ? usageLines(usage.rows, usage.quota, usagePeriod, GROUPS[usageGroup]!, textWidth)
+          : [],
+    [current, access, accessPeriod, usage, usagePeriod, usageGroup, textWidth],
+  );
+  const reportHeight = bodyHeight - 4;
+  const reportMax = Math.max(0, reportLines.length - reportHeight);
+  const reportPage = Math.max(1, reportHeight - 1);
+  /** How far the open modal can scroll, as its last render found; the key handlers stop there. */
+  const modalMax = useRef(0);
   // PgUp and PgDn in the skills list move the cursor by what the list shows.
   const skillPage = skillListRows(bodyHeight - 4);
   const connectorIds = CONNECTOR_IDS;
@@ -1102,8 +1135,8 @@ export function App({
         });
         say(
           `@${id} deleted with ${r.deletedTasks} task${r.deletedTasks === 1 ? '' : 's'}` +
-            (r.editedAgents.length
-              ? `; removed from the delegates of ${r.editedAgents.map((a) => `@${a}`).join(', ')}`
+            (r.editedAgents.length || r.editedTemplates.length
+              ? `; removed from the delegates of ${[...r.editedAgents.map((a) => `@${a}`), ...r.editedTemplates.map((t) => `template ${t}`)].join(', ')}`
               : '') +
             (r.warnings.length ? ` · ${r.warnings.join(' · ')}` : ''),
         );
@@ -1231,7 +1264,8 @@ export function App({
       case 'app:help':
         return setModal({ kind: 'help', context, scroll: 0 });
       case 'app:palette':
-        return setModal({ kind: 'palette', context, query: '', cursor: 0 });
+        // The task view's input takes the chat actions too: list them.
+        return setModal({ kind: 'palette', context, active, query: '', cursor: 0 });
       case 'app:select':
         return setSelecting(true);
       case 'focus:toggle':
@@ -1403,18 +1437,24 @@ export function App({
         return toggleAllGroups();
       case 'transcript:verbose':
         return setVerbose((v) => !v);
+      // Report views and Getting started count rows from the top; the transcript from the
+      // bottom. Both stop at their last line, so the other direction answers at once.
       case 'scroll:up':
-        // Report views clamp their own scroll.
         if (context === 'usage' || context === 'access' || context === 'welcome')
           return setScroll((s) => Math.max(0, s - 1));
         return setScroll((s) => Math.min(maxScroll, s + 1));
       case 'scroll:down':
-        if (context === 'usage' || context === 'access' || context === 'welcome')
-          return setScroll((s) => s + 1);
+        if (context === 'usage' || context === 'access')
+          return setScroll((s) => Math.min(reportMax, s + 1));
+        if (context === 'welcome') return setScroll((s) => s + 1);
         return setScroll((s) => Math.max(0, s - 1));
       case 'scroll:pageUp':
+        if (context === 'usage' || context === 'access')
+          return setScroll((s) => Math.max(0, s - reportPage));
         return setScroll((s) => Math.min(maxScroll, s + halfPage));
       case 'scroll:pageDown':
+        if (context === 'usage' || context === 'access')
+          return setScroll((s) => Math.min(reportMax, s + reportPage));
         return setScroll((s) => Math.max(0, s - halfPage));
       case 'chat:submit':
         return submit();
@@ -1518,15 +1558,16 @@ export function App({
           .call('skills.checkUpdate', { id: skill.id })
           .then((u) => {
             if (u.upToDate) return say(`${u.id} is up to date (${u.latest.slice(0, 10)})`);
+            // File names come from the skill repository's tree: untrusted, like its content.
             const list = (label: string, files: string[]) =>
               files.length
-                ? `\n${label}: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` and ${files.length - 8} more` : ''}`
+                ? `\n${label}: ${files.slice(0, 8).map(sanitizeLine).join(', ')}${files.length > 8 ? ` and ${files.length - 8} more` : ''}`
                 : '';
             setModal({
               kind: 'confirm',
               title: `Update skill ${u.id}`,
               body:
-                `${u.url}\n${u.current?.slice(0, 10) ?? '?'} → ${u.latest.slice(0, 10)}` +
+                `${sanitizeLine(u.url)}\n${u.current?.slice(0, 10) ?? '?'} → ${u.latest.slice(0, 10)}` +
                 list('added', u.added) +
                 list('changed', u.changed) +
                 list('removed', u.removed) +
@@ -1699,17 +1740,19 @@ export function App({
     if (key.ctrl && ch === 'c') return exit();
     if (selecting) {
       // Scrolling still works (terminals turn the wheel into arrows here); anything else ends it.
-      if (key.upArrow) return setScroll((s) => s + 1);
+      if (key.upArrow) return setScroll((s) => Math.min(maxScroll, s + 1));
       if (key.downArrow) return setScroll((s) => Math.max(0, s - 1));
-      if (key.pageUp) return setScroll((s) => s + transcriptHeight);
+      if (key.pageUp) return setScroll((s) => Math.min(maxScroll, s + transcriptHeight));
       if (key.pageDown) return setScroll((s) => Math.max(0, s - transcriptHeight));
       return setSelecting(false);
     }
+    /** One row or a page further down a modal, never past its last line. */
+    const down = (scroll: number, step = 1) => Math.min(modalMax.current, scroll + step);
     // ── modals take every key ──
     if (modal?.kind === 'composeReview') {
       if (key.escape) return setModal(null);
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
-      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (key.downArrow) return setModal({ ...modal, scroll: down(modal.scroll) });
       if (key.return) {
         const send = modal.send;
         setModal(null);
@@ -1720,13 +1763,13 @@ export function App({
     if (modal?.kind === 'setupLog') {
       if (key.escape) return setModal(null);
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
-      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (key.downArrow) return setModal({ ...modal, scroll: down(modal.scroll) });
       return;
     }
     if (modal?.kind === 'problem') {
       if (key.escape) return setModal(null);
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
-      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (key.downArrow) return setModal({ ...modal, scroll: down(modal.scroll) });
       if (ch === 'd') {
         setProblem(null);
         return setModal(null);
@@ -1798,7 +1841,7 @@ export function App({
     }
     if (modal?.kind === 'proposal') {
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
-      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (key.downArrow) return setModal({ ...modal, scroll: down(modal.scroll) });
       if (key.escape) return setModal(null);
       if (ch === 's') {
         return openSettings({ proposalId: modal.proposal.id, agentId: modal.proposal.agentId });
@@ -1812,10 +1855,12 @@ export function App({
       if (ch === 'y' && !modal.proposal.errors.length) {
         const { proposal } = modal;
         setModal(null);
-        setProposals((p) => p.filter((x) => x.id !== proposal.id));
+        // The daemon keeps a proposal it refused (the file changed since the review): so does
+        // the list, and ^X o shows it again.
         void client
           .call('builder.apply', { proposalId: proposal.id })
           .then((updated) => {
+            setProposals((p) => p.filter((x) => x.id !== proposal.id));
             setAgents(updated);
             setSelected(proposal.agentId);
             setFocus('main');
@@ -1894,12 +1939,12 @@ export function App({
     }
     if (modal?.kind === 'help') {
       if (key.upArrow) return setModal({ ...modal, scroll: Math.max(0, modal.scroll - 1) });
-      if (key.downArrow) return setModal({ ...modal, scroll: modal.scroll + 1 });
+      if (key.downArrow) return setModal({ ...modal, scroll: down(modal.scroll) });
       if (key.escape || key.return || ch === 'q' || ch === '?') setModal(null);
       return;
     }
     if (modal?.kind === 'palette') {
-      const entries = paletteEntries(keymap, modal.context, modal.query);
+      const entries = paletteEntries(keymap, modal.context, modal.query, modal.active);
       if (key.escape) return setModal(null);
       if (key.return) {
         const entry = entries[modal.cursor];
@@ -2041,7 +2086,7 @@ export function App({
         );
       }
       if (key.downArrow || key.pageDown || ch === 'j') {
-        return setModal((m) => (m?.kind === 'access' ? { ...m, scroll: m.scroll + step } : m));
+        return setModal((m) => (m?.kind === 'access' ? { ...m, scroll: down(m.scroll, step) } : m));
       }
       return;
     }
@@ -2170,6 +2215,7 @@ export function App({
           keymap={keymap}
           setupLog={setupLog}
           progress={setupProgress?.phase}
+          maxScroll={modalMax}
         />
       </Box>
     );
@@ -2483,24 +2529,8 @@ export function App({
             <ConnectorsView setup={setup} cursor={connectorCursor} />
           ) : current === 'runtimes' ? (
             <RuntimesView setup={setup} log={setupLog.slice(-6)} progress={setupProgress?.phase} />
-          ) : current === 'access' ? (
-            <Report
-              lines={accessSummaryLines(access, accessPeriod, textWidth)}
-              height={bodyHeight - 4}
-              scroll={scroll}
-            />
-          ) : current === 'usage' ? (
-            <Report
-              lines={usageLines(
-                usage.rows,
-                usage.quota,
-                usagePeriod,
-                GROUPS[usageGroup]!,
-                textWidth,
-              )}
-              height={bodyHeight - 4}
-              scroll={scroll}
-            />
+          ) : current === 'access' || current === 'usage' ? (
+            <Report lines={reportLines} height={reportHeight} scroll={scroll} />
           ) : (
             <SkillsView
               skills={skills}
@@ -2554,8 +2584,9 @@ export function paletteEntries(
   keymap: KeyMap,
   context: Context,
   query: string,
+  /** The contexts whose actions apply (a task's view also takes the chat's). */
+  active: readonly Context[] = [context, 'global'],
 ): { action: ActionId; title: string; keys: string }[] {
-  const active: Context[] = [context, 'global'];
   const q = query.toLowerCase().replace(/\s+/g, '');
   const matches = (text: string) => {
     let i = 0;
@@ -2565,7 +2596,7 @@ export function paletteEntries(
   return (Object.keys(ACTIONS) as ActionId[])
     .filter((a) => {
       const ctx: readonly Context[] = ACTIONS[a].contexts;
-      return (ctx.includes(context) || ctx.includes('global')) && a !== 'app:palette';
+      return ctx.some((c) => active.includes(c)) && a !== 'app:palette';
     })
     .map((a) => ({
       action: a,
@@ -3082,6 +3113,7 @@ function ModalView({
   keymap,
   setupLog,
   progress,
+  maxScroll,
 }: {
   setupLog: string[];
   progress?: string;
@@ -3089,8 +3121,15 @@ function ModalView({
   width: number;
   height: number;
   keymap: KeyMap;
+  /** Written here as each scrolling dialog lays out: how far it can scroll. */
+  maxScroll: { current: number };
 }) {
   const inner = width - 6;
+  /** The first visible line, and the dialog's scroll limit for the key handlers. */
+  const first = (scroll: number, count: number, room: number) => {
+    maxScroll.current = Math.max(0, count - room);
+    return Math.min(scroll, maxScroll.current);
+  };
   const label = (action: ActionId) => keyLabel(keysFor(keymap, ['global'], action)[0] ?? '');
   if (modal.kind === 'composeReview' || modal.kind === 'setupLog' || modal.kind === 'problem') {
     const recovery = modal.kind === 'problem' ? recoveryFor(modal.message) : undefined;
@@ -3108,6 +3147,7 @@ function ModalView({
           : `${recovery!.explanation}\n\nDetails\n${modal.message}`;
     const lines = wrap(sanitize(content), Math.max(2, inner));
     const heightInside = Math.max(1, height - 5);
+    const start = first(modal.scroll, lines.length, heightInside);
     const footer =
       modal.kind === 'composeReview'
         ? 'Enter send · Esc keep editing · ↑↓ scroll'
@@ -3126,28 +3166,41 @@ function ModalView({
         <Text bold wrap="truncate">
           {sanitizeLine(title)}
         </Text>
-        <Report
-          lines={lines.map((text) => ({ text }))}
-          height={heightInside}
-          scroll={modal.scroll}
-        />
+        <Report lines={lines.map((text) => ({ text }))} height={heightInside} scroll={start} />
         <Text wrap="truncate">{footer}</Text>
       </Box>
     );
   }
   if (modal.kind === 'createAgent') {
     return (
-      <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
-        <Text bold>Create a starter agent</Text>
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        borderStyle="double"
+        borderColor="cyan"
+        paddingX={2}
+      >
+        <Text bold color="cyan">
+          Create a starter agent
+        </Text>
         <Text>Choose a runtime. Connect it in Runtimes before running a task.</Text>
+        <Text> </Text>
         {STARTER_RUNTIMES.map((runtime, i) => (
           <Text key={runtime} color={i === modal.pick ? 'cyan' : undefined}>
             {i === modal.pick ? '› ' : '  '}
             {runtime}
           </Text>
         ))}
-        <Text dimColor>No model call · no connectors or shared folders · runtime network only</Text>
-        <Text dimColor>↑/↓ choose · Enter continue · Esc cancel</Text>
+        <Text> </Text>
+        <Text dimColor>
+          No model call · no connectors or shared folders · any public host; the proposal review
+          comes next
+        </Text>
+        <Box flexGrow={1} />
+        <Text dimColor>
+          ↑/↓ choose · Enter continue · Esc cancel · this screen is drawn by Anchi, not by an agent
+        </Text>
       </Box>
     );
   }
@@ -3227,7 +3280,7 @@ function ModalView({
   if (modal.kind === 'help') {
     const rows = helpRows(keymap, modal.context);
     const room = Math.max(3, height - 4);
-    const start = Math.min(modal.scroll, Math.max(0, rows.length - room));
+    const start = first(modal.scroll, rows.length, room);
     return (
       <Box
         flexDirection="column"
@@ -3254,7 +3307,7 @@ function ModalView({
     );
   }
   if (modal.kind === 'palette') {
-    const entries = paletteEntries(keymap, modal.context, modal.query);
+    const entries = paletteEntries(keymap, modal.context, modal.query, modal.active);
     const room = Math.max(3, height - 6);
     const first = Math.max(0, modal.cursor - room + 1);
     return (
@@ -3335,7 +3388,8 @@ function ModalView({
         <Text bold color="yellow">
           {modal.title}
         </Text>
-        <Text>{modal.body}</Text>
+        {/* Bodies quote names and text from outside (a skill's files): never raw. */}
+        <Text>{sanitize(modal.body)}</Text>
         <Box flexGrow={1} />
         <Text bold>[y] confirm · [n] cancel</Text>
       </Box>
@@ -3416,10 +3470,10 @@ function ModalView({
           {
             text: '  in the VM: its home (work directory, Codex and Claude sessions), its skills and its policy rules',
           },
-          ...(p.delegatedBy.length
+          ...(p.delegatedBy.length || p.delegatedByTemplates.length
             ? [
                 {
-                  text: `Changed: removed from the delegates of ${p.delegatedBy.map((a) => `@${a}`).join(', ')}`,
+                  text: `Changed: removed from the delegates of ${[...p.delegatedBy.map((a) => `@${a}`), ...p.delegatedByTemplates.map((t) => `template ${t}`)].join(', ')}`,
                 },
               ]
             : []),
@@ -3496,7 +3550,7 @@ function ModalView({
               ))}
           </Box>
         ) : (
-          <Report lines={lines} height={room} scroll={modal.scroll} />
+          <Report lines={lines} height={room} scroll={first(modal.scroll, lines.length, room)} />
         )}
         <Text dimColor wrap="truncate">
           {modal.pick !== undefined
@@ -3597,7 +3651,7 @@ function ModalView({
       add(l, l.startsWith('+') ? 'green' : l.startsWith('-') ? 'red' : undefined);
   }
   const room = height - 6 - (p.errors.length ? p.errors.length + 1 : 0) - (p.warnings?.length ?? 0);
-  const start = Math.min(modal.scroll, Math.max(0, body.length - room));
+  const start = first(modal.scroll, body.length, room);
   return (
     <Box
       flexDirection="column"

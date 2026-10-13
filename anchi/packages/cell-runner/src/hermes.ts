@@ -78,24 +78,37 @@ export class HermesTurnState {
   thought = '';
 
   *flush(): Generator<RuntimeEvent> {
+    yield* this.flushThought();
+    yield* this.flushMessage();
+  }
+
+  private *flushThought(): Generator<RuntimeEvent> {
     if (this.thought.trim()) yield { type: 'progress', text: text(this.thought.trim()) };
+    this.thought = '';
+  }
+
+  private *flushMessage(): Generator<RuntimeEvent> {
     if (this.message.trim()) yield { type: 'message', text: text(this.message.trim()) };
     this.message = '';
-    this.thought = '';
   }
 
   /** Maps one `session/update` payload (`params.update`) to runtime events. */
   *update(update: unknown): Generator<RuntimeEvent> {
     const u = obj(update);
     switch (u.sessionUpdate) {
+      // Text and reasoning alternate; the other buffer goes out first so their order is kept.
       case 'agent_message_chunk': {
         const c = obj(u.content);
-        if (c.type === 'text') this.message += str(c.text);
+        if (c.type !== 'text') return;
+        yield* this.flushThought();
+        this.message += str(c.text);
         return;
       }
       case 'agent_thought_chunk': {
         const c = obj(u.content);
-        if (c.type === 'text') this.thought += str(c.text);
+        if (c.type !== 'text') return;
+        yield* this.flushMessage();
+        this.thought += str(c.text);
         return;
       }
       case 'plan': {
@@ -305,11 +318,17 @@ async function start(turn: HermesTurn): Promise<AcpClient> {
       session = undefined;
     }
   });
-  await c.request('initialize', {
-    protocolVersion: ACP_VERSION,
-    clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    clientInfo: { name: 'anchi', version: '1' },
-  });
+  try {
+    await c.request('initialize', {
+      protocolVersion: ACP_VERSION,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientInfo: { name: 'anchi', version: '1' },
+    });
+  } catch (err) {
+    // Not tracked yet: left alone, the process would outlive the turn, one per failed start.
+    c.kill();
+    throw err;
+  }
   return c;
 }
 
@@ -346,20 +365,28 @@ export async function* runHermes(turn: HermesTurn): AsyncGenerator<RuntimeEvent>
   };
   const state = new HermesTurnState();
   let live = false;
+  // Cancels the prompt once one runs. Registered before anything starts, and the signal is
+  // checked after each start-up step: an abort fires once, and a cancel that arrives while
+  // Hermes starts must not run the prompt.
+  let cancel: (() => void) | undefined;
+  const onAbort = () => cancel?.();
+  turn.signal.addEventListener('abort', onAbort, { once: true });
   try {
+    if (turn.signal.aborted) return;
     client ??= await start(turn);
+    if (turn.signal.aborted) return;
     const c = client;
     c.onUpdate = () => {};
     if (!session) {
       session = await openSession(c, turn);
+      if (turn.signal.aborted) return;
       yield { type: 'session.started', resumeId: session.slice(0, 200) };
     }
     const sessionId = session;
     c.onUpdate = (params) => {
       if (live && params.sessionId === sessionId) push(state.update(params.update));
     };
-    const onAbort = () => c.notify('session/cancel', { sessionId });
-    turn.signal.addEventListener('abort', onAbort, { once: true });
+    cancel = () => c.notify('session/cancel', { sessionId });
     live = true;
     let done = false;
     let failure: Error | undefined;
@@ -380,7 +407,6 @@ export async function* runHermes(turn: HermesTurn): AsyncGenerator<RuntimeEvent>
       while (queue.length) yield queue.shift()!;
     }
     live = false;
-    turn.signal.removeEventListener('abort', onAbort);
     yield* state.flush();
     if (failure) throw failure;
     yield* promptResult(result, turn.options.model || turn.env.ANCHI_HERMES_MODEL || '');
@@ -394,6 +420,8 @@ export async function* runHermes(turn: HermesTurn): AsyncGenerator<RuntimeEvent>
         fatal: true,
       };
     }
+  } finally {
+    turn.signal.removeEventListener('abort', onAbort);
   }
 }
 

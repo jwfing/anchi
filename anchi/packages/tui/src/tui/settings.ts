@@ -127,7 +127,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
         'promptMode',
         'mode',
         state.promptMode !== cur.prompt.mode,
-        `${state.promptMode === 'append' ? "append: after the runtime's own instructions" : "replace: instead of the runtime's own instructions"}${inherited('prompt', changed)}`,
+        `${state.promptMode === 'append' ? "append: after the runtime's own instructions" : "replace: instead of the runtime's own instructions (Hermes keeps its own; the text is its persona)"}${inherited('prompt', changed)}`,
       ),
       field(
         'prompt',

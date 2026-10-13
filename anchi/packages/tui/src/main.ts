@@ -27,7 +27,7 @@ import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
 import type { RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
-import { sanitizeLine } from './sanitize.ts';
+import { sanitizeJson, sanitizeLine, sanitizeLines } from './sanitize.ts';
 import { selfUpdate } from './update.ts';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
@@ -40,6 +40,9 @@ import {
   usageLines,
 } from './tui/reports.ts';
 import type { UsageGroup } from '@anchi/protocol';
+
+/** `--json` output: C1 controls and bidi overrides never reach a terminal or a pipe. */
+const jsonOut = (value: unknown) => sanitizeJson(value);
 
 /** Prints report lines, coloured on a terminal. */
 function printReport(lines: ReportLine[]) {
@@ -237,7 +240,7 @@ program
   .action((taskId: string, opts: { json?: boolean }) =>
     withClient(async (client) => {
       const a = await client.call('tasks.audit', { taskId });
-      if (opts.json) return console.log(JSON.stringify(a, null, 2));
+      if (opts.json) return console.log(jsonOut(a));
       printReport(accessLines(a, process.stdout.columns || 120));
     }),
   );
@@ -253,7 +256,7 @@ program
       if (!age) fail('--since takes a number of hours or days, such as 24h or 7d');
       const ms = Number(age![1]) * (age![2] === 'h' ? 3_600_000 : 86_400_000);
       const summary = await client.call('access.summary', { since: Date.now() - ms });
-      if (opts.json) return console.log(JSON.stringify(summary, null, 2));
+      if (opts.json) return console.log(jsonOut(summary));
       const lines = accessSummaryLines(summary, 0, process.stdout.columns || 120);
       printReport(
         lines.map((l, i) => (i === 0 ? { ...l, text: `External access, last ${opts.since}` } : l)),
@@ -278,8 +281,7 @@ program
         client.call('usage.summary', { since: Date.now() - ms, by }),
         client.call('usage.quota').catch(() => []),
       ]);
-      if (opts.json)
-        return console.log(JSON.stringify({ since: opts.since, by, rows, quota }, null, 2));
+      if (opts.json) return console.log(jsonOut({ since: opts.since, by, rows, quota }));
       const lines = usageLines(rows, quota, 0, by, process.stdout.columns || 120);
       // The period label of the screen does not fit a free --since: name it as asked.
       printReport(
@@ -323,7 +325,7 @@ program
           since,
           limit: Number(opts.limit) || 50,
         });
-        if (opts.json) console.log(JSON.stringify(list, null, 2));
+        if (opts.json) console.log(jsonOut(list));
         else for (const t of list) console.log(taskLine(t));
       }),
   );
@@ -449,7 +451,7 @@ program
   .action((opts: { json?: boolean }) =>
     withClient(async (client) => {
       const list = await client.call('approvals.list');
-      if (opts.json) return console.log(JSON.stringify(list, null, 2));
+      if (opts.json) return console.log(jsonOut(list));
       if (!list.length) return console.log('no writes waiting for approval');
       for (const a of list) {
         console.log(
@@ -457,8 +459,7 @@ program
         );
         if (a.reason) console.log(`    why: ${sanitizeLine(a.reason)}`);
         if (a.origin) console.log(`    started by: ${sanitizeLine(a.origin)}`);
-        for (const line of sanitizeLine(a.summary).slice(0, 300).split('\n'))
-          console.log(`    ${line}`);
+        for (const line of sanitizeLines(a.summary)) console.log(`    ${line}`);
       }
     }),
   );
@@ -533,7 +534,7 @@ agentsCmd
 agentsCmd.action((opts: { json?: boolean }) =>
   withClient(async (client) => {
     const list = await client.call('agents.list');
-    if (opts.json) return console.log(JSON.stringify(list, null, 2));
+    if (opts.json) return console.log(jsonOut(list));
     for (const a of list) {
       const extra = a.error
         ? styleText('red', ` ${sanitizeLine(a.error)}`)
@@ -557,9 +558,9 @@ async function deleteAgentCli(id: string, yes: boolean) {
     console.log(
       '  in the VM: its home (work directory, sessions), its skills and its policy rules',
     );
-    if (p.delegatedBy.length)
+    if (p.delegatedBy.length || p.delegatedByTemplates.length)
       console.log(
-        `It is removed from the delegates of ${p.delegatedBy.map((a) => `@${a}`).join(', ')}.`,
+        `It is removed from the delegates of ${[...p.delegatedBy.map((a) => `@${a}`), ...p.delegatedByTemplates.map((t) => `template ${t}`)].join(', ')}.`,
       );
     console.log(
       styleText(
@@ -572,7 +573,7 @@ async function deleteAgentCli(id: string, yes: boolean) {
     }
     const r = await client.call('agents.delete', { agentId: p.agentId, confirm: p.agentId });
     console.log(
-      `deleted @${r.agentId}: ${r.deletedTasks} task(s)${r.editedAgents.length ? `; delegates edited in ${r.editedAgents.join(', ')}` : ''}`,
+      `deleted @${r.agentId}: ${r.deletedTasks} task(s)${r.editedAgents.length || r.editedTemplates.length ? `; delegates edited in ${[...r.editedAgents, ...r.editedTemplates.map((t) => `template ${t}`)].join(', ')}` : ''}`,
     );
     for (const w of r.warnings) console.log(styleText('yellow', w));
     if (r.warnings.length) process.exitCode = 1;
@@ -588,7 +589,7 @@ setup
   .action((opts: { json?: boolean }) =>
     withClient(async (client) => {
       const s = await client.call('setup.status');
-      if (opts.json) return console.log(JSON.stringify(s, null, 2));
+      if (opts.json) return console.log(jsonOut(s));
       const size = s.vmSize?.current;
       const lines = [
         `VM: ${s.vm}${size ? ` (${size.cpus} CPUs, ${size.memoryGiB} GiB)` : ''} · vault: ${
@@ -1039,7 +1040,7 @@ daemon
   .action(async () => {
     const client = await tryConnect(layout);
     if (!client) return console.log('daemon not running');
-    console.log(JSON.stringify(await client.call('daemon.status'), null, 2));
+    console.log(jsonOut(await client.call('daemon.status')));
     client.close();
   });
 daemon

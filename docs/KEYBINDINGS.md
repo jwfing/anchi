@@ -82,7 +82,7 @@ Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a fail
 - **Skills:** ↑ ↓ (k j) choose, PgUp PgDn a page, Home End (g G) first and last, a add, u update to the latest commit of its URL, d remove.
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, a another Google account (Gmail, Drive), o your Google OAuth client, r refresh.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.
-- **Access:** p period (24 hours, 7 days, 30 days), r refresh, ↑ ↓ scroll.
+- **Access:** p period (24 hours, 7 days, 30 days), r refresh, ↑ ↓ PgUp PgDn scroll.
 
 The access view of a task scrolls with ↑ ↓ PgUp PgDn and closes with Esc; **e** chooses a host the task was refused, to add to the agent's egress list after a confirmation (y).
 

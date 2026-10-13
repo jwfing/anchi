@@ -63,6 +63,17 @@ describe('Hermes event mapping', () => {
     ]);
   });
 
+  it('keeps the order of text and reasoning when they alternate', () => {
+    const s = new HermesTurnState();
+    const chunk = (kind: 'agent_message_chunk' | 'agent_thought_chunk', t: string) => [
+      ...s.update({ sessionUpdate: kind, content: { type: 'text', text: t } }),
+    ];
+    expect(chunk('agent_message_chunk', 'say A')).toEqual([]);
+    expect(chunk('agent_thought_chunk', 'think B')).toEqual([{ type: 'message', text: 'say A' }]);
+    expect(chunk('agent_message_chunk', 'say C')).toEqual([{ type: 'progress', text: 'think B' }]);
+    expect([...s.flush()]).toEqual([{ type: 'message', text: 'say C' }]);
+  });
+
   it('reports usage and stop reasons at the end of a turn', () => {
     expect([
       ...promptResult(
@@ -110,7 +121,12 @@ describe('Hermes over ACP', () => {
 
   const turn = (
     input: string,
-    extra: { resumeId?: string; signal?: AbortSignal; instructions?: string } = {},
+    extra: {
+      resumeId?: string;
+      signal?: AbortSignal;
+      instructions?: string;
+      env?: Record<string, string>;
+    } = {},
   ) => {
     dir = dir ?? mkdtempSync(join(tmpdir(), 'hermes-'));
     log = join(dir, 'acp.log');
@@ -130,6 +146,7 @@ describe('Hermes over ACP', () => {
         ANCHI_HERMES_BASE_URL: 'https://openrouter.ai/api/v1',
         ANCHI_HERMES_MODEL: 'nousresearch/hermes-4-405b',
         FAKE_HERMES_LOG: join(dir, 'acp.log'),
+        ...extra.env,
       } as Record<string, string>,
       signal: extra.signal ?? new AbortController().signal,
       bin: FAKE,
@@ -214,6 +231,35 @@ describe('Hermes over ACP', () => {
     dir = mkdtempSync(join(tmpdir(), 'hermes-'));
     const events = await collect(turn('ask'));
     expect(events).toContainEqual({ type: 'message', text: 'permission allow_session' });
+  });
+
+  it('honours a cancel that arrives while Hermes is still starting', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'hermes-'));
+    const controller = new AbortController();
+    const events: RuntimeEvent[] = [];
+    const run = (async () => {
+      for await (const e of turn('late', {
+        signal: controller.signal,
+        env: { FAKE_HERMES_SLOW_INIT: '300' },
+      }))
+        events.push(e);
+    })();
+    await new Promise((r) => setTimeout(r, 50));
+    controller.abort();
+    await run;
+    expect(events).toEqual([]);
+    const methods = requests().map((m) => m.method);
+    expect(methods).toContain('initialize');
+    expect(methods).not.toContain('session/new');
+    expect(methods).not.toContain('session/prompt');
+  });
+
+  it('kills a Hermes whose initialize fails instead of leaking it', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'hermes-'));
+    const events = await collect(turn('go', { env: { FAKE_HERMES_INIT_ERROR: '1' } }));
+    expect(events).toEqual([{ type: 'error', message: 'Hermes: init failed', fatal: true }]);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(requests().some((m) => (m as { event?: string }).event === 'sigterm')).toBe(true);
   });
 
   it('reports a Hermes that exits as a fatal error, and starts a new one next turn', async () => {

@@ -478,8 +478,14 @@ export class Hub extends EventEmitter<HubEvents> {
     if (fresh) {
       const first = events.find((e) => e.event.type === 'input')?.event as
         { text?: string } | undefined;
-      const retry = this.createTask(task.agentId, first?.text || task.title, task.trigger);
+      // The user asked for it, whatever started the original: a delegated task's fresh copy has
+      // no parent waiting for it, so its origin must not claim one.
+      const retry = this.createTask(task.agentId, first?.text || task.title);
       this.notice(taskId, `↻ started again as ${retry.id}`);
+      this.notice(
+        retry.id,
+        `↻ a fresh start of ${taskId}${task.parentId ? ` (which @${this.opts.store.getTask(task.parentId)?.agentId ?? '?'} had delegated as ${task.parentId})` : ''}`,
+      );
       return retry;
     }
     const error = [...events].reverse().find((e) => e.event.type === 'error')?.event as

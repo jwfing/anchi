@@ -14,6 +14,7 @@ import time
 import auth
 from common import CELL_AGENT_HOST_UID
 import connectors
+import egress_rules
 import vault
 
 TARGETS = Path('/run/secure-egress/targets.json')
@@ -28,11 +29,8 @@ ROLES = {
 # the per-service allowlists: any public destination, never a private, loopback or link-local one.
 EGRESS_USER = 'anchi-egress'
 EGRESS_LISTEN_PORT = 18080
-PRIVATE_V4 = (
-    '0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, '
-    '192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3'
-)
-PRIVATE_V6 = '::/127, ::ffff:0:0/96, 64:ff9b::/96, 100::/64, 2001:db8::/32, fc00::/7, fe80::/10, ff00::/8'
+# The lists live with the proxy's own check (`egress_rules.public_address`) so both agree.
+PRIVATE_V4, PRIVATE_V6 = egress_rules.PRIVATE_V4, egress_rules.PRIVATE_V6
 
 
 def egress_proxy_rules():
