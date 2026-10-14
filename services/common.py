@@ -213,6 +213,8 @@ def provider_request(
         # Never reflect provider error bodies: they can echo tokens or private content.
         if status == 412:
             raise Denied('TARGET_CHANGED')
+        if status == 402:
+            raise Denied('PROVIDER_PAYMENT_REQUIRED')
         if write and status not in (400, 401, 403, 404, 405, 409, 422, 429):
             raise ExecutionUnknown('WRITE_EXECUTION_UNKNOWN')
         if status in (401, 403):
