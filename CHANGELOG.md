@@ -18,6 +18,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Codex runtime extraction uses the build cell's root ownership instead of the publisher's archived UID. This fixes the Linux live ownership check; `anchi setup install` installs the corrected script and the next Codex task rebuilds its runtime layer.
 - Connectors keeps the selected entry visible in small terminals, including X and Reddit at the bottom of the list. It also explains when a running daemon predates the TUI's connector list, with instructions to restart it and update VM components; reopening the TUI alone keeps using the existing daemon.
 - Connector-service approvals retain the full frozen write content instead of a 4,000-character prefix. The approval dialog wraps long lines and supports arrows, PgUp/PgDn and Home/End; the list labels clipped content as a preview.
 
