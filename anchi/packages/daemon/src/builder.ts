@@ -53,7 +53,11 @@ An agent is a YAML file. Fields:
   its job, how it should work, and what it must not do.
 - connectors: any of github, aws, linear, posthog, sentry, firecrawl, figma, discord
   (credentials injected outside the agent's cell) and
-  gmail, drive, notion, slack, x (served by trusted services). X provides bounded post reads,
+  gmail, drive, notion, slack, x, reddit (served by trusted services). Reddit can list/search/read
+  posts, read comments and publish self posts or comments. Draft in conversation first; reddit_submit
+  and reddit_comment always require approval of the full content, destination and account. Never
+  set approvals.reddit to auto. Reddit requires approved Data API access and respects subreddit rules.
+  X provides bounded post reads,
   recent search, mentions and text publishing. Draft in conversation; x_post always asks for
   approval of the connected account and full text. Never set approvals.x to auto. X bills API
   usage; prefer small scheduled digests to frequent polling. Never put tokens anywhere. Grant

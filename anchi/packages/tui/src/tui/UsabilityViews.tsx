@@ -31,7 +31,7 @@ export function ApprovalsView({
   width: number;
   height: number;
   /** The keys as bound: how to select a decision, and the key that confirms it. */
-  keys: { select: string; confirm: string };
+  keys: { select: string; confirm: string; open: string };
 }) {
   if (!approvals.length) {
     return (
@@ -55,7 +55,8 @@ export function ApprovalsView({
   const listRoom = Math.max(1, Math.min(approvals.length, Math.floor(height / 4)));
   const first = Math.max(0, Math.min(cursor - listRoom + 1, approvals.length - listRoom));
   const detailRoom = Math.max(1, height - listRoom - 10);
-  const summary = sanitize(chosen.summary).split('\n').slice(0, detailRoom);
+  const lines = wrap(sanitize(chosen.summary), Math.max(10, width));
+  const summary = lines.slice(0, detailRoom);
   const decided = pick && pick.id === chosen.id ? pick : null;
   return (
     <Box flexDirection="column" height={height}>
@@ -94,7 +95,11 @@ export function ApprovalsView({
         ))}
       </Box>
       <Box flexGrow={1} />
-      <Text dimColor>The content above comes from the agent. This view is drawn by Anchi.</Text>
+      <Text dimColor>
+        {lines.length > detailRoom
+          ? `Content preview · ${keys.open} and scroll to see the rest.`
+          : 'The content above comes from the agent. This view is drawn by Anchi.'}
+      </Text>
       <Text bold>
         {decided
           ? `${decided.allow ? 'Approve' : 'Deny'} selected · ${keys.confirm} · y / n to change`

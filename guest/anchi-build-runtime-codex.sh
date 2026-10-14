@@ -16,7 +16,8 @@ url="https://github.com/openai/codex/releases/download/rust-v$ANCHI_CODEX_VERSIO
 curl -fsSL --retry 3 -o /var/tmp/codex.tgz "$url"
 echo "$sha  /var/tmp/codex.tgz" | sha256sum -c - >/dev/null
 rm -rf /opt/codex && install -d /opt/codex
-tar -xzf /var/tmp/codex.tgz -C /opt/codex
+# Upstream archives can carry the publisher's UID; tools must belong to cell root.
+tar --no-same-owner -xzf /var/tmp/codex.tgz -C /opt/codex
 rm -f /var/tmp/codex.tgz
 # Voice support is unused in cells and is most of the package size.
 rm -rf /opt/codex/codex-resources/voice

@@ -11,6 +11,7 @@ import admin
 import auth
 import connectors
 import x_auth
+import reddit_auth
 from common import Denied, rpc
 
 
@@ -76,14 +77,14 @@ def probe(connector, account=auth.DEFAULT_ACCOUNT):
 
 def disconnect(connector, account=auth.DEFAULT_ACCOUNT):
     spec = check(connector)
-    if connector == 'x':
+    if connector in ('x', 'reddit'):
 
-        def remove_x():
+        def remove_oauth():
             # Serialize with refresh: it must not save tokens again after disconnect.
             with auth.locked():
-                return x_auth.disconnect()
+                return (x_auth if connector == 'x' else reddit_auth).disconnect()
 
-        return {'connector': connector, **as_auth(remove_x)}
+        return {'connector': connector, **as_auth(remove_oauth)}
     if spec.credential.startswith('google:'):
         result = as_auth(lambda: auth.disconnect(connector, account))
         return {'connector': connector, **result}

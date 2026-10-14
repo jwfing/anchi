@@ -18,6 +18,8 @@ ADDRESSES = {
     'api.notion.com': ['104.18.1.1'],
     'slack.com': ['3.1.1.1'],
     'api.x.com': ['104.244.42.1'],
+    'www.reddit.com': ['151.101.1.140'],
+    'oauth.reddit.com': ['151.101.65.140'],
 }
 
 
@@ -86,6 +88,30 @@ class RefreshTests(unittest.TestCase):
         network_rules.refresh()
         self.assertEqual(self.sets()[0], {'xauth4'})
         auth.vault.remove(auth.STORE, x_auth.REVOCATION)
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], set())
+
+    def test_reddit_oauth_and_connector_roles_open_only_when_needed(self):
+        import reddit_auth
+
+        reddit_auth.import_client({'client_id': 'test-client', 'developer_username': 'developer'})
+        network_rules.refresh()
+        self.assertEqual(self.lookups, [])
+        reddit_auth.begin(reddit_auth.REDIRECT_URI)
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], {'redditauth4', 'redditidentity4'})
+        self.assertFalse(network_rules.configured('reddit'))
+        auth.write(reddit_auth.TOKENS, {'access_token': 'TEST_ACCESS', 'generation': 'test'})
+        self.lookups.clear()
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], {'redditauth4', 'redditidentity4', 'reddit4'})
+        self.assertEqual(self.lookups, ['www.reddit.com', 'oauth.reddit.com'])
+        auth.vault.remove(auth.STORE, reddit_auth.TOKENS)
+        auth.vault.remove(auth.STORE, reddit_auth.PENDING)
+        auth.write(reddit_auth.REVOCATION, {'token': 'TEST_REFRESH'})
+        network_rules.refresh()
+        self.assertEqual(self.sets()[0], {'redditauth4', 'redditidentity4'})
+        auth.vault.remove(auth.STORE, reddit_auth.REVOCATION)
         network_rules.refresh()
         self.assertEqual(self.sets()[0], set())
 

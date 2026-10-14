@@ -430,13 +430,13 @@ describe('App', () => {
       ui.stdin.write('\u0010');
       await tick();
     }
-    await frameWith(ui, 'SERVICES');
+    await frameWith(ui, 'connectors · ↑↓ choose');
     for (let i = 0; i < 12; i++) {
       ui.stdin.write('j');
       await tick();
     }
     ui.stdin.write('\r');
-    expect(await frameWith(ui, 'X native app Client ID')).toContain('127.0.0.1:48173/callback');
+    expect(await frameWith(ui, '127.0.0.1:48173/callback')).toContain('X native app Client ID');
     ui.stdin.write('test-client');
     await tick();
     ui.stdin.write('\r');
@@ -446,6 +446,70 @@ describe('App', () => {
     expect(calls.some(([m]) => m === 'services.googleLogin')).toBe(false);
     ui.stdin.write('m');
     await frameWith(ui, 'X posts always require approval');
+    expect(calls.some(([m]) => m === 'services.setMode')).toBe(false);
+    ui.unmount();
+  });
+
+  it('connects Reddit through an installed app Client ID and browser sign-in, and keeps publishing on approval', async () => {
+    let configured = false;
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          codex: { runtime: 'codex', connected: true, accountId: 'a', expiresAt: Date.now() + 1e6 },
+          connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
+          services: ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'].map((id) => ({
+            id,
+            connected: false,
+            account: null,
+            accounts: [],
+            reauthRequired: false,
+            mode: id === 'x' || id === 'reddit' ? 'ask' : 'auto',
+          })),
+          redditClient: configured,
+          googleClient: false,
+        }),
+        'services.redditClient': () => {
+          configured = true;
+          return null;
+        },
+        'services.redditLogin': () => ({ url: 'https://www.reddit.com/api/v1/authorize?test' }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[]} initialTasks={[]} />);
+    await tick();
+    for (let i = 0; i < 3; i++) {
+      ui.stdin.write('\u0010');
+      await tick();
+    }
+    await frameWith(ui, 'connectors · ↑↓ choose');
+    for (let i = 0; i < 13; i++) {
+      ui.stdin.write('j');
+      await tick();
+    }
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'Reddit installed app Client ID')).toContain(
+      '127.0.0.1:48174/callback',
+    );
+    ui.stdin.write('test-client');
+    await tick();
+    ui.stdin.write('\r');
+    await frameWith(ui, 'Reddit app developer username');
+    ui.stdin.write('developer');
+    await tick();
+    ui.stdin.write('\r');
+    await vi.waitFor(() => expect(calls.some(([m]) => m === 'services.redditLogin')).toBe(true));
+    expect(calls.find(([m]) => m === 'services.redditClient')?.[1]).toEqual({
+      clientId: 'test-client',
+      developerUsername: 'developer',
+    });
+    expect(calls.some(([m]) => m === 'services.redditLogin')).toBe(true);
+    expect(calls.some(([m]) => m === 'services.googleLogin')).toBe(false);
+    ui.stdin.write('m');
+    await frameWith(ui, 'Reddit posts and comments always require approval');
     expect(calls.some(([m]) => m === 'services.setMode')).toBe(false);
     ui.unmount();
   });
@@ -1217,7 +1281,7 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write(' '); // the first skill: review
     await tick();
-    for (let i = 0; i < 14; i++) ui.stdin.write('j'); // down to the workspace
+    for (let i = 0; i < 15; i++) ui.stdin.write('j'); // down to the workspace
     await tick();
     ui.stdin.write(' ');
     await tick();
@@ -2226,6 +2290,71 @@ describe('usability workflows', () => {
     welcome.unmount();
   });
 
+  it('keeps X and Reddit visible while navigating all connectors in a 24-row terminal', async () => {
+    const { client } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
+          services: ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'].map((id) => ({
+            id,
+            connected: false,
+            account: null,
+            mode: 'ask',
+          })),
+        }),
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="connectors" initialAgents={[]} initialTasks={[]} />,
+    );
+    await frameWith(ui, 'github');
+    for (let i = 0; i < 12; i++) {
+      ui.stdin.write('j');
+      await tick();
+    }
+    const x = ui.lastFrame() ?? '';
+    expect(x).toMatch(/○ x +needs an X native app Client ID/);
+    expect(x).toContain('13/14 connectors');
+    expect(x.split('\n')).toHaveLength(24);
+    ui.stdin.write('j');
+    const reddit = await frameWith(ui, '14/14 connectors');
+    expect(reddit).toMatch(/○ reddit +needs an approved Reddit installed app/);
+    expect(reddit.split('\n')).toHaveLength(24);
+    ui.unmount();
+  });
+
+  it('explains missing social connectors when the daemon predates the TUI update', async () => {
+    const { client } = fakeClient(
+      {},
+      {
+        'setup.status': () => ({
+          vm: 'running',
+          vaultUnlocked: true,
+          installed: true,
+          connectors: [],
+          services: ['gmail', 'drive', 'notion', 'slack'].map((id) => ({
+            id,
+            connected: false,
+            account: null,
+            mode: 'auto',
+          })),
+        }),
+      },
+    );
+    const ui = render(
+      <App client={client} initialView="connectors" initialAgents={[]} initialTasks={[]} />,
+    );
+    const frame = await frameWith(ui, 'Daemon missing connectors: x, reddit');
+    expect(frame).toContain('Daemon missing connectors: x, reddit');
+    expect(frame).toContain('anchi daemon stop');
+    expect(frame).toContain('anchi setup install');
+    ui.unmount();
+  });
+
   it('tells Gmail users without a Google client where to start, keeps ids aligned, and clears a token with ^U', async () => {
     const service = (id: string) => ({
       id,
@@ -2721,6 +2850,59 @@ describe("a task view's history", () => {
 });
 
 describe('the Approvals view', () => {
+  it('wraps and scrolls a long Reddit approval through its final text and account', async () => {
+    const { client, calls, emit } = fakeClient();
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    emit('approvals', {
+      approvals: [
+        {
+          id: 'a'.repeat(32),
+          kind: 'policy',
+          task: 't-test',
+          agent: 'dev',
+          connector: 'reddit',
+          operation: 'reddit.submit',
+          host: 'reddit',
+          createdAt: Date.now(),
+          timeout: 600,
+          reason: 'reddit writes ask for approval',
+          origin: 'you',
+          summary: JSON.stringify(
+            {
+              subreddit: 'test',
+              title: 'Review me',
+              text: 'long '.repeat(1500) + 'END-OF-POST',
+              account_label: 'u/example',
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    });
+    await tick();
+    ui.stdin.write('\u0018a');
+    expect(await frameWith(ui, 'Review me')).toContain('↑↓ PgUp/PgDn');
+    expect(ui.lastFrame()).not.toContain('END-OF-POST');
+    ui.stdin.write(`${ESC}[F`); // End: the tail must be reviewable, even beyond 4,000 characters.
+    const tail = await frameWith(ui, 'END-OF-POST');
+    expect(tail).toContain('u/example');
+    ui.stdin.write(`${ESC}[H`); // Home
+    expect(await frameWith(ui, 'Review me')).not.toContain('END-OF-POST');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m]) => m === 'approvals.decide')).toBe(false);
+    ui.stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(calls.find(([m]) => m === 'approvals.decide')?.[1]).toEqual({
+        id: 'a'.repeat(32),
+        allow: true,
+      }),
+    );
+    ui.unmount();
+  });
+
   const held = (
     over: Partial<Approval> & { id: string; agent: string; task: string },
   ): Approval => ({

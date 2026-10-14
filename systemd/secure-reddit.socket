@@ -1,0 +1,14 @@
+[Unit]
+Description=Secure VM cell-facing Reddit connector RPC socket
+After=systemd-tmpfiles-setup.service
+
+[Socket]
+ListenStream=/run/secure-reddit/api.sock
+SocketUser=secure-reddit
+SocketGroup=secure-cell-peer
+SocketMode=0660
+DirectoryMode=0750
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

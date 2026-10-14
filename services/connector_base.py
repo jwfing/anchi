@@ -31,6 +31,7 @@ def credential(connector):
             'generation': value['account_generation'],
             'user_id': value['user_id'],
             'account': value['account'],
+            **({'user_agent': value['user_agent']} if connector.id == 'reddit' else {}),
         }
     if connector.credential.startswith('google:'):
         value = rpc(AUTH_SOCKET, {'op': 'access_token', 'account': ACCOUNT})

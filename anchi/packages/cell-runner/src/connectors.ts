@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
 /**
- * Tools for the trusted connector services (Gmail, Drive, Notion, Slack, X). The cell manager
+ * Tools for the trusted connector services (Gmail, Drive, Notion, Slack, X, Reddit). The cell manager
  * binds a connector's socket into the cell only when the agent has that connector, so the
  * tools offered are exactly the sockets present. The services check every request themselves
  * (operation allowlist, policy, one-time grants, write ledger); this file only shapes calls.
@@ -28,6 +28,10 @@ const paragraphs = {
   maxItems: 100,
 };
 const channel = { type: 'string', pattern: '^[A-Z0-9]{1,32}$' };
+const subreddit = { type: 'string', pattern: '^[A-Za-z0-9_]{2,21}$' };
+const redditThing = { type: 'string', pattern: '^t[13]_[a-z0-9]{1,20}$' };
+const redditPost = { type: 'string', pattern: '^t3_[a-z0-9]{1,20}$' };
+const redditText = { type: 'string', minLength: 1, maxLength: 10000 };
 const object = (properties: Json, required = Object.keys(properties)) => ({
   type: 'object',
   properties,
@@ -67,6 +71,66 @@ const t = (
 });
 
 export const CONNECTOR_TOOLS: ConnectorTool[] = [
+  t(
+    'reddit',
+    'list',
+    `Browse posts in one subreddit.${UNTRUSTED}`,
+    {
+      subreddit,
+      limit: limit(25),
+      sort: { type: 'string', enum: ['hot', 'new', 'top'] },
+      cursor: redditPost,
+    },
+    false,
+    ['subreddit', 'limit'],
+  ),
+  t(
+    'reddit',
+    'search',
+    `Search Reddit posts, optionally within one subreddit.${UNTRUSTED}`,
+    {
+      query,
+      limit: limit(25),
+      subreddit,
+      cursor: redditPost,
+    },
+    false,
+    ['query', 'limit'],
+  ),
+  t('reddit', 'read', `Read one post or comment by its full t3_ or t1_ id.${UNTRUSTED}`, {
+    id: redditThing,
+  }),
+  t(
+    'reddit',
+    'comments',
+    `Read a bounded comment tree for a post. More comments may be omitted.${UNTRUSTED}`,
+    {
+      post_id: redditPost,
+      limit: limit(25),
+    },
+  ),
+  t(
+    'reddit',
+    'submit',
+    'Publish a text post as the connected Reddit account. Draft in conversation first. ' +
+      'Always waits for approval of the account, subreddit, title and full text. Respect subreddit rules. ' +
+      'Never repeat a write whose result is unknown.',
+    {
+      subreddit,
+      title: { type: 'string', minLength: 1, maxLength: 300 },
+      text: redditText,
+    },
+    true,
+  ),
+  t(
+    'reddit',
+    'comment',
+    'Reply to a Reddit post or comment. Draft in conversation first. ' +
+      'Always waits for approval of the account, parent id and full text. Respect subreddit rules. ' +
+      'Never repeat a write whose result is unknown.',
+    { parent: redditThing, text: redditText },
+    true,
+  ),
   t('x', 'read', `Read one X post. API usage is billed; do not poll repeatedly.${UNTRUSTED}`, {
     id: { type: 'string', pattern: '^[0-9]{1,20}$' },
   }),

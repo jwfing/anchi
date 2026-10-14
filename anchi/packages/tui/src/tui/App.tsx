@@ -168,6 +168,7 @@ function LineText({ line }: { line: Line }) {
 type SecretField = { key: string; label: string; masked: boolean; optional?: boolean };
 /** Masked inputs: connector credentials, the Claude Code token and Hermes's endpoint. */
 type SecretTarget = ConnectorId | 'claude' | 'hermes' | 'notion' | 'slack';
+const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'];
 const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
   notion: [
     { key: 'token', label: 'Notion internal integration secret (ntn_… or secret_…)', masked: true },
@@ -234,7 +235,7 @@ type Modal =
   | { kind: 'confirm'; title: string; body: string; action: () => Promise<unknown> }
   | { kind: 'help'; context: Context; scroll: number }
   | { kind: 'palette'; context: Context; active: Context[]; query: string; cursor: number }
-  | { kind: 'approval'; approval: Approval; decision?: boolean }
+  | { kind: 'approval'; approval: Approval; scroll: number; decision?: boolean }
   | {
       kind: 'settings';
       agentId: string;
@@ -994,7 +995,6 @@ export function App({
   // PgUp and PgDn in the skills list move the cursor by what the list shows.
   const skillPage = skillListRows(bodyHeight - 4);
   const connectorIds = CONNECTOR_IDS;
-  const serviceIds: ServiceConnectorId[] = ['gmail', 'drive', 'notion', 'slack', 'x'];
 
   const performSetup = async (step: SetupAction, vmSize?: VmSize) => {
     if (setupRunning.current)
@@ -1269,6 +1269,40 @@ export function App({
       `opened Google sign-in for ${id}${account === DEFAULT_ACCOUNT ? '' : ` (${account})`}`,
     );
 
+  const redditLogin = () =>
+    runAction(() => client.call('services.redditLogin'), 'opened Reddit sign-in in your browser');
+  const importRedditClient = () =>
+    setModal({
+      kind: 'text',
+      title: 'Reddit installed app Client ID',
+      input: '',
+      label:
+        'Use an installed app with approved Reddit Data API access. Register callback ' +
+        'http://127.0.0.1:48174/callback. Paste its Client ID (not a secret or password). ' +
+        'Disconnect Reddit before changing the client. See docs/REDDIT_SETUP.md.',
+      submit: async (clientId) => {
+        if (!/^[A-Za-z0-9_-]{1,256}$/.test(clientId.trim()))
+          throw new Error('BAD_REDDIT_CLIENT_ID');
+        setModal({
+          kind: 'text',
+          title: 'Reddit app developer username',
+          input: '',
+          label:
+            'The Reddit username of the app developer, without u/. Used to identify API requests. ' +
+            'Posts and comments always require your approval.',
+          submit: async (developerUsername) => {
+            await client.call('services.redditClient', {
+              clientId: clientId.trim(),
+              developerUsername: developerUsername.trim(),
+            });
+            refreshSetup();
+            await client.call('services.redditLogin');
+            say('sign in to Reddit in your browser');
+          },
+        });
+      },
+    });
+
   const xLogin = () =>
     runAction(() => client.call('services.xLogin'), 'opened X sign-in in your browser');
   const importXClient = () =>
@@ -1537,6 +1571,7 @@ export function App({
         return setModal({
           kind: 'approval',
           approval: (current === 'approvals' ? chosenApproval : undefined) ?? approvals[0]!,
+          scroll: 0,
         });
       case 'approvals:approve':
       case 'approvals:deny':
@@ -1736,6 +1771,7 @@ export function App({
       case 'connectors:connect':
         if (id) return openConnector(id);
         if (sid === 'x') return setup?.xClient ? xLogin() : importXClient();
+        if (sid === 'reddit') return setup?.redditClient ? redditLogin() : importRedditClient();
         if (sid === 'notion' || sid === 'slack') {
           return setModal({ kind: 'secret', connector: sid, index: 0, values: {}, input: '' });
         }
@@ -1775,6 +1811,8 @@ export function App({
             refreshSetup();
           },
         });
+      case 'connectors:redditClient':
+        return importRedditClient();
       case 'connectors:xClient':
         return importXClient();
       case 'connectors:ghImport':
@@ -1800,8 +1838,12 @@ export function App({
           submit: (profile) => client.call('connectors.awsProfile', { profile }),
         });
       case 'connectors:mode': {
-        if (!sid || !status) return say('select a service (gmail, drive, notion, slack, x) first');
-        if (sid === 'x') return say('X posts always require approval; reads are automatic');
+        if (!sid || !status)
+          return say('select a service (gmail, drive, notion, slack, x, reddit) first');
+        if (sid === 'x' || sid === 'reddit')
+          return say(
+            `${sid === 'x' ? 'X posts' : 'Reddit posts and comments'} always require approval; reads are automatic`,
+          );
         const mode = status.mode === 'ask' ? 'auto' : 'ask';
         return runAction(
           () => client.call('services.setMode', { id: sid, mode }),
@@ -1939,6 +1981,15 @@ export function App({
     if (modal?.kind === 'approval') {
       const { approval } = modal;
       if (key.escape) return setModal(null);
+      if (key.home) return setModal({ ...modal, scroll: 0 });
+      if (key.end) return setModal({ ...modal, scroll: modalMax.current });
+      if (key.upArrow || key.pageUp)
+        return setModal({
+          ...modal,
+          scroll: Math.max(0, modal.scroll - (key.pageUp ? halfPage : 1)),
+        });
+      if (key.downArrow || key.pageDown)
+        return setModal({ ...modal, scroll: down(modal.scroll, key.pageDown ? halfPage : 1) });
       if (ch === 'y' || ch === 'n') return setModal({ ...modal, decision: ch === 'y' });
       if (key.return && modal.decision !== undefined) {
         const allow = modal.decision;
@@ -2450,6 +2501,7 @@ export function App({
                       ['connectors:account', 'another Google account'],
                       ['connectors:googleClient', 'Google client'],
                       ['connectors:xClient', 'X client'],
+                      ['connectors:redditClient', 'Reddit client'],
                     ]
                   : context === 'usage'
                     ? [
@@ -2557,6 +2609,7 @@ export function App({
               keys={{
                 select: `${hint('approvals:approve', 'select approve')} · ${hint('approvals:deny', 'select deny')} · ${hint('approvals:confirm', 'confirm')}`,
                 confirm: hint('approvals:confirm', 'confirm'),
+                open: hint('approvals:open', 'review full content'),
               }}
             />
           ) : current === 'team' ? (
@@ -2676,7 +2729,12 @@ export function App({
               </Text>
             </>
           ) : current === 'connectors' ? (
-            <ConnectorsView setup={setup} cursor={connectorCursor} />
+            <ConnectorsView
+              setup={setup}
+              cursor={connectorCursor}
+              width={textWidth}
+              height={bodyHeight - 4}
+            />
           ) : current === 'runtimes' ? (
             <RuntimesView setup={setup} log={setupLog.slice(-6)} progress={setupProgress?.phase} />
           ) : current === 'access' || current === 'usage' ? (
@@ -2869,8 +2927,22 @@ function Sidebar(props: {
   );
 }
 
-function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: number }) {
+function ConnectorsView({
+  setup,
+  cursor,
+  width,
+  height,
+}: {
+  setup: SetupStatus | null;
+  cursor: number;
+  width: number;
+  height: number;
+}) {
   if (!setup) return <Text dimColor>Loading…</Text>;
+  // A reopened TUI can still be connected to a daemon from before the source update.
+  const missing = setup.services?.length
+    ? serviceIds.filter((id) => !setup.services!.some((s) => s.id === id))
+    : [];
   const notes: Record<string, string> = {
     github: 'API (bearer) and git over HTTPS; key and secret APIs are denied',
     aws: 'requests re-signed by the proxy; use a dedicated least-privilege principal',
@@ -2881,109 +2953,126 @@ function ConnectorsView({ setup, cursor }: { setup: SetupStatus | null; cursor: 
     figma: 'REST API; webhooks wait for approval',
     discord: 'bot REST API, no gateway; webhook tokens are denied',
   };
-  // One column for every id, the services' too, so `firecrawl` does not push its row out.
+  type Row = { text: string; color?: string; dim?: boolean; bold?: boolean; selected?: boolean };
+  const lines: Row[] = [];
+  const add = (text: string, style: Omit<Row, 'text'> = {}) => {
+    for (const part of wrap(text, width)) lines.push({ text: part, ...style });
+  };
+  let selectedRow = 0;
+  const select = (index: number) => {
+    if (index === cursor) selectedRow = lines.length;
+    return index === cursor;
+  };
+  if (missing.length) {
+    add(`Daemon missing connectors: ${missing.join(', ')}`, { color: 'yellow' });
+    add('After tasks finish: anchi daemon stop', { color: 'yellow' });
+    add('Then anchi setup install and reopen Anchi.', { color: 'yellow' });
+  }
+  if (!setup.vaultUnlocked)
+    add('The vault is locked. Open Getting started to initialize or unlock it.', { color: 'red' });
+  // One column for every id, the services' too, so firecrawl does not push its row out.
   const idWidth = Math.max(8, ...setup.connectors.map((c) => c.id.length)) + 1;
-  return (
-    <Box flexDirection="column">
-      {!setup.vaultUnlocked ? (
-        <Text color="red">
-          The vault is locked. Open Getting started to initialize or unlock it.
-        </Text>
-      ) : null}
-      {setup.connectors.map((c, i) => (
-        <Box key={c.id} flexDirection="column">
-          <Text inverse={i === cursor}>
-            <Text color={c.connected ? 'green' : 'gray'}>{c.connected ? '●' : '○'}</Text>{' '}
-            {c.id.padEnd(idWidth)}
-            {c.connected ? sanitizeLine(c.account ?? 'connected') : 'not connected'}
-            {c.profile ? ` · profile ${sanitizeLine(c.profile)}` : ''}
-          </Text>
-          <Text dimColor>{`  ${notes[c.id]}`}</Text>
-        </Box>
-      ))}
-      <Text bold dimColor>
-        SERVICES
-      </Text>
-      <Text dimColor>
-        {`  Google client (Gmail, Drive): ${
-          setup.googleClientSource === 'builtin'
-            ? 'built-in'
-            : setup.googleClientSource === 'user' || setup.googleClient
-              ? 'your own'
-              : 'none yet — Enter on gmail or drive imports one'
-        } · o to change`}
-      </Text>
-      {(setup.services ?? []).map((c, i) => {
-        // Named accounts, or a default one with a revocation to retry, get a row each.
-        const accounts = (c.accounts ?? []).filter((a) => a.connected || a.revocationPending);
-        const listAccounts =
-          accounts.length > 1 || accounts.some((a) => a.name !== 'default' || a.revocationPending);
-        // Gmail and Drive connect in two steps: the OAuth client JSON, then Google sign-in.
-        const signInPending =
-          !c.connected &&
-          !c.reauthRequired &&
-          setup.googleClient &&
-          (c.id === 'gmail' || c.id === 'drive');
-        return (
-          <Box key={c.id} flexDirection="column">
-            <Text inverse={i + setup.connectors.length === cursor}>
-              <Text
-                color={
-                  c.reauthRequired
-                    ? 'red'
-                    : c.connected
-                      ? 'green'
-                      : signInPending
-                        ? 'yellow'
-                        : 'gray'
-                }
-              >
-                {c.connected ? '●' : '○'}
-              </Text>{' '}
-              {c.id.padEnd(idWidth)}
-              {c.reauthRequired
-                ? 'sign in again'
-                : c.revocationPending && c.id === 'x'
-                  ? 'revocation pending — disconnect again'
-                  : c.connected
-                    ? sanitizeLine(c.account ?? 'connected')
-                    : signInPending
-                      ? setup.googleClientSource === 'builtin'
-                        ? 'press Enter to sign in with Google'
-                        : 'client stored — press Enter to sign in'
-                      : (c.id === 'gmail' || c.id === 'drive') && !setup.googleClient
-                        ? 'needs a Google OAuth client first — Enter imports yours (docs/GMAIL_SETUP.md)'
-                        : c.id === 'x'
-                          ? setup.xClient
-                            ? 'press Enter to sign in with X'
-                            : 'needs an X native app Client ID — Enter to configure'
-                          : 'not connected'}
-              {` · writes ${c.id === 'x' ? 'always ask' : c.mode === 'ask' ? 'ask' : 'auto'}`}
-            </Text>
-            {listAccounts
-              ? accounts.map((a) => (
-                  <Text
-                    key={a.name}
-                    dimColor={!a.reauthRequired}
-                    color={a.reauthRequired ? 'red' : undefined}
-                    wrap="truncate"
-                  >
-                    {`  └ ${a.name.padEnd(10)}${
-                      a.revocationPending
-                        ? 'revocation pending — disconnect again'
-                        : a.reauthRequired
-                          ? 'sign in again (Enter)'
-                          : sanitizeLine(a.account ?? 'connected')
-                    }`}
-                  </Text>
-                ))
-              : null}
-          </Box>
+  setup.connectors.forEach((c, i) => {
+    add(
+      `${c.connected ? '●' : '○'} ${c.id.padEnd(idWidth)}${
+        c.connected ? sanitizeLine(c.account ?? 'connected') : 'not connected'
+      }${c.profile ? ` · profile ${sanitizeLine(c.profile)}` : ''}`,
+      { selected: select(i), color: c.connected ? 'green' : undefined },
+    );
+    add(`  ${notes[c.id]}`, { dim: true });
+  });
+  add('SERVICES', { bold: true, dim: true });
+  add(
+    `  Google client (Gmail, Drive): ${
+      setup.googleClientSource === 'builtin'
+        ? 'built-in'
+        : setup.googleClientSource === 'user' || setup.googleClient
+          ? 'your own'
+          : 'none yet — Enter on gmail or drive imports one'
+    } · o to change`,
+    { dim: true },
+  );
+  (setup.services ?? []).forEach((c, i) => {
+    const accounts = (c.accounts ?? []).filter((a) => a.connected || a.revocationPending);
+    const listAccounts =
+      accounts.length > 1 || accounts.some((a) => a.name !== 'default' || a.revocationPending);
+    const google = c.id === 'gmail' || c.id === 'drive';
+    const social = c.id === 'x' || c.id === 'reddit';
+    const signInPending = !c.connected && !c.reauthRequired && setup.googleClient && google;
+    const status = c.reauthRequired
+      ? 'sign in again'
+      : c.revocationPending && social
+        ? 'revocation pending — disconnect again'
+        : c.connected
+          ? sanitizeLine(c.account ?? 'connected')
+          : signInPending
+            ? setup.googleClientSource === 'builtin'
+              ? 'press Enter to sign in with Google'
+              : 'client stored — press Enter to sign in'
+            : google && !setup.googleClient
+              ? 'needs a Google OAuth client first — Enter imports yours (docs/GMAIL_SETUP.md)'
+              : c.id === 'x'
+                ? setup.xClient
+                  ? 'press Enter to sign in with X'
+                  : 'needs an X native app Client ID — Enter to configure'
+                : c.id === 'reddit'
+                  ? setup.redditClient
+                    ? 'press Enter to sign in with Reddit'
+                    : 'needs an approved Reddit installed app — Enter to configure'
+                  : 'not connected';
+    add(
+      `${c.connected ? '●' : '○'} ${c.id.padEnd(idWidth)}${status} · writes ${
+        social ? 'always ask' : c.mode === 'ask' ? 'ask' : 'auto'
+      }`,
+      {
+        selected: select(i + setup.connectors.length),
+        color: c.reauthRequired
+          ? 'red'
+          : c.connected
+            ? 'green'
+            : signInPending
+              ? 'yellow'
+              : undefined,
+      },
+    );
+    if (listAccounts)
+      for (const a of accounts)
+        add(
+          `  └ ${sanitizeLine(a.name).padEnd(10)}${
+            a.revocationPending
+              ? 'revocation pending — disconnect again'
+              : a.reauthRequired
+                ? 'sign in again (Enter)'
+                : sanitizeLine(a.account ?? 'connected')
+          }`,
+          { dim: !a.reauthRequired, color: a.reauthRequired ? 'red' : undefined },
         );
-      })}
-      <Text dimColor>
-        Secrets go from this screen to the VM vault. They are never stored on this computer or shown
-        again. Google tokens are obtained in the VM.
+  });
+  const room = Math.max(1, height - 2);
+  const start = listWindow(lines.length, selectedRow, room);
+  const count = setup.connectors.length + (setup.services?.length ?? 0);
+  return (
+    <Box flexDirection="column" height={height}>
+      <Box flexDirection="column" height={room} flexShrink={0}>
+        {lines.slice(start, start + room).map((line, i) => (
+          <Text
+            key={i}
+            color={line.color}
+            dimColor={line.dim}
+            bold={line.bold}
+            inverse={line.selected}
+            wrap="truncate"
+          >
+            {line.text}
+          </Text>
+        ))}
+      </Box>
+      <Text
+        dimColor
+        wrap="truncate"
+      >{`${Math.min(cursor + 1, count)}/${count} connectors · ↑↓ choose · Enter connect`}</Text>
+      <Text dimColor wrap="truncate">
+        Credentials stay in the VM vault.
       </Text>
     </Box>
   );
@@ -3405,8 +3494,9 @@ function ModalView({
   if (modal.kind === 'approval') {
     const a = modal.approval;
     const left = Math.max(0, Math.round(a.timeout - (Date.now() - a.createdAt) / 1000));
-    const room = Math.max(3, height - 12);
-    const lines = sanitize(a.summary).split('\n').slice(0, room);
+    const room = Math.max(3, height - 13);
+    const lines = wrap(sanitize(a.summary), Math.max(10, inner));
+    const start = first(modal.scroll, lines.length, room);
     return (
       <Box
         flexDirection="column"
@@ -3426,13 +3516,16 @@ function ModalView({
         <Text dimColor>{`refused automatically in about ${left} s`}</Text>
         <Text> </Text>
         <Box flexDirection="column" height={room}>
-          {lines.map((l, i) => (
+          {lines.slice(start, start + room).map((l, i) => (
             <Text key={i} wrap="truncate">
-              {truncate(l, Math.max(10, width - 6)) || ' '}
+              {l || ' '}
             </Text>
           ))}
         </Box>
         <Box flexGrow={1} />
+        <Text
+          dimColor
+        >{`↑↓ PgUp/PgDn · Home/End · lines ${start + 1}–${Math.min(start + room, lines.length)}/${lines.length}`}</Text>
         <Text dimColor>The content above comes from the agent. This dialog is drawn by Anchi.</Text>
         <Text bold>
           {modal.decision === undefined

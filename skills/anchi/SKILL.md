@@ -5,7 +5,7 @@ description: Operate Anchi, a secured agent team on your own computer — set up
 
 # Using Anchi
 
-Anchi runs a team of agents (Codex, Claude Code or Hermes) on the user's computer. Each task runs in a disposable cell inside a local Linux VM (`anchi-vm`, through Lima). Agents never hold credentials: an egress proxy in the VM injects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out, and trusted services in the VM act for agents on Gmail, Drive, Notion, Slack and X. Each agent reaches only the connectors, hosts, directories, skills and delegates in its YAML file.
+Anchi runs a team of agents (Codex, Claude Code or Hermes) on the user's computer. Each task runs in a disposable cell inside a local Linux VM (`anchi-vm`, through Lima). Agents never hold credentials: an egress proxy in the VM injects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out, and trusted services in the VM act for agents on Gmail, Drive, Notion, Slack, X and Reddit. Each agent reaches only the connectors, hosts, directories, skills and delegates in its YAML file.
 
 Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for people, and the CLI (`anchi <command>`) for scripts and agents. From a source checkout the CLI is `scripts/anchi`.
 
@@ -113,6 +113,7 @@ anchi rm <task>                               # delete a finished task and the t
 | Linear | `anchi setup connector linear` | The GraphQL API; the proxy injects the key |
 | PostHog, Sentry, Firecrawl, Figma, Discord | `anchi setup connector <id>` (token) | Their REST APIs with the placeholder in `POSTHOG_PERSONAL_API_KEY`, `SENTRY_AUTH_TOKEN`, `FIRECRAWL_API_KEY`, `FIGMA_ACCESS_TOKEN`, `DISCORD_BOT_TOKEN`; the proxy injects the real one. Discord: REST only, no gateway. Firecrawl fetches any URL, beyond an `egress` list |
 | Gmail, Drive | `anchi setup service gmail [--account work]` (Google sign-in in the browser) | Tools in the cell (`gmail_*`, `drive_*`); Gmail is read-only |
+| Reddit | `anchi setup reddit-client <client-id> <developer-username>`, then `anchi setup service reddit` | Approved Data API access; `reddit_list`, `reddit_search`, `reddit_read`, `reddit_comments`, `reddit_submit`, `reddit_comment`; publishing always requires approval |
 | X | `anchi setup x-client <client-id>`, then `anchi setup service x` (browser OAuth) | `x_read`, `x_search`, `x_mentions`, `x_post`; X API usage is billed; publishing always requires approval |
 | Notion, Slack | `anchi setup service notion` / `slack` (token) | Tools in the cell (`notion_*`, `slack_*`) |
 
