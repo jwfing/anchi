@@ -4,6 +4,12 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.3.5 — 2026-10-13
+
+First-run setup now prepares the environment in one resumable operation and imports available local Codex and Claude Code logins. X and Reddit join the connector services with per-publication approval. Release packages include prebuilt base and runtime layers, and connector and approval screens handle long lists and posts.
+
+After updating, wait for tasks to finish, run `anchi daemon stop`, then `anchi setup install` and reopen Anchi. Reinstall daemon login startup with `anchi daemon install` if enabled. These steps preserve agents, tasks and credentials; they update the host daemon and VM together. The Codex runtime layer is rebuilt or downloaded when next needed. X and Reddit require your own provider application setup; real-account social authorization and publishing have not yet been verified.
+
 ### Added
 
 - Reddit connector: configure an approved installed app with `anchi setup reddit-client <client-id> <developer-username>`, then browser sign-in with `anchi setup service reddit`. Agents can browse/search/read posts and comments; text posts and replies always require approval. Needs `anchi setup install` and a daemon restart; see `docs/REDDIT_SETUP.md`.
@@ -21,7 +27,6 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 - Codex runtime extraction uses the build cell's root ownership instead of the publisher's archived UID. This fixes the Linux live ownership check; `anchi setup install` installs the corrected script and the next Codex task rebuilds its runtime layer.
 - Connectors keeps the selected entry visible in small terminals, including X and Reddit at the bottom of the list. It also explains when a running daemon predates the TUI's connector list, with instructions to restart it and update VM components; reopening the TUI alone keeps using the existing daemon.
 - Connector-service approvals retain the full frozen write content instead of a 4,000-character prefix. The approval dialog wraps long lines and supports arrows, PgUp/PgDn and Home/End; the list labels clipped content as a preview.
-
 - `anchi setup vault unlock` reports a missing master key with initialization and recovery steps instead of a traceback. Unsafe key paths are refused without blocking on pipes; initialization still refuses a replacement key over encrypted credentials.
 
 ## 0.3.4 — 2026-10-12

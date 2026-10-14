@@ -13,7 +13,7 @@ network access from a terminal UI or CLI.
 **Development preview:** public binaries are available; packages are unsigned and Anchi has
 not completed a security audit. Start with test accounts and non-sensitive projects. Linux
 support is experimental. Hermes has not been verified against a live endpoint; PostHog, Sentry,
-Firecrawl, Figma and Discord have not yet been exercised against live accounts.
+Firecrawl, Figma, Discord, X and Reddit have not yet been exercised against live accounts.
 
 ![Anchi terminal team overview with example tasks](docs/assets/tui-team.svg)
 
