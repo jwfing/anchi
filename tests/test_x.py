@@ -51,6 +51,28 @@ class XBoundaryTests(ConnectorHarness):
         self.assertEqual(params['account_id'], '123')
         self.assertEqual(params['account_label'], '@example')
 
+    def test_invalid_limits_are_refused_before_credentials_or_network(self):
+        for op in ('search', 'mentions'):
+            for limit in (0, 1, 9, 26, 100, True, 10.5, '10', None):
+                request = {'op': op, 'limit': limit}
+                if op == 'search':
+                    request['query'] = 'news'
+                with self.subTest(op=op, limit=limit), self.assertRaisesRegex(Denied, '^BAD_LIMIT$'):
+                    x_connector.handle(request)
+        x_connector.connector_base.credential.assert_not_called()
+        self.assertEqual(self.calls, [])
+
+    def test_payment_refusal_is_explicit_without_provider_body_or_automatic_retry(self):
+        requests = (
+            {'op': 'search', 'query': '新闻 -is:retweet', 'limit': 10},
+            {'op': 'post', 'text': 'hello', 'request_id': 'e' * 32},
+        )
+        for request in requests:
+            self.responses = [(402, b'{"detail":"TEST_ACCESS private billing details"}')]
+            with self.subTest(op=request['op']), self.assertRaisesRegex(Denied, '^PROVIDER_PAYMENT_REQUIRED$'):
+                x_connector.handle(request)
+        self.assertEqual(len(self.calls), 2)
+
     def test_policy_requires_approval_even_with_legacy_auto_rule(self):
         boot = Path(self.temp.name) / 'boot'
         boot.write_text('test-boot')
@@ -306,6 +328,16 @@ class XOAuthBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(Denied, 'DESTINATION_DENIED'):
                 x_auth.request('/2/dm_events')
             transport.assert_not_called()
+
+    def test_payment_failure_during_refresh_preserves_login_without_exposing_body(self):
+        self.connect()
+        expired = {**auth.read(x_auth.TOKENS), 'expires_at': 0}
+        auth.write(x_auth.TOKENS, expired)
+        with patch('common.TRANSPORT', return_value=(402, b'TEST_REFRESH private billing details', None)) as transport:
+            with self.assertRaisesRegex(Denied, '^PROVIDER_PAYMENT_REQUIRED$'):
+                x_auth.credential()
+        self.assertEqual(transport.call_count, 1)
+        self.assertEqual(auth.read(x_auth.TOKENS), expired)
 
     def test_admin_disconnect_holds_the_refresh_lock(self):
         import connector_admin

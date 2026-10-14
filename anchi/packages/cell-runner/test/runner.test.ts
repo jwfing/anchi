@@ -560,6 +560,71 @@ describe('Claude Code mapping', () => {
 });
 
 describe('connector tools', () => {
+  it('explains X payment failures through MCP without retrying the request', async () => {
+    const tool = CONNECTOR_TOOLS.find((t) => t.name === 'x_search')!;
+    let calls = 0;
+    const result = await handle(
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: tool.name, arguments: { query: '新闻 -is:retweet', limit: 10 } },
+      },
+      async () => ({ ok: true }),
+      {
+        list: () => [tool],
+        run: (t, args) =>
+          callConnector(t, args, {
+            call: async () => {
+              calls++;
+              throw new Error('PROVIDER_PAYMENT_REQUIRED');
+            },
+          }),
+      },
+    );
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({
+      result: {
+        isError: true,
+        content: [{ type: 'text', text: expect.stringContaining('HTTP 402') }],
+      },
+    });
+    expect(JSON.stringify(result)).toContain('https://console.x.com/');
+    expect(JSON.stringify(result)).toContain('web search');
+  });
+
+  it('explains the X limit range and forwards valid limits unchanged', async () => {
+    for (const name of ['x_search', 'x_mentions']) {
+      const tool = CONNECTOR_TOOLS.find((t) => t.name === name)!;
+      expect(tool.inputSchema).toMatchObject({
+        properties: { limit: { type: 'integer', minimum: 10, maximum: 25 } },
+      });
+      await expect(
+        callConnector(
+          tool,
+          { query: 'news', limit: 5 },
+          {
+            call: async () => {
+              throw new Error('BAD_LIMIT');
+            },
+          },
+        ),
+      ).rejects.toThrow('integer from 10 to 25');
+      for (const limit of [10, 25]) {
+        await callConnector(
+          tool,
+          { query: 'news', limit },
+          {
+            call: async (_path, request) => {
+              expect(request.limit).toBe(limit);
+              return { posts: [] };
+            },
+          },
+        );
+      }
+    }
+  });
+
   it('offers bounded X tools and keeps a post request stable while approval is pending', async () => {
     const names = CONNECTOR_TOOLS.filter((t) => t.connector === 'x').map((t) => t.name);
     expect(names).toEqual(['x_read', 'x_search', 'x_mentions', 'x_post']);

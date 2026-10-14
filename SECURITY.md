@@ -62,6 +62,8 @@ target, and binds to the connection generation. Changing the account invalidates
 The shared write ledger prevents replay after success or uncertain execution. Reads reserve
 up to 1,000 requested post resources per UTC day across agents in persistent SQLite, with a
 maximum of 25 per page. These limits do not replace X's monetary spending limit.
+HTTP 402 payment refusals are reported with a fixed error code; provider error bodies are never
+reflected to cells. Payment refusals do not cause automatic retries or mark an OAuth login revoked.
 
 The daemon detects host Codex and Claude Code logins at startup, after environment setup, on
 credential file changes and every five minutes. Once the installed VM's vault is unlocked,

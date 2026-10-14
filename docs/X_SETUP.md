@@ -92,3 +92,20 @@ or `x_mentions` result set and a draft. There is no X webhook or dedicated polli
 Offline tests cover OAuth and connector refusal paths, approval binding, refresh, quotas and
 write replay protection. Real-account OAuth, publishing/reply eligibility and platform billing
 still need provider-side validation; offline tests do not establish that an app has X API access.
+
+## Troubleshooting reads
+
+- `BAD_LIMIT`: `x_search` and `x_mentions` require an integer from 10 to 25. Use `limit: 10`
+  for the smallest request; an invalid limit is refused before reading credentials or calling X.
+- `PROVIDER_PAYMENT_REQUIRED`: X returned HTTP 402. Check the app's API credit balance,
+  billing status and spending limit in the [Developer Console](https://console.x.com/).
+  A connected OAuth account does not establish API billing access. Resolve billing before
+  retrying; reconnecting alone does not fix this error.
+- `PROVIDER_AUTH_REQUIRED`: check the app's API permissions and account authorization.
+- `PROVIDER_RATE_LIMITED`: wait before trying again. Repeated searches also consume Anchi's
+  daily read budget, including failed requests.
+
+Provider error bodies are never returned to agents; payment errors use a fixed code and guidance.
+If an agent falls back to web search after a failed X call, it must identify that different source;
+web results are not X API results. After updating this behavior, run `anchi setup install`,
+restart the daemon, and use a new task cell so its tool descriptions and error hints are current.

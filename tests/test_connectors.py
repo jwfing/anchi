@@ -135,6 +135,7 @@ class TransportTests(unittest.TestCase):
         slack = connectors.CONNECTORS['slack']
         for status, code in (
             (401, 'PROVIDER_AUTH_REQUIRED'),
+            (402, 'PROVIDER_PAYMENT_REQUIRED'),
             (403, 'PROVIDER_AUTH_REQUIRED'),
             (429, 'PROVIDER_RATE_LIMITED'),
             (500, 'PROVIDER_REQUEST_FAILED'),

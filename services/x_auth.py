@@ -41,6 +41,8 @@ def request(path, form=None, token=None):
         )
     except (OSError, ValueError):
         raise Denied('X_REQUEST_FAILED') from None
+    if code == 402:
+        raise Denied('PROVIDER_PAYMENT_REQUIRED')
     if code in (400, 401, 403):
         raise Denied('X_REAUTH_REQUIRED')
     if code != 200:

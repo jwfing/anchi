@@ -139,6 +139,22 @@ check(
     'x_cannot_approve_a_post',
     rpc_as('secure-x', '/run/secure-policy/api.sock', {'op': 'approve'}).get('error') == 'OPERATION_DENIED',
 )
+check(
+    'x_payment_error_redacts_provider_body',
+    as_user(
+        'secure-x',
+        '''import common, connectors, json
+common.TRANSPORT = lambda *args: (402, b'private synthetic provider details')
+errors = []
+for write in (False, True):
+ try:
+  common.provider_request(connectors.CONNECTORS['x'], 'POST' if write else 'GET',
+                          '/2/tweets' if write else '/2/tweets/123?', write=write)
+ except common.Denied as exc:
+  errors.append(str(exc))
+print(json.dumps(errors == ['PROVIDER_PAYMENT_REQUIRED'] * 2))''',
+    ),
+)
 for operation in ('token', 'codex_token', 'egress_credential'):
     check(
         'reddit_cannot_get_' + operation,
