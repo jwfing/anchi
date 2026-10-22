@@ -28,7 +28,7 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 
 ## Call direction
 
-TUI or CLI → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-image` and administration commands over `limactl shell … sudo` → task cell runner (its stdio).
+TUI or CLI → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-image` and administration commands over `limactl shell … sudo` (or `sudo` when the daemon runs inside the guest on a remote server) → task cell runner (its stdio). A remote server's client reaches the socket through `anchi-bridge` over SSH (`daemon/src/remote.ts`).
 
 Cell runtime → in-cell MCP server → runner → daemon, for Anchi tools (delegation, task status). The daemon decides from the task and agent it attached to the cell.
 
@@ -49,4 +49,4 @@ A dependency check (`anchi/scripts/check-deps.mjs`) keeps runtime SDKs and the c
 
 ## Future work
 
-Remote machines are not planned. Candidates: a GUI client on the same protocol, signed releases.
+Candidates: a GUI client on the same protocol, signed releases.

@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { homeLayout } from '@anchi/core';
 import { describe, expect, it } from 'vitest';
-import { appVersion, SetupRunner, workspaceSteps } from '../src/host.ts';
+import { appVersion, IN_GUEST_SETUP_STEPS, SetupRunner, workspaceSteps } from '../src/host.ts';
 import { launchdPlist, systemdUnit } from '../src/launch.ts';
 import { notifyCommand } from '../src/notify.ts';
-import { limaMinimum, parseLimaVersion, versionAtLeast } from '../src/setup.ts';
+import { hostReadiness, limaMinimum, parseLimaVersion, versionAtLeast } from '../src/setup.ts';
 
 describe('host integration', () => {
   it('compares the installed Lima with the version the VM template needs', () => {
@@ -38,6 +38,23 @@ describe('host integration', () => {
     expect(lines[0]).toMatch(/^\$ /);
   });
 
+  it('never runs Lima steps, workspaces or a reset when the daemon is inside the guest', async () => {
+    expect(JSON.stringify(IN_GUEST_SETUP_STEPS)).not.toContain('limactl');
+    expect(IN_GUEST_SETUP_STEPS.workspaces).toBeUndefined();
+    const runner = new SetupRunner(IN_GUEST_SETUP_STEPS, undefined, null);
+    await expect(runner.run('workspaces', () => {})).rejects.toThrow(/does not apply to a remote/);
+    await expect(runner.run('vm-start', () => {})).rejects.toThrow(/does not apply to a remote/);
+    await expect(runner.run('reset', () => {})).rejects.toThrow(/delete or recreate its machine/);
+    // A refused step leaves the runner free for the next one.
+    expect(runner.running).toBeUndefined();
+  });
+
+  it('asks a guest-side daemon for Python and sudo, not Lima', () => {
+    const host = hostReadiness('local');
+    expect(host.missing.filter((m) => /lima|qemu|kvm/i.test(m))).toEqual([]);
+    expect(host.installHint).toMatch(/passwordless sudo/);
+  });
+
   it('reads this Anchi version from the release manifest, else the workspace package', () => {
     expect(appVersion()).toMatch(/^\d+\.\d+\.\d+$/);
     const dir = mkdtempSync(join(tmpdir(), 'anchi-version-'));
@@ -61,9 +78,13 @@ describe('host integration', () => {
 
   it('writes a systemd user unit equivalent to the launchd agent', () => {
     const layout = homeLayout('/home/u/my anchi%dir');
-    const unit = systemdUnit(layout, '/usr/bin:/opt/$x');
+    const unit = systemdUnit(layout, '/usr/bin:/opt/$x', undefined);
     expect(unit).toContain(
-      'Environment="ANCHI_HOME=/home/u/my anchi%%dir" "PATH=/usr/bin:/opt/$x"',
+      'Environment="ANCHI_HOME=/home/u/my anchi%%dir" "PATH=/usr/bin:/opt/$x"\n',
+    );
+    // A daemon on a remote server drives the guest it runs in, not a Lima VM.
+    expect(systemdUnit(layout, '/usr/bin', 'local')).toContain(
+      '"PATH=/usr/bin" "ANCHI_GUEST=local"\n',
     );
     expect(unit).toMatch(
       /^ExecStart="[^"]*node[^"]*" "--import" "[^"]*tsx[^"]*" "[^"]*main\.ts"$/m,

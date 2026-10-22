@@ -2,12 +2,23 @@
 
 import json
 from pathlib import Path
+import socket
+import struct
 import subprocess
 import sys
 
 sys.path.insert(0, '/opt/secure-vm/services')
 
 checks = []
+
+
+def gateway():
+    """The guest's default gateway, the host side of its network (192.168.5.2 under Lima)."""
+    for line in Path('/proc/net/route').read_text().splitlines()[1:]:
+        fields = line.split()
+        if fields[1] == '00000000' and int(fields[3], 16) & 2:
+            return socket.inet_ntoa(struct.pack('<L', int(fields[2], 16)))
+    return '192.168.5.2'
 
 
 def check(name, passed):
@@ -72,7 +83,7 @@ import connectors
 for user in ('secure-auth', 'secure-policy', *connectors.SERVICE_USERS):
     probe = '''import socket, json
 results=[]
-for host, port, family, kind in [('1.1.1.1',443,socket.AF_INET,socket.SOCK_STREAM), ('192.168.5.2',443,socket.AF_INET,socket.SOCK_STREAM), ('1.1.1.1',53,socket.AF_INET,socket.SOCK_DGRAM), ('2606:4700:4700::1111',443,socket.AF_INET6,socket.SOCK_STREAM)]:
+for host, port, family, kind in [('1.1.1.1',443,socket.AF_INET,socket.SOCK_STREAM), (GATEWAY,443,socket.AF_INET,socket.SOCK_STREAM), ('1.1.1.1',53,socket.AF_INET,socket.SOCK_DGRAM), ('2606:4700:4700::1111',443,socket.AF_INET6,socket.SOCK_STREAM)]:
  s=socket.socket(family,kind); s.settimeout(2)
  try:
   if kind == socket.SOCK_DGRAM: s.sendto(b'nonsecret-probe',(host,port))
@@ -80,7 +91,7 @@ for host, port, family, kind in [('1.1.1.1',443,socket.AF_INET,socket.SOCK_STREA
   results.append(False)
  except OSError: results.append(True)
  finally: s.close()
-print(json.dumps(results))'''
+print(json.dumps(results))'''.replace('GATEWAY', repr(gateway()))
     for label, passed in zip(('public_tcp', 'private_tcp', 'dns_udp', 'ipv6'), as_user(user, probe)):
         check(user + '_blocks_' + label, passed)
 import network_rules

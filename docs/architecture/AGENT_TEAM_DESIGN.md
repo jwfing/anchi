@@ -18,7 +18,7 @@ Positioning: **a secured agent team.** Anchi runs a team of Codex and Claude Cod
 4. Agents consume no resources when idle. A task starts a fresh cell, and the cell is destroyed when the task ends.
 5. An agent builder generates agent configurations, including the system prompt and cell image, through chat.
 
-Non-goals: remote machines; data isolation (an agent can send what it reads to the hosts it may reach). Privilege borrowing between agents is narrowed, not prevented (see [Known risks](#known-risks)).
+The team runs on this computer with a Lima VM, or on a [remote server](../REMOTE_SERVER.md) whose daemon runs inside the guest. Non-goals: data isolation (an agent can send what it reads to the hosts it may reach). Privilege borrowing between agents is narrowed, not prevented (see [Known risks](#known-risks)).
 
 ## Architecture
 
@@ -122,7 +122,7 @@ The cell holds a placeholder access key pair, and the AWS CLI signs requests wit
 ## Orchestration
 
 - Agents never communicate directly. An agent calls an Anchi tool in its cell (`anchi_delegate_task`, `anchi_send_to_task`, `anchi_task_status`, `anchi_list_tasks`), and the call reaches the daemon, which checks the agent's `delegates` and starts or queues a task for the target agent.
-- Internally, the daemon models tasks after A2A (`Task`, `Message`, `Artifact`). A2A is exposed externally only if remote machines are added later.
+- Internally, the daemon models tasks after A2A (`Task`, `Message`, `Artifact`). A2A is not exposed externally, and agents on different servers cannot reach each other.
 - Delegation depth and per-task budget limits apply. These limits prevent runaway loops and cost; they are not a security control.
 - Triggers: manual tasks, cron schedules and polls of Linear issues or GitHub issue searches. Polls run fixed read-only queries on the trusted side; each task records its origin (`user`, `schedule`, `poll:<item>`, or the delegation chain), which approval dialogs show.
 
@@ -202,7 +202,7 @@ The phase 0 spikes are complete; see the [PoC summary](../../poc/README.md). Pha
 
 **After phase 3:** directories of the host, Linux hosts, key bindings, the agent settings panel and builder inventory, deleting agents, retrying failed tasks. Open requests are in the [backlog](BACKLOG.md).
 
-**Not planned:** remote machines.
+**Not implemented:** one team spanning several servers. Each server keeps its own agents, tasks and vault; delegation stays within one daemon.
 
 ## Known risks
 

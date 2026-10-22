@@ -16,8 +16,11 @@ import { homeLayout } from '@anchi/core';
 import {
   APP_VERSION,
   connectOrStart,
+  connectRemote,
   type DaemonClient,
   installAutostart,
+  parseServer,
+  type ServerTarget,
   tryConnect,
   uninstallAutostart,
   REPO_ROOT,
@@ -61,14 +64,46 @@ function printReport(lines: ReportLine[]) {
 
 const layout = homeLayout();
 const keysFile = join(layout.root, 'keybindings.json');
+/** The server `anchi server <target>` saved; `--server` and ANCHI_SERVER override it. */
+const serverFile = join(layout.root, 'server');
 
 function fail(message: string): never {
   console.error(styleText('red', sanitizeLine(message)));
   process.exit(1);
 }
 
+function savedServer(): string | undefined {
+  try {
+    return readFileSync(serverFile, 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Set before any command runs, from --server, ANCHI_SERVER or the saved choice. */
+let server: ServerTarget = { kind: 'local' };
+
+/** The daemon of the chosen server; a local one is started first if needed. */
+function connect(): Promise<DaemonClient> {
+  return server.kind === 'local' ? connectOrStart(layout) : connectRemote(server);
+}
+
+/** The daemon if it runs; a remote server's must, so its failure is reported. */
+async function connectIfRunning(): Promise<DaemonClient | undefined> {
+  return server.kind === 'local'
+    ? tryConnect(layout)
+    : connect().catch((e: Error) => fail(e.message));
+}
+
+/** Commands that act on this computer's files or login session, not on the server. */
+function localOnly(what: string) {
+  if (server.kind === 'remote') {
+    fail(`${what} acts on this computer, not on ${server.name}; run it on the server itself`);
+  }
+}
+
 async function withClient<T>(fn: (c: DaemonClient) => Promise<T>): Promise<T> {
-  const client = await connectOrStart(layout);
+  const client = await connect().catch((e: Error) => fail(e.message));
   try {
     return await fn(client);
   } catch (err) {
@@ -148,6 +183,41 @@ async function follow(client: DaemonClient, task: TaskRow, verbose: boolean): Pr
 const program = new Command('anchi').description('Anchi (安栖): a secured agent team');
 const appVersion = APP_VERSION;
 program.version(appVersion);
+program
+  .option(
+    '--server <target>',
+    'the server to use: local, instabox:<machine> or ssh:<[user@]host> (default: ANCHI_SERVER, else the saved one, else local)',
+  )
+  .hook('preAction', () => {
+    const chosen = (program.opts() as { server?: string }).server ?? process.env.ANCHI_SERVER;
+    try {
+      server = parseServer(chosen ?? savedServer());
+    } catch (err) {
+      fail((err as Error).message);
+    }
+  });
+
+program
+  .command('server [target]')
+  .description(
+    'Show the server this computer uses, or save one: local, instabox:<machine> or ssh:<[user@]host>',
+  )
+  .action(async (target?: string) => {
+    if (target === undefined) {
+      return console.log(server.kind === 'local' ? 'local' : server.name);
+    }
+    let chosen: ServerTarget;
+    try {
+      chosen = parseServer(target);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+    if (chosen.kind === 'remote')
+      (await connectRemote(chosen).catch((e: Error) => fail(e.message))).close();
+    mkdirSync(layout.root, { recursive: true, mode: 0o700 });
+    writeFileSync(serverFile, `${chosen.kind === 'local' ? 'local' : chosen.name}\n`);
+    console.log(`using ${chosen.kind === 'local' ? 'the daemon on this computer' : chosen.name}`);
+  });
 
 program
   .command('update')
@@ -161,7 +231,7 @@ program
   .command('tui', { isDefault: true })
   .description('Open the full-screen client (starts the daemon if needed)')
   .action(async () => {
-    const client = await connectOrStart(layout).catch((e: Error) => fail(e.message));
+    const client = await connect().catch((e: Error) => fail(e.message));
     await runTui(client, keysFile);
   });
 
@@ -1056,6 +1126,7 @@ setup
   .option('--all', 'also delete the vault key and ~/.anchi (agents, tasks, settings, logs)')
   .option('-y, --yes', 'do not ask for confirmation')
   .action(async (opts: { all?: boolean; yes?: boolean }) => {
+    if (opts.all) localOnly('reset --all');
     let home = '';
     let vaultKey = '';
     await withClient(async (client) => {
@@ -1130,14 +1201,14 @@ daemon
   .command('start')
   .description('Start the daemon in the background if it is not running')
   .action(async () => {
-    (await connectOrStart(layout)).close();
+    (await connect().catch((e: Error) => fail(e.message))).close();
     console.log('daemon running');
   });
 daemon
   .command('stop')
   .description('Stop the daemon; its cells are scanned and closed, running turns end')
   .action(async () => {
-    const client = await tryConnect(layout);
+    const client = await connectIfRunning();
     if (!client) return console.log('daemon not running');
     await client.call('daemon.shutdown');
     client.close();
@@ -1149,7 +1220,7 @@ daemon
     'Whether the daemon runs, with its pid, home, start time, clients and cells, as JSON',
   )
   .action(async () => {
-    const client = await tryConnect(layout);
+    const client = await connectIfRunning();
     if (!client) return console.log('daemon not running');
     console.log(jsonOut(await client.call('daemon.status')));
     client.close();
@@ -1157,11 +1228,17 @@ daemon
 daemon
   .command('install')
   .description('Run the daemon at login (launchd on macOS, a systemd user unit on Linux)')
-  .action(() => console.log(`installed ${installAutostart(layout)}`));
+  .action(() => {
+    localOnly('daemon install');
+    console.log(`installed ${installAutostart(layout)}`);
+  });
 daemon
   .command('uninstall')
   .description('Stop running the daemon at login')
-  .action(() => console.log(uninstallAutostart() ? 'uninstalled' : 'not installed'));
+  .action(() => {
+    localOnly('daemon uninstall');
+    console.log(uninstallAutostart() ? 'uninstalled' : 'not installed');
+  });
 
 // For scripts/gen-skill-cli.py: every command's help, as `--help` prints it, in one run.
 program

@@ -34,8 +34,27 @@ ROLES = {
 # the per-service allowlists: any public destination, never a private, loopback or link-local one.
 EGRESS_USER = 'anchi-egress'
 EGRESS_LISTEN_PORT = 18080
+RESOLV_CONF = Path('/etc/resolv.conf')
 # The lists live with the proxy's own check (`egress_rules.public_address`) so both agree.
 PRIVATE_V4, PRIVATE_V6 = egress_rules.PRIVATE_V4, egress_rules.PRIVATE_V6
+
+
+def nameservers(text):
+    """The resolvers a resolv.conf names, as glibc reads them (127.0.0.1 when none is named).
+    Ubuntu names systemd-resolved's stub; a plain Debian or a cloud VM names public resolvers."""
+    found = []
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) < 2 or fields[0] != 'nameserver':
+            continue
+        try:
+            address = ipaddress.ip_address(fields[1])
+        except ValueError:
+            continue
+        # A scoped link-local address (fe80::1%eth0) has no nftables form.
+        if getattr(address, 'scope_id', None) is None and address not in found:
+            found.append(address)
+    return found or [ipaddress.ip_address('127.0.0.1')]
 
 
 def egress_proxy_rules():
@@ -43,12 +62,20 @@ def egress_proxy_rules():
         uid = pwd.getpwnam(EGRESS_USER).pw_uid
     except KeyError:
         return []
+    try:
+        resolvers = nameservers(RESOLV_CONF.read_text())
+    except OSError:
+        resolvers = nameservers('')
     return [
         # Its own listener, both directions (the cell bridges connect to it in-process), and the
-        # local DNS stub.
+        # resolvers it looks names up with: DNS only, before the private and non-TCP rejects.
         f'  meta skuid {uid} ip daddr 127.0.0.1 tcp dport {EGRESS_LISTEN_PORT} accept',
         f'  meta skuid {uid} ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp sport {EGRESS_LISTEN_PORT} accept',
-        f'  meta skuid {uid} ip daddr 127.0.0.53 meta l4proto {{ tcp, udp }} th dport 53 accept',
+        *(
+            f'  meta skuid {uid} {"ip" if r.version == 4 else "ip6"} daddr {r} '
+            'meta l4proto { tcp, udp } th dport 53 accept'
+            for r in resolvers
+        ),
         f'  meta skuid {uid} ip daddr {{ {PRIVATE_V4} }} counter reject',
         f'  meta skuid {uid} ip6 daddr {{ {PRIVATE_V6} }} counter reject',
         f'  meta skuid {uid} meta l4proto != tcp counter reject',

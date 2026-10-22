@@ -93,7 +93,7 @@ export function vmSizeEnv(size: VmSize, host: VmSize): Record<string, string> {
 }
 
 /** Fixed host commands per setup step, run from the checkout in order. */
-export const SETUP_STEPS: Record<SetupAction, string[][]> = {
+export const SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
   // Mounts ~/AnchiWorkspaces into the VM once; restarts the VM, which locks the vault, so it is
   // unlocked again at the end.
   workspaces: workspaceSteps(),
@@ -104,6 +104,20 @@ export const SETUP_STEPS: Record<SetupAction, string[][]> = {
     ['limactl', 'shell', VM_NAME, '--', 'sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
   ],
   // vault.py reads the master key from ~/.config/anchi and sends it to the VM over stdin.
+  'vault-init': [['python3', 'scripts/vault.py', 'init']],
+  'vault-unlock': [['python3', 'scripts/vault.py', 'unlock']],
+};
+
+/**
+ * The steps of a daemon that runs inside the guest (`ANCHI_GUEST=local`, a remote server): the
+ * scripts install onto this machine, which is always running and has no VM to mount into.
+ */
+export const IN_GUEST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
+  install: [
+    ['bash', 'scripts/up.sh'],
+    ['bash', 'scripts/install-anchi.sh'],
+    ['sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
+  ],
   'vault-init': [['python3', 'scripts/vault.py', 'init']],
   'vault-unlock': [['python3', 'scripts/vault.py', 'unlock']],
 };
@@ -161,9 +175,10 @@ export class SetupRunner {
   running: SetupAction | 'reset' | undefined;
 
   constructor(
-    private steps: Record<SetupAction, string[][]> = SETUP_STEPS,
+    private steps: Partial<Record<SetupAction, string[][]>> = SETUP_STEPS,
     private cwd = REPO_ROOT,
-    private resetSteps: string[][] = RESET_STEPS,
+    /** Null when this guest cannot be reset from here (a remote server). */
+    private resetSteps: string[][] | null = RESET_STEPS,
     /** How long one command may run (tests shorten it). */
     private stepTimeoutMs = STEP_TIMEOUT_MS,
   ) {}
@@ -178,9 +193,17 @@ export class SetupRunner {
     if (action === 'workspaces' && process.platform !== 'darwin' && process.platform !== 'linux') {
       throw new Error('workspaces are available on macOS and Linux hosts only');
     }
+    const steps = action === 'reset' ? this.resetSteps : this.steps[action];
+    if (!steps) {
+      throw new Error(
+        action === 'reset'
+          ? 'this guest is a remote server: delete or recreate its machine instead'
+          : `setup step "${action}" does not apply to a remote server`,
+      );
+    }
     this.running = action;
     try {
-      for (const [cmd, ...args] of action === 'reset' ? this.resetSteps : this.steps[action]) {
+      for (const [cmd, ...args] of steps) {
         onLine(`$ ${[cmd, ...args].join(' ')}`);
         const { code, last, timedOut } = await runLines(
           cmd!,

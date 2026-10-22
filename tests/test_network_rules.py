@@ -171,3 +171,47 @@ class RefreshTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EgressProxyRuleTests(unittest.TestCase):
+    def rules(self, resolv):
+        with tempfile.NamedTemporaryFile('w', suffix='.conf') as conf:
+            conf.write(resolv)
+            conf.flush()
+            with (
+                patch('network_rules.pwd.getpwnam', return_value=type('pw', (), {'pw_uid': 990})),
+                patch('network_rules.RESOLV_CONF', Path(conf.name)),
+            ):
+                return network_rules.egress_proxy_rules()
+
+    def dns_rules(self, rules):
+        return [r for r in rules if 'dport 53' in r]
+
+    def test_systemd_resolved_stub_is_the_only_resolver_on_ubuntu(self):
+        rules = self.rules('nameserver 127.0.0.53\noptions edns0 trust-ad\nsearch .\n')
+        self.assertEqual(
+            self.dns_rules(rules),
+            ['  meta skuid 990 ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept'],
+        )
+
+    def test_public_resolvers_are_reachable_on_port_53_only(self):
+        rules = self.rules('# cloud image\nnameserver 1.1.1.1\nnameserver 2606:4700::1111\nnameserver fe80::1%eth0\n')
+        self.assertEqual(
+            self.dns_rules(rules),
+            [
+                '  meta skuid 990 ip daddr 1.1.1.1 meta l4proto { tcp, udp } th dport 53 accept',
+                '  meta skuid 990 ip6 daddr 2606:4700::1111 meta l4proto { tcp, udp } th dport 53 accept',
+            ],
+        )
+        # The DNS accepts come before the backstop, and the backstop still refuses non-TCP traffic
+        # and every private destination.
+        last_dns = max(i for i, r in enumerate(rules) if 'dport 53' in r)
+        self.assertTrue(rules[last_dns + 1].endswith('counter reject') and 'ip daddr {' in rules[last_dns + 1])
+        self.assertIn('  meta skuid 990 meta l4proto != tcp counter reject', rules[last_dns + 1 :])
+        self.assertEqual(rules[-1], '  meta skuid 990 accept')
+
+    def test_no_resolver_named_means_glibc_loopback_default(self):
+        self.assertEqual(
+            self.dns_rules(self.rules('options rotate\n')),
+            ['  meta skuid 990 ip daddr 127.0.0.1 meta l4proto { tcp, udp } th dport 53 accept'],
+        )

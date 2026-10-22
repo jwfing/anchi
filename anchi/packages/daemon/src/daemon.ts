@@ -53,7 +53,7 @@ import {
   parseBlocks,
   Proposals,
 } from './builder.ts';
-import { Guest, LimaTransport } from './guest.ts';
+import { Guest, type VmTransport, vmTransport } from './guest.ts';
 import {
   APP_VERSION,
   AWS_PROFILE,
@@ -62,8 +62,10 @@ import {
   hostConnectorsFile,
   hostOutput,
   hostResources,
+  IN_GUEST_SETUP_STEPS,
   migrateLegacyVm,
   readHostConnectors,
+  RESET_STEPS,
   SetupRunner,
   SETUP_STEPS,
   VAULT_KEY,
@@ -130,7 +132,7 @@ const AWS_REFRESH_AHEAD_MS = 15 * 60_000;
 export interface DaemonOptions {
   layout: HomeLayout;
   guest?: Guest;
-  lima?: LimaTransport;
+  vm?: VmTransport;
   log?(msg: string): void;
   /** Skip desktop notifications (tests). */
   quiet?: boolean;
@@ -139,7 +141,7 @@ export interface DaemonOptions {
   idleMs?: number;
   turnTimeoutMs?: number;
   /** Host commands of setup steps and of connector imports (tests replace them). */
-  setupSteps?: Record<SetupAction, string[][]>;
+  setupSteps?: Partial<Record<SetupAction, string[][]>>;
   /** Host commands of `setup.reset` (tests replace them; the default deletes the VM). */
   resetSteps?: string[][];
   hostRun?: typeof hostOutput;
@@ -219,7 +221,7 @@ export class Daemon {
   readonly store: Store;
   readonly hub: Hub;
   readonly guest: Guest;
-  readonly lima: LimaTransport;
+  readonly vm: VmTransport;
   readonly proposals: Proposals;
   readonly approvals: ApprovalWatcher;
   private quotaAlerts: QuotaAlerts;
@@ -301,7 +303,7 @@ export class Daemon {
       codex: settings.codexAutoImport !== false,
       claude: settings.claudeAutoImport !== false,
     });
-    const status = await setupStatus(this.guest, this.lima, this.services).catch(() => null);
+    const status = await setupStatus(this.guest, this.vm, this.services).catch(() => null);
     if (
       !status ||
       status.vm !== 'running' ||
@@ -334,7 +336,7 @@ export class Daemon {
   private async readSetupStatus(): Promise<SetupStatus> {
     await this.hostLoginSync;
     return {
-      ...(await setupStatus(this.guest, this.lima, this.services)),
+      ...(await setupStatus(this.guest, this.vm, this.services)),
       hostLogins: this.hostLogins.status,
     };
   }
@@ -475,7 +477,7 @@ export class Daemon {
 
   /** Reads the setup status for its side effects; a VM that is not up is not an error. */
   private async refreshSetup(): Promise<void> {
-    const status = await setupStatus(this.guest, this.lima, this.services).catch(() => undefined);
+    const status = await setupStatus(this.guest, this.vm, this.services).catch(() => undefined);
     if (status) this.noteSetup(status);
   }
 
@@ -496,8 +498,8 @@ export class Daemon {
   constructor(private opts: DaemonOptions) {
     this.hostLogins = opts.hostLogins ?? new HostLogins();
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
-    this.lima = opts.lima ?? new LimaTransport();
-    this.guest = opts.guest ?? new Guest(this.lima);
+    this.vm = opts.vm ?? vmTransport();
+    this.guest = opts.guest ?? new Guest(this.vm);
     this.store = new Store(opts.layout.dbFile);
     this.workspaceRoot = opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces');
     this.skills = new SkillStore(join(opts.layout.root, 'skills'), opts.skillRemote);
@@ -505,8 +507,18 @@ export class Daemon {
       inventory: this.quickInventory(),
       workspaceRoot: this.workspaceRoot,
     }));
-    this.services = new ServiceSetup(this.guest, (r) => this.broadcast('oauth', r), opts.openUrl);
-    this.setup = new SetupRunner(opts.setupSteps ?? SETUP_STEPS, undefined, opts.resetSteps);
+    const inGuest = this.vm.placement === 'local';
+    // Inside a remote server the browser is the client's: it opens the URL the call returns.
+    this.services = new ServiceSetup(
+      this.guest,
+      (r) => this.broadcast('oauth', r),
+      opts.openUrl ?? (inGuest ? () => {} : undefined),
+    );
+    this.setup = new SetupRunner(
+      opts.setupSteps ?? (inGuest ? IN_GUEST_SETUP_STEPS : SETUP_STEPS),
+      undefined,
+      opts.resetSteps ?? (inGuest ? null : RESET_STEPS),
+    );
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
       this.hub.origin(id),
     );
@@ -646,7 +658,7 @@ export class Daemon {
   }
 
   async inventory(): Promise<Inventory> {
-    const status = await setupStatus(this.guest, this.lima, this.services).catch(() => undefined);
+    const status = await setupStatus(this.guest, this.vm, this.services).catch(() => undefined);
     const known = status?.vm === 'running' && status.vaultUnlocked;
     const inventory: Inventory = {
       skills: this.skills.list().map(({ id, name, description }) => ({ id, name, description })),
@@ -988,7 +1000,7 @@ export class Daemon {
       try {
         await prepareEnvironment(
           runtime,
-          () => setupStatus(this.guest, this.lima, this.services),
+          () => setupStatus(this.guest, this.vm, this.services),
           async (action) => {
             await this.setup.run(
               action,
@@ -1062,7 +1074,7 @@ export class Daemon {
       this.log('setup reset started');
       await this.setup.run('reset', (line) => this.broadcast('reset', { line }));
       this.log('setup reset done: the VM is deleted');
-      return setupStatus(this.guest, this.lima);
+      return setupStatus(this.guest, this.vm);
     },
     'connectors.set': async (params) => {
       const secret = connectorSecret(params);
@@ -1210,7 +1222,7 @@ export class Daemon {
       0,
     );
     return {
-      vm: await this.lima.vmStatus(),
+      vm: await this.vm.vmStatus(),
       busy,
       cells: this.hub.cellCount(),
       home: this.opts.layout.root,
@@ -1298,7 +1310,10 @@ export class Daemon {
     if (existsSync(layout.socketFile)) rmSync(layout.socketFile);
 
     // In the background: restarting a running VM takes longer than clients wait for the socket.
-    const migration = this.opts.migrateVm ? migrateLegacyVm((line) => this.log(line)) : undefined;
+    const migration =
+      this.opts.migrateVm && this.vm.placement === 'lima'
+        ? migrateLegacyVm((line) => this.log(line))
+        : undefined;
     // Cells from a previous daemon cannot be reattached: their runner channel was its stdio. With
     // a migration under way the reap waits for it: those cells are in the VM being renamed, which
     // still answers to `secure-vm` until the rename lands.

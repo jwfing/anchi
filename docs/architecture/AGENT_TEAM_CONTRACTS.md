@@ -3,7 +3,7 @@
 These are the interfaces between the parts of the [agent team](AGENT_TEAM_DESIGN.md): the agent configuration, and the three channels that cross a process or trust boundary. The types and zod schemas live in `anchi/packages/protocol` and `anchi/packages/core`; this document explains them.
 
 ```text
-TUI ──(1) client socket──▶ daemon ──(2) limactl shell + sudo, fixed commands──▶ guest root
+TUI ──(1) client socket──▶ daemon ──(2) limactl shell + sudo (or sudo in the guest), fixed commands──▶ guest root
                              ▲                                                     │
                              └────(3) runner stdin/stdout, through (2)──── cell runner (untrusted)
 ```
@@ -58,7 +58,7 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
   - `services.redditClient({clientId, developerUsername})` stores an installed public Reddit app Client ID (1–256 base64url characters) and developer username (3–20 ASCII letters, digits, `_` or `-`). Replacement is refused while connected or revocation is pending. `services.redditLogin({})` uses the fixed callback `http://127.0.0.1:48174/callback`; both methods refuse unknown fields. Completion emits `oauth` with `id: reddit`; `setup.status.redditClient` reports configuration and service status includes `revocationPending`. `services.disconnect({id: reddit})` removes local tokens and attempts remote revocation. There is one account and no account parameter;
   - `services.xClient({clientId})` stores a native public X app Client ID (1–256 base64url characters); replacement is refused while tokens or pending revocation exist. `services.xLogin({})` opens PKCE sign-in using `http://127.0.0.1:48173/callback`; unknown fields are refused. Completion uses the `oauth` notification with `id: x`. `setup.status.xClient` reports configuration and the X service status reports `revocationPending`. `services.disconnect({id: x})` removes local tokens and attempts remote revocation. X has one account and accepts no account parameter;
   - `services.googleLogin` and `services.disconnect` take an optional Google `account`; `services.removeGoogleClient` drops the user's client;
-  - `setup.run` runs one setup step at a time: `vm-start`, `install`, `vault-init` or `vault-unlock`. Each is a fixed host command from the checkout (`limactl start`, `scripts/up.sh` then `scripts/install-anchi.sh` then the base image build, `scripts/vault.py`). The vault key is read by `vault.py`, not by the daemon. `install` takes an optional `vmSize` `{cpus, memoryGiB}`, whole numbers within the host (`BAD_VM_SIZE` otherwise), passed to `scripts/up.sh` as `ANCHI_VM_CPUS` and `ANCHI_VM_MEMORY_GIB`; it sizes a VM the step creates, and an existing VM keeps its size. Output lines arrive as `setup` notifications;
+  - `setup.run` runs one setup step at a time: `vm-start`, `install`, `vault-init` or `vault-unlock`. Each is a fixed host command from the checkout (`limactl start`, `scripts/up.sh` then `scripts/install-anchi.sh` then the base image build, `scripts/vault.py`). The vault key is read by `vault.py`, not by the daemon. A daemon inside the guest has no `vm-start` or `workspaces` step and refuses `setup.reset`; its `install` runs the same scripts on its own machine. `install` takes an optional `vmSize` `{cpus, memoryGiB}`, whole numbers within the host (`BAD_VM_SIZE` otherwise), passed to `scripts/up.sh` as `ANCHI_VM_CPUS` and `ANCHI_VM_MEMORY_GIB`; it sizes a VM the step creates, and an existing VM keeps its size. Output lines arrive as `setup` notifications;
   - `connectors.importGh` imports the token of the host `gh` CLI; `connectors.awsProfile` imports the temporary credentials of a host AWS profile and keeps them refreshed (the profile name is kept in `~/.anchi/data/connectors.json`, no secret);
   - `connectors.set` carries a secret. The daemon writes it to the guest administration command's stdin and never stores or logs it. It then verifies the connector, records the account it reports, and removes a credential the service refuses.
 - **Phase 2:**
@@ -73,7 +73,7 @@ Every string in a runtime event is agent-originated. Clients must strip control 
 
 ## (2) Daemon ⇄ guest administration
 
-The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`. Secrets travel on stdin only, never in arguments. Every command prints one JSON object, or `{"error": CODE}` with a non-zero exit.
+The daemon runs only fixed commands: `limactl shell anchi-vm -- sudo <command>`, or `sudo -n <command>` when it runs inside the guest on a [remote server](../REMOTE_SERVER.md) (`ANCHI_GUEST=local`). The client reaches a remote daemon's socket through `anchi-bridge` over SSH; the protocol is the same. Secrets travel on stdin only, never in arguments. Every command prints one JSON object, or `{"error": CODE}` with a non-zero exit.
 
 | Command | Purpose |
 |---|---|

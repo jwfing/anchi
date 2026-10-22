@@ -107,8 +107,15 @@ function unitPath(): string {
   return join(config, 'systemd', 'user', SYSTEMD_UNIT);
 }
 
-/** A systemd user unit equivalent to the launchd agent: started at login, restarted on failure. */
-export function systemdUnit(layout: HomeLayout, path = process.env.PATH ?? ''): string {
+/**
+ * A systemd user unit equivalent to the launchd agent: started at login, restarted on failure. On a
+ * remote server (`guest` = `local`, scripts/server-install.sh) the daemon drives the guest it runs in.
+ */
+export function systemdUnit(
+  layout: HomeLayout,
+  path = process.env.PATH ?? '',
+  guest = process.env.ANCHI_GUEST,
+): string {
   for (const value of [layout.root, layout.logFile, path, ...daemonCommand()]) {
     if (/[\n\r]/.test(value)) throw new Error('paths with line breaks cannot go into a unit file');
   }
@@ -119,7 +126,7 @@ Description=Anchi daemon
 ExecStart=${daemonCommand()
     .map((a) => unitWord(a).replace(/\$/g, '$$$$'))
     .join(' ')}
-Environment=${unitWord(`ANCHI_HOME=${layout.root}`)} ${unitWord(`PATH=${path}`)}
+Environment=${unitWord(`ANCHI_HOME=${layout.root}`)} ${unitWord(`PATH=${path}`)}${guest === 'local' ? ' "ANCHI_GUEST=local"' : ''}
 Restart=on-failure
 StandardOutput=append:${layout.logFile.replace(/%/g, '%%')}
 StandardError=append:${layout.logFile.replace(/%/g, '%%')}
