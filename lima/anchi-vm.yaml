@@ -1,4 +1,5 @@
-# Dedicated development VM; never inherit Lima's home-directory mounts.
+# Dedicated development VM; never inherit Lima's home-directory mounts. guest/bootstrap.sh installs
+# the guest's packages (the same on any Debian or Ubuntu guest).
 # The driver is passed explicitly by scripts/up.sh (vz on macOS, qemu on Linux);
 # Lima picks the image whose arch matches the host. scripts/up.sh also passes the CPUs and memory
 # (half of the host's unless ANCHI_VM_CPUS / ANCHI_VM_MEMORY_GIB say otherwise); these are the
@@ -26,11 +27,3 @@ portForwards:
     guestPortRange: [1, 65535]
     proto: any
     ignore: true
-provision:
-  - mode: system
-    script: |
-      #!/bin/bash
-      set -euo pipefail
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get -o DPkg::Lock::Timeout=600 update
-      apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends systemd-container debootstrap debian-archive-keyring python3 python3-cryptography nftables

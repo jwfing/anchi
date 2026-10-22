@@ -12,7 +12,7 @@ status and remaining acceptance work are in the [architecture notes](architectur
 | Developer experience | Task history, delegation, retries, audit, skills and TUI settings | File/diff review and richer artifact inspection; see the [backlog](architecture/BACKLOG.md) |
 | Community | Issues, contributing guide, private vulnerability reporting | More reproducible bug reports, onboarding feedback and focused contributions |
 
-Remote execution, Windows and additional host architectures have no committed support plan.
+A [remote server](REMOTE_SERVER.md) (an instabox VM or an SSH host) runs the daemon and cells; agents on different servers do not communicate. Windows and additional host architectures have no committed support plan.
 A completed audit and signed packages are not current guarantees.
 
 Use [feature requests](https://github.com/jwfing/anchi/issues/new/choose) to discuss a concrete

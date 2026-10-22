@@ -1,5 +1,7 @@
 PYTHON ?= python3
 VM ?= anchi-vm
+# Guest root: through Lima, or sudo on a remote server where Anchi runs in the guest (ANCHI_GUEST=local).
+GUEST_ROOT = $(if $(filter local,$(ANCHI_GUEST)),sudo -n,limactl shell $(VM) -- sudo)
 PY_SOURCES = services scripts guest tests
 SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run landing/dist/install.sh
 
@@ -37,4 +39,4 @@ verify-vm:
 	bash scripts/verify.sh
 
 verify-anchi:
-	limactl shell $(VM) -- sudo /usr/bin/python3 /opt/secure-vm/check-anchi.py $(START_BUDGET_MS)
+	$(GUEST_ROOT) /usr/bin/python3 /opt/secure-vm/check-anchi.py $(START_BUDGET_MS)

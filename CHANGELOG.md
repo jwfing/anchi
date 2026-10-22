@@ -4,6 +4,14 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- Remote server: run the daemon, trusted services and cells on an instabox VM or an SSH host while the TUI and CLI stay on this computer. Set it up with `scripts/remote.sh instabox:<machine>`, choose it with `anchi server <target>` (or `--server`, `ANCHI_SERVER`), then `anchi setup install`. Browser sign-ins open locally and relay their callback to the server. See `docs/REMOTE_SERVER.md`.
+
+### Changed
+
+- Guest installation runs on any Debian or Ubuntu machine: `guest/bootstrap.sh` installs its own packages, and the egress proxy's DNS rule follows the resolvers in `/etc/resolv.conf` instead of assuming systemd-resolved. Needs `anchi setup install`.
+
 ### Fixed
 
 - X connector reports HTTP 402 as `PROVIDER_PAYMENT_REQUIRED` with API billing guidance instead of a generic failure, and explains the 10–25 limit on search and mentions. Tools tell agents to identify web-search fallbacks as a different source. Run `anchi setup install`, restart the daemon and use a new task cell after updating.

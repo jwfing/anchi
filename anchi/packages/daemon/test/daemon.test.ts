@@ -359,7 +359,7 @@ async function start(
     layout,
     guest: new Guest(transport),
     // No limactl: the tests never depend on a VM of the machine they run on.
-    lima: new (vmRunning ? RunningLima : LimaTransport)('anchi-vm', join(root, 'no-limactl')),
+    vm: new (vmRunning ? RunningLima : LimaTransport)('anchi-vm', join(root, 'no-limactl')),
     log: (m) => void logs.push(m),
     quiet: true,
     idleMs,

@@ -1,4 +1,6 @@
-"""Keep the master key outside the VM; only send it via SSH stdin to tmpfs."""
+"""Keep the master key out of the guest's services; only send it on stdin to tmpfs. From a Lima host the
+key stays outside the VM; with Anchi inside the guest (ANCHI_GUEST=local) it stays in the login user's
+home, which neither task cells nor trusted services read."""
 
 import argparse
 import base64
@@ -15,16 +17,16 @@ VM = os.environ.get('ANCHI_INSTALL_VM', 'anchi-vm')
 if not re.fullmatch(r'anchi-vm(-[a-z0-9-]+)?', VM):
     raise SystemExit('ANCHI_INSTALL_VM must look like anchi-vm or anchi-vm-<suffix>')
 KEY_FILE = Path.home() / '.config/anchi/vault.key'
+# Anchi running inside the guest itself (a remote server) reaches guest root with sudo, not Lima.
+IN_GUEST = os.environ.get('ANCHI_GUEST', 'lima') == 'local'
 
 
 def remote(action, value=None):
     result = subprocess.run(
         [
-            'limactl',
-            'shell',
-            VM,
-            '--',
+            *([] if IN_GUEST else ['limactl', 'shell', VM, '--']),
             'sudo',
+            '-n',
             '/usr/bin/python3',
             '/opt/secure-vm/services/vault_admin.py',
             action,
@@ -48,7 +50,7 @@ def main():
     parser.add_argument('action', choices=('init', 'unlock', 'lock', 'status'))
     parser.add_argument('--key-file', type=Path, default=KEY_FILE)
     args = parser.parse_args()
-    if VM == 'anchi-vm' and os.environ.get('ANCHI_VM_MIGRATING') != '1':
+    if VM == 'anchi-vm' and not IN_GUEST and os.environ.get('ANCHI_VM_MIGRATING') != '1':
         # Renames a VM created as secure-vm and moves its key here first (scripts/vm-name.sh).
         # A failed migration stops us: the key and the VM may still carry their old names.
         migration = subprocess.run(

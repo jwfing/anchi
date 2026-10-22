@@ -11,8 +11,14 @@ Anchi (安栖): a secured agent team
 
 Options:
   -V, --version                    output the version number
+  --server <target>                the server to use: local, instabox:<machine>
+                                   or ssh:<[user@]host> (default: ANCHI_SERVER,
+                                   else the saved one, else local)
 
 Commands:
+  server [target]                  Show the server this computer uses, or save
+                                   one: local, instabox:<machine> or
+                                   ssh:<[user@]host>
   update [options]                 Update this installation to the latest
                                    release
   tui                              Open the full-screen client (starts the
@@ -47,6 +53,15 @@ Commands:
   agents [options]                 List or manage agents
   setup                            Runtime and connector setup
   daemon                           Manage the background daemon
+```
+
+### `anchi server`
+
+```text
+Usage: anchi server [options] [target]
+
+Show the server this computer uses, or save one: local, instabox:<machine> or
+ssh:<[user@]host>
 ```
 
 ### `anchi update`
