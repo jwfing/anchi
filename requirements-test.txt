@@ -3,4 +3,4 @@ cryptography==50.0.2
 # Lint and formatting for make lint; not used at runtime.
 ruff==0.17.1
 # Egress proxy AWS re-signing tests; the guest proxy venv pins the same version.
-botocore==1.43.111
+botocore==1.43.114
