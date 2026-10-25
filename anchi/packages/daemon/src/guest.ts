@@ -574,6 +574,20 @@ export class Guest {
     ) as { expires_at: number };
   }
 
+  /**
+   * Whether Anchi's services are on the guest at all. False only when they are certainly absent
+   * (a server before its first install); a guest that cannot be asked throws.
+   */
+  async servicesInstalled(): Promise<boolean> {
+    const { code, stderr } = await this.transport.exec([
+      'test',
+      '-f',
+      `${SERVICES}/vault_admin.py`,
+    ]);
+    if (code === 0 || code === 1) return code === 0;
+    throw new GuestError('GUEST_UNAVAILABLE', stderr.trim().slice(-300) || `exit ${code}`);
+  }
+
   async vaultStatus(): Promise<{ unlocked: boolean }> {
     return parse(
       await this.transport.exec(['/usr/bin/python3', `${SERVICES}/vault_admin.py`, 'status']),

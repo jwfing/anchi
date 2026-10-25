@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SetupAction, SetupStatus } from '@anchi/protocol';
-import { prepareEnvironment } from '../src/setup.ts';
+import { Guest, type ExecResult, type VmTransport } from '../src/guest.ts';
+import { prepareEnvironment, setupStatus } from '../src/setup.ts';
 
 const ready = {
   vm: 'running',
@@ -96,6 +97,66 @@ describe('automatic preparation', () => {
         calls.push(runtime);
       },
     );
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('a running server before its first install', () => {
+  /** A running guest where `test -f` answers with `testCode`; every service script is missing. */
+  const server = (testCode: number) => {
+    const transport = {
+      placement: 'local',
+      vmStatus: async () => 'running',
+      vmSize: async () => undefined,
+      exec: async (args: string[]): Promise<ExecResult> =>
+        args[0] === 'test'
+          ? { code: testCode, stdout: '', stderr: testCode === 255 ? 'ssh: lost' : '' }
+          : {
+              code: 2,
+              stdout: '',
+              stderr: `/usr/bin/python3: can't open file '${args[1]}': [Errno 2] No such file or directory`,
+            },
+      spawn: () => {
+        throw new Error('unused');
+      },
+    } as unknown as VmTransport;
+    return { guest: new Guest(transport), transport };
+  };
+
+  it('reports it as not installed, so preparing installs it', async () => {
+    const { guest, transport } = server(1);
+    const status = await setupStatus(guest, transport);
+    expect(status).toMatchObject({ vm: 'running', installed: false });
+    expect(status.error).toBeUndefined();
+
+    const calls: string[] = [];
+    await expect(
+      prepareEnvironment(
+        'codex',
+        async () => status,
+        async (action) => {
+          calls.push(action);
+          throw new Error('stop after the first step');
+        },
+        async () => {},
+      ),
+    ).rejects.toThrow('stop after the first step');
+    expect(calls).toEqual(['install']);
+  });
+
+  it('still reports an error when the guest cannot be asked, and prepares nothing', async () => {
+    const { guest, transport } = server(255);
+    const status = await setupStatus(guest, transport);
+    expect(status.error).toMatch(/can't open file|GUEST_UNAVAILABLE/);
+    const calls: string[] = [];
+    await expect(
+      prepareEnvironment(
+        'codex',
+        async () => status,
+        async (action) => void calls.push(action),
+        async () => {},
+      ),
+    ).rejects.toThrow();
     expect(calls).toEqual([]);
   });
 });
