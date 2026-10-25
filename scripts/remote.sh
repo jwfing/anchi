@@ -41,4 +41,5 @@ echo "Copying this checkout to $target"
 COPYFILE_DISABLE=1 tar czf - --no-xattrs -T "$files" |
   "${ssh[@]}" 'rm -rf ~/anchi.new && mkdir -p ~/anchi.new && tar xzf - -C ~/anchi.new 2>/dev/null'
 "${ssh[@]}" 'bash ~/anchi.new/scripts/server-install.sh'
-echo "Done. Use it: anchi server $target; then anchi setup install and anchi setup vault init."
+echo "Done. In the desktop app, choose Use beside this server (Settings, Server), then Prepare."
+echo "From the CLI: anchi server $target; then anchi setup install and anchi setup vault init."

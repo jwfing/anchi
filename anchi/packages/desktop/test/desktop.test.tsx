@@ -19,8 +19,13 @@ import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
 import { TaskTurn } from '../src/renderer/views/Agent.tsx';
 import { settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
-import { ProbeNote, Runtimes, SecretForm } from '../src/renderer/views/Settings.tsx';
-import { stageFor } from '../src/renderer/views/Welcome.tsx';
+import {
+  codexLoginHelp,
+  ProbeNote,
+  Runtimes,
+  SecretForm,
+} from '../src/renderer/views/Settings.tsx';
+import { onboarded, setOnboarded, stageFor } from '../src/renderer/views/Welcome.tsx';
 
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
 
@@ -498,6 +503,33 @@ describe('getting started', () => {
     for (const method of ['setup.run', 'setup.reset']) {
       expect(() => checkCall(method, {})).toThrow(/does not call/);
     }
+  });
+
+  it('remembers the guide per server, so switching to a new server opens it again', () => {
+    const store = new Map<string, string>();
+    const saved = globalThis.localStorage;
+    globalThis.localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    } as Storage;
+    try {
+      setOnboarded('local');
+      expect(onboarded('local')).toBe(true);
+      expect(onboarded('instabox:anchi-newuser')).toBe(false);
+    } finally {
+      globalThis.localStorage = saved;
+    }
+  });
+
+  it('says where to sign in to Codex when the server has no login', () => {
+    expect(codexLoginHelp('HOST_LOGIN_MISSING', 'instabox:anchi-newuser')).toBe(
+      'anchi-newuser has no Codex login yet. Run instabox ssh anchi-newuser, then codex login --device-auth there, then Set up again.',
+    );
+    expect(codexLoginHelp('HOST_LOGIN_EXPIRED', 'ssh:dev@box')).toContain('Run ssh dev@box,');
+    expect(codexLoginHelp('HOST_LOGIN_MISSING', 'local')).toBe(
+      'This computer has no Codex login yet. Run codex login, then Set up again.',
+    );
+    expect(codexLoginHelp('GUEST_UNAVAILABLE', 'local')).toBeUndefined();
   });
 
   it('maps where the daemon says the user is to the guide stage', () => {

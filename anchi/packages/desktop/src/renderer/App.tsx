@@ -139,27 +139,31 @@ export function App() {
     ]).catch((err) => say(message(err), true));
   }, [server.status, server.name, say]);
 
-  // The guide opens on a window that has not finished it, unless this server needs nothing.
-  const [guided, setGuided] = useState(onboarded());
+  // The guide opens once per server this window has not finished it for, unless the server
+  // needs nothing; switching to a server that still needs preparing opens it again.
+  const prompted = useRef(new Set<string>());
   useEffect(() => {
-    if (guided) return;
+    if (onboarded(server.name) || prompted.current.has(server.name)) return;
     if (server.status !== 'connected') {
-      if (server.status === 'error') setView({ kind: 'welcome' });
+      if (server.status === 'error') {
+        prompted.current.add(server.name);
+        setView({ kind: 'welcome' });
+      }
       return;
     }
+    const name = server.name;
     void Promise.all([
       call('setup.status'),
       call('agents.list'),
       call('tasks.list', { limit: 500 }),
     ])
       .then(([status, agents, tasks]) => {
-        if (welcomeStep(status, agents, tasks) === 'done') {
-          setOnboarded();
-          setGuided(true);
-        } else setView({ kind: 'welcome' });
+        if (welcomeStep(status, agents, tasks) === 'done') return setOnboarded(name);
+        prompted.current.add(name);
+        setView({ kind: 'welcome' });
       })
-      .catch(() => setView({ kind: 'welcome' }));
-  }, [guided, server.status, server.name]);
+      .catch(() => undefined);
+  }, [server.status, server.name]);
 
   const ctx: AppContext = { model, dispatch, server, loadEvents, act, setView };
   const team = model.agents.filter((a) => a.id !== BUILDER);
@@ -275,8 +279,8 @@ export function App() {
           {view.kind === 'settings' && <SettingsView />}
           {view.kind === 'welcome' && (
             <WelcomeView
+              key={server.name}
               onFinish={() => {
-                setGuided(true);
                 setView(team[0] ? { kind: 'agent', agentId: team[0].id } : { kind: 'builder' });
               }}
             />
