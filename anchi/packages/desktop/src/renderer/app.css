@@ -117,6 +117,10 @@ h2 {
 .wrap {
   flex-wrap: wrap;
 }
+/* Fields with a visible label beside a button: line the button up with the inputs. */
+.bottom {
+  align-items: flex-end;
+}
 .grow {
   flex: 1;
 }

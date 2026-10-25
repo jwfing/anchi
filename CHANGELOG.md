@@ -19,6 +19,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Desktop app: in the builder's start-from-empty form, the Preview button lines up with the Agent id and Runtime fields instead of sitting higher.
+
 - X connector reports HTTP 402 as `PROVIDER_PAYMENT_REQUIRED` with API billing guidance instead of a generic failure, and explains the 10–25 limit on search and mentions. Tools tell agents to identify web-search fallbacks as a different source. Run `anchi setup install`, restart the daemon and use a new task cell after updating.
 
 ## 0.3.5 — 2026-10-13
