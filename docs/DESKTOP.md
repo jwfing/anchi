@@ -15,7 +15,7 @@ The script bundles `anchi/packages/desktop` with esbuild and starts Electron. On
 - `ANCHI_SERVER`, else the choice saved by `anchi server <target>`, else `local`.
 - With `local`, it starts the local daemon through `scripts/anchi daemon start` when none is running. Set `ANCHI_CLI` to use another CLI.
 
-The server in use shows as the server button at the bottom of the left rail, with a dot for its connection, and as a tag in each agent's header; the button opens Settings → Server. While the window is not connected, a banner across the top says why. Release packages do not include the app yet. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. In a source run, macOS shows the Anchi icon in the Dock but still names the app Electron in the menu bar; packaging will fix the name.
+The server in use shows as the server button at the bottom of the left rail, with a dot for its connection, and as a tag in each agent's header; the button opens Settings → Server. While the window is not connected, a banner across the top says why. Release packages do not include the app yet. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
 
 ## Getting started
 
