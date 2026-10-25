@@ -8,6 +8,7 @@ import { Markdown } from '../markdown.tsx';
 import { agentTasks } from '../model.ts';
 import { doing, toolSummary, transcript } from '../transcript.ts';
 import { Avatar, Composer, Linked, Splitter, StatusPill, usePanelWidth } from '../ui.tsx';
+import { AgentSettingsView } from './AgentSettings.tsx';
 import { ApprovalCard } from './Approvals.tsx';
 import { TaskPanel } from './TaskPanel.tsx';
 
@@ -22,6 +23,7 @@ export function AgentView({ agentId }: { agentId: string }) {
   // Bumped by "Continue this task" so the panel focuses its reply box.
   const [replyFocus, setReplyFocus] = useState(0);
   const [panelWidth, setPanelWidth] = usePanelWidth();
+  const [tab, setTab] = useState<'conversation' | 'settings'>('conversation');
   const end = useRef<HTMLDivElement>(null);
 
   const recent = tasks
@@ -63,6 +65,20 @@ export function AgentView({ agentId }: { agentId: string }) {
                 .join(' · ')}
             </span>
           </div>
+          <div className="segmented" role="tablist" aria-label="Agent view">
+            {(['conversation', 'settings'] as const).map((t) => (
+              <button
+                type="button"
+                role="tab"
+                key={t}
+                aria-selected={tab === t}
+                aria-pressed={tab === t}
+                onClick={() => setTab(t)}
+              >
+                {t === 'conversation' ? 'Conversation' : 'Settings'}
+              </button>
+            ))}
+          </div>
         </div>
         {agent.error && (
           <div className="banner banner-error">
@@ -70,41 +86,47 @@ export function AgentView({ agentId }: { agentId: string }) {
           </div>
         )}
 
-        <div className="scroll conversation">
-          <div className="center small muted">
-            Each message below starts a new task in a new session. To continue a task, open it and
-            reply beside it.
-          </div>
-          {tasks.map((t) => (
-            <TaskTurn
-              key={t.id}
-              task={t}
-              selected={t.id === selected}
-              onSelect={() => {
-                setSelected(t.id);
-                setReplyFocus(0);
-              }}
-              onContinue={() => {
-                setSelected(t.id);
-                setReplyFocus((n) => n + 1);
+        {tab === 'settings' ? (
+          <AgentSettingsView agentId={agent.id} />
+        ) : (
+          <>
+            <div className="scroll conversation">
+              <div className="center small muted">
+                Each message below starts a new task in a new session. To continue a task, open it
+                and reply beside it.
+              </div>
+              {tasks.map((t) => (
+                <TaskTurn
+                  key={t.id}
+                  task={t}
+                  selected={t.id === selected}
+                  onSelect={() => {
+                    setSelected(t.id);
+                    setReplyFocus(0);
+                  }}
+                  onContinue={() => {
+                    setSelected(t.id);
+                    setReplyFocus((n) => n + 1);
+                  }}
+                />
+              ))}
+              <div ref={end} />
+            </div>
+
+            <Composer
+              label={`New task for @${agent.id}`}
+              placeholder={`Give @${agent.id} a new task…`}
+              hint={`New task, new session · ${agent.running} running · ${agent.queued} queued (up to ${agent.maxTasks} at once)`}
+              disabled={!!agent.error}
+              onSend={async (text) => {
+                const task = await act(() => call('tasks.create', { agentId, text }));
+                if (task) setSelected(task.id);
               }}
             />
-          ))}
-          <div ref={end} />
-        </div>
-
-        <Composer
-          label={`New task for @${agent.id}`}
-          placeholder={`Give @${agent.id} a new task…`}
-          hint={`New task, new session · ${agent.running} running · ${agent.queued} queued (up to ${agent.maxTasks} at once)`}
-          disabled={!!agent.error}
-          onSend={async (text) => {
-            const task = await act(() => call('tasks.create', { agentId, text }));
-            if (task) setSelected(task.id);
-          }}
-        />
+          </>
+        )}
       </main>
-      {selectedTask && (
+      {tab === 'conversation' && selectedTask && (
         <>
           <Splitter width={panelWidth} onResize={setPanelWidth} />
           <TaskPanel

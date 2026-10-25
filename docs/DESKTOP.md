@@ -22,6 +22,7 @@ Release packages do not include the app yet. The app keeps its window state, suc
 | Area | What you can do |
 |---|---|
 | Team | Pick an agent; its tasks read as a conversation. The box under it starts a new task in a new session; nothing carries over from the tasks above. Each card shows the status, the folded tool calls, what the agent is doing, and the result, with delegated tasks as chips. Continue this task, on a card whose turn has ended, opens the task and puts the cursor in its reply box. |
+| Agent settings | The Settings tab beside an agent's conversation edits its name, description, runtime, model, reasoning effort, system prompt (added to or replacing the template's), skills, connectors and workspaces. Review changes shows the change to the agent file, with its errors and warnings; Apply writes it, and is refused if the file changed since the review. Settings only the agent file sets (template, image, sandbox, delegates, triggers, approvals, egress) are shown read-only. |
 | Task panel | The selected task's time, turns and tokens, delegated work, full transcript, a reply that continues its session, and Cancel, Retry or Start over. Drag its left edge, or focus the edge and use the arrow keys, to resize it; a double-click restores the default. The conversation keeps at least 360 pixels. The width is remembered on this computer. |
 | Agent builder | One conversation with the builder, or an empty starter (agent id and runtime) with no model call. A proposal opens in a panel the app draws from the proposed file, with its diff, errors and warnings; Apply writes it, Discard drops it. |
 | Approvals | Held writes appear inside the task's card and in the Approvals view. Each shows the connector, operation, reason, origin chain, the full summary and a countdown, then Deny and Approve. A write left waiting is refused when its time runs out. |
@@ -33,7 +34,6 @@ The app does not:
 - delete agents or tasks;
 - run setup steps or reset;
 - stop the daemon;
-- edit an agent's settings;
 - add skills;
 - import AWS credentials.
 
@@ -44,6 +44,7 @@ Use the TUI or CLI for these.
 - **Main process:** the Electron main process holds the daemon connection, as the CLI does: the local socket, or `anchi-bridge` over SSH for a remote server.
 - **The window:** it is sandboxed, with context isolation, no Node integration, a content security policy that loads nothing from the network, no navigation and no new windows.
 - **Calls from the window:** it reaches the main process through four calls. Daemon methods outside `DESKTOP_METHODS` (`packages/desktop/src/main/bridge.ts`) are refused there, which includes everything that deletes, resets or stops.
+- **Confirmations the window cannot give:** an agent settings change that gives the agent a new connector, a new workspace or write access to one is confirmed in a system dialog from the main process, which compares the change with the agent's current settings. Cancel there, and the change never reaches the daemon.
 - **Agent text:**
   - It is sanitized: control characters, terminal escapes and bidirectional overrides are removed.
   - Its Markdown is drawn as React elements, never as HTML.

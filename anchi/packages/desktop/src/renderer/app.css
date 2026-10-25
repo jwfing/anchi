@@ -1192,3 +1192,44 @@ h2 {
     width: 230px;
   }
 }
+
+.settings-form {
+  flex: 1;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  border-bottom: 1px solid #f1f3f6;
+}
+.prompt-edit {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  background: var(--surface);
+}
+.settings-actions {
+  position: sticky;
+  bottom: -20px;
+  margin: 0 -20px -20px;
+  padding: 12px 20px;
+  background: var(--ground);
+  border-top: 1px solid var(--line);
+}
+.settings-form .segmented {
+  align-self: flex-start;
+}
+.review .diff {
+  max-height: 280px;
+  overflow: auto;
+}

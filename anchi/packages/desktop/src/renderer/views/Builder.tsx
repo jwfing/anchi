@@ -151,6 +151,19 @@ function diffLines(diff: string) {
     }));
 }
 
+/** A unified diff of an agent file, with the file header lines left out. */
+export function Diff({ text }: { text: string }) {
+  return (
+    <div className="diff">
+      {diffLines(text).map((l) => (
+        <div key={l.key} className={`diff-${l.tone}`}>
+          {l.text || ' '}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The proposal as Anchi read it from the builder's files: agent text cannot draw this panel. */
 function ProposalPanel({ proposal: p }: { proposal: BuilderProposal }) {
   const { act, dispatch, setView } = useApp();
@@ -173,23 +186,11 @@ function ProposalPanel({ proposal: p }: { proposal: BuilderProposal }) {
       </div>
       <div className="scroll grow panel-section">
         <span className="section-label">AGENT FILE</span>
-        <div className="diff">
-          {diffLines(p.agentDiff).map((l) => (
-            <div key={l.key} className={`diff-${l.tone}`}>
-              {l.text || ' '}
-            </div>
-          ))}
-        </div>
+        <Diff text={p.agentDiff} />
         {p.imageDiff && (
           <>
             <span className="section-label">IMAGE RECIPE</span>
-            <div className="diff">
-              {diffLines(p.imageDiff).map((l) => (
-                <div key={l.key} className={`diff-${l.tone}`}>
-                  {l.text || ' '}
-                </div>
-              ))}
-            </div>
+            <Diff text={p.imageDiff} />
           </>
         )}
         {p.errors.map((e, i) => (
