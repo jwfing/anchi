@@ -2,10 +2,14 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homeLayout } from '@anchi/core';
 import {
+  addServer,
   chosenServer,
   connectRemote,
   DaemonClient,
-  parseServer,
+  listServers,
+  probeServer,
+  removeServer,
+  resolveServer,
   saveServer,
   serverName,
   type ServerTarget,
@@ -157,10 +161,28 @@ ipcMain.handle('anchi:server', (event) => {
 });
 ipcMain.handle('anchi:setServer', async (event, text: unknown) => {
   fromApp(event);
-  const server = parseServer(typeof text === 'string' ? text : '');
+  const server = resolveServer(layout.root, typeof text === 'string' ? text : '');
   saveServer(layout.root, server);
   await connect(server);
   return state;
+});
+ipcMain.handle('anchi:servers', (event) => {
+  fromApp(event);
+  return listServers(layout.root);
+});
+/** Saves a server and tries it once, without switching to it. */
+ipcMain.handle('anchi:addServer', async (event, name: unknown, target: unknown) => {
+  fromApp(event);
+  const saved = addServer(layout.root, String(name ?? ''), String(target ?? ''));
+  const server = resolveServer(layout.root, saved.target);
+  const probe = server.kind === 'remote' ? await probeServer(server) : { kind: 'ok' as const };
+  return { saved, probe };
+});
+ipcMain.handle('anchi:removeServer', async (event, name: unknown) => {
+  fromApp(event);
+  const gone = removeServer(layout.root, String(name ?? ''));
+  if (state.name === gone.target) await connect({ kind: 'local' });
+  return listServers(layout.root);
 });
 ipcMain.handle('anchi:openExternal', async (event, url: unknown) => {
   fromApp(event);

@@ -12,6 +12,7 @@ import {
 } from '@anchi/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../App.tsx';
+import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { call, message } from '../api.ts';
 
 export function SettingsView() {
@@ -227,60 +228,215 @@ export function Skills({
   );
 }
 
-function ServerCard() {
+type Provider = 'instabox' | 'ssh';
+
+/** Where the daemon, vault and cells run: this computer, or a saved remote server. */
+export function ServerCard() {
   const { server } = useApp();
-  const [text, setText] = useState('');
+  const [servers, setServers] = useState<SavedServer[]>([{ name: 'local', target: 'local' }]);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<{ saved: SavedServer; probe: ProbeResult }>();
   const [error, setError] = useState('');
-  const use = async (target: string) => {
+  const run = async (fn: () => Promise<unknown>) => {
     setError('');
     try {
-      await window.anchi.setServer(target);
-      setText('');
+      await fn();
     } catch (err) {
       setError(message(err));
     }
   };
+  useEffect(() => {
+    void window.anchi.servers().then(setServers);
+  }, [server.name]);
   return (
     <section className="card">
       <h2>Server</h2>
       <p className="small muted">
         The daemon, the vault and the task cells run on the server. Local runs them in a VM on this
-        computer; a remote server (instabox:&lt;machine&gt; or ssh:&lt;host&gt;) keeps working while
-        it sleeps.
+        computer. A remote server keeps working while this computer sleeps: an instabox machine, or
+        any Linux VM you reach over SSH.
       </p>
-      <div className="row gap wrap">
-        <span className={`dot dot-${server.status}`} />
-        <span className="mono">{server.name}</span>
-        <span className="small muted">
-          {server.status}
-          {server.error ? `: ${server.error}` : ''}
-        </span>
-      </div>
-      <div className="row gap wrap">
-        <label className="field grow">
-          <span className="sr-only">Server</span>
-          <input
-            value={text}
-            placeholder="local, instabox:anchi-server or ssh:dev@host"
-            onChange={(e) => setText(e.target.value)}
-          />
-        </label>
+      {servers.map((s) => {
+        const active = s.target === server.name;
+        return (
+          <div key={s.name} className="connector-row">
+            <span className={`dot ${active ? `dot-${server.status}` : 'dot-off'}`} />
+            <span className="strong connector-id">{s.name}</span>
+            <span className="small muted grow ellipsis">
+              {s.target !== s.name ? <span className="mono">{s.target}</span> : null}
+              {active
+                ? ` ${server.status}${server.error ? `: ${sanitizeLine(server.error)}` : ''}`
+                : ''}
+            </span>
+            {!active && (
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => void run(() => window.anchi.setServer(s.name))}
+              >
+                Use
+              </button>
+            )}
+            {s.name !== 'local' && (
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => void run(() => window.anchi.removeServer(s.name).then(setServers))}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {added && (
+        <ProbeNote
+          added={added}
+          onUse={() => run(() => window.anchi.setServer(added.saved.name))}
+        />
+      )}
+      {adding ? (
+        <AddServer
+          onCancel={() => setAdding(false)}
+          onAdded={(result) => {
+            setAdded(result);
+            setAdding(false);
+            void window.anchi.servers().then(setServers);
+          }}
+        />
+      ) : (
         <button
           type="button"
-          className="btn btn-primary"
-          disabled={!text.trim()}
-          onClick={() => void use(text.trim())}
+          className="btn btn-small runtime-action"
+          onClick={() => {
+            setAdded(undefined);
+            setAdding(true);
+          }}
         >
-          Use this server
+          Add a server
         </button>
-        {server.name !== 'local' && (
-          <button type="button" className="btn" onClick={() => void use('local')}>
-            Use this computer
-          </button>
-        )}
-      </div>
+      )}
       {error && <div className="banner banner-error">{error}</div>}
     </section>
+  );
+}
+
+function AddServer({
+  onCancel,
+  onAdded,
+}: {
+  onCancel: () => void;
+  onAdded: (result: { saved: SavedServer; probe: ProbeResult }) => void;
+}) {
+  const [provider, setProvider] = useState<Provider>('instabox');
+  const [name, setName] = useState('');
+  const [where, setWhere] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const target = `${provider}:${where.trim()}`;
+  return (
+    <form
+      className="drawer"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onCancel();
+      }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError('');
+        window.anchi
+          .addServer(name.trim(), target)
+          .then(onAdded, (err) => setError(message(err)))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <div className="segmented" role="group" aria-label="Provider">
+        <button
+          type="button"
+          aria-pressed={provider === 'instabox'}
+          onClick={() => setProvider('instabox')}
+        >
+          instabox (recommended)
+        </button>
+        <button type="button" aria-pressed={provider === 'ssh'} onClick={() => setProvider('ssh')}>
+          Any SSH host
+        </button>
+      </div>
+      <p className="small muted">
+        {provider === 'instabox'
+          ? 'An instabox machine you are signed in to with the instabox CLI.'
+          : 'A Linux VM from any provider that ssh on this computer reaches with a key (no password prompt), as in ~/.ssh/config.'}
+      </p>
+      <div className="grid2">
+        <label className="field">
+          <span className="small strong">Name</span>
+          <input
+            value={name}
+            placeholder="my-server"
+            spellCheck={false}
+            autoFocus
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="small strong">{provider === 'instabox' ? 'Machine' : 'Host'}</span>
+          <input
+            value={where}
+            placeholder={
+              provider === 'instabox' ? 'anchi-server' : 'dev@203.0.113.7 or a Host alias'
+            }
+            spellCheck={false}
+            onChange={(e) => setWhere(e.target.value)}
+          />
+        </label>
+      </div>
+      {error && <div className="banner banner-error">{error}</div>}
+      <div className="row gap">
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={busy || !name.trim() || !where.trim()}
+        >
+          {busy ? 'Saving and trying it…' : 'Save'}
+        </button>
+        <button type="button" className="btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** What trying a newly saved server found, and the next step. */
+export function ProbeNote({
+  added: { saved, probe },
+  onUse,
+}: {
+  added: { saved: SavedServer; probe: ProbeResult };
+  onUse: () => void;
+}) {
+  if (probe.kind === 'ok') {
+    return (
+      <div className="banner row gap">
+        <span className="grow">{saved.name} answers.</span>
+        <button type="button" className="btn btn-small" onClick={onUse}>
+          Use {saved.name}
+        </button>
+      </div>
+    );
+  }
+  if (probe.kind === 'bridge-missing') {
+    return (
+      <div className="banner banner-warn">
+        Saved {saved.name}, but Anchi is not installed there yet. From an Anchi source checkout on
+        this computer, run <code className="mono">{probe.hint}</code>, then choose Use.
+      </div>
+    );
+  }
+  return (
+    <div className="banner banner-warn">
+      Saved {saved.name}, but it did not answer: {sanitizeLine(probe.detail)}
+    </div>
   );
 }
 

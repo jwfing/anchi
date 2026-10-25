@@ -15,6 +15,9 @@ const api: AnchiApi = {
     return () => ipcRenderer.off('anchi:server', handler);
   },
   setServer: (target) => ipcRenderer.invoke('anchi:setServer', target),
+  servers: () => ipcRenderer.invoke('anchi:servers'),
+  addServer: (name, target) => ipcRenderer.invoke('anchi:addServer', name, target),
+  removeServer: (name) => ipcRenderer.invoke('anchi:removeServer', name),
   openExternal: (url) => ipcRenderer.invoke('anchi:openExternal', url),
   addSkillFolder: () => ipcRenderer.invoke('anchi:addSkillFolder'),
 };
