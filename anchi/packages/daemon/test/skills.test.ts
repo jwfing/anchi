@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parsePatch } from '../src/settings.ts';
-import { parseGitHubUrl, type SkillRemote, SkillStore } from '../src/skills.ts';
+import { parseGitHubUrl, type SkillRemote, SkillStore, skillMeta } from '../src/skills.ts';
 
 function skillDir(files: Record<string, string>) {
   const dir = mkdtempSync(join(tmpdir(), 'skill-src-'));
@@ -63,6 +63,28 @@ describe('skills', () => {
     }
     expect(() => store.bundle(['big-one'])).not.toThrow();
     expect(() => store.bundle(['big-one', 'big-two'])).toThrow(/exceed 8 MB/);
+  });
+
+  it('reads quoted, escaped and folded front matter as YAML, and tolerates invalid YAML', () => {
+    const meta = (front: string) => skillMeta(`---\n${front}\n---\nBody`);
+    expect(
+      meta('name: a\ndescription: "Use for \\"automate me\\", or a \\"skill\\""').description,
+    ).toBe('Use for "automate me", or a "skill"');
+    expect(meta("name: a\ndescription: 'it''s quoted'").description).toBe("it's quoted");
+    expect(meta('name: a\ndescription: >-\n  Use when building\n  a custom UI.').description).toBe(
+      'Use when building a custom UI.',
+    );
+    expect(meta('name: a\ndescription: |\n  line one\n  line two').description).toBe(
+      'line one line two',
+    );
+    expect(meta('name: Lint\ndescription: Use when: the code is messy').description).toBe(
+      'Use when: the code is messy',
+    );
+    expect(meta('name: [1, 2]\ndescription: {a: b}')).toEqual({ name: '', description: '' });
+    // An alias is never expanded: the value is read as the line says.
+    expect(meta('x: &a "boom"\ndescription: *a').description).toBe('*a');
+    expect(meta('name: a\ndescription: "red \\e[31mtext\\u202e"').description).toBe('red text');
+    expect(skillMeta('no front matter')).toEqual({ name: '', description: '' });
   });
 
   it('refuses a bundle past the guest file limit', async () => {

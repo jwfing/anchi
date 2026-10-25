@@ -15,6 +15,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import type { SkillAddResult, SkillInfo, SkillUpdate } from '@anchi/protocol';
+import { parse as parseYaml } from 'yaml';
+import { sanitizeLine } from '@anchi/core/sanitize';
 
 /**
  * Skills are `SKILL.md` directories kept in ~/.anchi/skills/<id>. They come from a local
@@ -62,15 +64,28 @@ export function readSkillTree(dir: string): SkillFile[] {
   return files;
 }
 
-/** `name` and `description` from SKILL.md front matter. */
+/**
+ * `name` and `description` from SKILL.md front matter, read as YAML so quoted, escaped and folded
+ * values come out as their authors wrote them. Many skills in the wild are not valid YAML (an
+ * unquoted `: ` in a description), so those fall back to reading each `key: value` line. The file
+ * is untrusted: the front matter is bounded, aliases are refused, and a value that is not a string
+ * reads as empty. YAML escapes can spell control characters, so values are sanitized here.
+ */
 export function skillMeta(skillMd: string): { name: string; description: string } {
-  const front = /^---\n([\s\S]*?)\n---/.exec(skillMd)?.[1] ?? '';
-  const field = (k: string) =>
-    new RegExp(`^${k}:\\s*(.*)$`, 'm')
-      .exec(front)?.[1]
-      ?.replace(/^["']|["']$/g, '')
-      .trim() ?? '';
-  return { name: field('name').slice(0, 100), description: field('description').slice(0, 500) };
+  const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(skillMd.slice(0, 16 * 1024))?.[1] ?? '';
+  let field: (k: string) => string;
+  try {
+    const data: unknown = parseYaml(front, { maxAliasCount: 0 });
+    field = (k) => {
+      const value = (data as Record<string, unknown> | null | undefined)?.[k];
+      return typeof value === 'string' ? value : '';
+    };
+  } catch {
+    field = (k) =>
+      new RegExp(`^${k}:\\s*(.*)$`, 'm').exec(front)?.[1]?.replace(/^["']|["']$/g, '') ?? '';
+  }
+  const text = (k: string) => sanitizeLine(field(k));
+  return { name: text('name').slice(0, 100), description: text('description').slice(0, 500) };
 }
 
 const run = (cmd: string, args: string[], cwd?: string) =>
