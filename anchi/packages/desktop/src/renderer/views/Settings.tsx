@@ -772,7 +772,6 @@ function Services({ status, onChange }: { status: SetupStatus; onChange: () => v
         Services <span className="small muted normal">· act for agents, writes auto or ask</span>
       </h2>
       {status.services.map((s) => {
-        const fixedAsk = s.id === 'x' || s.id === 'reddit';
         return (
           <div key={s.id} className="connector-row">
             <span className={`dot ${s.connected ? 'dot-connected' : 'dot-off'}`} />
@@ -797,7 +796,6 @@ function Services({ status, onChange }: { status: SetupStatus; onChange: () => v
               <button
                 type="button"
                 aria-pressed={s.mode === 'auto'}
-                disabled={fixedAsk}
                 onClick={() =>
                   void act(() => call('services.setMode', { id: s.id, mode: 'auto' })).then(
                     onChange,

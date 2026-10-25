@@ -492,3 +492,70 @@ describe('getting started', () => {
     expect(stageFor('done')).toBe('done');
   });
 });
+
+describe('approval choices', () => {
+  const recorder = () => {
+    const sent: string[] = [];
+    return {
+      sent,
+      read: async (method: string) => {
+        sent.push(method);
+        return method === 'agents.settings'
+          ? { current: { connectors: [], workspaces: [], highRisk: { disable: ['github-merge'] } } }
+          : null;
+      },
+    };
+  };
+
+  it('lets X and Reddit post without asking only after the system dialog with the warning', async () => {
+    for (const id of ['x', 'reddit']) {
+      const { sent, read } = recorder();
+      let detail = '';
+      await expect(
+        guardedCall('services.setMode', { id, mode: 'auto' }, read, async (q) => {
+          detail = q.detail;
+          return false;
+        }),
+      ).rejects.toThrow('cancelled');
+      expect(detail).toContain('publicly under your account');
+      expect(sent, `${id}: refused, nothing sent`).toEqual([]);
+    }
+    const never = async () => {
+      throw new Error('asked');
+    };
+    for (const params of [
+      { id: 'x', mode: 'ask' },
+      { id: 'gmail', mode: 'auto' },
+    ]) {
+      await expect(
+        guardedCall('services.setMode', params, recorder().read, never),
+      ).resolves.toBeNull();
+    }
+  });
+
+  it('asks before an agent may do a new high-risk operation without approval', async () => {
+    const asked: string[] = [];
+    const ask = async (q: { detail: string }) => {
+      asked.push(q.detail);
+      return false;
+    };
+    const update = (disable: string[]) => ({
+      agentId: 'dev',
+      apply: true,
+      base: 'b',
+      patch: { highRisk: { disable } },
+    });
+    await expect(
+      guardedCall(
+        'agents.update',
+        update(['github-merge', 'github-push-main']),
+        recorder().read,
+        ask,
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(asked[0]).toContain('github-push-main');
+    expect(asked[0]).not.toContain('github-merge');
+    await guardedCall('agents.update', update([]), recorder().read, ask);
+    expect(asked).toHaveLength(1);
+  });
+});

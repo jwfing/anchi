@@ -53,6 +53,9 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
 
   if (!settings || !draft) return <div className="scroll settings-form muted">Loading…</div>;
   const { current, fixed, inventory, inherited } = settings;
+  // A daemon older than per-agent high-risk exemptions sends neither field.
+  const highRiskIds = inventory.highRisk ?? [];
+  const exempt = draft.highRisk?.disable ?? [];
   const patch = settingsPatch(current, draft);
   const changed = Object.keys(patch).length > 0;
   const edit = (next: Partial<AgentSettingValues>) => {
@@ -218,6 +221,32 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
         label={from('workspaces')}
         onChange={(workspaces) => edit({ workspaces })}
       />
+
+      {highRiskIds.length > 0 && (
+        <section className="card">
+          <h2>High-risk operations{from('highRisk')}</h2>
+          <p className="small muted">
+            These wait for your approval. Tick one to let this agent's tasks do it without asking.
+          </p>
+          {highRiskIds.map((id) => {
+            const global = fixed.highRiskGlobal?.includes(id);
+            return (
+              <label key={id} className="check-row">
+                <input
+                  type="checkbox"
+                  checked={global || exempt.includes(id)}
+                  disabled={global}
+                  onChange={() => edit({ highRisk: { disable: toggle(exempt, id) } })}
+                />
+                <span className="mono">{id}</span>
+                <span className="small muted">
+                  {global ? 'without asking for every agent (settings.yaml)' : ''}
+                </span>
+              </label>
+            );
+          })}
+        </section>
+      )}
 
       <section className="card">
         <h2>
