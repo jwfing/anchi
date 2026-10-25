@@ -464,6 +464,24 @@ kbd {
 kbd:first-child {
   margin-left: 0;
 }
+.app-shot {
+  margin: 0 0 34px;
+}
+.app-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.app-shot figcaption {
+  margin-top: 12px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.app-shot code {
+  color: var(--lime);
+}
 .demo-caption {
   display: flex;
   justify-content: space-between;
