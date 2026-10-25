@@ -16,7 +16,7 @@ import { TaskPanel } from './TaskPanel.tsx';
 const PRELOAD = 15;
 
 export function AgentView({ agentId }: { agentId: string }) {
-  const { model, loadEvents, act } = useApp();
+  const { model, loadEvents, act, server } = useApp();
   const agent = model.agents.find((a) => a.id === agentId);
   const tasks = agentTasks(model, agentId);
   const [selected, setSelected] = useState<string | undefined>(tasks.at(-1)?.id);
@@ -46,8 +46,13 @@ export function AgentView({ agentId }: { agentId: string }) {
         <div className="main-head">
           <Avatar id={agent.id} size={36} />
           <div className="col grow min0">
-            <span className="title">
-              @{agent.id} <span className="muted normal">· {sanitizeLine(agent.name)}</span>
+            <span className="row min0">
+              <span className="title ellipsis">
+                @{agent.id} <span className="muted normal">· {sanitizeLine(agent.name)}</span>
+              </span>
+              <span className="tag tag-off server-tag" title="The server this agent runs on">
+                on {server.name}
+              </span>
             </span>
             <span className="small muted ellipsis">
               {[

@@ -7,6 +7,7 @@
 //        {"type": ["css", "text"]} · {"key": "Enter"} · {"eval": "js"} (its value is printed)
 //        {"shot": "file.png"} · {"size": [width, height]} · {"reload": true}
 //        {"drag": ["css", dx]} (a mouse drag from the element's centre, dx pixels across)
+//        {"wheel": ["css", dy]} (a mouse wheel turn over the element's centre, dy pixels down)
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -150,6 +151,21 @@ try {
           windowsVirtualKeyCode: step.key === 'Enter' ? 13 : 0,
         });
       }
+    }
+    if (step.wheel) {
+      const [selector, dy] = step.wheel;
+      const at = await evaluate(
+        `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`,
+      );
+      if (!at) throw new Error(`nothing matches ${selector}`);
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: at[0],
+        y: at[1],
+        deltaX: 0,
+        deltaY: dy,
+      });
+      await sleep(300);
     }
     if (step.drag) {
       const [selector, dx] = step.drag;

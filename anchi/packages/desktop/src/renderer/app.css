@@ -32,6 +32,11 @@ body,
   height: 100%;
   margin: 0;
 }
+/* An app shell: only its panes scroll, so a wheel over the rail never moves the window. */
+html,
+body {
+  overflow: hidden;
+}
 body {
   font-family: var(--sans);
   font-size: 14px;
@@ -129,7 +134,10 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Positioned, so absolutely placed children (.sr-only labels) scroll and clip with it instead of
+   stretching the document. */
 .scroll {
+  position: relative;
   overflow: auto;
 }
 .empty {
@@ -226,50 +234,18 @@ h2 {
   display: flex;
   flex-direction: column;
 }
-.topbar {
-  height: 48px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-  font-size: 15px;
-}
-.logo {
-  width: 26px;
-  height: 26px;
-}
-.server {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--subtle);
-  font-size: 13px;
-}
-.topbar-error {
-  font-size: 12px;
-  color: var(--danger);
-  max-width: 420px;
-}
 .flash {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10;
+  max-width: 420px;
   font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  max-width: 560px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
 }
 .flash-error {
   background: #fdecea;
@@ -1310,4 +1286,35 @@ h2 {
 }
 .starter:hover {
   border-color: var(--accent);
+}
+
+.rail-dot {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--rail);
+  box-sizing: content-box;
+}
+.conn-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--subtle);
+}
+.conn-error {
+  background: #fdecea;
+  color: var(--danger);
+}
+
+.server-tag {
+  flex: none;
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-weight: 500;
 }

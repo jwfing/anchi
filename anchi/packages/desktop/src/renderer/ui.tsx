@@ -11,6 +11,7 @@ const PATHS = {
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z',
   chevron: 'M9 6l6 6-6 6',
   check: 'M5 12l5 5L20 7',
+  server: 'M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01',
   x: 'M6 6l12 12M18 6L6 18',
   down: 'M6 9l6 6 6-6',
 } as const;

@@ -168,29 +168,12 @@ export function App() {
   return (
     <Ctx.Provider value={ctx}>
       <div className="app">
-        <header className="topbar">
-          <div className="brand">
-            <img className="logo" src="icon.svg" alt="" />
-            <span>Anchi</span>
+        <ConnectionBanner onOpen={() => setView({ kind: 'settings' })} />
+        {flash && (
+          <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
+            {flash.text}
           </div>
-          <button
-            type="button"
-            className="server"
-            onClick={() => setView({ kind: 'settings' })}
-            aria-label={`Server ${server.name}, ${server.status}. Open settings`}
-          >
-            <span className={`dot dot-${server.status}`} />
-            <span className="mono">{server.name}</span>
-            <span className="muted">{server.status === 'connected' ? '' : server.status}</span>
-          </button>
-          {server.status === 'error' && <span className="topbar-error">{server.error}</span>}
-          <div className="spacer" />
-          {flash && (
-            <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
-              {flash.text}
-            </div>
-          )}
-        </header>
+        )}
 
         <div className="body">
           <nav className="rail" aria-label="Main">
@@ -216,6 +199,16 @@ export function App() {
               onClick={() => setView({ kind: 'usage' })}
             />
             <div className="spacer" />
+            <button
+              type="button"
+              className="rail-button"
+              title={`Server ${server.name} · ${server.status}`}
+              aria-label={`Server ${server.name}, ${server.status}. Open settings`}
+              onClick={() => setView({ kind: 'settings' })}
+            >
+              <Icon name="server" size={20} />
+              <span className={`rail-dot dot-${server.status}`} />
+            </button>
             <RailButton
               label="Settings"
               icon="gear"
@@ -291,6 +284,25 @@ export function App() {
         </div>
       </div>
     </Ctx.Provider>
+  );
+}
+
+/** Says so while the window is not talking to its server; otherwise the rail's dot is enough. */
+function ConnectionBanner({ onOpen }: { onOpen: () => void }) {
+  const { server } = useApp();
+  if (server.status === 'connected') return null;
+  return (
+    <div className={`conn-banner conn-${server.status}`} role="status">
+      <span className={`dot dot-${server.status}`} />
+      <span className="grow">
+        {server.status === 'connecting'
+          ? `Connecting to ${server.name}…`
+          : `Not connected to ${server.name}${server.error ? `: ${server.error}` : ''}`}
+      </span>
+      <button type="button" className="btn btn-small" onClick={onOpen}>
+        Server settings
+      </button>
+    </div>
   );
 }
 
