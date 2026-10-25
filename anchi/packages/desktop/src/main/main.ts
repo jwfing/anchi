@@ -10,8 +10,16 @@ import {
   serverName,
   type ServerTarget,
 } from '@anchi/daemon/client';
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent, session, shell } from 'electron';
-import { checkCall, externalUrl, NOTIFICATIONS } from './bridge.ts';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type IpcMainInvokeEvent,
+  session,
+  shell,
+} from 'electron';
+import { checkCall, type Confirmation, externalUrl, guardedCall, NOTIFICATIONS } from './bridge.ts';
 import type { ServerState } from '../shared.ts';
 
 const layout = homeLayout();
@@ -100,14 +108,34 @@ function fromApp(event: IpcMainInvokeEvent) {
 
 ipcMain.handle('anchi:call', async (event, method: unknown, params: unknown) => {
   fromApp(event);
-  const call = checkCall(method, params);
-  if (!client) throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
-  return (client.call as (m: string, p: object) => Promise<unknown>).call(
-    client,
-    call.method,
-    call.params,
+  const daemon = client;
+  if (!daemon) {
+    checkCall(method, params);
+    throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
+  }
+  return guardedCall(
+    method,
+    params,
+    (m, p) => (daemon.call as (m: string, p: object) => Promise<unknown>).call(daemon, m, p),
+    confirm,
   );
 });
+
+async function confirm(question: Confirmation): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    message: question.message,
+    detail: question.detail,
+    buttons: ['Cancel', question.button],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  const { response } = window
+    ? await dialog.showMessageBox(window, options)
+    : await dialog.showMessageBox(options);
+  return response === 1;
+}
 ipcMain.handle('anchi:server', (event) => {
   fromApp(event);
   return state;

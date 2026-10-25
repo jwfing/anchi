@@ -1,14 +1,22 @@
 import { readFileSync } from 'node:fs';
-import type { AgentSummary, Approval, SetupStatus, StoredEvent, TaskRow } from '@anchi/protocol';
+import type {
+  AgentSettingValues,
+  AgentSummary,
+  Approval,
+  SetupStatus,
+  StoredEvent,
+  TaskRow,
+} from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { checkCall, DESKTOP_METHODS, externalUrl } from '../src/main/bridge.ts';
+import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
 import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
 import { TaskTurn } from '../src/renderer/views/Agent.tsx';
+import { settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
 import { Runtimes, SecretForm } from '../src/renderer/views/Settings.tsx';
 
@@ -298,5 +306,96 @@ describe('settings', () => {
     expect(out.match(/type="password"/g)).toHaveLength(1);
     expect(out.match(/type="text"/g)).toHaveLength(1);
     expect(out).toMatch(/<button type="submit"[^>]*disabled/);
+  });
+});
+
+describe('confirmations', () => {
+  const settings = {
+    current: {
+      connectors: ['github'],
+      workspaces: [{ path: 'notes', mode: 'ro' }],
+    },
+  };
+  const daemon = () => {
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return method === 'agents.settings' ? settings : { applied: true };
+    };
+    return { sent, read };
+  };
+  const update = (patch: object, apply = true) => ({ agentId: 'dev', patch, apply, base: 'b' });
+
+  it('asks before an agent gets a new connector, directory or write access', async () => {
+    for (const patch of [
+      { connectors: ['github', 'gmail'] },
+      { workspaces: [{ path: 'notes', mode: 'rw' }] },
+      {
+        workspaces: [
+          { path: 'notes', mode: 'ro' },
+          { path: 'code', mode: 'ro' },
+        ],
+      },
+    ]) {
+      const { sent, read } = daemon();
+      const asked: string[] = [];
+      await expect(
+        guardedCall('agents.update', update(patch), read, async (q) => {
+          asked.push(q.detail);
+          return false;
+        }),
+      ).rejects.toThrow('cancelled');
+      expect(asked, JSON.stringify(patch)).toHaveLength(1);
+      expect(sent, 'refused: the update never reaches the daemon').toEqual(['agents.settings']);
+    }
+  });
+
+  it('sends the change once confirmed, and does not ask for narrowing or reviews', async () => {
+    const { sent, read } = daemon();
+    await guardedCall('agents.update', update({ connectors: ['gmail'] }), read, async () => true);
+    expect(sent).toEqual(['agents.settings', 'agents.update']);
+    const never = async () => {
+      throw new Error('asked');
+    };
+    for (const params of [
+      update({ model: 'gpt-5' }),
+      update({ connectors: [] }),
+      update({ workspaces: [{ path: 'notes', mode: 'ro' }] }),
+      update({ connectors: ['gmail'] }, false),
+    ]) {
+      await expect(
+        guardedCall('agents.update', params, daemon().read, never),
+      ).resolves.toBeTruthy();
+    }
+  });
+});
+
+describe('agent settings', () => {
+  const current = {
+    name: 'Dev',
+    description: '',
+    runtime: 'codex',
+    model: '',
+    effort: '',
+    prompt: { mode: 'append', text: 'Be brief.' },
+    skills: ['a'],
+    connectors: ['github'],
+    workspaces: [{ path: 'notes', mode: 'ro' }],
+  } as AgentSettingValues;
+
+  it('sends only what changed', () => {
+    expect(settingsPatch(current, current)).toEqual({});
+    expect(
+      settingsPatch(current, {
+        ...current,
+        model: 'gpt-5',
+        prompt: { mode: 'append', text: 'Be thorough.' },
+        workspaces: [{ path: 'notes', mode: 'rw' }],
+      }),
+    ).toEqual({
+      model: 'gpt-5',
+      prompt: { mode: 'append', text: 'Be thorough.' },
+      workspaces: [{ path: 'notes', mode: 'rw' }],
+    });
   });
 });
