@@ -26,7 +26,7 @@ Release packages do not include the app yet. The app keeps its window state, suc
 | Agent builder | One conversation with the builder, or an empty starter (agent id and runtime) with no model call. A proposal opens in a panel the app draws from the proposed file, with its diff, errors and warnings; Apply writes it, Discard drops it. |
 | Approvals | Held writes appear inside the task's card and in the Approvals view. Each shows the connector, operation, reason, origin chain, the full summary and a countdown, then Deny and Approve. A write left waiting is refused when its time runs out. |
 | Usage | Subscription windows per runtime, and token totals by agent, model, runtime or day over 24 hours, 7 or 30 days. |
-| Settings | Server (switch between `local`, `instabox:<machine>` and `ssh:<host>`), environment, runtimes, proxy connectors (token connect and disconnect), service connectors (sign-in, auto or ask writes) and the skill list. |
+| Settings | Server (switch between `local`, `instabox:<machine>` and `ssh:<host>`), environment, runtimes, proxy connectors (token connect and disconnect), service connectors (sign-in, auto or ask writes) and the skill list. Each runtime shows Connected or Not set up with a Set up or Replace button: Codex imports the server machine's `codex login`, Claude Code takes a token or API key, Hermes takes a base URL, model and API key. A connector's token, like a runtime's credentials, is typed in a form that opens under its row; Escape closes it. |
 
 The app does not:
 
