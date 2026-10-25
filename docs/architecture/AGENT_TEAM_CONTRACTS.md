@@ -27,7 +27,7 @@ Agents are YAML files in `~/.anchi/agents/<id>.yaml`. The file name is the id: 1
 | `approvals` | `{}` | Per connector, `ask` holds the agent's writes for the user: in the proxy for the proxy connectors; in the policy service, as the principal `<connector>:<agent>`, for `gmail`, `drive`, `notion`, `slack`, `x`, `reddit`. For `x` and `reddit`, whose service mode defaults to `ask`, `auto` gives the agent its own `auto` rule: its posts go out without approval even while the service asks. For the other services `auto` follows the service's mode |
 | `highRisk` | `{disable: []}` | `{disable: [ids]}`: high-risk operations (ids of `HIGH_RISK` in `services/egress_rules.py`, at most 30) the agent does without approval; an unknown id is an error. Adds to `highRisk.disable` of `~/.anchi/settings.yaml`. `approvals: {<connector>: ask}` still holds them |
 | `triggers` | `[]` | `{schedule: '<cron>', text}` or `{poll: {type: linear-issues, team?, label?, state?} \| {type: github-issues, query}, text, every?}`; `text` may use `{title}`, `{url}`, `{id}` |
-| `skills` | `[]` | Skill ids in `~/.anchi/skills/` |
+| `skills` | `[]` | Skill ids in `~/.anchi/skills/`, at most 200; together at most 8 MB and 2000 files |
 | `egress` | none (open) | Host patterns (`example.com`, `*.example.com`) the cells may reach, besides the runtime's and the connectors' hosts |
 | `workspaces` | `[]` | `{path, mode: ro\|rw, name?}`: directories under `~/AnchiWorkspaces`, bound at `/home/agent/workspaces/<name>` (macOS) |
 
