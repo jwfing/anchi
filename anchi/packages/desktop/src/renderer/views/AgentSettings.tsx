@@ -11,6 +11,7 @@ import type {
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../App.tsx';
 import { call } from '../api.ts';
+import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { Icon } from '../ui.tsx';
 import { Diff } from './Builder.tsx';
 
@@ -207,7 +208,8 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
                 checked={draft.connectors.includes(c.id)}
                 onChange={() => edit({ connectors: toggle(draft.connectors, c.id) })}
               />
-              <span className="strong">{c.id}</span>
+              <ConnectorLogo id={c.id} />
+              <span className="strong">{connectorName(c.id)}</span>
               <span className="small muted">{c.connected === false ? 'not connected' : ''}</span>
             </label>
           ))}

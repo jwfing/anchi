@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
+import { SERVICE_CONNECTORS } from '@anchi/core';
+import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
   AgentSettingValues,
   AgentSummary,
@@ -12,6 +14,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
+import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
@@ -465,6 +468,18 @@ describe('skills', () => {
     expect(sent, 'refused: nothing removed').toEqual(['agents.list']);
     await guardedCall('skills.remove', { id: 'pdf' }, read, async () => true);
     expect(sent.at(-1)).toBe('skills.remove');
+  });
+});
+
+describe('connector logos', () => {
+  it('names and marks every connector, with an initial where there is no mark', () => {
+    for (const id of [...CONNECTOR_IDS, ...SERVICE_CONNECTORS]) {
+      expect(connectorName(id), id).not.toBe(id);
+      expect(renderToStaticMarkup(<ConnectorLogo id={id} />)).toContain('aria-hidden="true"');
+    }
+    expect(renderToStaticMarkup(<ConnectorLogo id="github" />)).toMatch(/^<svg class="logo"/);
+    expect(renderToStaticMarkup(<ConnectorLogo id="aws" />)).toContain('>A</span>');
+    expect(connectorName('someday')).toBe('someday');
   });
 });
 
