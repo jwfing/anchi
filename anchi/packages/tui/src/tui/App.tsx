@@ -29,7 +29,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from 'ink';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { autoPublishWarning, sanitize, sanitizeLine } from '@anchi/core';
 import {
   ACTIONS,
   type ActionId,
@@ -73,17 +73,19 @@ import { completePath, type PathKind } from './pathcomplete.ts';
 import { ApprovalsView, TeamView, WelcomeView } from './UsabilityViews.tsx';
 import {
   agentTaskLines,
-  welcomeStep,
-  nextSetupAction,
-  runtimeReady,
   recoveryFor,
   continued,
   resultLines,
   setupPhase,
   turnActivity,
+} from './usability.ts';
+import {
+  welcomeStep,
+  nextSetupAction,
+  runtimeReady,
   suggestedRuntime,
   FIRST_TASK,
-} from './usability.ts';
+} from '@anchi/core';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
@@ -1289,7 +1291,7 @@ export function App({
           input: '',
           label:
             'The Reddit username of the app developer, without u/. Used to identify API requests. ' +
-            'Posts and comments always require your approval.',
+            'Posts and comments ask for your approval unless you make Reddit writes automatic.',
           submit: async (developerUsername) => {
             await client.call('services.redditClient', {
               clientId: clientId.trim(),
@@ -1313,7 +1315,7 @@ export function App({
       label:
         'Create a Native App with OAuth 2.0 in the X Developer Console. Register callback ' +
         'http://127.0.0.1:48173/callback, then paste its Client ID here (not an API key or client secret). ' +
-        'X bills API usage: set a spending limit there. Anchi reads posts and mentions; publishing always asks. ' +
+        'X bills API usage: set a spending limit there. Anchi reads posts and mentions; publishing asks for approval unless you make X writes automatic. ' +
         'Disconnect X before changing the client. See docs/X_SETUP.md.',
       submit: async (clientId) => {
         await client.call('services.xClient', { clientId: clientId.trim() });
@@ -1840,13 +1842,18 @@ export function App({
       case 'connectors:mode': {
         if (!sid || !status)
           return say('select a service (gmail, drive, notion, slack, x, reddit) first');
-        if (sid === 'x' || sid === 'reddit')
-          return say(
-            `${sid === 'x' ? 'X posts' : 'Reddit posts and comments'} always require approval; reads are automatic`,
-          );
         const mode = status.mode === 'ask' ? 'auto' : 'ask';
+        const setMode = () => client.call('services.setMode', { id: sid, mode });
+        if (mode === 'auto' && (sid === 'x' || sid === 'reddit')) {
+          return setModal({
+            kind: 'confirm',
+            title: `${sid === 'x' ? 'X' : 'Reddit'} posts without approval`,
+            body: autoPublishWarning(sid),
+            action: setMode,
+          });
+        }
         return runAction(
-          () => client.call('services.setMode', { id: sid, mode }),
+          setMode,
           `${sid} writes: ${mode === 'ask' ? 'ask for approval' : 'automatic'}`,
         );
       }
@@ -3021,9 +3028,7 @@ function ConnectorsView({
                     : 'needs an approved Reddit installed app — Enter to configure'
                   : 'not connected';
     add(
-      `${c.connected ? '●' : '○'} ${c.id.padEnd(idWidth)}${status} · writes ${
-        social ? 'always ask' : c.mode === 'ask' ? 'ask' : 'auto'
-      }`,
+      `${c.connected ? '●' : '○'} ${c.id.padEnd(idWidth)}${status} · writes ${c.mode === 'ask' ? 'ask' : 'auto'}`,
       {
         selected: select(i + setup.connectors.length),
         color: c.reauthRequired

@@ -52,13 +52,21 @@ The connector tools are:
 | `x_read` | `id` | One post, its author id and URL |
 | `x_search` | `query`, `limit` (10–25), optional `cursor` | Recent search results; use `next_cursor` for another page |
 | `x_mentions` | `limit` (10–25), optional `cursor` | Mentions of the authenticated account |
-| `x_post` | `text`, optional `reply_to` post id | After approval: published post id and URL |
+| `x_post` | `text`, optional `reply_to` post id | After approval (or at once in `auto`): published post id and URL |
 
 Drafts are ordinary conversation text. Ask for revisions before calling `x_post`. The approval
 view shows the posting account's handle and id, the full text and any reply target id. Approval
-binds to that exact content and account generation. **X publishing always requires approval**,
-including scheduled tasks; `approvals: {x: auto}` and `service-mode x auto` are refused. Reads
-are automatic. Unanswered approvals expire after ten minutes.
+binds to that exact content and account generation. **X publishing asks for approval by
+default**, including in scheduled tasks. Reads are automatic. Unanswered approvals expire after
+ten minutes.
+
+`anchi setup service-mode x auto` makes every agent's posts go out without approval, and
+`approvals: {x: auto}` in an agent file does it for that agent only; `approvals: {x: ask}` keeps
+an agent asking. In `auto`, an agent posts publicly under your account without a person, also in
+tasks a trigger starts and that read untrusted content such as mentions, so instructions in that
+content can make it post. The TUI asks you to confirm before it sets `auto` (**m** on `x` in
+**Connectors**), and the CLI prints this warning. The policy service in the VM learns the new
+rule with `anchi setup install`.
 
 Successful retries with the same request id return the recorded result. An uncertain result
 (for example a timeout or upstream 5xx) is not retried automatically; check X before deciding

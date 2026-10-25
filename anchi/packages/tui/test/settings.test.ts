@@ -1,3 +1,4 @@
+import { HIGH_RISK_IDS } from '@anchi/core';
 import type { AgentSettings } from '@anchi/protocol';
 import { describe, expect, it } from 'vitest';
 import {
@@ -20,6 +21,7 @@ const data: AgentSettings = {
     skills: ['review', 'gone'],
     connectors: ['github'],
     workspaces: [{ path: 'docs', mode: 'ro', name: 'notes' }],
+    highRisk: { disable: [] },
   },
   inherited: ['model'],
   fixed: {
@@ -41,6 +43,7 @@ const data: AgentSettings = {
     ],
     agents: [],
     images: [],
+    highRisk: [...HIGH_RISK_IDS],
   },
 };
 
@@ -50,7 +53,9 @@ const items = (state: ReturnType<typeof initialSettings>) =>
 describe('settings panel', () => {
   it('lists what exists, what is selected and what is missing', () => {
     const rows = settingsRows(data, initialSettings(data));
-    const selectable = items(initialSettings(data)).filter((r) => r.kind !== 'field');
+    const selectable = items(initialSettings(data)).filter(
+      (r) => r.kind !== 'field' && r.kind !== 'highRisk',
+    );
     expect(selectable.map((r) => `${r.mark} ${r.id} ${r.note}`)).toEqual([
       '[x] review Reviews',
       '[x] gone not installed',
@@ -96,6 +101,55 @@ describe('settings panel', () => {
     state = toggleSetting(state, row('aws'));
     expect(settingsPatch(data, state).connectors).toEqual(['github', 'aws', 'slack']);
     expect(settingsPatch(data, state).workspaces).toEqual([{ path: 'web', mode: 'ro' }]);
+  });
+
+  it("offers the high-risk operations of the agent's connectors and sends the exemptions", () => {
+    const own: AgentSettings = {
+      ...data,
+      current: {
+        ...data.current,
+        connectors: ['github', 'x'],
+        highRisk: { disable: ['aws-destroy'] },
+      },
+      fixed: { ...data.fixed, approvals: { x: 'auto' }, highRiskGlobal: ['github-merge'] },
+    };
+    let state = initialSettings(own);
+    const risky = () => settingsRows(own, state).flatMap((r) => (r.kind === 'highRisk' ? [r] : []));
+    expect(risky().map((r) => `${r.mark} ${r.id} ${r.note}`)).toEqual([
+      '[ ] github-merge no approval for every agent (settings.yaml)',
+      '[ ] github-repo-delete ',
+      '[ ] github-repo-settings ',
+      '[ ] github-repo-transfer ',
+      '[ ] github-protection ',
+      '[ ] github-access ',
+      '[ ] github-ref-delete ',
+      '[ ] github-graphql ',
+      '[ ] git-default-branch ',
+      '[ ] git-ref-delete ',
+      '[x] aws-destroy aws is not a connector of the agent',
+    ]);
+    const row = (id: string) => risky().find((r) => r.id === id)!;
+    state = toggleSetting(state, row('git-ref-delete'));
+    state = toggleSetting(state, row('github-merge'));
+    expect(settingsPatch(own, state)).toEqual({
+      highRisk: { disable: ['github-merge', 'git-ref-delete', 'aws-destroy'] },
+    });
+    for (const id of ['git-ref-delete', 'github-merge', 'aws-destroy']) {
+      state = toggleSetting(state, row(id));
+    }
+    expect(settingsPatch(own, state)).toEqual({ highRisk: { disable: [] } });
+    const text = settingsRows(own, state).map((r) => (r.kind === 'header' ? r.text : ''));
+    expect(text).toContain('  X posts     go out without approval (approvals)');
+    // An agent's ask holds the connector's writes, exempt or not.
+    const asks = { ...own, fixed: { ...own.fixed, approvals: { github: 'ask' } } };
+    expect(
+      settingsRows(asks, state).find((r) => r.kind !== 'header' && r.id === 'github-merge'),
+    ).toMatchObject({
+      note: 'waits anyway: approvals github: ask',
+    });
+    expect(settingsRows(asks, state).map((r) => (r.kind === 'header' ? r.text : ''))).toContain(
+      '  X posts     follow the x service mode (ask unless set to auto)',
+    );
   });
 
   it('shows the agent settings, inherited values and the read-only rest', () => {

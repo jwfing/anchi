@@ -1,6 +1,6 @@
 import type { RuntimeEvent, StoredEvent } from '@anchi/protocol';
 import stringWidth from 'string-width';
-import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { sanitize, sanitizeLine } from '@anchi/core';
 import { markdownLines } from './markdown.ts';
 
 export type Tone = 'user' | 'assistant' | 'tool' | 'toolOut' | 'error' | 'warn' | 'dim' | 'system';

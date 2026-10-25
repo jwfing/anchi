@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./sanitize": "./src/sanitize.ts",
+    "./welcome": "./src/welcome.ts",
+    "./publish": "./src/publish.ts"
   },
   "dependencies": {
     "@anchi/protocol": "workspace:*",

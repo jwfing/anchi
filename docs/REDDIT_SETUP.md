@@ -52,20 +52,26 @@ prompt:
 | `reddit_search` | `query`, `limit` (1–25), optional `subreddit` and `cursor` | Matching posts, sorted by relevance |
 | `reddit_read` | `id` | One post (`t3_…`) or comment (`t1_…`) |
 | `reddit_comments` | `post_id` (`t3_…`), `limit` (1–25) | A bounded, flattened comment tree with parent ids |
-| `reddit_submit` | `subreddit`, `title`, `text` | After approval: a text post id and URL |
-| `reddit_comment` | `parent` (`t3_…` or `t1_…`), `text` | After approval: the new comment id |
+| `reddit_submit` | `subreddit`, `title`, `text` | After approval (or at once in `auto`): a text post id and URL |
+| `reddit_comment` | `parent` (`t3_…` or `t1_…`), `text` | After approval (or at once in `auto`): the new comment id |
 
 Use subreddit names without `r/`. Read tools return `items`, `next_cursor`, `truncated`, and
 `untrusted_content`. Comments request depth three and do not expand Reddit's `more` entries;
 omissions are marked. Listing/search cursors are available only when Anchi has not clipped
 the response. Text fields are bounded and each result stays below the bridge's byte limit.
 
-Drafts remain conversation text. **Every Reddit post and comment requires approval**, including
-scheduled tasks and agents without an `approvals` entry. The review shows the verified account,
-destination subreddit and title or parent id, and full text. Approval binds to that exact content
-and connection generation. Open the full approval dialog (**a** in Approvals or **^X a**);
-use **↑/↓**, **PgUp/PgDn**, or **Home/End** to review long text. `approvals: {reddit: auto}` and `service-mode reddit auto` are refused.
-Reads run automatically.
+Drafts remain conversation text. **Reddit posts and comments ask for approval by default**,
+including in scheduled tasks and for agents without an `approvals` entry. The review shows the
+verified account, destination subreddit and title or parent id, and full text. Approval binds to
+that exact content and connection generation. Open the full approval dialog (**a** in Approvals or
+**^X a**); use **↑/↓**, **PgUp/PgDn**, or **Home/End** to review long text. Reads run automatically.
+
+`anchi setup service-mode reddit auto` lets every agent post and comment without approval, and
+`approvals: {reddit: auto}` in an agent file does it for that agent only; `approvals: {reddit: ask}`
+keeps an agent asking. In `auto`, an agent publishes under your account without a person, also in
+tasks a trigger starts and that read untrusted content, so instructions in that content can make
+it post. The TUI asks you to confirm before it sets `auto`, and the CLI prints this warning. The
+policy service in the VM learns the new rule with `anchi setup install`.
 
 ## Limits and recovery
 

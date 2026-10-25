@@ -14,6 +14,7 @@ import { createServer, type Server } from 'node:net';
 import {
   agentFile,
   agentLayerSchema,
+  HIGH_RISK_IDS,
   type HomeLayout,
   idSchema,
   listAgentIds,
@@ -377,13 +378,18 @@ export class Daemon {
     return undefined;
   }
 
+  /** `highRisk.disable` of ~/.anchi/settings.yaml: exempt for every agent. */
+  private globalHighRisk(): string[] {
+    const highRisk = this.settings().highRisk as { disable?: unknown } | undefined;
+    return Array.isArray(highRisk?.disable) ? highRisk.disable.map(String) : [];
+  }
+
   /**
    * Sends the user's settings the egress proxy applies to the egress proxy: high-risk
    * exceptions (`highRisk: {disable: [ids]}`) and the approval timeout.
    */
   async pushEgressSettings(): Promise<void> {
-    const highRisk = this.settings().highRisk as { disable?: unknown } | undefined;
-    const disabled = Array.isArray(highRisk?.disable) ? highRisk.disable.map(String) : [];
+    const disabled = this.globalHighRisk();
     const timeout = this.approvalTimeoutS();
     try {
       const r = await this.guest.transport.exec(
@@ -691,6 +697,7 @@ export class Daemon {
         .map((a) => a.id)
         .filter((id) => id !== BUILDER_ID),
       images: listImageIds(this.opts.layout),
+      highRisk: [...HIGH_RISK_IDS],
     };
     if (!status) {
       const quick = this.quickInventory();
@@ -736,6 +743,17 @@ export class Daemon {
   }
 
   private async agentSettings(
+    params: { agentId: string } | { proposalId: string },
+  ): Promise<AgentSettings> {
+    const view = await this.fileSettings(params);
+    // The proxy refuses settings.yaml with an unknown id, so only known ones are shown.
+    const global = this.globalHighRisk().filter((h) => HIGH_RISK_IDS.some((id) => id === h));
+    if (global.length) view.fixed.highRiskGlobal = global;
+    return view;
+  }
+
+  /** An agent's settings from its files (or a proposal's), without ~/.anchi/settings.yaml. */
+  private async fileSettings(
     params: { agentId: string } | { proposalId: string },
   ): Promise<AgentSettings> {
     const inventory = await this.inventory();

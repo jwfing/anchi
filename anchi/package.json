@@ -8,13 +8,14 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/desktop/tsconfig.json",
     "test": "vitest run",
     "deps": "node scripts/check-deps.mjs",
     "format": "prettier --write packages scripts",
     "format:check": "prettier --check packages scripts",
     "check": "pnpm run deps && pnpm run typecheck && pnpm run format:check && pnpm run test",
-    "anchi": "tsx packages/tui/src/main.ts"
+    "anchi": "tsx packages/tui/src/main.ts",
+    "desktop": "pnpm --dir packages/desktop start"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

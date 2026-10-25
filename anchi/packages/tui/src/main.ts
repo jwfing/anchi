@@ -14,12 +14,19 @@ import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
 import {
+  addServer,
   APP_VERSION,
   connectOrStart,
+  chosenServer,
   connectRemote,
   type DaemonClient,
   installAutostart,
-  parseServer,
+  listServers,
+  probeServer,
+  removeServer,
+  resolveServer,
+  saveServer,
+  serverName,
   type ServerTarget,
   tryConnect,
   uninstallAutostart,
@@ -30,9 +37,9 @@ import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
 import type { RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
-import { sanitizeJson, sanitizeLine, sanitizeLines } from './sanitize.ts';
+import { sanitizeJson, sanitizeLine, sanitizeLines } from '@anchi/core';
 import { selfUpdate } from './update.ts';
-import { suggestedRuntime, runtimeReady } from './tui/usability.ts';
+import { autoPublishWarning, suggestedRuntime, runtimeReady } from '@anchi/core';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
@@ -64,20 +71,10 @@ function printReport(lines: ReportLine[]) {
 
 const layout = homeLayout();
 const keysFile = join(layout.root, 'keybindings.json');
-/** The server `anchi server <target>` saved; `--server` and ANCHI_SERVER override it. */
-const serverFile = join(layout.root, 'server');
 
 function fail(message: string): never {
   console.error(styleText('red', sanitizeLine(message)));
   process.exit(1);
-}
-
-function savedServer(): string | undefined {
-  try {
-    return readFileSync(serverFile, 'utf8').trim() || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Set before any command runs, from --server, ANCHI_SERVER or the saved choice. */
@@ -186,37 +183,76 @@ program.version(appVersion);
 program
   .option(
     '--server <target>',
-    'the server to use: local, instabox:<machine> or ssh:<[user@]host> (default: ANCHI_SERVER, else the saved one, else local)',
+    'the server to use: local, a name from anchi server ls, instabox:<machine> or ssh:<[user@]host> (default: ANCHI_SERVER, else the saved one, else local)',
   )
   .hook('preAction', () => {
-    const chosen = (program.opts() as { server?: string }).server ?? process.env.ANCHI_SERVER;
     try {
-      server = parseServer(chosen ?? savedServer());
+      server = chosenServer(layout.root, (program.opts() as { server?: string }).server);
     } catch (err) {
       fail((err as Error).message);
     }
   });
 
-program
-  .command('server [target]')
+/** The saved servers, `*` before the one in use; a target in use that is not saved comes last. */
+function printServers() {
+  const using = serverName(server);
+  const servers = listServers(layout.root);
+  if (!servers.some((s) => s.target === using)) servers.push({ name: using, target: using });
+  const width = Math.max(...servers.map((s) => s.name.length));
+  for (const s of servers) {
+    const where = s.target === 'local' ? 'this computer' : s.name === s.target ? '' : s.target;
+    console.log(`${s.target === using ? '*' : ' '} ${s.name.padEnd(width)}  ${where}`.trimEnd());
+  }
+}
+
+/** The result of `fn`, or its error as the failure of the command. */
+function orFail<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    fail((err as Error).message);
+  }
+}
+
+const serverCmd = program
+  .command('server [server]')
   .description(
-    'Show the server this computer uses, or save one: local, instabox:<machine> or ssh:<[user@]host>',
+    'List the saved servers, * before the one in use, or use one: local, a saved name, instabox:<machine> or ssh:<[user@]host>',
   )
-  .action(async (target?: string) => {
-    if (target === undefined) {
-      return console.log(server.kind === 'local' ? 'local' : server.name);
+  .action(async (choice?: string) => {
+    if (choice === undefined) return printServers();
+    const chosen = orFail(() => resolveServer(layout.root, choice));
+    if (chosen.kind === 'remote') {
+      const probe = await probeServer(chosen);
+      if (probe.kind === 'bridge-missing') {
+        fail(`${probe.detail}; install Anchi there from a checkout: ${probe.hint}`);
+      }
+      if (probe.kind !== 'ok') fail(probe.detail);
     }
-    let chosen: ServerTarget;
-    try {
-      chosen = parseServer(target);
-    } catch (err) {
-      fail((err as Error).message);
-    }
-    if (chosen.kind === 'remote')
-      (await connectRemote(chosen).catch((e: Error) => fail(e.message))).close();
-    mkdirSync(layout.root, { recursive: true, mode: 0o700 });
-    writeFileSync(serverFile, `${chosen.kind === 'local' ? 'local' : chosen.name}\n`);
+    saveServer(layout.root, chosen);
     console.log(`using ${chosen.kind === 'local' ? 'the daemon on this computer' : chosen.name}`);
+  });
+serverCmd
+  .command('ls')
+  .description('List the saved servers, * before the one in use')
+  .action(printServers);
+serverCmd
+  .command('add <name> <target>')
+  .description(
+    'Save a remote server under a short name: instabox:<machine> or ssh:<[user@]host>, any Debian or Ubuntu host SSH reaches with a key',
+  )
+  .action((name: string, target: string) => {
+    const added = orFail(() => addServer(layout.root, name, target));
+    console.log(`saved ${added.name} (${added.target}); use it with: anchi server ${added.name}`);
+  });
+serverCmd
+  .command('rm <name>')
+  .description('Forget a saved server; local is used from then on if it was in use')
+  .action((name: string) => {
+    const removed = orFail(() => removeServer(layout.root, name));
+    const local =
+      removed.target === serverName(server) ? '; using the daemon on this computer' : '';
+    console.log(`removed ${removed.name} (${removed.target})${local}`);
   });
 
 program
@@ -1178,13 +1214,16 @@ setup
 
 setup
   .command('service-mode <id> <mode>')
-  .description('Writes of a service: auto, or ask (X always requires approval)')
+  .description('Writes of a service: auto, or ask (X and Reddit ask until set to auto)')
   .action((id: string, mode: string) =>
     withClient(async (client) => {
       if (!isService(id) || (mode !== 'auto' && mode !== 'ask'))
-        fail('usage: service-mode <gmail|drive|notion|slack|x> <auto|ask> (X only allows ask)');
+        fail('usage: service-mode <gmail|drive|notion|slack|x|reddit> <auto|ask>');
       await client.call('services.setMode', { id, mode });
       console.log(`${id} writes: ${mode}`);
+      if (mode === 'auto' && (id === 'x' || id === 'reddit')) {
+        console.log(styleText('yellow', `Warning: ${autoPublishWarning(id)}`));
+      }
     }),
   );
 

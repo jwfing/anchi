@@ -85,13 +85,54 @@ class StartCommandTests(unittest.TestCase):
         ):
             anchi_cell.main(args)
             anchi_cell.main([*args, 'github-merge'])
+            anchi_cell.main([*args, '-', 'x'])
             with self.assertRaises(anchi_cell.Failure):
-                anchi_cell.main([*args, 'github-merge', 'extra'])
-        self.assertEqual([len(a) for a in seen], [11, 12])
+                anchi_cell.main([*args, 'github-merge', 'x', 'extra'])
+        self.assertEqual([len(a) for a in seen], [11, 12, 13])
         self.assertEqual(seen[1][-1], 'github-merge')
+        self.assertEqual(seen[2][-1], 'x')
         with self.assertRaises(anchi_cell.Failure) as refused:
             anchi_cell.cell_start('t-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', '-', 'a b')
         self.assertEqual(str(refused.exception), 'BAD_HIGH_RISK')
+
+    def test_auto_names_only_x_or_reddit_of_the_agent_that_do_not_ask(self):
+        for connectors, ask, auto in (
+            ('notion', '-', 'notion'),
+            ('github,x', '-', 'github'),
+            ('reddit', '-', 'x'),
+            ('x', 'x', 'x'),
+            ('x,reddit', '-', 'x,x'),
+            ('x', '-', 'X'),
+        ):
+            with self.subTest(auto=auto), self.assertRaises(anchi_cell.Failure) as refused:
+                anchi_cell.cell_start(
+                    't-1', 'dev', 'codex', 'base', connectors, 'cell', 'codex', ask, '-', '-', '-', '-', auto
+                )
+            self.assertEqual(str(refused.exception), 'BAD_APPROVALS')
+
+    def test_policy_rules_follow_the_agent_approvals(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        rules = {'x': 'ask', 'reddit': 'ask', 'notion': 'auto', 'x:dev': 'ask', 'notion:dev': 'ask'}
+        calls = []
+
+        def run(*argv, **_):
+            calls.append(argv[2:])
+            return SimpleNamespace(stdout=json.dumps({'rules': rules}))
+
+        with patch.object(anchi_cell, 'run', run):
+            anchi_cell.sync_policy_modes('dev', ['x', 'reddit', 'notion'], [], ['x', 'reddit'])
+        self.assertEqual(
+            calls, [('rules',), ('mode', 'x:dev', 'auto'), ('mode', 'reddit:dev', 'auto'), ('clear', 'notion:dev')]
+        )
+        calls.clear()
+        rules.update({'x:dev': 'auto'})
+        with patch.object(anchi_cell, 'run', run):
+            anchi_cell.sync_policy_modes('dev', ['x'], [], ['x'])
+            anchi_cell.sync_policy_modes('dev', ['x'], ['x'])
+            anchi_cell.sync_policy_modes('dev', ['x'], [])
+        self.assertEqual(calls, [('rules',), ('rules',), ('mode', 'x:dev', 'ask'), ('rules',), ('clear', 'x:dev')])
 
 
 class BaseImageTests(unittest.TestCase):

@@ -11,14 +11,15 @@ Anchi (安栖): a secured agent team
 
 Options:
   -V, --version                    output the version number
-  --server <target>                the server to use: local, instabox:<machine>
-                                   or ssh:<[user@]host> (default: ANCHI_SERVER,
+  --server <target>                the server to use: local, a name from anchi
+                                   server ls, instabox:<machine> or
+                                   ssh:<[user@]host> (default: ANCHI_SERVER,
                                    else the saved one, else local)
 
 Commands:
-  server [target]                  Show the server this computer uses, or save
-                                   one: local, instabox:<machine> or
-                                   ssh:<[user@]host>
+  server [server]                  List the saved servers, * before the one in
+                                   use, or use one: local, a saved name,
+                                   instabox:<machine> or ssh:<[user@]host>
   update [options]                 Update this installation to the latest
                                    release
   tui                              Open the full-screen client (starts the
@@ -58,10 +59,43 @@ Commands:
 ### `anchi server`
 
 ```text
-Usage: anchi server [options] [target]
+Usage: anchi server [options] [command] [server]
 
-Show the server this computer uses, or save one: local, instabox:<machine> or
-ssh:<[user@]host>
+List the saved servers, * before the one in use, or use one: local, a saved
+name, instabox:<machine> or ssh:<[user@]host>
+
+Commands:
+  ls                   List the saved servers, * before the one in use
+  add <name> <target>  Save a remote server under a short name:
+                       instabox:<machine> or ssh:<[user@]host>, any Debian or
+                       Ubuntu host SSH reaches with a key
+  rm <name>            Forget a saved server; local is used from then on if it
+                       was in use
+```
+
+#### `anchi server ls`
+
+```text
+Usage: anchi server ls [options]
+
+List the saved servers, * before the one in use
+```
+
+#### `anchi server add`
+
+```text
+Usage: anchi server add [options] <name> <target>
+
+Save a remote server under a short name: instabox:<machine> or
+ssh:<[user@]host>, any Debian or Ubuntu host SSH reaches with a key
+```
+
+#### `anchi server rm`
+
+```text
+Usage: anchi server rm [options] <name>
+
+Forget a saved server; local is used from then on if it was in use
 ```
 
 ### `anchi update`
@@ -372,7 +406,7 @@ Commands:
   x-client <client-id>                            Store an X native app Client ID; register http://127.0.0.1:48173/callback in X
   google-client [options] [path]                  Store your own Google Cloud Desktop app OAuth client JSON (Gmail and Drive); it overrides the built-in client
   reset [options]                                 Back to a first launch: delete the VM with everything in it (--all: also the vault key and the Anchi home)
-  service-mode <id> <mode>                        Writes of a service: auto, or ask (X always requires approval)
+  service-mode <id> <mode>                        Writes of a service: auto, or ask (X and Reddit ask until set to auto)
 ```
 
 #### `anchi setup prepare`
@@ -561,7 +595,7 @@ Options:
 ```text
 Usage: anchi setup service-mode [options] <id> <mode>
 
-Writes of a service: auto, or ask (X always requires approval)
+Writes of a service: auto, or ask (X and Reddit ask until set to auto)
 ```
 
 ### `anchi daemon`

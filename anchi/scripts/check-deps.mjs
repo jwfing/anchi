@@ -1,4 +1,4 @@
-// Trust-zone dependency check. Host packages (core, daemon, tui) must never load a runtime
+// Trust-zone dependency check. Host packages (core, daemon, tui, desktop) must never load a runtime
 // SDK or the cell runner; the cell runner must never load a host package. Checks both the
 // package manifests and every import in the sources.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -11,6 +11,7 @@ const FORBIDDEN = {
   core: [/^@anchi\/(cell-runner|daemon|tui)$/, ...RUNTIME],
   daemon: [/^@anchi\/(cell-runner|tui)$/, ...RUNTIME],
   tui: [/^@anchi\/cell-runner$/, ...RUNTIME],
+  desktop: [/^@anchi\/(cell-runner|tui)$/, ...RUNTIME],
   'cell-runner': [/^@anchi\/(core|daemon|tui)$/],
 };
 

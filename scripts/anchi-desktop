@@ -1,0 +1,9 @@
+#!/bin/bash
+# Opens the Anchi desktop app from this checkout, after bundling it (`pnpm --dir anchi install` once).
+# It uses the server `anchi server` chose; this checkout's CLI starts a local daemon when needed.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+desktop=$root/anchi/packages/desktop
+node "$desktop/scripts/build.mjs"
+export ANCHI_CLI=${ANCHI_CLI:-$root/scripts/anchi}
+exec "$desktop/node_modules/.bin/electron" "$desktop/dist/main.cjs" "$@"
