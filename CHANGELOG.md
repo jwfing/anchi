@@ -21,6 +21,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Desktop app: an agent's header counts in the singular for one (`1 skill`, `1 trigger`, `up to 1 task`), and in an agent's Settings tab a long skill name stays on one line, cutting its description instead.
+
 - Skill descriptions are read from SKILL.md front matter as YAML, so escaped quotes no longer show as `\"` and folded descriptions (`description: >-`) show their text instead of `>-`, in the Skills lists and the builder's inventory. Front matter that is not valid YAML is still read line by line.
 
 - Desktop app: the guide's first stage says when the server in use cannot be reached instead of waiting for it, and preparing a remote server no longer says it installs a VM. `scripts/remote.sh` ends with what to do in the desktop app as well as the CLI.

@@ -3,7 +3,7 @@ import type { TaskRow } from '@anchi/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../App.tsx';
 import { call } from '../api.ts';
-import { duration, tokens } from '../format.ts';
+import { count, duration, tokens } from '../format.ts';
 import { Markdown } from '../markdown.tsx';
 import { agentTasks } from '../model.ts';
 import { doing, toolSummary, transcript } from '../transcript.ts';
@@ -59,12 +59,12 @@ export function AgentView({ agentId }: { agentId: string }) {
                 agent.runtime,
                 agent.model,
                 agent.connectors.length ? agent.connectors.join(', ') : 'no connectors',
-                agent.skills?.length ? `${agent.skills.length} skills` : '',
+                agent.skills?.length ? count(agent.skills.length, 'skill') : '',
                 agent.delegates?.length
                   ? `delegates to ${agent.delegates.map((d) => '@' + d).join(', ')}`
                   : '',
-                agent.triggers ? `${agent.triggers} triggers` : '',
-                `up to ${agent.maxTasks} tasks`,
+                agent.triggers ? count(agent.triggers, 'trigger') : '',
+                `up to ${count(agent.maxTasks, 'task')}`,
               ]
                 .filter(Boolean)
                 .join(' · ')}

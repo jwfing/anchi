@@ -1,3 +1,8 @@
+/** 1 → "1 skill", 3 → "3 skills". */
+export function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
 /** 1234 → "1.2k", 1_920_000 → "1.92M". */
 export function tokens(n: number): string {
   if (n < 1000) return String(n);
