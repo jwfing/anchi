@@ -11,3 +11,8 @@ node_modules/
 .pytest_cache/
 coverage/
 *.log
+
+# Local agent credentials
+.insta/agent-session.json
+
+.insta/.agent-session-*.tmp
