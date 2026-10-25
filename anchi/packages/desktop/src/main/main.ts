@@ -15,6 +15,14 @@ import { checkCall, externalUrl, NOTIFICATIONS } from './bridge.ts';
 import type { ServerState } from '../shared.ts';
 
 const layout = homeLayout();
+
+// Run as `electron dist/main.cjs`, the app would be called Electron and share that generic
+// profile; ~/…/Anchi belongs to the retired 0.1 app. A --user-data-dir (checks) wins.
+app.setName('Anchi');
+if (!app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', join(app.getPath('appData'), 'Anchi Desktop'));
+}
+const icon = join(__dirname, 'icon.png');
 let window: BrowserWindow | undefined;
 let client: DaemonClient | undefined;
 let state: ServerState = { name: 'local', status: 'connecting' };
@@ -124,6 +132,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     title: 'Anchi',
+    icon,
     backgroundColor: '#F4F5F7',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -143,6 +152,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
+  app.dock?.setIcon(icon);
   createWindow();
   let server: ServerTarget;
   try {

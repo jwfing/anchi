@@ -1,6 +1,6 @@
 // Bundles the desktop app into dist/: the Electron main process and preload as CommonJS, the
 // renderer as one browser script with its page and stylesheet. Fetches Electron's binary when
-// the install skipped it.
+// the install skipped it. The icon comes from assets/: the landing page's mark, padded for docks.
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -52,3 +52,5 @@ await build({
 for (const file of ['index.html', 'app.css']) {
   copyFileSync(join(root, 'src/renderer', file), join(dist, 'renderer', file));
 }
+copyFileSync(join(root, 'assets/icon.svg'), join(dist, 'renderer/icon.svg'));
+copyFileSync(join(root, 'assets/icon.png'), join(dist, 'icon.png'));

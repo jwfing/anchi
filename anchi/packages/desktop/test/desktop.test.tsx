@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { AgentSummary, Approval, StoredEvent, TaskRow } from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -247,5 +248,12 @@ describe('agent conversation', () => {
     expect(clampWidth(100, 560, 600)).toBe(PANEL_WIDTH.min);
     expect(clampWidth(900, 560, 200)).toBe(400);
     expect(clampWidth(900, 400, 100)).toBe(PANEL_WIDTH.min);
+  });
+});
+
+describe('app identity', () => {
+  it('uses the landing page mark as its icon', () => {
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+    expect(read('../assets/icon.svg')).toBe(read('../../../../landing/dist/favicon.svg'));
   });
 });

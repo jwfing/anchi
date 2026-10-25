@@ -145,7 +145,7 @@ export function App() {
       <div className="app">
         <header className="topbar">
           <div className="brand">
-            <span className="logo">安</span>
+            <img className="logo" src="icon.svg" alt="" />
             <span>Anchi</span>
           </div>
           <button
