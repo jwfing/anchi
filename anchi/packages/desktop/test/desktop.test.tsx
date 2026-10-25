@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 import type {
   AgentSettingValues,
   AgentSummary,
@@ -262,6 +263,22 @@ describe('agent conversation', () => {
 });
 
 describe('app identity', () => {
+  it('gives the dock an icon that is transparent around the tile', () => {
+    const png = readFileSync(new URL('../assets/icon.png', import.meta.url));
+    const chunks: Buffer[] = [];
+    for (let at = 8; at < png.length;) {
+      const size = png.readUInt32BE(at);
+      if (png.toString('latin1', at + 4, at + 8) === 'IDAT') {
+        chunks.push(png.subarray(at + 8, at + 8 + size));
+      }
+      at += size + 12;
+    }
+    expect(png[25], 'colour type: RGBA').toBe(6);
+    // The first pixel of the first row is stored as is whatever the row's filter.
+    const corner = inflateSync(Buffer.concat(chunks)).subarray(1, 5);
+    expect(corner[3], 'corner alpha').toBe(0);
+  });
+
   it('uses the landing page mark as its icon', () => {
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
     expect(read('../assets/icon.svg')).toBe(read('../../../../landing/dist/favicon.svg'));
