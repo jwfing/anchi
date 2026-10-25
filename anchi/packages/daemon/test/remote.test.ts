@@ -295,6 +295,14 @@ describe('probeServer', () => {
     }
   });
 
+  it('gives the reason every time a host exits before reading the request', async () => {
+    // On Linux the first write can fail with EPIPE before the exit is seen, a few times in a hundred.
+    const host = sshRunning(`echo 'bash: line 1: anchi-bridge: command not found' >&2; exit 1`);
+    const kinds = new Set<string>();
+    for (let i = 0; i < 40; i++) kinds.add((await probeServer(host)).kind);
+    expect([...kinds]).toEqual(['bridge-missing']);
+  });
+
   it('says unreachable when ssh fails or nothing answers in time', async () => {
     expect(
       await probeServer(

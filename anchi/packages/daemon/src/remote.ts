@@ -222,14 +222,17 @@ function bridge(
   });
   const stream = new Duplex({
     read: () => child.stdout.resume(),
-    write: (chunk, _encoding, done) => child.stdin.write(chunk, done),
+    // A write the host never reads fails with EPIPE; the host's close reports why, not the write.
+    write: (chunk, _encoding, done) => child.stdin.write(chunk, () => done()),
     final: (done) => child.stdin.end(done),
   });
   child.stdout.on('data', (b: Buffer) => {
     if (!stream.push(b)) child.stdout.pause();
   });
   child.stdout.on('end', () => stream.push(null));
-  child.stdin.on('error', () => stream.destroy());
+  // A host that exits at once (no anchi-bridge, ssh refused) can close its input before the first
+  // request is written; its close, which follows, ends the stream with the reason.
+  child.stdin.on('error', () => {});
   child.on('error', (err) => {
     onError(`${cmd}: ${err.message}`, 'spawn');
     stream.destroy();
