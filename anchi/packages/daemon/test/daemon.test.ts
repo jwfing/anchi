@@ -170,6 +170,7 @@ class FakeTransport implements GuestTransport {
       if (this.guestVersion === null) return { code: 1, stdout: '{"error":"USAGE"}', stderr: '' };
       return ok({ runtime_version: this.guestVersion, installed_at: '2026-10-11T00:00:00Z' });
     }
+    if (args[0] === 'test') return { code: this.servicesInstalled ? 0 : 1, stdout: '', stderr: '' };
     if (args[1]?.endsWith('vault_admin.py') && this.guestFails) {
       return { code: 1, stdout: '{"error":"GUEST_SUDO_FAILED"}', stderr: '' };
     }
@@ -268,6 +269,8 @@ class FakeTransport implements GuestTransport {
   guestVersion: string | null = APP_VERSION;
   /** The VM runs but guest commands fail (sudo, a missing script). */
   guestFails = false;
+  /** Whether Anchi's services are on the guest (false: a server before its first install). */
+  servicesInstalled = true;
   codexImports: Record<string, string>[] = [];
   scanResult: {
     clean: boolean;

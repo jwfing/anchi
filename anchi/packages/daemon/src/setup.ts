@@ -171,6 +171,9 @@ export async function setupStatus(
     guestOutdated: false,
   };
   if (vm !== 'running') return empty;
+  // A remote server runs before its first install: its missing services are not an error, and
+  // preparing it installs them. One that cannot be asked falls through to the error below.
+  if (!(await guest.servicesInstalled().catch(() => true))) return empty;
   // Shown on the Runtimes screen; a Lima that cannot say leaves it out.
   const current = await transport.vmSize().catch(() => undefined);
   if (current) empty.vmSize = { ...empty.vmSize!, current };
