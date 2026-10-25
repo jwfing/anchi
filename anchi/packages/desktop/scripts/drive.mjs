@@ -125,9 +125,16 @@ try {
       });
     }
     if (step.waitFor) {
-      const ok = await evaluate(
-        `new Promise((resolve) => { const t = Date.now(); const f = () => document.querySelector(${JSON.stringify(step.waitFor)}) ? resolve(true) : Date.now() - t > 60000 ? resolve(false) : setTimeout(f, 100); f(); })`,
-      );
+      // Polled from here, not in the page: a page that loads or reloads meanwhile destroys the
+      // context an in-page wait runs in, which fails the check although the element appears.
+      const deadline = Date.now() + 60000;
+      let ok = false;
+      while (!ok && Date.now() < deadline) {
+        ok = await evaluate(`!!document.querySelector(${JSON.stringify(step.waitFor)})`).catch(
+          () => false,
+        );
+        if (!ok) await sleep(100);
+      }
       if (!ok) throw new Error(`timed out waiting for ${step.waitFor}`);
     }
     if (step.click) {
