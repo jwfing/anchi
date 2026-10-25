@@ -27,13 +27,33 @@ host_vm_type() {
       ;;
   esac
 }
+# How host scripts reach the guest: through Lima from the host, or directly when Anchi runs inside
+# the guest itself (ANCHI_GUEST=local: a remote server such as an instabox VM). `guest_sh` runs as
+# the login user, `guest_root` as root, `guest_copy <vm> <dir> <path>...` copies files or folders
+# into a guest directory the login user owns.
+guest_local() { [[ ${ANCHI_GUEST:-lima} == local ]]; }
+guest_sh() {
+  local vm=$1
+  shift
+  if guest_local; then "$@"; else limactl shell "$vm" -- "$@"; fi
+}
+guest_root() {
+  local vm=$1
+  shift
+  if guest_local; then sudo -n "$@"; else limactl shell "$vm" -- sudo -n "$@"; fi
+}
+guest_copy() {
+  local vm=$1 dir=$2
+  shift 2
+  if guest_local; then cp -R "$@" "$dir/"; else limactl copy -r "$@" "$vm:$dir/"; fi
+}
 # Installing restarts the egress proxy, which cuts every running cell off the network and so
 # ends its task. Refuse while task cells run (live check cells, `chk-*`, do not count), unless
 # ANCHI_FORCE_RESTART=1. A VM that is not running has no cells.
 refuse_if_tasks_running() {
   local vm=$1 running
   [[ ${ANCHI_FORCE_RESTART:-} == 1 ]] && return 0
-  running=$(limactl shell "$vm" -- sudo -n anchi-cell list 2>/dev/null | python3 -c '
+  running=$(guest_root "$vm" anchi-cell list 2>/dev/null | python3 -c '
 import json, sys
 try:
     cells = json.load(sys.stdin).get("cells", [])

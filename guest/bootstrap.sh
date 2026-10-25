@@ -10,10 +10,13 @@ base=/var/lib/secure-vm
 install -d -m 0700 "$base"
 install -d -m 0755 /opt/secure-vm
 install -m 0644 "$src/cell.env" /opt/secure-vm/cell.env
-if [[ ! -f /usr/share/keyrings/debian-archive-keyring.gpg ]]; then
+# The guest's own prerequisites, so any Debian or Ubuntu machine can be the guest (Lima's image,
+# an instabox VM), not only one Lima provisioned.
+packages=(systemd-container debootstrap debian-archive-keyring python3 python3-cryptography nftables)
+if ! dpkg -s "${packages[@]}" >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get -o DPkg::Lock::Timeout=600 update
-  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends debian-archive-keyring
+  apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends "${packages[@]}"
 fi
 if [[ ! -f "$base/rootfs-ready" ]]; then
   if [[ -e "$root" ]]; then

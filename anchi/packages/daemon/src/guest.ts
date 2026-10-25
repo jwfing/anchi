@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { cpus, totalmem } from 'node:os';
 import type { ConnectorId, ConnectorSecret, RuntimeId } from '@anchi/protocol';
 import { VM_NAME } from './host.ts';
 
@@ -18,7 +19,8 @@ interface GuestQuota {
 }
 
 /**
- * The daemon's only path into the VM: fixed guest-root commands over `limactl shell ... sudo`.
+ * The daemon's only path into the guest: fixed guest-root commands over `limactl shell ... sudo`,
+ * or plain `sudo` when the daemon runs inside the guest.
  * Arguments are validated before they get here; secrets go on stdin, never in arguments.
  */
 
@@ -48,7 +50,55 @@ export interface GuestTransport {
   spawn(args: string[]): ChildProcessWithoutNullStreams;
 }
 
-export class LimaTransport implements GuestTransport {
+/** Where the guest is: a Lima VM on this computer, or this machine itself. */
+export interface VmTransport extends GuestTransport {
+  /** `lima`: a VM this computer runs; `local`: the daemon runs inside the guest. */
+  readonly placement: 'lima' | 'local';
+  vmStatus(): Promise<'missing' | 'stopped' | 'running' | 'unknown'>;
+  /** The guest's CPUs and memory, for the Runtimes screen. */
+  vmSize(): Promise<{ cpus: number; memoryGiB: number } | undefined>;
+}
+
+/** Runs `child` to completion with `stdin`, keeping at most MAX_OUTPUT bytes of its output. */
+function collect(
+  child: ChildProcessWithoutNullStreams,
+  stdin: string,
+  timeoutMs: number,
+): Promise<ExecResult> {
+  return new Promise((resolve, reject) => {
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let size = 0;
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    const into = (chunks: Buffer[]) => (b: Buffer) => {
+      size += b.length;
+      if (size > MAX_OUTPUT) child.kill('SIGKILL');
+      else chunks.push(b);
+    };
+    child.stdout.on('data', into(out));
+    child.stderr.on('data', into(err));
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({
+        code: code ?? -1,
+        stdout: Buffer.concat(out).toString('utf8'),
+        stderr: Buffer.concat(err).toString('utf8'),
+      });
+    });
+    // A child that exits before draining stdin (VM stopped, guest refuses early, SIGKILL
+    // above) raises EPIPE here; the failure already surfaces through `close`.
+    child.stdin.on('error', () => {});
+    child.stdin.end(stdin);
+  });
+}
+
+export class LimaTransport implements VmTransport {
+  readonly placement = 'lima';
+
   constructor(
     readonly vm = process.env.ANCHI_VM ?? VM_NAME,
     private limactl = process.env.ANCHI_LIMACTL ?? 'limactl',
@@ -65,36 +115,7 @@ export class LimaTransport implements GuestTransport {
   }
 
   exec(args: string[], stdin = '', timeoutMs = 120_000): Promise<ExecResult> {
-    return new Promise((resolve, reject) => {
-      const child = this.spawn(args);
-      const out: Buffer[] = [];
-      const err: Buffer[] = [];
-      let size = 0;
-      const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
-      const collect = (into: Buffer[]) => (b: Buffer) => {
-        size += b.length;
-        if (size > MAX_OUTPUT) child.kill('SIGKILL');
-        else into.push(b);
-      };
-      child.stdout.on('data', collect(out));
-      child.stderr.on('data', collect(err));
-      child.on('error', (e) => {
-        clearTimeout(timer);
-        reject(e);
-      });
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        resolve({
-          code: code ?? -1,
-          stdout: Buffer.concat(out).toString('utf8'),
-          stderr: Buffer.concat(err).toString('utf8'),
-        });
-      });
-      // A child that exits before draining stdin (VM stopped, guest refuses early, SIGKILL
-      // above) raises EPIPE here; the failure already surfaces through `close`.
-      child.stdin.on('error', () => {});
-      child.stdin.end(stdin);
-    });
+    return collect(this.spawn(args), stdin, timeoutMs);
   }
 
   /** The VM's line of `limactl list` in `format`, or undefined when there is none. */
@@ -123,6 +144,39 @@ export class LimaTransport implements GuestTransport {
     if (!/^\d+$/.test(cpus ?? '') || !/^\d+$/.test(bytes ?? '')) return undefined;
     return { cpus: Number(cpus), memoryGiB: Math.round(Number(bytes) / 2 ** 30) };
   }
+}
+
+/**
+ * The daemon running inside the guest itself (a remote server such as an instabox VM): the same
+ * fixed guest-root commands through `sudo -n`, with no VM to start or size.
+ */
+export class InGuestTransport implements VmTransport {
+  readonly placement = 'local';
+
+  constructor(private sudo = process.env.ANCHI_SUDO ?? 'sudo') {}
+
+  spawn(args: string[]): ChildProcessWithoutNullStreams {
+    return spawn(this.sudo, ['-n', ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+
+  exec(args: string[], stdin = '', timeoutMs = 120_000): Promise<ExecResult> {
+    return collect(this.spawn(args), stdin, timeoutMs);
+  }
+
+  async vmStatus(): Promise<'running'> {
+    return 'running';
+  }
+
+  async vmSize(): Promise<{ cpus: number; memoryGiB: number }> {
+    return { cpus: cpus().length, memoryGiB: Math.round(totalmem() / 2 ** 30) };
+  }
+}
+
+/** The guest this daemon drives: `ANCHI_GUEST=local` when it runs inside the guest. */
+export function vmTransport(placement = process.env.ANCHI_GUEST ?? 'lima'): VmTransport {
+  if (placement === 'local') return new InGuestTransport();
+  if (placement === 'lima') return new LimaTransport();
+  throw new Error(`ANCHI_GUEST must be lima or local, not ${placement}`);
 }
 
 export class GuestError extends Error {

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { createConnection, type Socket } from 'node:net';
+import { createConnection } from 'node:net';
+import type { Duplex } from 'node:stream';
 import {
   CLIENT_MAX_FRAME_BYTES,
   encodeFrame,
@@ -11,7 +12,7 @@ import {
 } from '@anchi/protocol';
 
 /**
- * Newline-delimited JSON-RPC over a stream socket.
+ * Newline-delimited JSON-RPC over a stream: the daemon's socket, or a remote server's through SSH.
  * Request: {id, method, params}; response: {id, result} | {id, error}; notification: {method, params}.
  * A frame over the limit or a line that is not JSON closes the connection.
  */
@@ -32,7 +33,7 @@ export class Peer extends EventEmitter {
   closed = false;
 
   constructor(
-    readonly socket: Socket,
+    readonly socket: Duplex,
     private handler?: (method: string, params: unknown) => Promise<unknown>,
     maxFrameBytes = CLIENT_MAX_FRAME_BYTES,
   ) {
@@ -103,7 +104,11 @@ export class Peer extends EventEmitter {
 
 /** Typed client for the daemon socket. */
 export class DaemonClient {
-  private constructor(private peer: Peer) {}
+  private constructor(
+    private peer: Peer,
+    /** Sees every result before the caller does (a remote server's sign-in pages). */
+    private onResult?: (method: MethodName, result: unknown) => Promise<void>,
+  ) {}
 
   static connect(socketPath: string): Promise<DaemonClient> {
     return new Promise((resolve, reject) => {
@@ -113,11 +118,21 @@ export class DaemonClient {
     });
   }
 
-  call<M extends MethodName>(
+  /** A client over an already open stream, such as a bridge to a remote server's socket. */
+  static over(
+    stream: Duplex,
+    onResult?: (method: MethodName, result: unknown) => Promise<void>,
+  ): DaemonClient {
+    return new DaemonClient(new Peer(stream), onResult);
+  }
+
+  async call<M extends MethodName>(
     method: M,
     ...params: Params<M> extends Record<string, never> ? [] : [Params<M>]
   ): Promise<Result<M>> {
-    return this.peer.request(method, params[0] ?? {}) as Promise<Result<M>>;
+    const result = (await this.peer.request(method, params[0] ?? {})) as Result<M>;
+    await this.onResult?.(method, result);
+    return result;
   }
 
   on<N extends keyof Notifications>(name: N, cb: (params: Notifications[N]) => void): () => void {

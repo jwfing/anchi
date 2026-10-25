@@ -11,7 +11,7 @@ import type {
   SetupAction,
   SetupStatus,
 } from '@anchi/protocol';
-import type { Guest, LimaTransport } from './guest.ts';
+import type { Guest, VmTransport } from './guest.ts';
 import { APP_VERSION, defaultVmSize, hostResources, REPO_ROOT, VAULT_KEY } from './host.ts';
 import type { ServiceSetup } from './services.ts';
 
@@ -97,7 +97,9 @@ function limaVersion(): string | null {
   return version;
 }
 
-export function hostReadiness(): NonNullable<SetupStatus['host']> {
+export function hostReadiness(
+  placement: VmTransport['placement'] = 'lima',
+): NonNullable<SetupStatus['host']> {
   const executable = (name: string) =>
     (process.env.PATH ?? '').split(':').some((dir) => {
       try {
@@ -107,6 +109,14 @@ export function hostReadiness(): NonNullable<SetupStatus['host']> {
         return false;
       }
     });
+  if (placement === 'local') {
+    // Inside the guest: the installers need Python and reach guest root with `sudo -n`.
+    return {
+      platform: process.platform,
+      missing: ['python3', 'sudo'].filter((name) => !executable(name)),
+      installHint: 'This server needs Python 3.11+ and passwordless sudo for its login user.',
+    };
+  }
   const missing = ['limactl', 'python3'].filter((name) => !executable(name));
   // An older Lima fails only at `limactl start`, deep in the installation log; say it here.
   const minimum = limaMinimum();
@@ -132,16 +142,16 @@ export function hostReadiness(): NonNullable<SetupStatus['host']> {
 
 export async function setupStatus(
   guest: Guest,
-  lima: LimaTransport,
+  transport: VmTransport,
   services?: ServiceSetup,
 ): Promise<SetupStatus> {
-  const vm = await lima.vmStatus();
+  const vm = await transport.vmStatus();
   const host = hostResources();
   const empty: SetupStatus = {
     quickSetup: true,
     preparedRuntimes: [],
     vm,
-    host: hostReadiness(),
+    host: hostReadiness(transport.placement),
     vaultKeyPresent: existsSync(VAULT_KEY),
     vaultUnlocked: false,
     installed: false,
@@ -162,7 +172,7 @@ export async function setupStatus(
   };
   if (vm !== 'running') return empty;
   // Shown on the Runtimes screen; a Lima that cannot say leaves it out.
-  const current = await lima.vmSize().catch(() => undefined);
+  const current = await transport.vmSize().catch(() => undefined);
   if (current) empty.vmSize = { ...empty.vmSize!, current };
   try {
     const [vault, codex, claude, hermes, connectors, base, workspaces, guestVersion] =

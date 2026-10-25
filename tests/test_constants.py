@@ -94,9 +94,11 @@ class LimaTemplateTests(unittest.TestCase):
 
     def test_installers_clear_their_staging_directory_before_copying(self):
         # A VM keeps /tmp between releases; a stale copy would reinstall files a release removed.
-        for script, stage in (('up.sh', '/tmp/secure-vm-bootstrap'), ('install-anchi.sh', '$stage')):
+        for script, stage in (('up.sh', '/tmp/secure-vm-bootstrap'), ('install-anchi.sh', '"$stage')):
             text = (ROOT / 'scripts' / script).read_text()
-            self.assertRegex(text, rf'rm -rf {re.escape(stage)} && mkdir -p', script)
+            clear = text.index(f'guest_root "$vm_name" rm -rf {stage}')
+            self.assertLess(clear, text.index(f'guest_sh "$vm_name" mkdir -p {stage}'), script)
+            self.assertLess(clear, text.index('guest_copy '), script)
 
     def test_guest_installer_names_a_wrong_cell_peer_gid(self):
         # Under set -e a bare test exits silently; the message names both gids.
