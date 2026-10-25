@@ -1,3 +1,5 @@
+import type { SkillAddResult } from '@anchi/protocol';
+
 /** What the window knows about its daemon connection. */
 export interface ServerState {
   /** `local`, `instabox:<machine>` or `ssh:<host>`. */
@@ -15,4 +17,6 @@ export interface AnchiApi {
   onServer(listener: (state: ServerState) => void): () => void;
   setServer(target: string): Promise<ServerState>;
   openExternal(url: string): Promise<void>;
+  /** Picks a folder on this computer and adds the skills in it; null when cancelled. */
+  addSkillFolder(): Promise<SkillAddResult | null>;
 }

@@ -27,14 +27,13 @@ Release packages do not include the app yet. The app keeps its window state, suc
 | Agent builder | One conversation with the builder, or an empty starter (agent id and runtime) with no model call. A proposal opens in a panel the app draws from the proposed file, with its diff, errors and warnings; Apply writes it, Discard drops it. |
 | Approvals | Held writes appear inside the task's card and in the Approvals view. Each shows the connector, operation, reason, origin chain, the full summary and a countdown, then Deny and Approve. A write left waiting is refused when its time runs out. |
 | Usage | Subscription windows per runtime, and token totals by agent, model, runtime or day over 24 hours, 7 or 30 days. |
-| Settings | Server (switch between `local`, `instabox:<machine>` and `ssh:<host>`), environment, runtimes, proxy connectors (token connect and disconnect), service connectors (sign-in, auto or ask writes) and the skill list. Each runtime shows Connected or Not set up with a Set up or Replace button: Codex imports the server machine's `codex login`, Claude Code takes a token or API key, Hermes takes a base URL, model and API key. A connector's token, like a runtime's credentials, is typed in a form that opens under its row; Escape closes it. |
+| Settings | Server (switch between `local`, `instabox:<machine>` and `ssh:<host>`), environment, runtimes, proxy connectors (token connect and disconnect), service connectors (sign-in, auto or ask writes) and skills. Each runtime shows Connected or Not set up with a Set up or Replace button: Codex imports the server machine's `codex login`, Claude Code takes a token or API key, Hermes takes a base URL, model and API key. A connector's token, like a runtime's credentials, is typed in a form that opens under its row; Escape closes it. Skills are added from a GitHub address (pinned to its current commit), or, with the local server, from a folder chosen in a system file dialog; Check for update shows the newer commit and the files it changes before Update installs it; Remove asks in a system dialog that names the agents still listing the skill. |
 
 The app does not:
 
 - delete agents or tasks;
 - run setup steps or reset;
 - stop the daemon;
-- add skills;
 - import AWS credentials.
 
 Use the TUI or CLI for these.
@@ -44,7 +43,7 @@ Use the TUI or CLI for these.
 - **Main process:** the Electron main process holds the daemon connection, as the CLI does: the local socket, or `anchi-bridge` over SSH for a remote server.
 - **The window:** it is sandboxed, with context isolation, no Node integration, a content security policy that loads nothing from the network, no navigation and no new windows.
 - **Calls from the window:** it reaches the main process through four calls. Daemon methods outside `DESKTOP_METHODS` (`packages/desktop/src/main/bridge.ts`) are refused there, which includes everything that deletes, resets or stops.
-- **Confirmations the window cannot give:** an agent settings change that gives the agent a new connector, a new workspace or write access to one is confirmed in a system dialog from the main process, which compares the change with the agent's current settings. Cancel there, and the change never reaches the daemon.
+- **Confirmations the window cannot give:** an agent settings change that gives the agent a new connector, a new workspace or write access to one is confirmed in a system dialog from the main process, which compares the change with the agent's current settings. Cancel there, and the change never reaches the daemon. Removing a skill is confirmed the same way. The window adds skills only from `https://github.com/` addresses; a folder on this computer comes from a system file dialog the main process opens, and only for the local server, since a remote server would read the path on its own disk.
 - **Agent text:**
   - It is sanitized: control characters, terminal escapes and bidirectional overrides are removed.
   - Its Markdown is drawn as React elements, never as HTML.
