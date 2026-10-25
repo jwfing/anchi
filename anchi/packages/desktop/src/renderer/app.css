@@ -1035,6 +1035,7 @@ h2 {
 .grid3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
   gap: 12px;
 }
 .runtime {
@@ -1068,11 +1069,35 @@ h2 {
 .connector-id {
   width: 80px;
 }
-.secret {
+.drawer {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 8px;
-  padding-top: 8px;
+  margin: 6px 0 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--subtle);
+}
+.drawer p {
+  margin: 0;
+}
+.runtime-action,
+.drawer-save {
+  align-self: flex-start;
+}
+.tag {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.tag-ok {
+  background: #e3f2e8;
+  color: #1d6b3a;
+}
+.tag-off {
+  background: var(--subtle);
+  color: var(--muted);
 }
 .segmented {
   display: inline-flex;

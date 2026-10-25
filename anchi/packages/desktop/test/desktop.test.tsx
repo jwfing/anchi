@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { AgentSummary, Approval, StoredEvent, TaskRow } from '@anchi/protocol';
+import type { AgentSummary, Approval, SetupStatus, StoredEvent, TaskRow } from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { checkCall, DESKTOP_METHODS, externalUrl } from '../src/main/bridge.ts';
@@ -10,6 +10,7 @@ import { toolSummary, transcript } from '../src/renderer/transcript.ts';
 import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
 import { TaskTurn } from '../src/renderer/views/Agent.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
+import { Runtimes, SecretForm } from '../src/renderer/views/Settings.tsx';
 
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
 
@@ -19,8 +20,10 @@ describe('bridge', () => {
     expect(checkCall('approvals.decide', { id: 'a', allow: false }).method).toBe(
       'approvals.decide',
     );
+    expect(checkCall('setup.importHermes', {}).method).toBe('setup.importHermes');
     for (const method of [
       'daemon.shutdown',
+      'setup.prepare',
       'setup.reset',
       'setup.run',
       'agents.delete',
@@ -255,5 +258,45 @@ describe('app identity', () => {
   it('uses the landing page mark as its icon', () => {
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
     expect(read('../assets/icon.svg')).toBe(read('../../../../landing/dist/favicon.svg'));
+  });
+});
+
+describe('settings', () => {
+  const html = (node: React.ReactNode) =>
+    renderToStaticMarkup(
+      <Ctx.Provider value={{ act: async () => undefined } as unknown as AppContext}>
+        {node}
+      </Ctx.Provider>,
+    );
+
+  it('marks each runtime connected or not set up, with the button that fits', () => {
+    const status = {
+      codex: { runtime: 'codex', connected: true, accountId: null, expiresAt: null },
+      claude: { runtime: 'claude-code', connected: false, kind: null },
+      hermes: { runtime: 'hermes', connected: false, baseUrl: null, model: null },
+    } as unknown as SetupStatus;
+    const out = html(<Runtimes status={status} server="local" onChange={() => undefined} />);
+    expect(out.match(/>Connected</g)).toHaveLength(1);
+    expect(out.match(/>Not set up</g)).toHaveLength(2);
+    expect(out.match(/>Replace</g)).toHaveLength(1);
+    expect(out.match(/>Set up</g)).toHaveLength(2);
+  });
+
+  it('asks for secrets in password fields and keeps Save off until every field is filled', () => {
+    const out = html(
+      <SecretForm
+        id="f"
+        fields={[
+          { key: 'baseUrl', label: 'Base URL' },
+          { key: 'apiKey', label: 'API key', secret: true },
+        ]}
+        note=""
+        submit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+    expect(out.match(/type="password"/g)).toHaveLength(1);
+    expect(out.match(/type="text"/g)).toHaveLength(1);
+    expect(out).toMatch(/<button type="submit"[^>]*disabled/);
   });
 });

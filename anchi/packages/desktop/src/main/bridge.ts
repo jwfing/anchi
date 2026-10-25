@@ -22,6 +22,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'setup.status',
   'setup.importCodex',
   'setup.importClaude',
+  'setup.importHermes',
   'connectors.set',
   'connectors.remove',
   'builder.proposal',
