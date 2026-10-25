@@ -39,7 +39,7 @@ import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeJson, sanitizeLine, sanitizeLines } from '@anchi/core';
 import { selfUpdate } from './update.ts';
-import { suggestedRuntime, runtimeReady } from '@anchi/core';
+import { autoPublishWarning, suggestedRuntime, runtimeReady } from '@anchi/core';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';
@@ -1214,13 +1214,16 @@ setup
 
 setup
   .command('service-mode <id> <mode>')
-  .description('Writes of a service: auto, or ask (X always requires approval)')
+  .description('Writes of a service: auto, or ask (X and Reddit ask until set to auto)')
   .action((id: string, mode: string) =>
     withClient(async (client) => {
       if (!isService(id) || (mode !== 'auto' && mode !== 'ask'))
-        fail('usage: service-mode <gmail|drive|notion|slack|x> <auto|ask> (X only allows ask)');
+        fail('usage: service-mode <gmail|drive|notion|slack|x|reddit> <auto|ask>');
       await client.call('services.setMode', { id, mode });
       console.log(`${id} writes: ${mode}`);
+      if (mode === 'auto' && (id === 'x' || id === 'reddit')) {
+        console.log(styleText('yellow', `Warning: ${autoPublishWarning(id)}`));
+      }
     }),
   );
 

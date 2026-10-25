@@ -121,7 +121,8 @@ export const CONNECTOR_TOOLS: ConnectorTool[] = [
     'reddit',
     'submit',
     'Publish a text post as the connected Reddit account. Draft in conversation first. ' +
-      'Always waits for approval of the account, subreddit, title and full text. Respect subreddit rules. ' +
+      'Unless the user made Reddit writes automatic, waits for approval of the account, subreddit, title and full text. ' +
+      'Respect subreddit rules. ' +
       'Never repeat a write whose result is unknown.',
     {
       subreddit,
@@ -134,7 +135,8 @@ export const CONNECTOR_TOOLS: ConnectorTool[] = [
     'reddit',
     'comment',
     'Reply to a Reddit post or comment. Draft in conversation first. ' +
-      'Always waits for approval of the account, parent id and full text. Respect subreddit rules. ' +
+      'Unless the user made Reddit writes automatic, waits for approval of the account, parent id and full text. ' +
+      'Respect subreddit rules. ' +
       'Never repeat a write whose result is unknown.',
     { parent: redditThing, text: redditText },
     true,
@@ -168,7 +170,8 @@ export const CONNECTOR_TOOLS: ConnectorTool[] = [
   t(
     'x',
     'post',
-    'Publish a text post or reply as the connected X account. Always waits for approval of the full text and account. ' +
+    'Publish a text post or reply as the connected X account. Unless the user made X writes automatic, ' +
+      'waits for approval of the full text and account. ' +
       'Draft in conversation first. X also enforces weighted character limits and reply eligibility. ' +
       'Never repeat a write whose result is unknown.',
     {

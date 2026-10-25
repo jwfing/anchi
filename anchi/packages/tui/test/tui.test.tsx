@@ -388,8 +388,9 @@ describe('App', () => {
     ui.unmount();
   });
 
-  it('connects X through a native Client ID and browser sign-in, and keeps publishing on approval', async () => {
+  it('connects X through a native Client ID and browser sign-in, and asks before posts go out without approval', async () => {
     let configured = false;
+    let xMode = 'ask';
     const { client, calls } = fakeClient(
       {},
       {
@@ -405,13 +406,17 @@ describe('App', () => {
             account: null,
             accounts: [],
             reauthRequired: false,
-            mode: id === 'x' ? 'ask' : 'auto',
+            mode: id === 'x' ? xMode : 'auto',
           })),
           xClient: configured,
           googleClient: false,
         }),
         'services.xClient': () => {
           configured = true;
+          return null;
+        },
+        'services.setMode': (p) => {
+          xMode = (p as { mode: string }).mode;
           return null;
         },
         'services.xLogin': () => ({ url: 'https://x.com/i/oauth2/authorize?test' }),
@@ -437,13 +442,26 @@ describe('App', () => {
     expect(calls.find(([m]) => m === 'services.xClient')?.[1]).toEqual({ clientId: 'test-client' });
     expect(calls.some(([m]) => m === 'services.xLogin')).toBe(true);
     expect(calls.some(([m]) => m === 'services.googleLogin')).toBe(false);
+    expect(ui.lastFrame()).toMatch(/x .*writes ask/);
+    const modes = () => calls.filter(([m]) => m === 'services.setMode').map(([, p]) => p);
     ui.stdin.write('m');
-    await frameWith(ui, 'X posts always require approval');
-    expect(calls.some(([m]) => m === 'services.setMode')).toBe(false);
+    expect(await frameWith(ui, 'X posts without approval')).toContain('Agents with x then post');
+    ui.stdin.write('n');
+    await tick();
+    expect(modes()).toEqual([]);
+    ui.stdin.write('m');
+    await frameWith(ui, 'X posts without approval');
+    ui.stdin.write('y');
+    await vi.waitFor(() => expect(modes()).toEqual([{ id: 'x', mode: 'auto' }]));
+    await vi.waitFor(() => expect(ui.lastFrame()).toMatch(/x .*writes auto/));
+    // Back to ask needs no confirmation.
+    ui.stdin.write('m');
+    await vi.waitFor(() => expect(modes().at(-1)).toEqual({ id: 'x', mode: 'ask' }));
+    expect(ui.lastFrame()).not.toContain('[y] confirm');
     ui.unmount();
   });
 
-  it('connects Reddit through an installed app Client ID and browser sign-in, and keeps publishing on approval', async () => {
+  it('connects Reddit through an installed app Client ID and browser sign-in, and asks before posts go out without approval', async () => {
     let configured = false;
     const { client, calls } = fakeClient(
       {},
@@ -502,8 +520,17 @@ describe('App', () => {
     expect(calls.some(([m]) => m === 'services.redditLogin')).toBe(true);
     expect(calls.some(([m]) => m === 'services.googleLogin')).toBe(false);
     ui.stdin.write('m');
-    await frameWith(ui, 'Reddit posts and comments always require approval');
+    expect(await frameWith(ui, 'Reddit posts without approval')).toContain(
+      'Agents with reddit then post',
+    );
     expect(calls.some(([m]) => m === 'services.setMode')).toBe(false);
+    ui.stdin.write('y');
+    await vi.waitFor(() =>
+      expect(calls.find(([m]) => m === 'services.setMode')?.[1]).toEqual({
+        id: 'reddit',
+        mode: 'auto',
+      }),
+    );
     ui.unmount();
   });
 
@@ -1223,6 +1250,7 @@ describe('agent settings panel', () => {
       skills: [],
       connectors: ['github'],
       workspaces: [],
+      highRisk: { disable: [] },
       ...over,
     },
     inherited: [],
@@ -1244,6 +1272,7 @@ describe('agent settings panel', () => {
       runtimes: [],
       agents: ['dev'],
       images: [],
+      highRisk: [],
     },
   });
   const update = {
@@ -1305,6 +1334,44 @@ describe('agent settings panel', () => {
         base: 'b1',
       },
     ]);
+    ui.unmount();
+  });
+
+  it("exempts one of the agent's high-risk operations and sends it as highRisk.disable", async () => {
+    const base = settings();
+    const { client, calls } = fakeClient(
+      {},
+      {
+        'agents.settings': () => ({
+          ...base,
+          inventory: { ...base.inventory, highRisk: ['github-merge', 'aws-destroy'] },
+        }),
+        'agents.update': () => ({
+          ...update,
+          diff: '+ highRisk: {disable: [github-merge]}',
+          warnings: ['@dev does github-merge without asking you (highRisk)'],
+        }),
+      },
+    );
+    const ui = render(<App client={client} initialAgents={[agent('dev')]} initialTasks={[]} />);
+    await tick();
+    ui.stdin.write(LEADER);
+    await tick();
+    ui.stdin.write('s');
+    await frameWith(ui, 'Reviews pull requests');
+    // Past 7 fields, 1 skill, 14 connectors and 1 workspace: github's, not aws's.
+    for (let i = 0; i < 23; i++) ui.stdin.write('j');
+    await tick();
+    ui.stdin.write(' ');
+    const frame = await frameWith(ui, '[x]  github-merge');
+    expect(frame).toContain('HIGH-RISK');
+    expect(frame).not.toContain('aws-destroy');
+    ui.stdin.write('\r');
+    expect(await frameWith(ui, 'save these settings?')).toContain('without asking you');
+    expect(calls.find(([m]) => m === 'agents.update')?.[1]).toEqual({
+      agentId: 'dev',
+      patch: { highRisk: { disable: ['github-merge'] } },
+    });
     ui.unmount();
   });
 
@@ -1671,6 +1738,7 @@ describe('deleting agents', () => {
             skills: [],
             connectors: [],
             workspaces: [],
+            highRisk: { disable: [] },
           },
           inherited: [],
           fixed: {
@@ -1688,6 +1756,7 @@ describe('deleting agents', () => {
             runtimes: [],
             agents: [],
             images: [],
+            highRisk: [],
           },
         }),
       },

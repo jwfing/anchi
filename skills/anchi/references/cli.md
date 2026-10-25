@@ -406,7 +406,7 @@ Commands:
   x-client <client-id>                            Store an X native app Client ID; register http://127.0.0.1:48173/callback in X
   google-client [options] [path]                  Store your own Google Cloud Desktop app OAuth client JSON (Gmail and Drive); it overrides the built-in client
   reset [options]                                 Back to a first launch: delete the VM with everything in it (--all: also the vault key and the Anchi home)
-  service-mode <id> <mode>                        Writes of a service: auto, or ask (X always requires approval)
+  service-mode <id> <mode>                        Writes of a service: auto, or ask (X and Reddit ask until set to auto)
 ```
 
 #### `anchi setup prepare`
@@ -595,7 +595,7 @@ Options:
 ```text
 Usage: anchi setup service-mode [options] <id> <mode>
 
-Writes of a service: auto, or ask (X always requires approval)
+Writes of a service: auto, or ask (X and Reddit ask until set to auto)
 ```
 
 ### `anchi daemon`

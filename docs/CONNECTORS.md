@@ -1,6 +1,6 @@
 # Account connectors
 
-Gmail, Google Drive, Notion, Slack, X and Reddit are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X and Reddit read automatically and always require approval to publish. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
+Gmail, Google Drive, Notion, Slack, X and Reddit are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X and Reddit read automatically and ask for approval to publish unless you set their writes to `auto`. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
 
 ## Account setup
 
@@ -36,9 +36,14 @@ that `anchi setup status` lists both `x` and `reddit` under Services. Their CLI 
 
 ## Authorization modes
 
-X and Reddit are exceptions to the configurable modes below: reads are automatic and publishing
-always asks, even when an agent omits `approvals`. `service-mode x auto` and
-`service-mode reddit auto` are refused.
+X and Reddit differ from the other services in two ways. Their reads are always automatic, and
+their writes default to per-request approval (`ask`) with an exact-content approval of each post.
+`anchi setup service-mode x auto` (or `reddit`) lets every agent with that connector publish
+under your account without a person; an agent's own `approvals: {x: auto}` does the same for that
+agent only, even while the service asks. With `auto`, a task can post publicly, including a task
+a trigger starts and that reads untrusted content (mentions, issues, mail, web pages): instructions
+in that content can make the agent post. The TUI asks for confirmation before it sets `auto`, and
+the CLI prints this warning. `approvals: {x: ask}` keeps an agent asking either way.
 
 New connections use **standing authorization** (`auto`): allowlisted reads and writes receive one-time policy grants automatically. Switch to **per-request approval** (`ask`) to review each operation in Anchi's approval dialog. Any mode change revokes all unconsumed grants. The mode is per connector service and applies to every agent. An agent can additionally have its writes held with `approvals: {notion: ask}` in its file (the policy principal `notion:<agent>`): agents reach the services through a bridge that names them, so policy can tell them apart.
 

@@ -35,7 +35,8 @@ describe('service connectors', () => {
       const imported = execs.at(-1)!;
       expect(imported.args.slice(-2)).toEqual(['import-client', 'x']);
       expect(JSON.parse(imported.stdin)).toEqual({ client_id: 'test-client' });
-      await expect(s.setMode('x', 'auto')).rejects.toThrow('X_WRITES_REQUIRE_APPROVAL');
+      await s.setMode('x', 'auto');
+      expect(execs.at(-1)!.args.slice(-3)).toEqual(['mode', 'x', 'auto']);
       expect(await s.xLogin()).toContain('https://x.com/');
       const redirect = JSON.parse(execs.find((e) => e.args[2] === 'begin')!.stdin).redirect_uri;
       expect(redirect).toBe('http://127.0.0.1:48173/callback');
@@ -82,8 +83,13 @@ describe('service connectors', () => {
       account: '@example',
       reauthRequired: true,
       revocationPending: true,
-      mode: 'ask',
+      mode: 'auto',
     });
+    // Without a rule from the policy service, publishing asks.
+    const unknown = fakeGuest((args) => (args[1]!.endsWith('policy_admin.py') ? {} : {}));
+    const fallback = await new ServiceSetup(unknown.guest).status();
+    expect(fallback.services.find((s) => s.id === 'x')!.mode).toBe('ask');
+    expect(fallback.services.find((s) => s.id === 'notion')!.mode).toBe('auto');
   });
   it('signs in to Reddit on the registered callback, rejects forged callbacks and sends the code on stdin', async () => {
     const { guest, execs } = fakeGuest((args) =>
@@ -105,7 +111,8 @@ describe('service connectors', () => {
         client_id: 'test-client',
         developer_username: 'developer',
       });
-      await expect(s.setMode('reddit', 'auto')).rejects.toThrow('REDDIT_WRITES_REQUIRE_APPROVAL');
+      await s.setMode('reddit', 'auto');
+      expect(execs.at(-1)!.args.slice(-3)).toEqual(['mode', 'reddit', 'auto']);
       expect(await s.redditLogin()).toContain('https://www.reddit.com/');
       const redirect = JSON.parse(execs.find((e) => e.args[2] === 'begin')!.stdin).redirect_uri;
       expect(redirect).toBe('http://127.0.0.1:48174/callback');
@@ -152,8 +159,13 @@ describe('service connectors', () => {
       account: 'u/example',
       reauthRequired: true,
       revocationPending: true,
-      mode: 'ask',
+      mode: 'auto',
     });
+    // Without a rule from the policy service, publishing asks.
+    const unknown = fakeGuest((args) => (args[1]!.endsWith('policy_admin.py') ? {} : {}));
+    const fallback = await new ServiceSetup(unknown.guest).status();
+    expect(fallback.services.find((s) => s.id === 'reddit')!.mode).toBe('ask');
+    expect(fallback.services.find((s) => s.id === 'notion')!.mode).toBe('auto');
   });
   it('reports status and modes, and keeps tokens off the Google connectors', async () => {
     const { guest } = fakeGuest((args) =>

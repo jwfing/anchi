@@ -91,9 +91,9 @@ Agents hold placeholders for these managed credentials.
 
 | Control | Default and limits |
 |---|---|
-| Connectors | Only those listed on the agent. Available: GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord, Gmail, Drive, Notion, Slack, [X](docs/X_SETUP.md) and [Reddit](docs/REDDIT_SETUP.md). X and Reddit publishing always require approval. Gmail is read-only; Discord supports REST only. |
+| Connectors | Only those listed on the agent. Available: GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord, Gmail, Drive, Notion, Slack, [X](docs/X_SETUP.md) and [Reddit](docs/REDDIT_SETUP.md). X and Reddit publishing asks for approval unless set to `auto`, which lets agents post under your account without a person. Gmail is read-only; Discord supports REST only. |
 | Network | Omitting `egress` allows public Internet access. `egress: []` allows runtime and configured connector hosts only; a nonempty list adds hosts. Firecrawl can fetch remote URLs outside this list. |
-| Writes | Ordinary writes can run automatically. `approvals: {connector: ask}` holds that connector's writes. Listed high-risk patterns are held by default; `highRisk.disable` can exempt patterns globally or per agent. Explicit `ask` still holds those writes. |
+| Writes | Ordinary writes can run automatically. `approvals: {connector: ask}` holds that connector's writes. Listed high-risk patterns are held by default; `highRisk.disable` can exempt patterns globally or per agent (also from the agent settings panel). Explicit `ask` still holds those writes. |
 | Project folders | No host folders unless shared as workspaces. Read-only by default; `rw` changes real files. Review those changes before running them on the host. |
 | Data | Content an agent reads can reach its model and allowed destinations. Credential isolation does not keep content local or prevent every misuse of allowed access. |
 

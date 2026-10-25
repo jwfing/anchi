@@ -229,6 +229,8 @@ export interface CellStart {
   runtime: RuntimeId;
   /** Connectors whose writes wait for approval. */
   ask: string[];
+  /** X and Reddit, when the agent's approvals make its posts automatic. */
+  auto?: string[];
   /** Directories under ~/AnchiWorkspaces bound into the cell. */
   workspaces: { name: string; path: string; mode: 'ro' | 'rw' }[];
   /** Allowed hosts, or undefined for open egress. */
@@ -281,6 +283,8 @@ export class Guest {
     if (!/^([a-z0-9-]{1,40}(,[a-z0-9-]{1,40})*)?$/.test(highRisk)) {
       throw new Error('invalid high-risk ids');
     }
+    const auto = (c.auto ?? []).filter((x) => c.connectors.includes(x)).join(',');
+    if (!/^((x|reddit)(,(x|reddit))?)?$/.test(auto)) throw new Error('invalid auto services');
     return this.transport.spawn([
       'anchi-cell',
       'start',
@@ -295,8 +299,10 @@ export class Guest {
       c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
       c.egress ? Buffer.from(JSON.stringify(c.egress)).toString('base64url') : '-',
       accounts,
-      // Only when set, so a guest installed before high-risk exceptions per agent still starts.
-      ...(highRisk ? [highRisk] : []),
+      // Only when set, so a guest installed before high-risk exceptions per agent still starts;
+      // an older guest refuses an agent whose X or Reddit posts are automatic (USAGE).
+      ...(highRisk || auto ? [highRisk || '-'] : []),
+      ...(auto ? [auto] : []),
     ]);
   }
 

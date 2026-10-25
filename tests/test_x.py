@@ -73,12 +73,10 @@ class XBoundaryTests(ConnectorHarness):
                 x_connector.handle(request)
         self.assertEqual(len(self.calls), 2)
 
-    def test_policy_requires_approval_even_with_legacy_auto_rule(self):
+    def test_posts_ask_without_a_rule_and_go_through_only_where_a_rule_says_auto(self):
         boot = Path(self.temp.name) / 'boot'
         boot.write_text('test-boot')
         with patch('policy.DATABASE', Path(self.temp.name) / 'policy.db'), patch('policy.BOOT_ID', boot):
-            with policy.database() as conn:
-                conn.execute("INSERT INTO rules VALUES('x:dev','auto')")
             action = {
                 'operation': 'x.post',
                 'account': 'g1',
@@ -88,9 +86,25 @@ class XBoundaryTests(ConnectorHarness):
                     'account_label': '@example',
                 },
             }
-            self.assertEqual(policy.authorize(action, 'x:dev')['decision'], 'ask')
-            with self.assertRaisesRegex(Denied, 'X_WRITES_REQUIRE_APPROVAL'):
-                policy.set_mode('x', 'auto')
+            search = {'operation': 'x.search', 'account': 'g1', 'params': {'query': 'news', 'limit': 10}}
+            self.assertEqual(policy.inspect_rules()['rules']['x'], 'ask')
+            for principal in ('x', 'x:dev'):
+                self.assertEqual(policy.authorize(action, principal)['decision'], 'ask')
+                self.assertEqual(policy.authorize(search, principal)['decision'], 'allow')
+            policy.set_mode('x:dev', 'auto')
+            self.assertEqual(policy.authorize(action, 'x:dev')['decision'], 'allow')
+            self.assertEqual(policy.authorize(action, 'x:ops')['decision'], 'ask')
+            policy.set_mode('x', 'auto')
+            self.assertEqual(policy.authorize(action, 'x:ops')['decision'], 'allow')
+            # An agent's own ask still holds its posts while the connector is auto.
+            policy.set_mode('x:ops', 'ask')
+            self.assertEqual(policy.authorize(action, 'x:ops')['decision'], 'ask')
+            policy.set_mode('x', 'ask')
+            self.assertEqual(policy.authorize(search, 'x:ops')['decision'], 'allow')
+            for bad in (('x', 'always'), ('x:dev', ''), ('x:Dev', 'auto')):
+                with self.subTest(bad=bad), self.assertRaises(Denied):
+                    policy.set_mode(*bad)
+            self.assertEqual(policy.inspect_rules()['rules']['x:dev'], 'auto')
 
     def test_real_policy_approval_is_bound_to_content_and_execution_happens_once(self):
         boot = Path(self.temp.name) / 'boot'

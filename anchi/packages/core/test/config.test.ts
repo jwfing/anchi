@@ -26,23 +26,18 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'anchi-test-'));
 });
 
-it('allows X on an agent and refuses automatic publishing', () => {
-  write('agents/social.yaml', 'runtime: codex\nconnectors: [x]\napprovals: { x: ask }\n');
-  expect(resolveAgent('social', layout()).connectors).toEqual(['x']);
-  write('agents/social.yaml', 'runtime: codex\nconnectors: [x]\napprovals: { x: auto }\n');
-  expect(() => resolveAgent('social', layout())).toThrow(/X posts always require approval/);
-});
-
-it('allows Reddit on an agent and refuses automatic publishing', () => {
-  write('agents/social.yaml', 'runtime: codex\nconnectors: [reddit]\napprovals: { reddit: ask }\n');
-  expect(resolveAgent('social', layout()).connectors).toEqual(['reddit']);
-  write(
-    'agents/social.yaml',
-    'runtime: codex\nconnectors: [reddit]\napprovals: { reddit: auto }\n',
-  );
-  expect(() => resolveAgent('social', layout())).toThrow(
-    /Reddit posts and comments always require approval/,
-  );
+it('lets an agent file set X and Reddit publishing to ask or auto, and nothing else', () => {
+  for (const mode of ['ask', 'auto']) {
+    write(
+      'agents/social.yaml',
+      `runtime: codex\nconnectors: [x, reddit]\napprovals: { x: ${mode}, reddit: ${mode} }\n`,
+    );
+    expect(resolveAgent('social', layout()).approvals).toEqual({ x: mode, reddit: mode });
+  }
+  for (const bad of ['always', 'never', "''"]) {
+    write('agents/social.yaml', `runtime: codex\nconnectors: [x]\napprovals: { x: ${bad} }\n`);
+    expect(() => resolveAgent('social', layout()), bad).toThrow(ConfigError);
+  }
 });
 
 describe('mergeLayers', () => {
@@ -240,6 +235,28 @@ describe('patchAgentYaml', () => {
     expect(patchAgentYaml('delegates: [dev, qa] # team\n', { delegates: ['qa'] })).toBe(
       'delegates: [qa] # team\n',
     );
+  });
+
+  it("writes high-risk exemptions in the file's own shape, keeping its comments", () => {
+    expect(patchAgentYaml('runtime: codex\n', { highRisk: { disable: ['github-merge'] } })).toBe(
+      'runtime: codex\nhighRisk: {disable: [github-merge]}\n',
+    );
+    expect(
+      patchAgentYaml('highRisk: { disable: [github-merge] } # merges\n', {
+        highRisk: { disable: ['github-merge', 'aws-destroy'] },
+      }),
+    ).toBe('highRisk: {disable: [github-merge, aws-destroy]} # merges\n');
+    expect(
+      patchAgentYaml('highRisk:\n  # the merge bot\n  disable:\n    - github-merge\n', {
+        highRisk: { disable: ['aws-destroy'] },
+      }),
+    ).toBe('highRisk:\n  # the merge bot\n  disable: [aws-destroy]\n');
+    expect(
+      patchAgentYaml('runtime: codex\nhighRisk: { disable: [a] }\n', { highRisk: { disable: [] } }),
+    ).toBe('runtime: codex\n');
+    expect(
+      patchAgentYaml('extends: base\nhighRisk: { disable: [a] }\n', { highRisk: { disable: [] } }),
+    ).toContain('disable: []');
   });
 
   it('writes an egress list even when empty, never falling back to open egress', () => {

@@ -13,6 +13,7 @@ import {
   resolveAgent,
   type Runtime,
   runtimeSchema,
+  SOCIAL_CONNECTORS,
   workspaceName,
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
@@ -861,6 +862,7 @@ export class Hub extends EventEmitter<HubEvents> {
       ask: Object.entries(agent.approvals)
         .filter(([, mode]) => mode === 'ask')
         .map(([connector]) => connector),
+      auto: SOCIAL_CONNECTORS.filter((c) => agent.approvals[c] === 'auto'),
       workspaces: agent.workspaces.map((w) => ({
         name: workspaceName(w),
         path: w.path,

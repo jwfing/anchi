@@ -1,3 +1,4 @@
+import { autoPublishWarning } from '@anchi/core/publish';
 import type {
   AgentPatch,
   AgentSettings,
@@ -130,6 +131,9 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
     if (!before) out.push(`workspace ${w.path} (${w.mode === 'rw' ? 'read-write' : 'read-only'})`);
     else if (w.mode === 'rw' && before.mode !== 'rw') out.push(`write access to ${w.path}`);
   }
+  for (const id of patch.highRisk?.disable ?? []) {
+    if (!current.highRisk?.disable.includes(id)) out.push(`${id} without asking you`);
+  }
   return out;
 }
 
@@ -152,6 +156,15 @@ export async function confirmation(
       message: `Give @${p.agentId} more access?`,
       detail: `Its tasks will be able to use:\n\n${added.map((a) => `• ${a}`).join('\n')}`,
       button: 'Give access',
+    };
+  }
+  if (call.method === 'services.setMode') {
+    const p = call.params as { id?: unknown; mode?: unknown };
+    if (p.mode !== 'auto' || (p.id !== 'x' && p.id !== 'reddit')) return undefined;
+    return {
+      message: `Let agents post to ${p.id === 'x' ? 'X' : 'Reddit'} without asking?`,
+      detail: autoPublishWarning(p.id),
+      button: 'Post without asking',
     };
   }
   if (call.method === 'setup.prepare') {
