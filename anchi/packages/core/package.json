@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./sanitize": "./src/sanitize.ts"
+    "./sanitize": "./src/sanitize.ts",
+    "./welcome": "./src/welcome.ts"
   },
   "dependencies": {
     "@anchi/protocol": "workspace:*",

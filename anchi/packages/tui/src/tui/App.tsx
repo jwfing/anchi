@@ -73,17 +73,19 @@ import { completePath, type PathKind } from './pathcomplete.ts';
 import { ApprovalsView, TeamView, WelcomeView } from './UsabilityViews.tsx';
 import {
   agentTaskLines,
-  welcomeStep,
-  nextSetupAction,
-  runtimeReady,
   recoveryFor,
   continued,
   resultLines,
   setupPhase,
   turnActivity,
+} from './usability.ts';
+import {
+  welcomeStep,
+  nextSetupAction,
+  runtimeReady,
   suggestedRuntime,
   FIRST_TASK,
-} from './usability.ts';
+} from '@anchi/core';
 
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';

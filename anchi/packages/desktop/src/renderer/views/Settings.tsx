@@ -16,7 +16,7 @@ import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { call, message } from '../api.ts';
 
 export function SettingsView() {
-  const { act, server } = useApp();
+  const { act, server, setView } = useApp();
   const [status, setStatus] = useState<SetupStatus>();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const refresh = useCallback(() => {
@@ -29,7 +29,12 @@ export function SettingsView() {
 
   return (
     <main className="main page scroll">
-      <h1>Settings</h1>
+      <div className="row between">
+        <h1>Settings</h1>
+        <button type="button" className="btn" onClick={() => setView({ kind: 'welcome' })}>
+          Getting started
+        </button>
+      </div>
       <ServerCard />
       {status && (
         <>

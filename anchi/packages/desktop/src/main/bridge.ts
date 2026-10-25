@@ -30,6 +30,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'setup.importCodex',
   'setup.importClaude',
   'setup.importHermes',
+  'setup.prepare',
   'connectors.set',
   'connectors.remove',
   'builder.proposal',
@@ -59,6 +60,7 @@ export const NOTIFICATIONS: readonly (keyof Notifications)[] = [
   'oauth',
   'tasksDeleted',
   'approvals',
+  'setup',
 ];
 
 /** Checks a call from the window: an allowed method with a plain-object parameter. */
@@ -150,6 +152,16 @@ export async function confirmation(
       message: `Give @${p.agentId} more access?`,
       detail: `Its tasks will be able to use:\n\n${added.map((a) => `• ${a}`).join('\n')}`,
       button: 'Give access',
+    };
+  }
+  if (call.method === 'setup.prepare') {
+    const runtime = String((call.params as { runtime?: unknown }).runtime ?? '');
+    return {
+      message: 'Prepare the Anchi environment?',
+      detail:
+        `This starts or installs the Anchi VM on the server, its services and the ${runtime} runtime image, then unlocks the vault. The first install takes several minutes.\n\n` +
+        'The vault key (~/.config/anchi/vault.key on the server) is the only way to read the credentials you store. Back it up once it exists.',
+      button: 'Prepare',
     };
   }
   if (call.method === 'skills.remove') {

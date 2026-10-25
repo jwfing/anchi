@@ -17,6 +17,17 @@ The script bundles `anchi/packages/desktop` with esbuild and starts Electron. On
 
 Release packages do not include the app yet. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. In a source run, macOS shows the Anchi icon in the Dock but still names the app Electron in the menu bar; packaging will fix the name.
 
+## Getting started
+
+A window that has not finished the guide opens on Getting started, unless the server already has a ready runtime, an agent and a finished task. The guide has four stages, and Settings → Getting started opens it again:
+
+1. **Where Anchi runs:** this computer or a saved remote server (see Settings → Server).
+2. **Prepare the environment:** lists missing host tools with the command that installs them; otherwise Prepare runs `setup.prepare` for the suggested runtime (start or install the VM, its services and the runtime image, unlock the vault) and shows its output. A system dialog asks first and says to back up the vault key.
+3. **Connect a runtime:** the runtime cards of Settings.
+4. **Meet your first agent:** creates `@dev` (no connectors, no workspaces) on the suggested runtime, then offers three starter tasks; choosing one opens the agent's conversation.
+
+Skip for now leaves the guide until it is opened again.
+
 ## What it does
 
 | Area | What you can do |
@@ -32,7 +43,7 @@ Release packages do not include the app yet. The app keeps its window state, suc
 The app does not:
 
 - delete agents or tasks;
-- run setup steps or reset;
+- run single setup steps (`setup.run`) or reset;
 - stop the daemon;
 - import AWS credentials.
 
@@ -43,7 +54,7 @@ Use the TUI or CLI for these.
 - **Main process:** the Electron main process holds the daemon connection, as the CLI does: the local socket, or `anchi-bridge` over SSH for a remote server.
 - **The window:** it is sandboxed, with context isolation, no Node integration, a content security policy that loads nothing from the network, no navigation and no new windows.
 - **Calls from the window:** it reaches the main process through four calls. Daemon methods outside `DESKTOP_METHODS` (`packages/desktop/src/main/bridge.ts`) are refused there, which includes everything that deletes, resets or stops.
-- **Confirmations the window cannot give:** an agent settings change that gives the agent a new connector, a new workspace or write access to one is confirmed in a system dialog from the main process, which compares the change with the agent's current settings. Cancel there, and the change never reaches the daemon. Removing a skill is confirmed the same way. The window adds skills only from `https://github.com/` addresses; a folder on this computer comes from a system file dialog the main process opens, and only for the local server, since a remote server would read the path on its own disk.
+- **Confirmations the window cannot give:** an agent settings change that gives the agent a new connector, a new workspace or write access to one is confirmed in a system dialog from the main process, which compares the change with the agent's current settings. Cancel there, and the change never reaches the daemon. Removing a skill and preparing the environment (`setup.prepare`) are confirmed the same way. The window adds skills only from `https://github.com/` addresses; a folder on this computer comes from a system file dialog the main process opens, and only for the local server, since a remote server would read the path on its own disk.
 - **Agent text:**
   - It is sanitized: control characters, terminal escapes and bidirectional overrides are removed.
   - Its Markdown is drawn as React elements, never as HTML.

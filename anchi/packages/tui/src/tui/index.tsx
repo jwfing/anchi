@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DaemonClient } from '@anchi/daemon';
 import { render } from 'ink';
-import { welcomeStep } from './usability.ts';
+import { welcomeStep } from '@anchi/core';
 import { App, type AppProps } from './App.tsx';
 import { loadKeyMap, watchKeyMap } from './keyconfig.ts';
 import { captureMouse, MOUSE_OFF, MOUSE_ON, type MouseEvent } from './mouse.ts';

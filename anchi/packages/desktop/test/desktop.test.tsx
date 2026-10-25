@@ -19,6 +19,7 @@ import { TaskTurn } from '../src/renderer/views/Agent.tsx';
 import { settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
 import { ProbeNote, Runtimes, SecretForm } from '../src/renderer/views/Settings.tsx';
+import { stageFor } from '../src/renderer/views/Welcome.tsx';
 
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
 
@@ -31,7 +32,6 @@ describe('bridge', () => {
     expect(checkCall('setup.importHermes', {}).method).toBe('setup.importHermes');
     for (const method of [
       'daemon.shutdown',
-      'setup.prepare',
       'setup.reset',
       'setup.run',
       'agents.delete',
@@ -462,5 +462,33 @@ describe('servers', () => {
     expect(note({ kind: 'ok' })).toContain('Use box');
     expect(note({ kind: 'unreachable', detail: 'no route\u001b[31m' })).toContain('no route');
     expect(note({ kind: 'unreachable', detail: 'no route\u001b[31m' })).not.toContain('\u001b');
+  });
+});
+
+describe('getting started', () => {
+  it('prepares the environment only after the system dialog', async () => {
+    const sent: string[] = [];
+    const read = async (method: string) => void sent.push(method);
+    let asked = '';
+    await expect(
+      guardedCall('setup.prepare', { runtime: 'codex', confirm: true }, read, async (q) => {
+        asked = q.detail;
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(asked).toContain('vault.key');
+    expect(sent, 'refused: nothing prepared').toEqual([]);
+    for (const method of ['setup.run', 'setup.reset']) {
+      expect(() => checkCall(method, {})).toThrow(/does not call/);
+    }
+  });
+
+  it('maps where the daemon says the user is to the guide stage', () => {
+    expect(stageFor('environment')).toBe('prepare');
+    expect(stageFor('vault')).toBe('prepare');
+    expect(stageFor('runtime')).toBe('runtime');
+    expect(stageFor('agent')).toBe('start');
+    expect(stageFor('task')).toBe('start');
+    expect(stageFor('done')).toBe('done');
   });
 });
