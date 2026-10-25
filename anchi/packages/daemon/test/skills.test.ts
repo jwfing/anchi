@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parsePatch } from '../src/settings.ts';
 import { parseGitHubUrl, type SkillRemote, SkillStore } from '../src/skills.ts';
 
 function skillDir(files: Record<string, string>) {
@@ -62,6 +63,25 @@ describe('skills', () => {
     }
     expect(() => store.bundle(['big-one'])).not.toThrow();
     expect(() => store.bundle(['big-one', 'big-two'])).toThrow(/exceed 8 MB/);
+  });
+
+  it('refuses a bundle past the guest file limit', async () => {
+    const store = new SkillStore(mkdtempSync(join(tmpdir(), 'skills-')));
+    const files = (n: number) =>
+      Object.fromEntries([
+        ['SKILL.md', '---\nname: Many\ndescription: d\n---'],
+        ...Array.from({ length: n }, (_, i) => [`ref/${i}.md`, 'x']),
+      ]);
+    const ids = Array.from({ length: 12 }, (_, i) => `many-${i}`);
+    for (const id of ids) await store.add(skillDir(files(180)), id);
+    expect(() => store.bundle(ids.slice(0, 10))).not.toThrow();
+    expect(() => store.bundle(ids)).toThrow(/more than 2000 files/);
+  });
+
+  it('lets an agent hold a whole skill collection, within a bound', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `skill-${i}`);
+    expect(parsePatch({ skills: ids(55) }).skills).toHaveLength(55);
+    expect(() => parsePatch({ skills: ids(201) })).toThrow(/skills/);
   });
 
   it('adds each skill of a local collection and skips the broken ones', async () => {

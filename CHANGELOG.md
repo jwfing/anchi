@@ -19,6 +19,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- An agent can have up to 200 skills, so a whole collection such as pstack fits; 50 was refused with `Too big: expected array to have <=50 items`. Together an agent's skills stay within 8 MB and 2000 files, and assigning more names that limit instead of failing in the VM.
+
 - X connector reports HTTP 402 as `PROVIDER_PAYMENT_REQUIRED` with API billing guidance instead of a generic failure, and explains the 10–25 limit on search and mentions. Tools tell agents to identify web-search fallbacks as a different source. Run `anchi setup install`, restart the daemon and use a new task cell after updating.
 
 ## 0.3.5 — 2026-10-13
