@@ -15,10 +15,11 @@ not completed a security audit. Start with test accounts and non-sensitive proje
 support is experimental. Hermes has not been verified against a live endpoint; PostHog, Sentry,
 Firecrawl, Figma, Discord, X and Reddit have not yet been exercised against live accounts.
 
-![Anchi terminal team overview with example tasks](docs/assets/tui-team.svg)
+![Anchi desktop app: three agents, the developer's task conversation and a task's transcript](docs/assets/desktop.png)
 
-*Actual TUI rendering with synthetic example data; no live accounts.
-[Reproduce this preview](docs/assets/README.md).*
+*The desktop app against a stand-in daemon with synthetic example data; no live accounts.
+The same team in the terminal: [TUI preview](docs/assets/tui-team.svg).
+[Reproduce both](docs/assets/README.md).*
 
 ## What you can do
 

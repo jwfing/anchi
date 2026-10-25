@@ -1,4 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <title>Anchi</title>
+  <defs>
+    <radialGradient id="halo" cx="32" cy="42" r="13" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".95"/>
+      <stop offset=".18" stop-color="#f2ffe0" stop-opacity=".55"/>
+      <stop offset=".5" stop-color="#e2ffbf" stop-opacity=".15"/>
+      <stop offset="1" stop-color="#e2ffbf" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="32" cy="42" r="3.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".45" stop-color="#fff"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ray-h" x1="4" x2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#fff"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ray-v" x1="0" y1="30" x2="0" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#fff"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
   <path d="M30 7 9 42 30 57Z M34 7 55 42 34 57Z" fill="#c0e889"/>
+  <!-- A point of light where the gap crosses the widest line, shining out like a four-point star. -->
+  <circle cx="32" cy="42" r="13" fill="url(#halo)"/>
+  <path d="M4 42 32 41.35 60 42 32 42.65Z" fill="url(#ray-h)"/>
+  <path d="M32 30 32.45 42 32 54 31.55 42Z" fill="url(#ray-v)"/>
+  <circle cx="32" cy="42" r="3.8" fill="url(#core)"/>
 </svg>

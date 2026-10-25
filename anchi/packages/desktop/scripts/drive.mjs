@@ -5,7 +5,7 @@
 // Anchi window holds that profile's storage.
 // Steps: {"wait": ms} · {"waitFor": "css"} · {"click": "css"} · {"clickText": "text"}
 //        {"type": ["css", "text"]} · {"key": "Enter"} · {"eval": "js"} (its value is printed)
-//        {"shot": "file.png"} · {"size": [width, height]} · {"reload": true}
+//        {"shot": "file.png"} · {"size": [width, height, scale?]} · {"reload": true}
 //        {"drag": ["css", dx]} (a mouse drag from the element's centre, dx pixels across)
 //        {"wheel": ["css", dy]} (a mouse wheel turn over the element's centre, dy pixels down)
 import { spawn } from 'node:child_process';
@@ -114,7 +114,7 @@ try {
       await send('Emulation.setDeviceMetricsOverride', {
         width: step.size[0],
         height: step.size[1],
-        deviceScaleFactor: 1,
+        deviceScaleFactor: step.size[2] ?? 1,
         mobile: false,
       });
     }

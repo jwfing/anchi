@@ -25,12 +25,16 @@ when changing content, and keep the alternate-language metadata and sitemap in s
 
 ## Brand
 
-`dist/logo.svg` is the flat, split-diamond silhouette used in the header and
-footer. Its upper and lower triangles have a 7:3 height ratio, with a clear
-vertical gap between the two halves. `dist/favicon.svg` uses the same geometry
-on a dark tile. The hero animations use the same mark for the trusted gateway. All retain the lime accent,
-without facets or glow. The wordmark
-is live text so it stays crisp and accessible.
+`dist/logo.svg` is the split-diamond mark used in the header and footer. Its
+upper and lower triangles have a 7:3 height ratio, with a clear vertical gap
+between the two halves, and a point of light where the gap crosses the widest
+line, shining out as a four-point star. `dist/favicon.svg` is the desktop app's
+icon (`anchi/packages/desktop/assets/icon.svg`): the same mark on a dark tile.
+The hero animations still draw the flat mark, without the light, for the trusted
+gateway. The wordmark is live text so it stays crisp and accessible.
+
+`dist/desktop.png` is the desktop app screenshot with example data; see
+`docs/assets/README.md` to regenerate it.
 
 ## Terminal design
 
