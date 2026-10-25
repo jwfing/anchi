@@ -101,7 +101,7 @@ function Starters() {
   return (
     <div className="starter">
       <p className="strong">Describe the agent you want below, or start from an empty one:</p>
-      <div className="row gap wrap">
+      <div className="row gap wrap bottom">
         <label className="field">
           <span className="small muted">Agent id</span>
           <input
