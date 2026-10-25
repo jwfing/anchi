@@ -10,7 +10,15 @@ import {
   serverName,
   type ServerTarget,
 } from '@anchi/daemon/client';
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  type IpcMainInvokeEvent,
+  nativeImage,
+  session,
+  shell,
+} from 'electron';
 import { checkCall, externalUrl, NOTIFICATIONS } from './bridge.ts';
 import type { ServerState } from '../shared.ts';
 
@@ -132,7 +140,8 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     title: 'Anchi',
-    icon,
+    // X11 drops a window icon this large (the 1024 px dock image): give windows a small copy.
+    icon: nativeImage.createFromPath(icon).resize({ width: 128 }),
     backgroundColor: '#F4F5F7',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
