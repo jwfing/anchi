@@ -11,14 +11,15 @@ Anchi (安栖): a secured agent team
 
 Options:
   -V, --version                    output the version number
-  --server <target>                the server to use: local, instabox:<machine>
-                                   or ssh:<[user@]host> (default: ANCHI_SERVER,
+  --server <target>                the server to use: local, a name from anchi
+                                   server ls, instabox:<machine> or
+                                   ssh:<[user@]host> (default: ANCHI_SERVER,
                                    else the saved one, else local)
 
 Commands:
-  server [target]                  Show the server this computer uses, or save
-                                   one: local, instabox:<machine> or
-                                   ssh:<[user@]host>
+  server [server]                  List the saved servers, * before the one in
+                                   use, or use one: local, a saved name,
+                                   instabox:<machine> or ssh:<[user@]host>
   update [options]                 Update this installation to the latest
                                    release
   tui                              Open the full-screen client (starts the
@@ -58,10 +59,43 @@ Commands:
 ### `anchi server`
 
 ```text
-Usage: anchi server [options] [target]
+Usage: anchi server [options] [command] [server]
 
-Show the server this computer uses, or save one: local, instabox:<machine> or
-ssh:<[user@]host>
+List the saved servers, * before the one in use, or use one: local, a saved
+name, instabox:<machine> or ssh:<[user@]host>
+
+Commands:
+  ls                   List the saved servers, * before the one in use
+  add <name> <target>  Save a remote server under a short name:
+                       instabox:<machine> or ssh:<[user@]host>, any Debian or
+                       Ubuntu host SSH reaches with a key
+  rm <name>            Forget a saved server; local is used from then on if it
+                       was in use
+```
+
+#### `anchi server ls`
+
+```text
+Usage: anchi server ls [options]
+
+List the saved servers, * before the one in use
+```
+
+#### `anchi server add`
+
+```text
+Usage: anchi server add [options] <name> <target>
+
+Save a remote server under a short name: instabox:<machine> or
+ssh:<[user@]host>, any Debian or Ubuntu host SSH reaches with a key
+```
+
+#### `anchi server rm`
+
+```text
+Usage: anchi server rm [options] <name>
+
+Forget a saved server; local is used from then on if it was in use
 ```
 
 ### `anchi update`

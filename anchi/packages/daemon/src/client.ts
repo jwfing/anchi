@@ -2,10 +2,18 @@
 // bundlers that follow this entry leave the VM, the store and the cell code out.
 export { DaemonClient, Peer } from './rpc.ts';
 export {
+  addServer,
   callbackPort,
   chosenServer,
   connectRemote,
+  listServers,
   parseServer,
+  probeServer,
+  type ProbeResult,
+  type RemoteTarget,
+  removeServer,
+  resolveServer,
+  type SavedServer,
   savedServer,
   saveServer,
   serverName,
