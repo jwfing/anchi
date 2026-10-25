@@ -4,6 +4,8 @@ Anchi releases include standalone archives for Apple Silicon macOS and glibc Lin
 Each archive contains the Node runtime, bundled TUI and daemon, prebuilt cell runners, the
 Anchi skill for host-side agents (`skills/anchi`), VM
 installation resources, and license notices. Users need neither a checkout nor pnpm.
+Each platform also has a desktop app archive, `anchi-desktop-<target>.tar.gz`, which the
+installer adds with `--desktop` (see [Desktop app](../DESKTOP.md#install)).
 A release is a commit on `main` with a version, a changelog entry and the checks below.
 
 ## Build and publish
@@ -12,6 +14,9 @@ A release is a commit on `main` with a version, a changelog entry and the checks
 pnpm --dir anchi install --frozen-lockfile
 bash scripts/package-release.sh
 python3 scripts/check-release.py artifacts/releases/anchi-darwin-arm64.tar.gz
+node anchi/packages/desktop/scripts/package.mjs
+python3 scripts/check-desktop-release.py artifacts/releases/anchi-darwin-arm64.tar.gz \
+  artifacts/releases/anchi-desktop-darwin-arm64.tar.gz
 ```
 
 Build on the target platform; Linux produces `anchi-linux-x64.tar.gz`. The packaging script
@@ -19,7 +24,8 @@ uses the Node version pinned in `guest/cell.env`, verifies the official download
 and writes each archive plus its `.sha256` file under `artifacts/releases/`.
 
 `.github/workflows/release.yml` builds both platforms and exercises installation, upgrade,
-checksum rejection, PATH configuration, daemon startup and real TUI rendering. Manual
+checksum rejection, PATH configuration, daemon startup and real TUI rendering, then packages
+the desktop app and installs, updates and opens it (Linux under `xvfb-run`). Manual
 workflow runs produce downloadable CI artifacts without publishing. Pushing a `v<version>`
 tag matching `anchi/package.json` publishes a GitHub development release after both jobs pass.
 Release notes are generated from the exact dated version section of `CHANGELOG.md` by

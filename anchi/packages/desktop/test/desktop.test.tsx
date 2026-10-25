@@ -13,6 +13,7 @@ import type {
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
+import { mergePath, parseShellPath } from '../src/main/env.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
 import { count } from '../src/renderer/format.ts';
 import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
@@ -469,6 +470,23 @@ describe('skills', () => {
     expect(sent, 'refused: nothing removed').toEqual(['agents.list']);
     await guardedCall('skills.remove', { id: 'pdf' }, read, async () => true);
     expect(sent.at(-1)).toBe('skills.remove');
+  });
+});
+
+describe('packaged app PATH', () => {
+  it('reads the PATH a login shell printed, whatever else its startup files print', () => {
+    expect(parseShellPath('Welcome!\n__ANCHI_PATH__/a:/b__ANCHI_PATH__')).toBe('/a:/b');
+    expect(parseShellPath('zsh: command not found: nvm')).toBeUndefined();
+    expect(parseShellPath('__ANCHI_PATH____ANCHI_PATH__')).toBeUndefined();
+  });
+
+  it("keeps the app's PATH first, then the shell's, then the installer's, each once", () => {
+    expect(mergePath('/usr/bin:/bin', '/opt/homebrew/bin:/usr/bin:relative', '/home/u')).toBe(
+      '/usr/bin:/bin:/opt/homebrew/bin:/home/u/.local/bin:/usr/local/bin',
+    );
+    expect(mergePath('/usr/bin', undefined, '/home/u')).toBe(
+      '/usr/bin:/home/u/.local/bin:/opt/homebrew/bin:/usr/local/bin',
+    );
   });
 });
 
