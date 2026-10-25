@@ -137,6 +137,21 @@ async function confirm(question: Confirmation): Promise<boolean> {
     : await dialog.showMessageBox(options);
   return response === 1;
 }
+/**
+ * A skill folder on this computer, chosen in a native picker: the window never names a host path.
+ * A remote server would read the path on its own disk, so this is for the local server only.
+ */
+ipcMain.handle('anchi:addSkillFolder', async (event) => {
+  fromApp(event);
+  if (state.name !== 'local') throw new Error('add folders on the server with anchi skills add');
+  if (!client) throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
+  const options = { title: 'Add a skill folder', properties: ['openDirectory' as const] };
+  const picked = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  if (picked.canceled || !picked.filePaths[0]) return null;
+  return client.call('skills.add', { source: picked.filePaths[0] });
+});
 ipcMain.handle('anchi:server', (event) => {
   fromApp(event);
   return state;

@@ -16,6 +16,7 @@ const api: AnchiApi = {
   },
   setServer: (target) => ipcRenderer.invoke('anchi:setServer', target),
   openExternal: (url) => ipcRenderer.invoke('anchi:openExternal', url),
+  addSkillFolder: () => ipcRenderer.invoke('anchi:addSkillFolder'),
 };
 
 contextBridge.exposeInMainWorld('anchi', api);

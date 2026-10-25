@@ -36,7 +36,6 @@ describe('bridge', () => {
       'setup.run',
       'agents.delete',
       'tasks.delete',
-      'skills.remove',
       'agents.allowHost',
       'nope',
       42,
@@ -397,5 +396,52 @@ describe('agent settings', () => {
       prompt: { mode: 'append', text: 'Be thorough.' },
       workspaces: [{ path: 'notes', mode: 'rw' }],
     });
+  });
+});
+
+describe('skills', () => {
+  it('takes skill sources from GitHub only; host paths come from the folder picker', () => {
+    expect(
+      checkCall('skills.add', { source: 'https://github.com/anthropics/skills/tree/main/x' })
+        .method,
+    ).toBe('skills.add');
+    for (const source of [
+      '/etc',
+      '../x',
+      '~/.ssh',
+      'file:///etc/passwd',
+      'http://github.com/a/b',
+      'https://github.com.evil.example/a/b',
+      'https://user@github.com/a/b',
+      42,
+      undefined,
+    ]) {
+      expect(() => checkCall('skills.add', { source }), String(source)).toThrow(/github/);
+    }
+  });
+
+  it('removes a skill only after the dialog, naming the agents that list it', async () => {
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return method === 'agents.list'
+        ? [
+            { id: 'dev', skills: ['pdf'] },
+            { id: 'ops', skills: [] },
+          ]
+        : null;
+    };
+    let detail = '';
+    await expect(
+      guardedCall('skills.remove', { id: 'pdf' }, read, async (q) => {
+        detail = q.detail;
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(detail).toContain('@dev lists it');
+    expect(detail).not.toContain('@ops');
+    expect(sent, 'refused: nothing removed').toEqual(['agents.list']);
+    await guardedCall('skills.remove', { id: 'pdf' }, read, async () => true);
+    expect(sent.at(-1)).toBe('skills.remove');
   });
 });

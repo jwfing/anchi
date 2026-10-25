@@ -4,7 +4,9 @@ import {
   type ConnectorId,
   type ServiceConnectorId,
   type SetupStatus,
+  type SkillAddResult,
   type SkillInfo,
+  type SkillUpdate,
   TOKEN_CONNECTOR_IDS,
   type TokenConnectorId,
 } from '@anchi/protocol';
@@ -60,25 +62,168 @@ export function SettingsView() {
           </div>
         </>
       )}
-      <section className="card">
-        <h2>Skills</h2>
-        <p className="small muted">
-          Assign skills in each agent's file or the TUI's settings panel. Add or update them with
-          anchi skills.
-        </p>
-        {skills.map((s) => (
-          <div key={s.id} className="skill-row">
-            <span className="strong">{sanitizeLine(s.id)}</span>
-            <span className="small muted grow">{sanitizeLine(s.description)}</span>
-            <span className="mono small muted">
-              {sanitizeLine(s.source)}
-              {s.commit ? ` @ ${s.commit.slice(0, 7)}` : ''}
-            </span>
-          </div>
-        ))}
-        {!skills.length && <p className="small muted">No skills yet.</p>}
-      </section>
+      <Skills skills={skills} local={server.name === 'local'} onChange={refresh} />
     </main>
+  );
+}
+
+/** The skills on the server: add from GitHub or (local server) a folder, update, remove. */
+export function Skills({
+  skills,
+  local,
+  onChange,
+}: {
+  skills: SkillInfo[];
+  local: boolean;
+  onChange: () => void;
+}) {
+  const { act } = useApp();
+  const [url, setUrl] = useState('');
+  const [result, setResult] = useState<SkillAddResult>();
+  const [updates, setUpdates] = useState<Record<string, SkillUpdate>>({});
+  const added = (r: SkillAddResult | null | undefined) => {
+    if (!r) return;
+    setResult(r);
+    setUrl('');
+    onChange();
+  };
+  return (
+    <section className="card">
+      <h2>Skills</h2>
+      <p className="small muted">
+        Instructions agents can load. Assign them in an agent's Settings tab. A GitHub skill stays
+        at the commit it was added at until you update it.
+      </p>
+      <form
+        className="row gap wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act(() => call('skills.add', { source: url.trim() })).then(added);
+        }}
+      >
+        <label className="field grow">
+          <span className="sr-only">GitHub address of a skill or a collection</span>
+          <input
+            value={url}
+            spellCheck={false}
+            placeholder="https://github.com/owner/repo/tree/main/skills/name"
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={!url.trim()}>
+          Add from GitHub
+        </button>
+        {local && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void act(() => window.anchi.addSkillFolder()).then(added)}
+          >
+            Add a folder…
+          </button>
+        )}
+      </form>
+      {result && (
+        <div className="banner">
+          {result.added.length
+            ? `Added ${result.added.map((a) => sanitizeLine(a.id)).join(', ')}.`
+            : 'Nothing added.'}
+          {result.skipped.map((x, i) => (
+            <div key={i} className="small tone-warn">
+              Skipped: {sanitizeLine(x)}
+            </div>
+          ))}
+        </div>
+      )}
+      {skills.map((s) => {
+        const u = updates[s.id];
+        return (
+          <div key={s.id} className="skill-group">
+            <div className="skill-row">
+              <span className="strong">{sanitizeLine(s.id)}</span>
+              <span className="small muted grow ellipsis">{sanitizeLine(s.description)}</span>
+              <span className="mono small muted ellipsis skill-source">
+                {sanitizeLine(s.source)}
+                {s.commit ? ` @ ${s.commit.slice(0, 7)}` : ''}
+              </span>
+              {s.commit && (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() =>
+                    void act(() => call('skills.checkUpdate', { id: s.id })).then(
+                      (r) => r && setUpdates({ ...updates, [s.id]: r }),
+                    )
+                  }
+                >
+                  Check for update
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() =>
+                  void act(() => call('skills.remove', { id: s.id }), `${s.id} removed`).then(
+                    (r) => r !== undefined && onChange(),
+                  )
+                }
+              >
+                Remove
+              </button>
+            </div>
+            {u && (
+              <div className="drawer">
+                {u.upToDate ? (
+                  <span className="small">Up to date at {u.latest.slice(0, 7)}.</span>
+                ) : (
+                  <>
+                    <span className="small">
+                      {u.current?.slice(0, 7) ?? 'unknown'} → {u.latest.slice(0, 7)}:{' '}
+                      {[
+                        u.added.length && `${u.added.length} added`,
+                        u.changed.length && `${u.changed.length} changed`,
+                        u.removed.length && `${u.removed.length} removed`,
+                      ]
+                        .filter(Boolean)
+                        .join(', ') || 'no file changes'}
+                    </span>
+                    <div className="mono small muted">
+                      {[
+                        ...u.added.map((f) => `+ ${f}`),
+                        ...u.changed.map((f) => `~ ${f}`),
+                        ...u.removed.map((f) => `- ${f}`),
+                      ]
+                        .slice(0, 40)
+                        .map((line) => (
+                          <div key={line}>{sanitizeLine(line)}</div>
+                        ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-small drawer-save"
+                      onClick={() =>
+                        void act(
+                          () => call('skills.update', { id: s.id, commit: u.latest }),
+                          `${s.id} updated`,
+                        ).then((r) => {
+                          if (!r) return;
+                          const { [s.id]: _, ...rest } = updates;
+                          setUpdates(rest);
+                          onChange();
+                        })
+                      }
+                    >
+                      Update to {u.latest.slice(0, 7)}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {!skills.length && <p className="small muted">No skills yet.</p>}
+    </section>
   );
 }
 
