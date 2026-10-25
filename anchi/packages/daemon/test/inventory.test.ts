@@ -11,6 +11,7 @@ const inventory = {
   workspaces: { shared: true, dirs: [] },
   agents: [],
   images: [],
+  highRisk: [],
 };
 
 describe('inventory', () => {

@@ -110,11 +110,8 @@ class RedditBoundaryTests(ConnectorHarness):
         reddit_connector.connector_base.policy_client.require.side_effect = require
         request = {'op': 'submit', 'subreddit': 'test', 'title': 'Hello', 'text': 'Full draft', 'request_id': 'd' * 32}
         with patch('policy.DATABASE', Path(self.temp.name) / 'policy.db'), patch('policy.BOOT_ID', boot):
-            with policy.database() as conn:
-                conn.execute("INSERT INTO rules VALUES('reddit:dev','auto')")
-            for principal in ('reddit', 'reddit:dev'):
-                with self.assertRaisesRegex(Denied, 'REDDIT_WRITES_REQUIRE_APPROVAL'):
-                    policy.set_mode(principal, 'auto')
+            # No rule: the connector's default holds every post for the exact content.
+            self.assertEqual(policy.inspect_rules()['rules']['reddit'], 'ask')
             with self.assertRaisesRegex(Denied, 'APPROVAL_REQUIRED'):
                 reddit_connector.handle(request)
             grant = policy.inspect()['pending'][0]
@@ -144,6 +141,31 @@ class RedditBoundaryTests(ConnectorHarness):
         self.assertEqual(form['text'], ['Full draft'])
         self.assertNotIn('account_id', form)
         self.assertEqual(self.calls[0][2]['User-Agent'], 'linux:anchi-test:v1 (by /u/developer)')
+
+    def test_an_auto_rule_publishes_without_approval_for_that_agent_only(self):
+        boot = Path(self.temp.name) / 'boot'
+        boot.write_text('test-boot')
+        agent = {'name': 'dev'}
+
+        def require(action):
+            decision = policy.authorize(action, f'reddit:{agent["name"]}')
+            if decision['decision'] == 'ask':
+                raise Denied('APPROVAL_REQUIRED:' + decision['approval_id'])
+            policy.consume(action, f'reddit:{agent["name"]}', decision['grant_id'], decision['ticket'])
+
+        reddit_connector.connector_base.policy_client.require.side_effect = require
+        request = {'op': 'comment', 'parent': 't3_post', 'text': 'Reply', 'request_id': 'a' * 32}
+        with patch('policy.DATABASE', Path(self.temp.name) / 'policy.db'), patch('policy.BOOT_ID', boot):
+            policy.set_mode('reddit:dev', 'auto')
+            self.responses = [(200, b'{"json":{"errors":[],"data":{"things":[{"kind":"t1","data":{"name":"t1_r"}}]}}}')]
+            self.assertEqual(reddit_connector.handle(request), {'id': 't1_r'})
+            agent['name'] = 'ops'
+            with self.assertRaisesRegex(Denied, 'APPROVAL_REQUIRED'):
+                reddit_connector.handle({**request, 'request_id': 'b' * 32})
+            for bad in ('sometimes', 'AUTO'):
+                with self.subTest(mode=bad), self.assertRaisesRegex(Denied, '^BAD_MODE$'):
+                    policy.set_mode('reddit', bad)
+        self.assertEqual(len(self.calls), 1)
 
     def test_reconnect_invalidates_waiting_comment(self):
         gate = reddit_connector.connector_base.policy_client.require

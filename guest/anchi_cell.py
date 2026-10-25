@@ -65,6 +65,8 @@ startup_timeout_sec = 10
 tool_timeout_sec = 3600
 '''
 SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack', 'x', 'reddit')
+# Services whose writes ask by default; an agent's `approvals: {x: auto}` gives it an auto rule.
+SOCIAL_SERVICES = ('x', 'reddit')
 # Google services an agent may name an account of (`accounts:` in its file).
 ACCOUNT_SERVICES = ('gmail', 'drive')
 ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
@@ -872,19 +874,20 @@ def parse_workspaces(arg):
     return out
 
 
-def sync_policy_modes(agent, services, ask):
-    """The agent's own write mode per connector service: `ask` when its approvals ask, else its
-    rule is cleared and the connector's mode applies. Changed only when needed, since every
-    policy rule change revokes outstanding grants."""
+def sync_policy_modes(agent, services, ask, auto=()):
+    """The agent's own write mode per connector service: `ask` when its approvals ask, `auto`
+    when they say auto for X or Reddit, else its rule is cleared and the connector's mode
+    applies. Changed only when needed, since every policy rule change revokes outstanding grants."""
     if not services:
         return
     admin = ['/usr/bin/python3', str(SERVICES / 'policy_admin.py')]
     rules = json.loads(run(*admin, 'rules').stdout).get('rules', {})
     for service in services:
         principal = f'{service}:{agent}'
-        if service in ask and rules.get(principal) != 'ask':
-            run(*admin, 'mode', principal, 'ask')
-        elif service not in ask and principal in rules:
+        want = 'ask' if service in ask else 'auto' if service in auto else None
+        if want and rules.get(principal) != want:
+            run(*admin, 'mode', principal, want)
+        elif not want and principal in rules:
             run(*admin, 'clear', principal)
 
 
@@ -1145,6 +1148,7 @@ def cell_start(
     egress_arg='-',
     accounts_arg='-',
     high_risk_arg='-',
+    auto_arg='-',
 ):
     name(task, 'BAD_TASK')
     name(agent, 'BAD_AGENT')
@@ -1162,6 +1166,10 @@ def cell_start(
     egress_hosts = parse_egress(egress_arg)
     ask = [] if ask_arg == '-' else ask_arg.split(',')
     if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
+        raise Failure('BAD_APPROVALS')
+    # X and Reddit services whose writes this agent makes automatic.
+    auto = [] if auto_arg == '-' else auto_arg.split(',')
+    if not all(c in connectors and c in SOCIAL_SERVICES and c not in ask for c in auto) or len(set(auto)) != len(auto):
         raise Failure('BAD_APPROVALS')
     accounts = parse_accounts(accounts_arg, connectors)
     # High-risk entries that do not wait for approval in this cell; the proxy checks the ids.
@@ -1230,7 +1238,7 @@ def cell_start(
             }
         )
         identifiers = registration.get('identifiers', {})
-        sync_policy_modes(agent, [c for c in connectors if c in SERVICE_CONNECTORS], ask)
+        sync_policy_modes(agent, [c for c in connectors if c in SERVICE_CONNECTORS], ask, auto)
         home = agent_home(agent, uid)
         if runtime == 'codex':
             if not identifiers.get('codex_account_id'):
@@ -1589,7 +1597,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and 6 <= len(rest) <= 12:
+    if command == 'start' and 6 <= len(rest) <= 13:
         return cell_start(*rest)
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids], "approval_timeout_s"?: seconds} on stdin, from the

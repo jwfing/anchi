@@ -1,4 +1,4 @@
-import { MODEL_ID } from '@anchi/core';
+import { highRiskConnector, MODEL_ID } from '@anchi/core';
 import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
   AgentPatch,
@@ -25,6 +25,8 @@ export interface SettingsState {
   skills: string[];
   connectors: string[];
   workspaces: WorkspaceSetting[];
+  /** High-risk ids this agent does without approval. */
+  highRisk: string[];
 }
 
 /** Single values: typed in the panel, switched with Space, or (the prompt) edited in $EDITOR. */
@@ -40,7 +42,7 @@ export const MODEL = new RegExp(`^$|${MODEL_ID.source}`);
 export type SettingsRow =
   | { kind: 'header'; text: string }
   | {
-      kind: 'field' | 'skill' | 'connector' | 'workspace';
+      kind: 'field' | 'skill' | 'connector' | 'workspace' | 'highRisk';
       id: string;
       label: string;
       mark: string;
@@ -58,6 +60,7 @@ export const initialSettings = (data: AgentSettings): SettingsState => ({
   skills: [...data.current.skills],
   connectors: [...data.current.connectors],
   workspaces: data.current.workspaces.map((w) => ({ ...w })),
+  highRisk: [...data.current.highRisk.disable],
 });
 
 /** The prompt as compared and saved: one trailing newline when it has several lines. */
@@ -196,6 +199,32 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
     });
   }
   const f = data.fixed;
+  // The high-risk operations of the agent's connectors, and any exemption it already has.
+  const risky = inv.highRisk.filter(
+    (id) =>
+      state.connectors.includes(highRiskConnector(id)) ||
+      state.highRisk.includes(id) ||
+      cur.highRisk.disable.includes(id),
+  );
+  rows.push({ kind: 'header', text: 'HIGH-RISK · [x]: this agent does it without asking you' });
+  if (!risky.length) rows.push({ kind: 'header', text: "  none for the agent's connectors" });
+  for (const id of risky) {
+    const connector = highRiskConnector(id);
+    rows.push({
+      kind: 'highRisk',
+      id,
+      label: id,
+      mark: state.highRisk.includes(id) ? '[x]' : '[ ]',
+      note:
+        f.approvals[connector] === 'ask'
+          ? `waits anyway: approvals ${connector}: ask`
+          : f.highRiskGlobal?.includes(id)
+            ? 'no approval for every agent (settings.yaml)'
+            : state.connectors.includes(connector)
+              ? ''
+              : `${connector} is not a connector of the agent`,
+    });
+  }
   const fixed = (label: string, value: string) =>
     rows.push({ kind: 'header', text: `  ${label.padEnd(12)}${value}` });
   rows.push({ kind: 'header', text: 'OTHER SETTINGS · change them in the agent file' });
@@ -205,10 +234,21 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
   fixed('delegates', f.delegates.join(', ') || 'none');
   const approvals = Object.entries(f.approvals).map(([c, m]) => `${c}: ${m}`);
   fixed('approvals', approvals.join(', ') || 'none');
-  if (state.connectors.includes('x')) fixed('X posts', 'always ask for approval');
-  if (state.connectors.includes('reddit'))
-    fixed('Reddit posts/comments', 'always ask for approval');
-  if (f.highRisk) fixed('no approval', f.highRisk.join(', '));
+  for (const [id, what] of [
+    ['x', 'X posts'],
+    ['reddit', 'Reddit posts/comments'],
+  ] as const) {
+    if (!state.connectors.includes(id)) continue;
+    const mode = f.approvals[id];
+    fixed(
+      what,
+      mode === 'auto'
+        ? 'go out without approval (approvals)'
+        : mode === 'ask'
+          ? 'ask for approval'
+          : `follow the ${id} service mode (ask unless set to auto)`,
+    );
+  }
   fixed(
     'egress',
     f.egress ? f.egress.join(', ') || 'none (runtime and connectors only)' : 'any public host',
@@ -223,8 +263,9 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
 }
 
 /**
- * Space on a row: skills and connectors switch on and off; workspaces go off → ro → rw → off;
- * runtime, effort and prompt mode go to their next value. Text fields are typed in the panel.
+ * Space on a row: skills, connectors and high-risk exemptions switch on and off; workspaces go
+ * off → ro → rw → off; runtime, effort and prompt mode go to their next value. Text fields are
+ * typed in the panel.
  */
 export function toggleSetting(state: SettingsState, row: SettingsRow): SettingsState {
   if (row.kind === 'header') return state;
@@ -241,6 +282,7 @@ export function toggleSetting(state: SettingsState, row: SettingsRow): SettingsS
     list.includes(row.id) ? list.filter((x) => x !== row.id) : [...list, row.id];
   if (row.kind === 'skill') return { ...state, skills: flip(state.skills) };
   if (row.kind === 'connector') return { ...state, connectors: flip(state.connectors) };
+  if (row.kind === 'highRisk') return { ...state, highRisk: flip(state.highRisk) };
   const w = state.workspaces.find((x) => x.path === row.id);
   if (!w) return { ...state, workspaces: [...state.workspaces, { path: row.id, mode: 'ro' }] };
   if (w.mode === 'ro') {
@@ -275,5 +317,10 @@ export function settingsPatch(data: AgentSettings, state: SettingsState): AgentP
     patch.connectors = CONNECTORS.filter((c) => state.connectors.includes(c));
   }
   if (!same(state.workspaces, data.current.workspaces)) patch.workspaces = state.workspaces;
+  if (!same(sorted(state.highRisk), sorted(cur.highRisk.disable))) {
+    patch.highRisk = {
+      disable: data.inventory.highRisk.filter((id) => state.highRisk.includes(id)),
+    };
+  }
   return patch;
 }

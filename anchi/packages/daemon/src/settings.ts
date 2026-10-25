@@ -19,6 +19,7 @@ import {
   ConfigError,
   connectorSchema,
   type HomeLayout,
+  highRiskIdSchema,
   idSchema,
   patchAgentYaml,
   resolveAgent,
@@ -48,6 +49,7 @@ const patchSchema = z.strictObject({
   skills: z.array(idSchema).max(50).optional(),
   connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
+  highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
 });
 
 /** The fields a patch may change, for messages. */
@@ -56,9 +58,14 @@ export const PATCH_FIELDS = Object.keys(patchSchema.shape);
 export function parsePatch(raw: unknown): AgentPatch {
   const parsed = patchSchema.safeParse(raw);
   if (!parsed.success) throw new Error(`invalid settings: ${z.prettifyError(parsed.error)}`);
-  const { skills, connectors, workspaces } = parsed.data;
+  const { skills, connectors, workspaces, highRisk } = parsed.data;
   const unique = (l?: string[]) => !l || new Set(l).size === l.length;
-  if (!unique(skills) || !unique(connectors) || !unique(workspaces?.map((w) => w.path))) {
+  if (
+    !unique(skills) ||
+    !unique(connectors) ||
+    !unique(workspaces?.map((w) => w.path)) ||
+    !unique(highRisk?.disable)
+  ) {
     throw new Error('invalid settings: an entry appears twice');
   }
   return parsed.data;
@@ -74,6 +81,7 @@ const EDITABLE = [
   'skills',
   'connectors',
   'workspaces',
+  'highRisk',
 ] as const;
 
 /** One line per trigger, for display. */
@@ -112,6 +120,7 @@ export function settingsView(
         mode: w.mode ?? 'ro',
         ...(w.name ? { name: w.name } : {}),
       })),
+      highRisk: { disable: [...(agent.highRisk?.disable ?? [])] },
     },
     inherited,
     fixed: {
@@ -122,7 +131,6 @@ export function settingsView(
       delegates: agent.delegates ?? [],
       triggers: (agent.triggers ?? []).map(triggerLine),
       approvals: { ...agent.approvals },
-      ...(agent.highRisk?.disable?.length ? { highRisk: [...agent.highRisk.disable] } : {}),
       egress: agent.egress ?? null,
       ...(agent.accounts && Object.keys(agent.accounts).length
         ? { accounts: { ...agent.accounts } as Record<string, string> }
@@ -204,8 +212,19 @@ export function updateAgentFile(
   const next = patchAgentYaml(text, patch);
   const errors: string[] = [];
   const warnings: string[] = [];
+  let before: string[] = [];
+  try {
+    before = resolveAgent(id, layout).highRisk.disable;
+  } catch {
+    // A broken file exempts nothing yet.
+  }
   try {
     const agent = resolveAgent(id, layout, next);
+    // The user confirms the diff, so say which approvals it gives up.
+    const added = agent.highRisk.disable.filter((h) => !before.includes(h));
+    if (added.length) {
+      warnings.push(`@${id} does ${added.join(', ')} without asking you (highRisk)`);
+    }
     if (opts.inventory) {
       const found = checkReferences(agent, opts.inventory, opts.workspaceRoot ?? '');
       errors.push(...found.errors);

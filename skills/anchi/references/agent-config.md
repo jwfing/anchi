@@ -13,10 +13,10 @@ The file name is the id: 1–40 lowercase letters, digits or `-`. Unknown fields
 | `model` | runtime default | e.g. `gpt-5.5` (Codex), `claude-sonnet-5-5` or `claude-opus-5-5` (Claude Code), any model of the stored endpoint (Hermes), such as `nousresearch/hermes-4-405b`. A letter or digit first, then letters, digits and `. _ - : / @ +` |
 | `effort` | runtime default | `low`, `medium`, `high`, `xhigh` (Codex only) |
 | `prompt` | `{mode: append, text: ''}` | `text`, or `file` relative to this file. `mode: replace` replaces the runtime's base instructions (Hermes: the prompt becomes its persona either way) |
-| `connectors` | `[]` | Any of `github`, `aws`, `linear`, `posthog`, `sentry`, `firecrawl`, `figma`, `discord`, `gmail`, `drive`, `notion`, `slack`, `x`, `reddit` (X and Reddit publishing always require approval) |
+| `connectors` | `[]` | Any of `github`, `aws`, `linear`, `posthog`, `sentry`, `firecrawl`, `figma`, `discord`, `gmail`, `drive`, `notion`, `slack`, `x`, `reddit` (X and Reddit publishing asks for approval unless set to `auto`) |
 | `accounts` | `{}` | Named Google account for `gmail` or `drive` (`{gmail: work}`), which must also be in `connectors`; `default` otherwise |
-| `approvals` | `{}` | `{github: ask}` holds every write of that connector for the user |
-| `highRisk` | none | `{disable: [github-merge]}`: these high-risk operations no longer wait for this agent |
+| `approvals` | `{}` | `{github: ask}` holds every write of that connector for the user. `{x: auto}` or `{reddit: auto}` lets this agent post without approval, even while the service asks |
+| `highRisk` | none | `{disable: [github-merge]}`: these high-risk operations no longer wait for this agent; also editable in the settings panel |
 | `egress` | open | Host patterns the cells may reach besides the runtime's and connectors' hosts, e.g. `[registry.npmjs.org, '*.pypi.org']` |
 | `workspaces` | `[]` | `{path, mode?, name?}` under `~/AnchiWorkspaces`; `mode` is `ro` (default) or `rw` |
 | `skills` | `[]` | Installed skill ids (`anchi skills`); a missing one fails the task when it starts |

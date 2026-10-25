@@ -13,7 +13,7 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 | Approvals | ^X 5 | Every write waiting for your decision; ↑ ↓ choose, y / n select, Enter confirms, a the full dialog, o the write's task |
 | Configure → Runtimes | ^X 1 | s start the VM, I install/update, u unlock the vault, V new vault, W share workspaces, i Codex, c Claude Code, h Hermes, r refresh |
 | Configure → Skills | ^X 1, ↓ | One line per skill: ↑ ↓ choose, PgUp PgDn page, Home End (g G) first and last; a add (directory or GitHub URL), u update after reviewing which files are added, changed or removed, d remove |
-| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client, x X native app Client ID, Shift+R Reddit installed app client; X and Reddit publishing always ask |
+| Configure → Connectors | ^X 1, ↓↓ | Enter/c connect, g GitHub from `gh`, p AWS profile, m service writes auto/ask, d disconnect, a another Google account, o Google OAuth client, x X native app Client ID, Shift+R Reddit installed app client; m on X or Reddit asks for confirmation before posts go out without approval |
 | Configure → Usage | ^X 1, ↓↓↓ | Tokens and subscription limits; p period, b group by agent, model, runtime or day, r refresh |
 | Configure → Access | ^X 1, ↓↓↓↓ | Hosts, injections and refusals per agent; p period, r refresh |
 | Agents | ^X 2 | An agent's view lists its tasks; its input starts a new task |
@@ -27,7 +27,7 @@ The leader key is **Ctrl+X** (written **^X**): every action has a leader binding
 | Tab | Switch between the sidebar and the main pane |
 | ^N, ^P | Next / previous sidebar item |
 | ^X n | New task for the agent shown |
-| ^X s | The agent's settings panel (Space selects, Enter reviews the diff) |
+| ^X s | The agent's settings panel (Space selects, also high-risk exemptions; Enter reviews the diff) |
 | ^X N | Create a starter agent without a model call; choose runtime/id, then review YAML |
 | ^X a | Review a write waiting for approval (y / n, Enter confirms) |
 | ^X c, ^X r | Cancel the task (after confirmation); run a failed or cancelled task again |

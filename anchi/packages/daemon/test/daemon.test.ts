@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as setupModule from '../src/setup.ts';
 import { HostLogins } from '../src/host-logins.ts';
 import { ServiceSetup } from '../src/services.ts';
-import { connectorSchema, homeLayout } from '@anchi/core';
+import { connectorSchema, HIGH_RISK_IDS, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
 import type { QuotaInfo, StoredEvent, TaskRow } from '@anchi/protocol';
 import {
@@ -418,9 +418,15 @@ describe('daemon tasks', () => {
       expect(await client.call('services.xLogin')).toEqual({
         url: 'https://x.com/i/oauth2/authorize?test',
       });
-      await expect(client.call('services.setMode', { id: 'x', mode: 'auto' })).rejects.toThrow(
-        'X_WRITES_REQUIRE_APPROVAL',
-      );
+      const execs = transport.execs.length;
+      for (const mode of ['always', 'AUTO', ''] as never[]) {
+        await expect(client.call('services.setMode', { id: 'x', mode })).rejects.toThrow(
+          'mode is auto or ask',
+        );
+      }
+      expect(transport.execs).toHaveLength(execs);
+      await client.call('services.setMode', { id: 'x', mode: 'auto' });
+      expect(transport.execs.at(-1)!.args.slice(-3)).toEqual(['mode', 'x', 'auto']);
     } finally {
       login.mockRestore();
     }
@@ -467,9 +473,15 @@ describe('daemon tasks', () => {
       expect(await client.call('services.redditLogin')).toEqual({
         url: 'https://www.reddit.com/api/v1/authorize?test',
       });
-      await expect(client.call('services.setMode', { id: 'reddit', mode: 'auto' })).rejects.toThrow(
-        'REDDIT_WRITES_REQUIRE_APPROVAL',
-      );
+      const execs = transport.execs.length;
+      for (const mode of ['always', 'AUTO', ''] as never[]) {
+        await expect(client.call('services.setMode', { id: 'reddit', mode })).rejects.toThrow(
+          'mode is auto or ask',
+        );
+      }
+      expect(transport.execs).toHaveLength(execs);
+      await client.call('services.setMode', { id: 'reddit', mode: 'auto' });
+      expect(transport.execs.at(-1)!.args.slice(-3)).toEqual(['mode', 'reddit', 'auto']);
     } finally {
       login.mockRestore();
     }
@@ -1457,6 +1469,24 @@ describe('daemon tasks', () => {
     await client.call('tasks.wait', { taskId: t.id });
     expect(transport.starts.at(-1)!.slice(-2)).toEqual(['-', 'github-merge']);
     const plain = await client.call('tasks.create', { agentId: 'dev', text: 'hi' });
+    await client.call('tasks.wait', { taskId: plain.id });
+    expect(transport.starts.at(-1)).toHaveLength(13);
+  });
+
+  it("makes an agent's X and Reddit posts automatic only where its approvals say auto", async () => {
+    write(
+      'agents/poster.yaml',
+      'runtime: codex\nconnectors: [x, reddit, notion]\napprovals: { x: auto, reddit: ask, notion: auto }\n',
+    );
+    write('agents/asker.yaml', 'runtime: codex\nconnectors: [x, reddit]\n');
+    const { client } = await start();
+    const t = await client.call('tasks.create', { agentId: 'poster', text: 'post it' });
+    await client.call('tasks.wait', { taskId: t.id });
+    const started = transport.starts.at(-1)!;
+    // ASK, then the empty high-risk list and AUTO: X only, never Notion or an asking Reddit.
+    expect(started[9]).toBe('reddit');
+    expect(started.slice(-2)).toEqual(['-', 'x']);
+    const plain = await client.call('tasks.create', { agentId: 'asker', text: 'draft it' });
     await client.call('tasks.wait', { taskId: plain.id });
     expect(transport.starts.at(-1)).toHaveLength(13);
   });
@@ -2529,6 +2559,7 @@ describe('agent settings', () => {
       skills: [],
       connectors: ['github'],
       workspaces: [],
+      highRisk: { disable: [] },
     });
     expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
@@ -2560,6 +2591,55 @@ describe('agent settings', () => {
     await expect(
       client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base }),
     ).rejects.toThrow(/changed since you reviewed it/);
+  });
+
+  it("edits an agent's high-risk exemptions, refuses unknown ids and shows the global ones", async () => {
+    write('settings.yaml', 'highRisk: { disable: [github-merge] }\n');
+    write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
+    const { client } = await start();
+    const before = await client.call('agents.settings', { agentId: 'dev' });
+    expect(before.current.highRisk).toEqual({ disable: [] });
+    expect(before.fixed.highRiskGlobal).toEqual(['github-merge']);
+    expect(before.inventory.highRisk).toEqual([...HIGH_RISK_IDS]);
+    const file = readFileSync(join(root, 'agents/dev.yaml'), 'utf8');
+    for (const [highRisk, message] of [
+      [{ disable: ['merge-everything'] }, /invalid settings/],
+      [{ disable: ['GITHUB-MERGE'] }, /invalid settings/],
+      [['github-merge'], /invalid settings/],
+      [{ disable: ['github-merge'], enable: ['aws-destroy'] }, /invalid settings/],
+      [{ disable: ['github-merge', 'github-merge'] }, /twice/],
+    ] as const) {
+      await expect(
+        client.call('agents.update', { agentId: 'dev', patch: { highRisk } as never }),
+      ).rejects.toThrow(message);
+    }
+    const patch = { highRisk: { disable: ['git-ref-delete'] } };
+    const preview = await client.call('agents.update', { agentId: 'dev', patch });
+    expect(preview.errors).toEqual([]);
+    expect(preview.warnings).toEqual(['@dev does git-ref-delete without asking you (highRisk)']);
+    expect(preview.diff).toMatch(/^\+ highRisk: \{disable: \[git-ref-delete\]\}$/m);
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(file);
+    await client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base });
+    const text = readFileSync(join(root, 'agents/dev.yaml'), 'utf8');
+    expect(text).toMatch(/^# my developer\nruntime: codex\nconnectors: \[github\] # pushes\n/);
+    expect((await client.call('agents.settings', { agentId: 'dev' })).current.highRisk).toEqual({
+      disable: ['git-ref-delete'],
+    });
+    const t = await client.call('tasks.create', { agentId: 'dev', text: 'go' });
+    await client.call('tasks.wait', { taskId: t.id });
+    expect(transport.starts.at(-1)!.slice(-2)).toEqual(['-', 'git-ref-delete']);
+    const off = await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { highRisk: { disable: [] } },
+    });
+    expect(off.warnings).toEqual([]);
+    await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { highRisk: { disable: [] } },
+      apply: true,
+      base: off.base,
+    });
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(file);
   });
 
   it('saves every connector at once: the limit follows the schema', async () => {
@@ -2641,6 +2721,16 @@ describe('agent settings', () => {
     expect(risky.warnings).toContain(
       'the agent does github-merge, git-ref-delete without asking you (highRisk)',
     );
+    const poster = daemon.proposals.add(
+      parseBlocks(
+        '```anchi-agent id=rev\nruntime: codex\nconnectors: [x, reddit]\napprovals: { x: auto, reddit: ask }\n```',
+      ),
+    )!;
+    expect(poster.errors).toEqual([]);
+    expect(poster.warnings).toContain(
+      'the agent posts to X under your account without asking you (approvals)',
+    );
+    expect(poster.warnings.join(' ')).not.toMatch(/Reddit/);
 
     const proposal = daemon.proposals.add(
       parseBlocks('```anchi-agent id=rev\nruntime: codex # ok\n```'),

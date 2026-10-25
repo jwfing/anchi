@@ -26,6 +26,7 @@ import {
   resolvedAgentSchema,
   type Runtime,
   runtimeSchema,
+  SOCIAL_CONNECTORS,
 } from '@anchi/core';
 import type { BuilderProposal, SetupStatus } from '@anchi/protocol';
 import { z } from 'zod';
@@ -55,13 +56,14 @@ An agent is a YAML file. Fields:
   (credentials injected outside the agent's cell) and
   gmail, drive, notion, slack, x, reddit (served by trusted services). Reddit can list/search/read
   posts, read comments and publish self posts or comments. Draft in conversation first; reddit_submit
-  and reddit_comment always require approval of the full content, destination and account. Never
-  set approvals.reddit to auto. Reddit requires approved Data API access and respects subreddit rules.
-  X provides bounded post reads,
-  recent search, mentions and text publishing. Draft in conversation; x_post always asks for
-  approval of the connected account and full text. Never set approvals.x to auto. X bills API
-  usage; prefer small scheduled digests to frequent polling. Never put tokens anywhere. Grant
-  only what the job needs.
+  and reddit_comment ask for approval of the full content, destination and account unless Reddit
+  writes are automatic. Reddit requires approved Data API access and respects subreddit rules.
+  X provides bounded post reads, recent search, mentions and text publishing. Draft in
+  conversation; x_post asks for approval of the connected account and full text unless X writes
+  are automatic. Set approvals.x or approvals.reddit to auto only when the user asks for this
+  agent to post without approval, and tell them it then posts publicly under their account, also
+  from triggered tasks that read outside content. X bills API usage; prefer small scheduled
+  digests to frequent polling. Never put tokens anywhere. Grant only what the job needs.
 - accounts (optional): which signed-in Google account gmail or drive use, e.g.
   { gmail: work }; the inventory lists them. Without it, the account named default.
 - skills: ids of installed skills the agent can use (optional), e.g. [code-review]. Each turn
@@ -131,10 +133,10 @@ skills: [code-review, test]
 \`\`\`
 
 A patch may set name, description, runtime, model, effort, prompt ({ mode, text }), skills,
-connectors and workspaces. Lists replace the whole list: repeat the entries to keep. An empty
-model, effort or description ('') removes it. For any other field (triggers, approvals,
-highRisk, egress, delegates, image), send a complete anchi-agent block with the whole agent
-instead.
+connectors, workspaces and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
+the entries to keep. An empty model, effort or description ('') removes it. For any other field
+(triggers, approvals, egress, delegates, image), send a complete anchi-agent block with the
+whole agent instead.
 The inventory shows each agent's file when the user's message names its id; otherwise it
 shows a summary, so ask the user to name the agent if you need to see its prompt.`;
 
@@ -247,6 +249,13 @@ export function makeProposal(
       const disabled = resolved.data.highRisk.disable;
       if (disabled.length) {
         warnings.push(`the agent does ${disabled.join(', ')} without asking you (highRisk)`);
+      }
+      for (const c of SOCIAL_CONNECTORS) {
+        if (resolved.data.approvals[c] === 'auto') {
+          warnings.push(
+            `the agent posts to ${c === 'x' ? 'X' : 'Reddit'} under your account without asking you (approvals)`,
+          );
+        }
       }
       if (refs) {
         const found = checkReferences(resolved.data, refs.inventory, refs.workspaceRoot);

@@ -21,6 +21,11 @@ export const PROXY_CONNECTORS = [
 ] as const;
 /** Connectors served by trusted VM services, reached through per-cell sockets. */
 export const SERVICE_CONNECTORS = ['gmail', 'drive', 'notion', 'slack', 'x', 'reddit'] as const;
+/**
+ * Services that publish under the user's public identity. Their writes ask unless the service's
+ * mode or the agent's `approvals` says `auto`; an agent's `auto` applies even while the service asks.
+ */
+export const SOCIAL_CONNECTORS = ['x', 'reddit'] as const;
 export const connectorSchema = z.enum([...PROXY_CONNECTORS, ...SERVICE_CONNECTORS]);
 export type Connector = z.infer<typeof connectorSchema>;
 
@@ -36,14 +41,7 @@ const accountsSchema = z.partialRecord(z.enum(ACCOUNT_CONNECTORS), accountNameSc
 export const DEFAULT_MAX_TASKS = 3;
 
 export const approvalModeSchema = z.enum(['auto', 'ask']);
-const approvalsSchema = z
-  .partialRecord(connectorSchema, approvalModeSchema)
-  .refine((value) => value.x !== 'auto', {
-    message: 'X posts always require approval; use x: ask',
-  })
-  .refine((value) => value.reddit !== 'auto', {
-    message: 'Reddit posts and comments always require approval; use reddit: ask',
-  });
+const approvalsSchema = z.partialRecord(connectorSchema, approvalModeSchema);
 export type ApprovalMode = z.infer<typeof approvalModeSchema>;
 /** Ids of the egress proxy's high-risk entries, as in `HIGH_RISK` of services/egress_rules.py. */
 export const HIGH_RISK_IDS = [
@@ -223,7 +221,8 @@ export const agentLayerSchema = z.strictObject({
   skills: z.array(idSchema).max(50).optional(),
   /**
    * Per connector, `ask` holds the agent's writes for approval: through the proxy for the proxy
-   * connectors, through the policy service (per agent) for gmail, drive, notion, slack and x. X always asks.
+   * connectors, through the policy service (per agent) for the connector services. For x and
+   * reddit, `auto` lets the agent publish without approval even while the service asks.
    */
   approvals: approvalsSchema.optional(),
   /**

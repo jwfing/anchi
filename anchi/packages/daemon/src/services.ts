@@ -122,8 +122,9 @@ export class ServiceSetup {
         account: typeof s.account === 'string' ? s.account : null,
         reauthRequired: s.reauth_required === true,
         revocationPending: s.revocation_pending === true,
+        // Policy reports each service's mode; X and Reddit ask without a rule.
         mode:
-          id === 'x' || id === 'reddit' || rules[id] === 'ask'
+          (rules[id] ?? (id === 'x' || id === 'reddit' ? 'ask' : 'auto')) === 'ask'
             ? ('ask' as const)
             : ('auto' as const),
         accounts,
@@ -171,10 +172,11 @@ export class ServiceSetup {
     ]);
   }
 
-  /** `auto`: standing authorization. `ask`: every write waits for approval in the TUI. */
+  /**
+   * `auto`: standing authorization. `ask`: every write waits for approval in the TUI. For X and
+   * Reddit, `auto` lets agents publish under the user's account without approval.
+   */
   async setMode(id: ServiceConnectorId, mode: 'auto' | 'ask'): Promise<void> {
-    if ((id === 'x' || id === 'reddit') && mode !== 'ask')
-      throw new Error(`${id.toUpperCase()}_WRITES_REQUIRE_APPROVAL`);
     await json(this.exec, [`${SERVICES}/policy_admin.py`, 'mode', id, mode]);
   }
 

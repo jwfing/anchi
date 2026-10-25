@@ -13,6 +13,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- X and Reddit writes can be set to `auto`: `anchi setup service-mode x auto` (or `reddit`, or **m** in Connectors after a confirmation) for every agent, or `approvals: {x: auto}` in one agent's file, which applies even while the service asks. In `auto`, agents post publicly under your account without approval, including tasks a trigger starts that read untrusted content; the default stays `ask` with exact-content approval. Needs `anchi setup install`: until then the VM's policy service refuses `auto` and an older guest refuses the cell of an agent with `approvals: {x: auto}`.
+- The agent settings panel (**^X s**) lists the high-risk operations of the agent's connectors; **Space** exempts one for that agent (`highRisk: {disable: [...]}` in its file), and the review shows each new exemption as a warning. `agents.update` and builder patches accept `highRisk`; unknown ids are refused.
 - Guest installation runs on any Debian or Ubuntu machine: `guest/bootstrap.sh` installs its own packages, and the egress proxy's DNS rule follows the resolvers in `/etc/resolv.conf` instead of assuming systemd-resolved. Needs `anchi setup install`.
 
 ### Fixed

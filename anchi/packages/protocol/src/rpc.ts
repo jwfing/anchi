@@ -387,6 +387,11 @@ export interface AgentPatch {
   skills?: string[];
   connectors?: string[];
   workspaces?: WorkspaceSetting[];
+  /**
+   * High-risk operations this agent does without approval, by id (`github-merge`), as in its
+   * file. The list replaces the file's; `[]` removes it. Unknown ids are refused.
+   */
+  highRisk?: { disable: string[] };
 }
 
 /** An agent's editable settings, as resolved (templates included). */
@@ -401,6 +406,8 @@ export interface AgentSettingValues {
   skills: string[];
   connectors: string[];
   workspaces: WorkspaceSetting[];
+  /** High-risk operations this agent does without approval (`highRisk.disable`), by id. */
+  highRisk: { disable: string[] };
 }
 
 /** Settings the panel shows but does not edit (they are changed in the agent file). */
@@ -415,8 +422,11 @@ export interface FixedSettings {
   /** One line per trigger. */
   triggers: string[];
   approvals: Record<string, string>;
-  /** High-risk operations that do not wait for approval for this agent, by id. */
-  highRisk?: string[];
+  /**
+   * High-risk operations that do not wait for approval for any agent, by id: `highRisk.disable`
+   * in ~/.anchi/settings.yaml, changed in that file.
+   */
+  highRiskGlobal?: string[];
   /** null: any public host. */
   egress: string[] | null;
   /** Named Google accounts of gmail and drive (`default` when absent). */
@@ -439,6 +449,8 @@ export interface Inventory {
   workspaces: { shared: boolean | null; dirs: string[] };
   agents: string[];
   images: string[];
+  /** Ids of the high-risk operations an agent can do without approval (`highRisk.disable`). */
+  highRisk: string[];
 }
 
 /** An agent's (or a builder proposal's) current settings and what is available. */
@@ -753,6 +765,11 @@ export interface Methods {
   'services.setToken': [{ id: ServiceConnectorId; token: string }, null];
   /** Gmail and Drive: one account (`default` when omitted). */
   'services.disconnect': [{ id: ServiceConnectorId; account?: string }, null];
+  /**
+   * A service's write mode for every agent; an agent's `approvals: {<id>: ask}` still holds its
+   * writes. X and Reddit default to `ask` (an agent's `auto` overrides it for that agent); their
+   * `auto` lets agents publish under the user's account without approval.
+   */
   'services.setMode': [{ id: ServiceConnectorId; mode: 'auto' | 'ask' }, null];
   /** The Google Cloud Desktop OAuth client JSON (its text), for Gmail and Drive. */
   'services.googleClient': [{ json: string }, null];

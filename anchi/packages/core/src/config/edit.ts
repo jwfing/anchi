@@ -1,5 +1,5 @@
 import { Document, isMap, isNode, isScalar, parseDocument, Scalar, type YAMLMap } from 'yaml';
-import type { Connector, Runtime, Workspace } from './schema.ts';
+import type { Connector, HighRiskId, Runtime, Workspace } from './schema.ts';
 
 /** Where new scalar keys go: after the last of these that precede them. */
 const ORDER = ['id', 'name', 'description', 'extends', 'runtime', 'model', 'effort', 'prompt'];
@@ -17,6 +17,8 @@ export interface AgentPatch {
   skills?: string[];
   connectors?: Connector[];
   workspaces?: Workspace[];
+  /** Written as `highRisk: { disable: [...] }`; an empty list removes it. */
+  highRisk?: { disable: HighRiskId[] };
   /** Set by the daemon only (removing a deleted agent); clients cannot send it. */
   delegates?: string[];
   /** Set by the daemon only (allowing a refused host); never emptied into open egress. */
@@ -117,6 +119,15 @@ export function patchAgentYaml(text: string, patch: AgentPatch): string {
     const node = doc.createNode(patch.egress);
     node.flow = true;
     replace(['egress'], node);
+  }
+  if (patch.highRisk) {
+    const ids = patch.highRisk.disable;
+    if (!ids.length && !inherits) doc.delete('highRisk');
+    else if (isMap(doc.get('highRisk', true))) {
+      const node = doc.createNode(ids);
+      node.flow = true;
+      replace(['highRisk', 'disable'], node);
+    } else replace(['highRisk'], doc.createNode({ disable: ids }, { flow: true }));
   }
   // `ro` is the default mode; name only when it differs from the path's last segment.
   set(

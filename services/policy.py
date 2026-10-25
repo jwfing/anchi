@@ -91,6 +91,8 @@ def normalize(action, principal):
 
 PRINCIPALS = tuple(connectors.CONNECTORS)
 MODES = ('auto', 'ask')
+# Publish under the user's public identity: writes ask until a rule says auto; reads are automatic.
+SOCIAL = ('x', 'reddit')
 
 
 def mode(conn, principal):
@@ -99,7 +101,7 @@ def mode(conn, principal):
     if row:
         return row['mode']
     # An agent without its own rule follows its connector's.
-    return mode(conn, base(principal)) if ':' in principal else ('ask' if principal in ('x', 'reddit') else 'auto')
+    return mode(conn, base(principal)) if ':' in principal else ('ask' if principal in SOCIAL else 'auto')
 
 
 def inspect_rules():
@@ -135,12 +137,10 @@ def authorize(action, principal):
             raise Denied('POLICY_DENIED')
         # Standing authorization covers reads and writes alike; 'ask' falls back to human approval.
         # An agent's own rule holds its writes only; its reads follow the connector's mode.
+        # X and Reddit reads are always automatic.
         write = connectors.CONNECTORS[base(principal)].ops[action['operation']] == connectors.WRITE
-        auto = mode(conn, principal if write else base(principal)) == 'auto'
-        # Social connectors publish to a public identity: every post needs an exact-content approval,
-        # including agents with a pre-existing auto rule. Reading remains automatic.
-        if base(principal) in ('x', 'reddit'):
-            auto = not write
+        ruled = principal if write else base(principal)
+        auto = (not write and base(principal) in SOCIAL) or mode(conn, ruled) == 'auto'
         if grant and grant['state'] == 'APPROVED':
             grant_id = grant['id']
         elif auto:
@@ -283,8 +283,6 @@ def set_mode(principal, value):
         raise Denied('UNKNOWN_PRINCIPAL')
     if value not in MODES:
         raise Denied('BAD_MODE')
-    if base(principal) in ('x', 'reddit') and value != 'ask':
-        raise Denied(base(principal).upper() + '_WRITES_REQUIRE_APPROVAL')
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         conn.execute(
