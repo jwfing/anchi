@@ -6,4 +6,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 desktop=$root/anchi/packages/desktop
 node "$desktop/scripts/build.mjs"
 export ANCHI_CLI=${ANCHI_CLI:-$root/scripts/anchi}
+# On macOS, the Anchi.app copy build.mjs makes, so the menu bar and the Dock say Anchi.
+if [[ $(uname) == Darwin ]]; then
+  exec "$desktop/dist/Anchi.app/Contents/MacOS/Anchi" "$desktop/dist/main.cjs" "$@"
+fi
 exec "$desktop/node_modules/.bin/electron" "$desktop/dist/main.cjs" "$@"
