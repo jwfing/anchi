@@ -1,6 +1,6 @@
 # Desktop app
 
-The desktop app is a window onto the same daemon the TUI and CLI use. Agents are listed like contacts. Each agent has a conversation in which every message starts a task, and a task's transcript and replies open beside it. It runs on macOS and Linux. Windows is untested: it has no local server, so there it could only use a remote one.
+The desktop app is a window onto the same daemon the TUI and CLI use. Agents are listed like contacts. Each agent has a conversation in which every message starts a new task with its own runtime session. A task's transcript and replies, which continue that task's session, open in a panel beside it. It runs on macOS and Linux. Windows is untested: it has no local server, so there it could only use a remote one.
 
 ## Open it
 
@@ -21,8 +21,8 @@ Release packages do not include the app yet.
 
 | Area | What you can do |
 |---|---|
-| Team | Pick an agent; its tasks read as a conversation. Each card shows the status, the folded tool calls, what the agent is doing, and the result, with delegated tasks as chips. |
-| Task panel | The selected task's time, turns and tokens, delegated work, full transcript, a reply that continues its session, and Cancel, Retry or Start over. |
+| Team | Pick an agent; its tasks read as a conversation. The box under it starts a new task in a new session; nothing carries over from the tasks above. Each card shows the status, the folded tool calls, what the agent is doing, and the result, with delegated tasks as chips. Continue this task, on a card whose turn has ended, opens the task and puts the cursor in its reply box. |
+| Task panel | The selected task's time, turns and tokens, delegated work, full transcript, a reply that continues its session, and Cancel, Retry or Start over. Drag its left edge, or focus the edge and use the arrow keys, to resize it; a double-click restores the default. The conversation keeps at least 360 pixels. The width is remembered on this computer. |
 | Agent builder | One conversation with the builder, or an empty starter (agent id and runtime) with no model call. A proposal opens in a panel the app draws from the proposed file, with its diff, errors and warnings; Apply writes it, Discard drops it. |
 | Approvals | Held writes appear inside the task's card and in the Approvals view. Each shows the connector, operation, reason, origin chain, the full summary and a countdown, then Deny and Approve. A write left waiting is refused when its time runs out. |
 | Usage | Subscription windows per runtime, and token totals by agent, model, runtime or day over 24 hours, 7 or 30 days. |
@@ -55,10 +55,10 @@ Use the TUI or CLI for these.
 
 ```bash
 pnpm --dir anchi exec vitest run packages/desktop
-node anchi/packages/desktop/scripts/drive.mjs steps.json   # after a build; see the script's header
+node anchi/packages/desktop/scripts/drive.mjs steps.json [profile-dir]   # after a build; see the script's header
 ```
 
-`scripts/drive.mjs` starts the built app with a debugging port. It then clicks, types, evaluates and takes screenshots from a JSON list of steps, and prints the page's errors. On a Linux machine without a display, run it under `xvfb-run`.
+`scripts/drive.mjs` starts the built app with a debugging port. It then clicks, types, evaluates and takes screenshots from a JSON list of steps, and prints the page's errors. It runs the app in a profile of its own, a new temporary one unless you name a directory, so it does not share storage with an open Anchi window. On a Linux machine without a display, run it under `xvfb-run`.
 
 ## Limits
 

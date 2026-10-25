@@ -7,7 +7,7 @@ import { duration, tokens } from '../format.ts';
 import { Markdown } from '../markdown.tsx';
 import { agentTasks } from '../model.ts';
 import { doing, toolSummary, transcript } from '../transcript.ts';
-import { Avatar, Composer, Linked, StatusPill } from '../ui.tsx';
+import { Avatar, Composer, Linked, Splitter, StatusPill, usePanelWidth } from '../ui.tsx';
 import { ApprovalCard } from './Approvals.tsx';
 import { TaskPanel } from './TaskPanel.tsx';
 
@@ -19,6 +19,9 @@ export function AgentView({ agentId }: { agentId: string }) {
   const agent = model.agents.find((a) => a.id === agentId);
   const tasks = agentTasks(model, agentId);
   const [selected, setSelected] = useState<string | undefined>(tasks.at(-1)?.id);
+  // Bumped by "Continue this task" so the panel focuses its reply box.
+  const [replyFocus, setReplyFocus] = useState(0);
+  const [panelWidth, setPanelWidth] = usePanelWidth();
   const end = useRef<HTMLDivElement>(null);
 
   const recent = tasks
@@ -69,14 +72,22 @@ export function AgentView({ agentId }: { agentId: string }) {
 
         <div className="scroll conversation">
           <div className="center small muted">
-            Each message you send starts a task. Replies inside a task continue its session.
+            Each message below starts a new task in a new session. To continue a task, open it and
+            reply beside it.
           </div>
           {tasks.map((t) => (
             <TaskTurn
               key={t.id}
               task={t}
               selected={t.id === selected}
-              onSelect={() => setSelected(t.id)}
+              onSelect={() => {
+                setSelected(t.id);
+                setReplyFocus(0);
+              }}
+              onContinue={() => {
+                setSelected(t.id);
+                setReplyFocus((n) => n + 1);
+              }}
             />
           ))}
           <div ref={end} />
@@ -85,7 +96,7 @@ export function AgentView({ agentId }: { agentId: string }) {
         <Composer
           label={`New task for @${agent.id}`}
           placeholder={`Give @${agent.id} a new task…`}
-          hint={`${agent.running} running · ${agent.queued} queued (up to ${agent.maxTasks} at once)`}
+          hint={`New task, new session · ${agent.running} running · ${agent.queued} queued (up to ${agent.maxTasks} at once)`}
           disabled={!!agent.error}
           onSend={async (text) => {
             const task = await act(() => call('tasks.create', { agentId, text }));
@@ -93,19 +104,31 @@ export function AgentView({ agentId }: { agentId: string }) {
           }}
         />
       </main>
-      {selectedTask && <TaskPanel key={selectedTask.id} task={selectedTask} />}
+      {selectedTask && (
+        <>
+          <Splitter width={panelWidth} onResize={setPanelWidth} />
+          <TaskPanel
+            key={selectedTask.id}
+            task={selectedTask}
+            width={panelWidth}
+            focusReply={replyFocus}
+          />
+        </>
+      )}
     </>
   );
 }
 
-function TaskTurn({
+export function TaskTurn({
   task,
   selected,
   onSelect,
+  onContinue,
 }: {
   task: TaskRow;
   selected: boolean;
   onSelect: () => void;
+  onContinue: () => void;
 }) {
   const { model } = useApp();
   const items = useMemo(() => transcript(model.events[task.id] ?? []), [model.events, task.id]);
@@ -178,6 +201,11 @@ function TaskTurn({
                 </span>
               ))}
             </div>
+          )}
+          {!active && (
+            <button type="button" className="btn btn-small continue" onClick={onContinue}>
+              Continue this task
+            </button>
           )}
         </div>
         {approvals.map((a) => (

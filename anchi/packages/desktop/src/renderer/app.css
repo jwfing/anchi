@@ -463,7 +463,7 @@ h2 {
 
 .main {
   flex: 1;
-  min-width: 0;
+  min-width: 320px;
   display: flex;
   flex-direction: column;
   background: var(--ground);
@@ -521,6 +521,8 @@ h2 {
   max-width: 80%;
 }
 .task-card {
+  /* overflow: hidden drops its minimum height, so in the scrolling column it would shrink. */
+  flex: none;
   max-width: 84%;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -551,6 +553,9 @@ h2 {
 }
 .task-card-body:empty {
   display: none;
+}
+.continue {
+  align-self: flex-start;
 }
 .progress {
   color: var(--muted);
@@ -698,12 +703,36 @@ h2 {
 
 .panel {
   width: 380px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 300px;
   background: var(--surface);
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.splitter {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 8px;
+  margin: 0 -4px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 1px;
+}
+.splitter:hover::after,
+.splitter:active::after,
+.splitter:focus-visible::after {
+  background: var(--accent);
+}
+.splitter:focus-visible {
+  outline: none;
 }
 .panel-head {
   padding: 16px 16px 10px;

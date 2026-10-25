@@ -6,6 +6,8 @@ import { type AppContext, Ctx } from '../src/renderer/App.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
+import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
+import { TaskTurn } from '../src/renderer/views/Agent.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
 
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
@@ -216,5 +218,34 @@ describe('approval card', () => {
     }
     expect(out).not.toContain('‮');
     expect(out.indexOf('>Deny<')).toBeLessThan(out.indexOf('>Approve<'));
+  });
+});
+
+describe('agent conversation', () => {
+  const turn = (status: TaskRow['status']) =>
+    renderToStaticMarkup(
+      <Ctx.Provider value={{ model: EMPTY_MODEL } as unknown as AppContext}>
+        <TaskTurn
+          task={{ id: 't-1', agentId: 'dev', title: 'go', status, trigger: 'user' } as TaskRow}
+          selected={false}
+          onSelect={() => undefined}
+          onContinue={() => undefined}
+        />
+      </Ctx.Provider>,
+    );
+
+  it('offers to continue a task only once its turn has ended', () => {
+    expect(turn('done')).toContain('Continue this task');
+    expect(turn('failed')).toContain('Continue this task');
+    expect(turn('running')).not.toContain('Continue this task');
+    expect(turn('queued')).not.toContain('Continue this task');
+  });
+
+  it('keeps the task panel and the conversation beside it usable while resizing', () => {
+    expect(clampWidth(700, 560, 600)).toBe(700);
+    expect(clampWidth(2000, 560, 600)).toBe(560 + 600 - PANEL_WIDTH.main);
+    expect(clampWidth(100, 560, 600)).toBe(PANEL_WIDTH.min);
+    expect(clampWidth(900, 560, 200)).toBe(400);
+    expect(clampWidth(900, 400, 100)).toBe(PANEL_WIDTH.min);
   });
 });

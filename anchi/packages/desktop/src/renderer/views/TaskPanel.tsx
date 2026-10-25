@@ -9,7 +9,15 @@ import { type Item, toolSummary, transcript } from '../transcript.ts';
 import { Composer, Linked, StatusPill } from '../ui.tsx';
 
 /** The selected task: its numbers, delegated work, full transcript and replies. */
-export function TaskPanel({ task }: { task: TaskRow }) {
+export function TaskPanel({
+  task,
+  width,
+  focusReply,
+}: {
+  task: TaskRow;
+  width: number;
+  focusReply: number;
+}) {
   const { model, loadEvents, act } = useApp();
   useEffect(() => {
     loadEvents(task.id);
@@ -19,13 +27,17 @@ export function TaskPanel({ task }: { task: TaskRow }) {
   const parent = task.parentId ? model.tasks[task.parentId] : undefined;
   const active = task.status === 'running' || task.status === 'queued';
   const end = useRef<HTMLDivElement>(null);
+  const reply = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusReply) reply.current?.focus();
+  }, [focusReply]);
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
   }, [items.length]);
   const elapsed = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : 0;
 
   return (
-    <aside className="panel" aria-label="Task details">
+    <aside className="panel" aria-label="Task details" style={{ width }}>
       <div className="panel-head">
         <span className="section-label">SELECTED TASK</span>
         <span className="strong">{sanitizeLine(task.title)}</span>
@@ -116,6 +128,7 @@ export function TaskPanel({ task }: { task: TaskRow }) {
             : `Reply to ${task.id} · continues its session`
         }
         disabled={active}
+        inputRef={reply}
         onSend={(text) => act(() => call('tasks.send', { taskId: task.id, text }))}
       />
     </aside>

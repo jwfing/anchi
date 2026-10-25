@@ -1,11 +1,15 @@
 // Drives the built app for checks: starts Electron with a debugging port, runs steps against the
 // page through the DevTools protocol, and quits.
-//   node scripts/drive.mjs steps.json
+//   node scripts/drive.mjs steps.json [profile-dir]
+// The app runs in its own profile (a new temporary one unless given), never the user's: an open
+// Anchi window holds that profile's storage.
 // Steps: {"wait": ms} · {"waitFor": "css"} · {"click": "css"} · {"clickText": "text"}
 //        {"type": ["css", "text"]} · {"key": "Enter"} · {"eval": "js"} (its value is printed)
 //        {"shot": "file.png"} · {"size": [width, height]} · {"reload": true}
+//        {"drag": ["css", dx]} (a mouse drag from the element's centre, dx pixels across)
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,10 +18,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const steps = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const electron = createRequire(import.meta.url)('electron');
 const port = 9300 + Math.floor(Math.random() * 500);
-const app = spawn(electron, [`--remote-debugging-port=${port}`, join(root, 'dist/main.cjs')], {
-  stdio: ['ignore', 'inherit', 'inherit'],
-  env: process.env,
-});
+const profile = process.argv[3] ?? mkdtempSync(join(tmpdir(), 'anchi-drive-'));
+const app = spawn(
+  electron,
+  [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, join(root, 'dist/main.cjs')],
+  { stdio: ['ignore', 'inherit', 'inherit'], env: process.env },
+);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function page() {
@@ -79,6 +85,22 @@ async function evaluate(expression) {
   return res.result.value;
 }
 
+/** Quits as a user would, so the window's storage is written; kills the app if that hangs. */
+async function quit() {
+  const exited = new Promise((r) => app.once('exit', r));
+  try {
+    const { webSocketDebuggerUrl } = await (
+      await fetch(`http://127.0.0.1:${port}/json/version`)
+    ).json();
+    const browser = new WebSocket(webSocketDebuggerUrl);
+    await new Promise((r) => browser.addEventListener('open', r, { once: true }));
+    browser.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+  } catch {
+    // Already gone, or the port is closed: the kill below decides.
+  }
+  if (!(await Promise.race([exited.then(() => true), sleep(5000).then(() => false)]))) app.kill();
+}
+
 await send('Runtime.enable');
 await send('Log.enable');
 
@@ -129,6 +151,25 @@ try {
         });
       }
     }
+    if (step.drag) {
+      const [selector, dx] = step.drag;
+      const at = await evaluate(
+        `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`,
+      );
+      if (!at) throw new Error(`nothing matches ${selector}`);
+      const mouse = (type, x, buttons) =>
+        send('Input.dispatchMouseEvent', {
+          type,
+          x,
+          y: at[1],
+          button: 'left',
+          buttons,
+          clickCount: 1,
+        });
+      await mouse('mousePressed', at[0], 1);
+      for (let i = 1; i <= 10; i++) await mouse('mouseMoved', at[0] + (dx * i) / 10, 1);
+      await mouse('mouseReleased', at[0] + dx, 0);
+    }
     if (step.eval) console.log(JSON.stringify(await evaluate(step.eval)));
     if (step.shot) {
       const { data } = await send('Page.captureScreenshot', { format: 'png' });
@@ -141,6 +182,6 @@ try {
   failed = true;
 } finally {
   ws.close();
-  app.kill();
+  await quit();
 }
 process.exit(failed ? 1 : 0);
