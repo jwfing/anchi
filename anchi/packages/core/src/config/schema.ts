@@ -217,8 +217,11 @@ export const agentLayerSchema = z.strictObject({
   /** Agents this agent may delegate tasks to. */
   delegates: z.array(idSchema).max(50).optional(),
   triggers: z.array(triggerSchema).max(20).optional(),
-  /** Skill ids in `skills/`, copied into the cell at task start. */
-  skills: z.array(idSchema).max(50).optional(),
+  /**
+   * Skill ids in `skills/`, copied into the cell at task start. The bundle's size and file count,
+   * checked when it is built, are the real limit; this only bounds the list.
+   */
+  skills: z.array(idSchema).max(200).optional(),
   /**
    * Per connector, `ask` holds the agent's writes for approval: through the proxy for the proxy
    * connectors, through the policy service (per agent) for the connector services. For x and

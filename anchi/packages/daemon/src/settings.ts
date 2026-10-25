@@ -20,7 +20,6 @@ import {
   connectorSchema,
   type HomeLayout,
   highRiskIdSchema,
-  idSchema,
   patchAgentYaml,
   resolveAgent,
   type Trigger,
@@ -46,7 +45,7 @@ const patchSchema = z.strictObject({
       text: z.string().max(100_000).optional(),
     })
     .optional(),
-  skills: z.array(idSchema).max(50).optional(),
+  skills: field.skills,
   connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
   highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
