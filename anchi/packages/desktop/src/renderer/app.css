@@ -1202,6 +1202,14 @@ h2 {
   min-height: 34px;
   border-bottom: 1px solid #f1f3f6;
 }
+/* A name stays on one line; when space runs out, the description beside it is cut instead. */
+.check-row > .strong {
+  flex: none;
+  white-space: nowrap;
+}
+.check-row > .ellipsis {
+  min-width: 0;
+}
 .prompt-edit {
   width: 100%;
   border: 1px solid var(--line-strong);

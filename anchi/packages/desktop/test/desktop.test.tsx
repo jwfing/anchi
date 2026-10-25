@@ -14,6 +14,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
+import { count } from '../src/renderer/format.ts';
 import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
@@ -468,6 +469,14 @@ describe('skills', () => {
     expect(sent, 'refused: nothing removed').toEqual(['agents.list']);
     await guardedCall('skills.remove', { id: 'pdf' }, read, async () => true);
     expect(sent.at(-1)).toBe('skills.remove');
+  });
+});
+
+describe('format', () => {
+  it('counts in the singular for one', () => {
+    expect(count(1, 'skill')).toBe('1 skill');
+    expect(count(2, 'task')).toBe('2 tasks');
+    expect(count(0, 'trigger')).toBe('0 triggers');
   });
 });
 
