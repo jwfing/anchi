@@ -1,13 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <title>Anchi</title>
   <defs>
+    <clipPath id="mark">
+      <path d="M30 7 9 42 30 57Z M34 7 55 42 34 57Z"/>
+    </clipPath>
     <filter id="glow" x="-20%" y="-400%" width="140%" height="900%">
-      <feGaussianBlur stdDeviation="0.9"/>
+      <feGaussianBlur stdDeviation="0.8"/>
     </filter>
   </defs>
   <rect width="64" height="64" rx="12" fill="#10120f"/>
   <path d="M30 7 9 42 30 57Z M34 7 55 42 34 57Z" fill="#c0e889"/>
-  <!-- Light from inside the mark: thickest at its centre, thinning past both edges. -->
-  <path d="M4 42Q32 40.6 60 42Q32 43.4 4 42Z" fill="#fff" opacity=".55" filter="url(#glow)"/>
-  <path d="M5 42Q32 41 59 42Q32 43 5 42Z" fill="#fff"/>
+  <!-- Light from the gap: tallest beside it, thinning to the mark's edges, never in the gap. -->
+  <g clip-path="url(#mark)">
+    <path d="M9 42Q32 39.6 55 42Q32 44.4 9 42Z" fill="#fff" opacity=".6" filter="url(#glow)"/>
+    <path d="M9 42Q32 39.6 55 42Q32 44.4 9 42Z" fill="#fff"/>
+  </g>
 </svg>
