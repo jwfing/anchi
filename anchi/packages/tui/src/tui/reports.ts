@@ -8,7 +8,7 @@ import type {
 } from '@anchi/protocol';
 import { auditHeadline } from '@anchi/daemon';
 import { highRiskConnector } from '@anchi/core';
-import { sanitizeLine } from '../sanitize.ts';
+import { sanitizeLine } from '@anchi/core';
 import { truncate } from './lines.ts';
 
 /** A line of a report view: text with an optional style. Agent-originated parts are sanitized. */

@@ -16,10 +16,13 @@ import { homeLayout } from '@anchi/core';
 import {
   APP_VERSION,
   connectOrStart,
+  chosenServer,
   connectRemote,
   type DaemonClient,
   installAutostart,
   parseServer,
+  saveServer,
+  serverName,
   type ServerTarget,
   tryConnect,
   uninstallAutostart,
@@ -30,7 +33,7 @@ import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
 import type { RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
-import { sanitizeJson, sanitizeLine, sanitizeLines } from './sanitize.ts';
+import { sanitizeJson, sanitizeLine, sanitizeLines } from '@anchi/core';
 import { selfUpdate } from './update.ts';
 import { suggestedRuntime, runtimeReady } from './tui/usability.ts';
 import { runTui } from './tui/index.tsx';
@@ -64,20 +67,10 @@ function printReport(lines: ReportLine[]) {
 
 const layout = homeLayout();
 const keysFile = join(layout.root, 'keybindings.json');
-/** The server `anchi server <target>` saved; `--server` and ANCHI_SERVER override it. */
-const serverFile = join(layout.root, 'server');
 
 function fail(message: string): never {
   console.error(styleText('red', sanitizeLine(message)));
   process.exit(1);
-}
-
-function savedServer(): string | undefined {
-  try {
-    return readFileSync(serverFile, 'utf8').trim() || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Set before any command runs, from --server, ANCHI_SERVER or the saved choice. */
@@ -189,9 +182,8 @@ program
     'the server to use: local, instabox:<machine> or ssh:<[user@]host> (default: ANCHI_SERVER, else the saved one, else local)',
   )
   .hook('preAction', () => {
-    const chosen = (program.opts() as { server?: string }).server ?? process.env.ANCHI_SERVER;
     try {
-      server = parseServer(chosen ?? savedServer());
+      server = chosenServer(layout.root, (program.opts() as { server?: string }).server);
     } catch (err) {
       fail((err as Error).message);
     }
@@ -204,7 +196,7 @@ program
   )
   .action(async (target?: string) => {
     if (target === undefined) {
-      return console.log(server.kind === 'local' ? 'local' : server.name);
+      return console.log(serverName(server));
     }
     let chosen: ServerTarget;
     try {
@@ -214,8 +206,7 @@ program
     }
     if (chosen.kind === 'remote')
       (await connectRemote(chosen).catch((e: Error) => fail(e.message))).close();
-    mkdirSync(layout.root, { recursive: true, mode: 0o700 });
-    writeFileSync(serverFile, `${chosen.kind === 'local' ? 'local' : chosen.name}\n`);
+    saveServer(layout.root, chosen);
     console.log(`using ${chosen.kind === 'local' ? 'the daemon on this computer' : chosen.name}`);
   });
 

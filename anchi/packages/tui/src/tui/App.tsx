@@ -29,7 +29,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from 'ink';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { sanitize, sanitizeLine } from '@anchi/core';
 import {
   ACTIONS,
   type ActionId,

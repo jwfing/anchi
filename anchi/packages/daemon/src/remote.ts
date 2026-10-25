@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
+import { join } from 'node:path';
 import { Duplex } from 'node:stream';
 import type { MethodName } from '@anchi/protocol';
 import { DaemonClient } from './rpc.ts';
@@ -29,6 +31,30 @@ export function parseServer(text: string | undefined): ServerTarget {
     return { kind: 'remote', name: value, ssh: ['ssh', '-T', '-o', 'BatchMode=yes', name, '--'] };
   }
   throw new Error(`unknown server "${value}": use local, instabox:<machine> or ssh:<[user@]host>`);
+}
+
+/** How a target is written: `local` or the name it was parsed from. */
+export function serverName(target: ServerTarget): string {
+  return target.kind === 'local' ? 'local' : target.name;
+}
+
+/** The server `anchi server <target>` saved in the Anchi home, or undefined. */
+export function savedServer(home: string): string | undefined {
+  try {
+    return readFileSync(join(home, 'server'), 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveServer(home: string, target: ServerTarget): void {
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  writeFileSync(join(home, 'server'), `${serverName(target)}\n`);
+}
+
+/** The server a client uses: an explicit choice, else ANCHI_SERVER, else the saved one. */
+export function chosenServer(home: string, explicit?: string): ServerTarget {
+  return parseServer(explicit ?? process.env.ANCHI_SERVER ?? savedServer(home));
 }
 
 const LOGIN_METHODS: MethodName[] = [

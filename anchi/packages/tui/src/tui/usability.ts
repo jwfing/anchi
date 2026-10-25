@@ -7,7 +7,7 @@ import type {
   StoredEvent,
   TaskRow,
 } from '@anchi/protocol';
-import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { sanitize, sanitizeLine } from '@anchi/core';
 import { summarizeInput, truncate, wrap, type Line } from './lines.ts';
 import { markdownLines } from './markdown.ts';
 

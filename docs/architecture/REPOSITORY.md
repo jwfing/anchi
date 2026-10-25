@@ -9,6 +9,7 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `anchi/packages/protocol` | Client, cell runner and event schemas; bounded JSON-lines codec |
 | `anchi/packages/core` | Agent, image and trigger configuration (trusted, host) |
 | `anchi/packages/daemon` | Daemon: task store, hub and queues, cell sessions, Anchi tool dispatcher, delegation, approvals, triggers, skills, builder inventory and proposals, agent settings and deletion, task retry, scan before close, setup steps, fixed guest commands (trusted, host) |
+| `anchi/packages/desktop` | Electron desktop app: the main process holds the daemon connection and allows the window a fixed list of methods; the sandboxed window draws agents, tasks, the builder, approvals, usage and settings, sanitizing all agent text (trusted, host) |
 | `anchi/packages/tui` | Ink TUI and CLI: key map and command palette, settings panel, security dialogs; sanitizes all agent text (trusted, host) |
 | `anchi/packages/cell-runner` | Inside task cells (untrusted): runner hosting the Codex and Claude Agent SDKs, the in-cell MCP server and its connector tools, the proxy forwarder |
 | `guest/anchi_cell.py` | `anchi-cell` / `anchi-image`: task cells with workspaces and bridge sockets, image layers, reaper, approvals stream, polls, skills, agent purge, live exec and credential scan (guest root) |
@@ -28,7 +29,7 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 
 ## Call direction
 
-TUI or CLI → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-image` and administration commands over `limactl shell … sudo` (or `sudo` when the daemon runs inside the guest on a remote server) → task cell runner (its stdio). A remote server's client reaches the socket through `anchi-bridge` over SSH (`daemon/src/remote.ts`).
+TUI, CLI or desktop app → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-image` and administration commands over `limactl shell … sudo` (or `sudo` when the daemon runs inside the guest on a remote server) → task cell runner (its stdio). A remote server's client reaches the socket through `anchi-bridge` over SSH (`daemon/src/remote.ts`).
 
 Cell runtime → in-cell MCP server → runner → daemon, for Anchi tools (delegation, task status). The daemon decides from the task and agent it attached to the cell.
 

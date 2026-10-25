@@ -13,7 +13,7 @@ import { CONNECTOR_IDS } from '@anchi/protocol';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
-import { sanitize, sanitizeJson, sanitizeLines } from '../src/sanitize.ts';
+import { sanitize, sanitizeJson, sanitizeLines } from '@anchi/core';
 import {
   continued,
   nextSetupAction,

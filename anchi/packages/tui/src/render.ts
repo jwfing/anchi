@@ -1,6 +1,6 @@
 import { styleText } from 'node:util';
 import type { RuntimeEvent } from '@anchi/protocol';
-import { sanitize, sanitizeLine } from './sanitize.ts';
+import { sanitize, sanitizeLine } from '@anchi/core';
 import { summarizeInput } from './tui/lines.ts';
 
 /**

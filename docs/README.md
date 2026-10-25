@@ -7,6 +7,7 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | Document | Purpose |
 |---|---|
 | [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault, connect a runtime, and get a shell in the VM |
+| [Desktop app](DESKTOP.md) | The window client on macOS and Linux: team conversations, tasks, the builder, approvals, usage and settings |
 | [Remote server](REMOTE_SERVER.md) | Run the daemon and cells on an instabox VM or SSH host, with the TUI on your computer |
 | [First task](FIRST_TASK.md) | One connected runtime, one starter, one successful task; no business account needed |
 | [CLI reference](../skills/anchi/references/cli.md) | Every command and flag, generated from the implementation |

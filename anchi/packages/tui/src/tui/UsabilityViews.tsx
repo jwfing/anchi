@@ -1,7 +1,7 @@
 /** @jsxRuntime automatic */
 import { Box, Text } from 'ink';
 import type { AgentSummary, Approval, SetupStatus, StoredEvent, TaskRow } from '@anchi/protocol';
-import { sanitize, sanitizeLine } from '../sanitize.ts';
+import { sanitize, sanitizeLine } from '@anchi/core';
 import { truncate, wrap } from './lines.ts';
 import { suggestedRuntime, teamActivity, welcomeStep } from './usability.ts';
 

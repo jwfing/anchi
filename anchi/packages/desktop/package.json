@@ -1,0 +1,23 @@
+{
+  "name": "@anchi/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && electron dist/main.cjs"
+  },
+  "dependencies": {
+    "@anchi/core": "workspace:*",
+    "@anchi/daemon": "workspace:*",
+    "@anchi/protocol": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react-dom": "^19.3.0",
+    "electron": "44.7.2",
+    "esbuild": "^0.28.0"
+  }
+}
