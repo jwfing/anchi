@@ -18,7 +18,7 @@ import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
 import { TaskTurn } from '../src/renderer/views/Agent.tsx';
 import { settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
-import { Runtimes, SecretForm } from '../src/renderer/views/Settings.tsx';
+import { ProbeNote, Runtimes, SecretForm } from '../src/renderer/views/Settings.tsx';
 
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
 
@@ -443,5 +443,24 @@ describe('skills', () => {
     expect(sent, 'refused: nothing removed').toEqual(['agents.list']);
     await guardedCall('skills.remove', { id: 'pdf' }, read, async () => true);
     expect(sent.at(-1)).toBe('skills.remove');
+  });
+});
+
+describe('servers', () => {
+  const note = (probe: Parameters<typeof ProbeNote>[0]['added']['probe']) =>
+    renderToStaticMarkup(
+      <ProbeNote
+        added={{ saved: { name: 'box', target: 'ssh:dev@box' }, probe }}
+        onUse={() => {}}
+      />,
+    );
+
+  it('says what to run when a saved host has no Anchi yet, and offers a server that answers', () => {
+    expect(
+      note({ kind: 'bridge-missing', detail: 'x', hint: 'scripts/remote.sh ssh:dev@box' }),
+    ).toContain('scripts/remote.sh ssh:dev@box');
+    expect(note({ kind: 'ok' })).toContain('Use box');
+    expect(note({ kind: 'unreachable', detail: 'no route\u001b[31m' })).toContain('no route');
+    expect(note({ kind: 'unreachable', detail: 'no route\u001b[31m' })).not.toContain('\u001b');
   });
 });
