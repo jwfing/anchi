@@ -69,6 +69,9 @@ not need sudo or modify your vault, agents or VM.
 The installer configures your shell for future sessions; a script piped into `sh` cannot change
 the parent terminal's environment.
 
+- Add the desktop app with
+  `curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop` (or `ANCHI_DESKTOP=1`).
+  `anchi update` then updates it too. See [Desktop app](DESKTOP.md#install).
 - Install a specific release with
   `curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION=v0.2.0 sh`.
 - `ANCHI_INSTALL_ROOT` overrides the default `~/.local/share/anchi`.

@@ -2,9 +2,47 @@
 
 The desktop app is a window onto the same daemon the TUI and CLI use. Agents are listed like contacts. Each agent has a conversation in which every message starts a new task with its own runtime session. A task's transcript and replies, which continue that task's session, open in a panel beside it. It runs on macOS and Linux. Windows is untested: it has no local server, so there it could only use a remote one.
 
-## Open it
+## Install
 
-From a source checkout, after `pnpm --dir anchi install`:
+The installer adds the desktop app with `--desktop`:
+
+```bash
+curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
+```
+
+It installs the CLI as usual, then the app of the same release, after checking its SHA-256 like the CLI's archive:
+
+- **macOS:** `~/Applications/Anchi.app` (`ANCHI_DESKTOP_DIR` picks another folder). An existing `Anchi.app` there is replaced only if its bundle id is `dev.anchi.desktop`.
+- **Linux:** the app goes into the release's version directory, `~/.local/share/anchi/current/desktop`, so it always matches the CLI. The installer adds the launcher `anchi-desktop` beside `anchi`, and Anchi to the applications menu (`~/.local/share/applications/anchi.desktop`).
+
+`anchi update` then updates the app with the CLI. The app is also a release asset of its own, `anchi-desktop-darwin-arm64.tar.gz` or `anchi-desktop-linux-x64.tar.gz`, with a `.sha256`.
+
+The app is not signed by a publisher, as the CLI is not; the checksums protect against corruption, not tampering. On macOS a file downloaded by the installer opens as is. An `Anchi.app` downloaded with a browser is quarantined, and macOS refuses to open it: open System Settings → Privacy & Security and choose Open Anyway, or remove the quarantine with `xattr -dr com.apple.quarantine Anchi.app`. On Apple silicon it is signed ad hoc, which only lets it run.
+
+Opened from the Finder, the Dock or a desktop menu, an app gets a minimal `PATH`. The packaged app therefore asks the login shell for its `PATH` at start (`$SHELL -ilc`, for at most five seconds) and adds the installer's directories (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`). With `local`, it starts the daemon with that `anchi`; a remote server is reached with the `ssh` or `instabox` found there.
+
+### Linux sandbox
+
+Electron isolates its renderer with user namespaces. Ubuntu 23.10 and later allow them only to programs an AppArmor profile permits (`/proc/sys/kernel/apparmor_restrict_unprivileged_userns` is `1`), and the installer says so. Without a profile, the app exits at start. This profile permits every installed version (not yet tried on Ubuntu):
+
+```bash
+sudo tee /etc/apparmor.d/anchi-desktop >/dev/null <<'PROFILE'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile anchi-desktop @{HOME}/.local/share/anchi/versions/*/app/desktop/anchi-desktop flags=(unconfined) {
+  userns,
+  include if exists <local/anchi-desktop>
+}
+PROFILE
+sudo apparmor_parser -r /etc/apparmor.d/anchi-desktop
+```
+
+Do not start it with `--no-sandbox`: the renderer shows agent text.
+
+## From a source checkout
+
+After `pnpm --dir anchi install`:
 
 ```bash
 scripts/anchi-desktop
@@ -15,7 +53,7 @@ The script bundles `anchi/packages/desktop` with esbuild and starts Electron. On
 - `ANCHI_SERVER`, else the choice saved by `anchi server <target>`, else `local`.
 - With `local`, it starts the local daemon through `scripts/anchi daemon start` when none is running. Set `ANCHI_CLI` to use another CLI.
 
-The server in use shows as the server button at the bottom of the left rail, with a dot for its connection, and as a tag in each agent's header; the button opens Settings → Server. While the window is not connected, a banner across the top says why. Release packages do not include the app yet. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
+The server in use shows as the server button at the bottom of the left rail, with a dot for its connection, and as a tag in each agent's header; the button opens Settings → Server. While the window is not connected, a banner across the top says why. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
 
 ## Getting started
 
@@ -69,10 +107,19 @@ pnpm --dir anchi exec vitest run packages/desktop
 node anchi/packages/desktop/scripts/drive.mjs steps.json [profile-dir]   # after a build; see the script's header
 ```
 
-`scripts/drive.mjs` starts the built app with a debugging port. It then clicks, types, evaluates and takes screenshots from a JSON list of steps, and prints the page's errors. It runs the app in a profile of its own, a new temporary one unless you name a directory, so it does not share storage with an open Anchi window. On a Linux machine without a display, run it under `xvfb-run`.
+Release packages (on the platform they are for, after `scripts/package-release.sh`):
+
+```bash
+node anchi/packages/desktop/scripts/package.mjs
+python3 scripts/check-desktop-release.py artifacts/releases/anchi-<target>.tar.gz artifacts/releases/anchi-desktop-<target>.tar.gz
+```
+
+`package.mjs` writes `artifacts/releases/anchi-desktop-<target>.tar.gz`: on macOS a copy of `dist/Anchi.app` with the app code in `Contents/Resources/app` and the release version, signed ad hoc again; on Linux Electron's directory with the executable renamed `anchi-desktop`. `check-desktop-release.py` installs it with the public installer through a stand-in `curl`, checks refusals (another app's `Anchi.app` or `anchi-desktop`, a bad checksum) and `anchi update`, then opens the installed app with a minimal `PATH` and waits until it has started the daemon and connected. On Linux it needs `xvfb-run`; `.github/workflows/release.yml` runs it on both platforms.
+
+`scripts/drive.mjs` starts the built app with a debugging port. It then clicks, types, evaluates and takes screenshots from a JSON list of steps, and prints the page's errors. It runs the app in a profile of its own, a new temporary one unless you name a directory, so it does not share storage with an open Anchi window. `ANCHI_DRIVE_APP=<executable>` drives a packaged app instead of the checkout's build. On a Linux machine without a display, run it under `xvfb-run`.
 
 ## Limits
 
-- **Live checks:** the app was tried against a local daemon on macOS, a remote instabox server from macOS, and a daemon on Debian 13 under Xvfb. Approvals were not tried live; they are covered by unit tests.
+- **Live checks:** the app was tried against a local daemon on macOS, a remote instabox server from macOS, and a daemon on Debian 13 under Xvfb. The release packages were installed, updated and opened on macOS and on Debian 13 under Xvfb; the AppArmor profile above was not tried on Ubuntu. Approvals were not tried live; they are covered by unit tests.
 - **Windows:** has no local server, and is untested.
 - **Session state:** new events arrive while the app runs. A reconnection reads agents, tasks and approvals again; transcripts load when their task opens. A builder proposal made while the app was closed does not appear in it: ask the builder to propose it again.

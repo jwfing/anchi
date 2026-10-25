@@ -53,7 +53,7 @@ jobs:
             target: linux-x64
             arch: x86_64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -79,6 +79,22 @@ jobs:
         env:
           ANCHI_PREBUILT_MANIFEST: artifacts/prebuilt/prebuilt-${{ matrix.arch }}.json
       - run: python scripts/check-release.py artifacts/releases/anchi-${{ matrix.target }}.tar.gz
+      - name: Package the desktop app
+        run: node anchi/packages/desktop/scripts/package.mjs
+      - name: Install, update and open the desktop app (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          python scripts/check-desktop-release.py
+          artifacts/releases/anchi-${{ matrix.target }}.tar.gz
+          artifacts/releases/anchi-desktop-${{ matrix.target }}.tar.gz
+      - name: Install, update and open the desktop app (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgbm1 libnss3 libasound2
+          xvfb-run -a python scripts/check-desktop-release.py \
+            artifacts/releases/anchi-${{ matrix.target }}.tar.gz \
+            artifacts/releases/anchi-desktop-${{ matrix.target }}.tar.gz
       - uses: actions/upload-artifact@v6
         with:
           name: anchi-${{ matrix.target }}

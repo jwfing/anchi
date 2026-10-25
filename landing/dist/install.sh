@@ -1,5 +1,6 @@
 #!/bin/sh
 # curl -fsSL https://anchi.elseward.xyz/install.sh | sh
+# With the desktop app: curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
 set -eu
 
 die() { printf 'anchi: %s\n' "$*" >&2; exit 1; }
@@ -7,6 +8,14 @@ fetch() { curl -fsSL --retry 3 --connect-timeout 15 --max-time 300 "$1" -o "$2";
 quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 main() {
+  desktop=${ANCHI_DESKTOP:-0}
+  for arg in "$@"; do
+    case "$arg" in
+      --desktop) desktop=1 ;;
+      *) die "Unknown option: $arg (the only option is --desktop)" ;;
+    esac
+  done
+  case "$desktop" in 0|1) ;; *) die 'Invalid ANCHI_DESKTOP.' ;; esac
   case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) target=darwin-arm64 ;;
     Linux-x86_64) target=linux-x64 ;;
@@ -53,6 +62,24 @@ main() {
         || die "$bin/anchi already exists and is not managed by this installer. Set ANCHI_BIN_DIR."
     fi
   fi
+  # A desktop app installed before is updated with the CLI.
+  [ -f "$base/desktop" ] && desktop=1
+  if [ "$desktop" = 1 ]; then
+    case "$target" in
+      darwin-*)
+        apps=${ANCHI_DESKTOP_DIR:-$HOME/Applications}
+        case "$apps" in /*) ;; *) die 'ANCHI_DESKTOP_DIR must be absolute.' ;; esac
+        if [ -e "$apps/Anchi.app" ] || [ -L "$apps/Anchi.app" ]; then
+          [ "$(plutil -extract CFBundleIdentifier raw "$apps/Anchi.app/Contents/Info.plist" 2>/dev/null)" = dev.anchi.desktop ] \
+            || die "$apps/Anchi.app already exists and is not the Anchi desktop app. Set ANCHI_DESKTOP_DIR."
+        fi ;;
+      *)
+        if [ "$update_only" = 0 ] && { [ -e "$bin/anchi-desktop" ] || [ -L "$bin/anchi-desktop" ]; }; then
+          [ -f "$bin/anchi-desktop" ] && grep -q '^# Anchi desktop launcher$' "$bin/anchi-desktop" \
+            || die "$bin/anchi-desktop already exists and is not managed by this installer. Set ANCHI_BIN_DIR."
+        fi ;;
+    esac
+  fi
   mkdir "$base/.install-lock" 2>/dev/null || die "Another installation is running (lock: $base/.install-lock)."
   tmp=$(mktemp -d "$base/versions/.install.XXXXXX")
   trap 'rm -rf "$tmp"; rmdir "$base/.install-lock"' EXIT
@@ -82,6 +109,29 @@ main() {
   if [ "$release" != latest ]; then
     [ "$version" = "${release#v}" ] || die 'Release version does not match the requested tag.'
   fi
+  if [ "$desktop" = 1 ]; then
+    desktop_archive=anchi-desktop-$target.tar.gz
+    printf 'Downloading the desktop app (%s)…\n' "$target"
+    fetch "$url/$desktop_archive.sha256" "$tmp/desktop-checksum" \
+      || die 'Desktop app checksum unavailable (this release may have no desktop app). No installation was changed.'
+    expected=$(awk -v name="$desktop_archive" '$2 == name {print $1}' "$tmp/desktop-checksum")
+    [ "${#expected}" -eq 64 ] || die 'Invalid desktop app checksum.'
+    case "$expected" in *[!a-fA-F0-9]*) die 'Invalid desktop app checksum.' ;; esac
+    fetch "$url/$desktop_archive" "$tmp/desktop.tar.gz" || die 'Desktop app download failed.'
+    [ "$(checksum "$tmp/desktop.tar.gz")" = "$expected" ] || die 'Desktop app checksum mismatch; installation cancelled.'
+    mkdir "$tmp/desktop"
+    tar -xzf "$tmp/desktop.tar.gz" -C "$tmp/desktop"
+    case "$target" in
+      darwin-*)
+        [ -x "$tmp/desktop/Anchi.app/Contents/MacOS/Anchi" ] \
+          && [ -f "$tmp/desktop/Anchi.app/Contents/Resources/app/main.cjs" ] || die 'Incomplete desktop app.' ;;
+      *)
+        [ -x "$tmp/desktop/anchi-desktop/anchi-desktop" ] \
+          && [ -f "$tmp/desktop/anchi-desktop/resources/app/main.cjs" ] || die 'Incomplete desktop app.'
+        # Inside the version directory, so the app switches with the CLI and matches its version.
+        mv "$tmp/desktop/anchi-desktop" "$tmp/anchi/desktop" ;;
+    esac
+  fi
   dest=$(mktemp -d "$base/versions/release.XXXXXX")
   # The version directory is never overwritten: existing daemons can finish their work.
   mv "$tmp/anchi" "$dest/app"
@@ -98,6 +148,21 @@ main() {
   if [ -n "$stale" ]; then
     printf 'Older versions remain under %s; remove them once no daemon or login service runs from them:\n  rm -rf%s\n' "$base/versions" "$stale"
   fi
+  if [ "$desktop" = 1 ]; then
+    case "$target" in
+      darwin-*)
+        mkdir -p "$apps"
+        staged=$(mktemp -d "$apps/.anchi-desktop.XXXXXX")
+        mv "$tmp/desktop/Anchi.app" "$staged/Anchi.app"
+        if [ -e "$apps/Anchi.app" ]; then mv "$apps/Anchi.app" "$staged/previous.app"; fi
+        mv "$staged/Anchi.app" "$apps/Anchi.app"
+        rm -rf "$staged"
+        desktop_path=$apps/Anchi.app ;;
+      *) desktop_path=$base/current/desktop/anchi-desktop ;;
+    esac
+    printf '%s\n' "$desktop_path" > "$base/desktop"
+    printf 'Installed the Anchi desktop app: %s\n' "$desktop_path"
+  fi
   if [ "$update_only" = 1 ]; then
     printf 'Installed Anchi %s.\n' "$version"
     return
@@ -113,6 +178,24 @@ main() {
   chmod +x "$launcher"
   mv -f "$launcher" "$bin/anchi"
   printf 'Installed Anchi %s: %s/anchi\n' "$version" "$bin"
+  if [ "$desktop" = 1 ] && [ "${target#darwin-}" = "$target" ]; then
+    {
+      printf '#!/bin/sh\n# Anchi desktop launcher\n'
+      printf 'exec %s "$@"\n' "$(quote "$base/current/desktop/anchi-desktop")"
+    } > "$tmp/desktop-launcher"
+    launcher=$(mktemp "$bin/.anchi-desktop.XXXXXX")
+    cp "$tmp/desktop-launcher" "$launcher"
+    chmod +x "$launcher"
+    mv -f "$launcher" "$bin/anchi-desktop"
+    entries=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+    mkdir -p "$entries"
+    printf '[Desktop Entry]\nType=Application\nName=Anchi\nComment=A secured agent team\nExec="%s"\nIcon=%s\nCategories=Development;\nTerminal=false\n' \
+      "$bin/anchi-desktop" "$base/current/desktop/icon.png" > "$entries/anchi.desktop"
+    printf 'Desktop app: %s/anchi-desktop, or Anchi in the applications menu.\n' "$bin"
+    if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = 1 ]; then
+      printf 'This system restricts the sandbox the desktop app needs; see\n  https://github.com/jwfing/anchi/blob/main/docs/DESKTOP.md#linux-sandbox\n'
+    fi
+  fi
   case ":$PATH:" in
     *":$bin:"*) ;;
     *)

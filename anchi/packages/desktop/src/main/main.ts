@@ -25,6 +25,7 @@ import {
   shell,
 } from 'electron';
 import { checkCall, type Confirmation, externalUrl, guardedCall, NOTIFICATIONS } from './bridge.ts';
+import { adoptLoginPath } from './env.ts';
 import type { ServerState } from '../shared.ts';
 
 const layout = homeLayout();
@@ -48,12 +49,21 @@ function publish(next: ServerState) {
   window?.webContents.send('anchi:server', state);
 }
 
-/** The CLI that starts a local daemon: the checkout's (set by scripts/anchi-desktop) or PATH's. */
+/**
+ * The CLI that starts a local daemon: the checkout's (set by scripts/anchi-desktop) or PATH's,
+ * which for the packaged app includes the installer's directories.
+ */
 function startLocalDaemon(): Promise<void> {
   return new Promise((resolve, reject) => {
     const cli = process.env.ANCHI_CLI ?? 'anchi';
     const child = spawn(cli, ['daemon', 'start'], { stdio: 'ignore' });
-    child.on('error', () => reject(new Error(`cannot start the local daemon: ${cli} not found`)));
+    child.on('error', () =>
+      reject(
+        new Error(
+          `cannot start the local daemon: ${cli} not found. Install the Anchi CLI (curl -fsSL https://anchi.elseward.xyz/install.sh | sh), or use a remote server`,
+        ),
+      ),
+    );
     child.on('close', (code) =>
       code === 0 ? resolve() : reject(new Error(`${cli} daemon start exited with ${code}`)),
     );
@@ -217,10 +227,11 @@ function createWindow() {
   void window.loadFile(join(__dirname, 'renderer/index.html'));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   app.dock?.setIcon(icon);
   createWindow();
+  if (app.isPackaged) await adoptLoginPath();
   let server: ServerTarget;
   try {
     server = chosenServer(layout.root, process.env.ANCHI_DESKTOP_SERVER);

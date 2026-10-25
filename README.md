@@ -51,6 +51,9 @@ curl -fsSL https://anchi.elseward.xyz/install.sh | sh
 anchi
 ```
 
+To add the [desktop app](docs/DESKTOP.md) (`~/Applications/Anchi.app` on macOS, `anchi-desktop`
+and a menu entry on Linux), run the installer with `sh -s -- --desktop` instead of `sh`.
+
 The app bundles Node and its dependencies. No source checkout or pnpm is needed. The installer
 verifies the archive checksum; this is not publisher signing. See [installer options and source
 installation](docs/GETTING_STARTED.md) to inspect the script or pin a version.

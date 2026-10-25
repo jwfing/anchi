@@ -1,6 +1,7 @@
 // Drives the built app for checks: starts Electron with a debugging port, runs steps against the
 // page through the DevTools protocol, and quits.
 //   node scripts/drive.mjs steps.json [profile-dir]
+// ANCHI_DRIVE_APP=<executable> drives a packaged app instead of the checkout's build.
 // The app runs in its own profile (a new temporary one unless given), never the user's: an open
 // Anchi window holds that profile's storage.
 // Steps: {"wait": ms} · {"waitFor": "css"} · {"click": "css"} · {"clickText": "text"}
@@ -20,9 +21,14 @@ const steps = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const electron = createRequire(import.meta.url)('electron');
 const port = 9300 + Math.floor(Math.random() * 500);
 const profile = process.argv[3] ?? mkdtempSync(join(tmpdir(), 'anchi-drive-'));
+const packaged = process.env.ANCHI_DRIVE_APP;
 const app = spawn(
-  electron,
-  [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, join(root, 'dist/main.cjs')],
+  packaged ?? electron,
+  [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    ...(packaged ? [] : [join(root, 'dist/main.cjs')]),
+  ],
   { stdio: ['ignore', 'inherit', 'inherit'], env: process.env },
 );
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
