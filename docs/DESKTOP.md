@@ -19,11 +19,11 @@ The server in use shows as the server button at the bottom of the left rail, wit
 
 ## Getting started
 
-A window that has not finished the guide opens on Getting started, unless the server already has a ready runtime, an agent and a finished task. The guide has four stages, and Settings → Getting started opens it again:
+The window opens Getting started for each server it has not finished the guide for, unless that server already has a ready runtime, an agent and a finished task: switching to a new server opens it again, once per window. The guide has four stages, and Settings → Getting started opens it again:
 
-1. **Where Anchi runs:** this computer or a saved remote server (see Settings → Server).
+1. **Where Anchi runs:** this computer or a saved remote server (see Settings → Server). When the server in use cannot be reached, the button says so instead of waiting. On a remote server the guide starts at the next stage.
 2. **Prepare the environment:** lists missing host tools with the command that installs them; otherwise Prepare runs `setup.prepare` for the suggested runtime (start or install the VM, its services and the runtime image, unlock the vault) and shows its output. A system dialog asks first and says to back up the vault key.
-3. **Connect a runtime:** the runtime cards of Settings.
+3. **Connect a runtime:** the runtime cards of Settings. Codex imports the login of the machine the daemon runs on; when it has none, the card names what to run there (`codex login`, or on a remote server `instabox ssh <machine>` or `ssh <host>` followed by `codex login --device-auth`).
 4. **Meet your first agent:** creates `@dev` (no connectors, no workspaces) on the suggested runtime, then offers three starter tasks; choosing one opens the agent's conversation.
 
 Skip for now leaves the guide until it is opened again.

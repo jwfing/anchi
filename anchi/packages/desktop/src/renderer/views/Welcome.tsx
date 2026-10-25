@@ -14,19 +14,20 @@ import { call } from '../api.ts';
 import { Icon } from '../ui.tsx';
 import { Runtimes, ServerCard } from './Settings.tsx';
 
-const ONBOARDED = 'anchi.onboarded';
-
-/** Whether this window finished or skipped the guide; storage may be refused. */
-export function onboarded(): boolean {
+/**
+ * Whether this window finished or skipped the guide for a server: a server switched to later may
+ * still need preparing. Storage may be refused.
+ */
+export function onboarded(server: string): boolean {
   try {
-    return localStorage.getItem(ONBOARDED) === '1';
+    return localStorage.getItem(`anchi.onboarded:${server}`) === '1';
   } catch {
     return false;
   }
 }
-export function setOnboarded() {
+export function setOnboarded(server: string) {
   try {
-    localStorage.setItem(ONBOARDED, '1');
+    localStorage.setItem(`anchi.onboarded:${server}`, '1');
   } catch {
     // The guide shows again next time.
   }
@@ -61,7 +62,8 @@ const STARTERS = [
 export function WelcomeView({ onFinish }: { onFinish: () => void }) {
   const { model, server, act, setView } = useApp();
   const [status, setStatus] = useState<SetupStatus>();
-  const [machineChosen, setMachineChosen] = useState(false);
+  // A remote server in use was chosen on purpose: start at preparing it.
+  const [machineChosen, setMachineChosen] = useState(server.name !== 'local');
   const [lines, setLines] = useState<string[]>([]);
   const [preparing, setPreparing] = useState(false);
 
@@ -121,7 +123,7 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
     if (!agent) return;
     const task = await act(() => call('tasks.create', { agentId: agent.id, text }));
     if (!task) return;
-    setOnboarded();
+    setOnboarded(server.name);
     onFinish();
     setView({ kind: 'agent', agentId: agent.id });
   };
@@ -134,7 +136,7 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
           type="button"
           className="btn"
           onClick={() => {
-            setOnboarded();
+            setOnboarded(server.name);
             onFinish();
           }}
         >
@@ -169,7 +171,9 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
           >
             {server.status === 'connected'
               ? `Continue with ${server.name}`
-              : `Waiting for ${server.name}…`}
+              : server.status === 'error'
+                ? `${server.name} is not available: use another server above`
+                : `Waiting for ${server.name}…`}
           </button>
         </>
       )}
@@ -191,7 +195,9 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
                 {nextSetupAction(status) === 'vm-start'
                   ? 'The Anchi VM is stopped. Preparing starts it.'
                   : nextSetupAction(status) === 'install'
-                    ? 'Preparing installs the Anchi VM, its services and a runtime image. The first time takes several minutes.'
+                    ? server.name === 'local'
+                      ? 'Preparing installs the Anchi VM, its services and a runtime image. The first time takes several minutes.'
+                      : 'Preparing installs the Anchi services, the vault and a runtime image on the server. The first time takes several minutes.'
                     : 'Preparing unlocks the vault that holds your credentials.'}
               </p>
               <button

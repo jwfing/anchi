@@ -532,6 +532,25 @@ export function SecretForm({
 
 type RuntimeId = 'codex' | 'claude' | 'hermes';
 
+const CODEX_LOGIN: Record<string, string> = {
+  HOST_LOGIN_MISSING: 'has no Codex login yet',
+  HOST_LOGIN_EXPIRED: 'has a Codex login that expired',
+  HOST_LOGIN_UNAVAILABLE: 'has a Codex login Anchi could not read',
+};
+
+/**
+ * The daemon reads the Codex login of the machine it runs on, so a remote server needs its own:
+ * the codes become what to run, and where.
+ */
+export function codexLoginHelp(code: string, server: string): string | undefined {
+  const state = CODEX_LOGIN[code];
+  if (!state) return undefined;
+  if (server === 'local') return `This computer ${state}. Run codex login, then Set up again.`;
+  const host = server.slice(server.indexOf(':') + 1);
+  const shell = server.startsWith('instabox:') ? `instabox ssh ${host}` : `ssh ${host}`;
+  return `${host} ${state}. Run ${shell}, then codex login --device-auth there, then Set up again.`;
+}
+
 /** How each runtime is set up from here: its host login imported, or a form. */
 const RUNTIMES: Record<
   RuntimeId,
@@ -539,13 +558,16 @@ const RUNTIMES: Record<
     name: string;
     fields?: Field[];
     note: string;
-    save: (v: Record<string, string>) => Promise<unknown>;
+    save: (v: Record<string, string>, server: string) => Promise<unknown>;
   }
 > = {
   codex: {
     name: 'Codex',
     note: 'Imports the ChatGPT login of the server machine. Run codex login there first.',
-    save: () => call('setup.importCodex'),
+    save: (_, server) =>
+      call('setup.importCodex').catch((err: unknown) => {
+        throw new Error(codexLoginHelp(message(err), server) ?? message(err));
+      }),
   },
   claude: {
     name: 'Claude Code',
@@ -646,7 +668,9 @@ export function Runtimes({
                 aria-controls={rt.fields ? `runtime-${id}` : undefined}
                 onClick={() => {
                   if (rt.fields) return setOpen(open === id ? undefined : id);
-                  void act(() => rt.save({}), `${rt.name} connected`).then((r) => r && onChange());
+                  void act(() => rt.save({}, server), `${rt.name} connected`).then(
+                    (r) => r && onChange(),
+                  );
                 }}
               >
                 {open === id ? 'Cancel' : ok ? 'Replace' : 'Set up'}
@@ -658,7 +682,7 @@ export function Runtimes({
                   fields={rt.fields}
                   note={rt.note}
                   submit={async (v) => {
-                    await rt.save(v);
+                    await rt.save(v, server);
                     setOpen(undefined);
                     onChange();
                   }}
