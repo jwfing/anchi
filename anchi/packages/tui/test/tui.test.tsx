@@ -14,15 +14,8 @@ import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/render.ts';
 import { sanitize, sanitizeJson, sanitizeLines } from '@anchi/core';
-import {
-  continued,
-  nextSetupAction,
-  resultLines,
-  teamActivity,
-  turnActivity,
-  welcomeStep,
-  FIRST_TASK,
-} from '../src/tui/usability.ts';
+import { continued, resultLines, teamActivity, turnActivity } from '../src/tui/usability.ts';
+import { nextSetupAction, welcomeStep, FIRST_TASK } from '@anchi/core';
 import { App, filterTasks, skillSource, sortSkills } from '../src/tui/App.tsx';
 import { buildKeyMap, keysFor } from '../src/tui/keys.ts';
 import { transcriptLines, wrap } from '../src/tui/lines.ts';

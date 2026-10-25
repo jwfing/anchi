@@ -39,7 +39,7 @@ import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeJson, sanitizeLine, sanitizeLines } from '@anchi/core';
 import { selfUpdate } from './update.ts';
-import { suggestedRuntime, runtimeReady } from './tui/usability.ts';
+import { suggestedRuntime, runtimeReady } from '@anchi/core';
 import { runTui } from './tui/index.tsx';
 import { loadKeyMap } from './tui/keyconfig.ts';
 import { ACTIONS, CONTEXTS, keyLabel, KEYS_TEMPLATE } from './tui/keys.ts';

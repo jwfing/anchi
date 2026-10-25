@@ -1237,3 +1237,77 @@ h2 {
 .skill-source {
   max-width: 280px;
 }
+
+.welcome {
+  max-width: 980px;
+}
+.stepper {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stepper li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 13px;
+}
+.step-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--subtle);
+  font-weight: 600;
+}
+.step-now {
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+.step-now .step-mark {
+  background: var(--accent);
+  color: #fff;
+}
+.step-done .step-mark {
+  background: #e3f2e8;
+  color: #1d6b3a;
+}
+.step-later {
+  color: var(--muted);
+}
+.setup-log {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--subtle);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.starters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.starter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.starter:hover {
+  border-color: var(--accent);
+}

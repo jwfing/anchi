@@ -17,6 +17,8 @@ import { AgentView } from './views/Agent.tsx';
 import { ApprovalsView } from './views/Approvals.tsx';
 import { BuilderView } from './views/Builder.tsx';
 import { SettingsView } from './views/Settings.tsx';
+import { onboarded, setOnboarded, WelcomeView } from './views/Welcome.tsx';
+import { welcomeStep } from '@anchi/core/welcome';
 import { UsageView } from './views/Usage.tsx';
 
 export const BUILDER = 'builder';
@@ -26,7 +28,8 @@ export type View =
   | { kind: 'builder' }
   | { kind: 'approvals' }
   | { kind: 'usage' }
-  | { kind: 'settings' };
+  | { kind: 'settings' }
+  | { kind: 'welcome' };
 
 export interface AppContext {
   model: Model;
@@ -135,6 +138,28 @@ export function App() {
       call('approvals.list').then((approvals) => dispatch({ type: 'approvals', approvals })),
     ]).catch((err) => say(message(err), true));
   }, [server.status, server.name, say]);
+
+  // The guide opens on a window that has not finished it, unless this server needs nothing.
+  const [guided, setGuided] = useState(onboarded());
+  useEffect(() => {
+    if (guided) return;
+    if (server.status !== 'connected') {
+      if (server.status === 'error') setView({ kind: 'welcome' });
+      return;
+    }
+    void Promise.all([
+      call('setup.status'),
+      call('agents.list'),
+      call('tasks.list', { limit: 500 }),
+    ])
+      .then(([status, agents, tasks]) => {
+        if (welcomeStep(status, agents, tasks) === 'done') {
+          setOnboarded();
+          setGuided(true);
+        } else setView({ kind: 'welcome' });
+      })
+      .catch(() => setView({ kind: 'welcome' }));
+  }, [guided, server.status, server.name]);
 
   const ctx: AppContext = { model, dispatch, server, loadEvents, act, setView };
   const team = model.agents.filter((a) => a.id !== BUILDER);
@@ -255,6 +280,14 @@ export function App() {
           {view.kind === 'approvals' && <ApprovalsView />}
           {view.kind === 'usage' && <UsageView />}
           {view.kind === 'settings' && <SettingsView />}
+          {view.kind === 'welcome' && (
+            <WelcomeView
+              onFinish={() => {
+                setGuided(true);
+                setView(team[0] ? { kind: 'agent', agentId: team[0].id } : { kind: 'builder' });
+              }}
+            />
+          )}
         </div>
       </div>
     </Ctx.Provider>
