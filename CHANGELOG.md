@@ -19,6 +19,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Skill descriptions are read from SKILL.md front matter as YAML, so escaped quotes no longer show as `\"` and folded descriptions (`description: >-`) show their text instead of `>-`, in the Skills lists and the builder's inventory. Front matter that is not valid YAML is still read line by line.
+
 - Desktop app: the guide's first stage says when the server in use cannot be reached instead of waiting for it, and preparing a remote server no longer says it installs a VM. `scripts/remote.sh` ends with what to do in the desktop app as well as the CLI.
 
 - Desktop app: in the builder's start-from-empty form, the Preview button lines up with the Agent id and Runtime fields instead of sitting higher.
