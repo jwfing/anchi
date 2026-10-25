@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../App.tsx';
 import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { call, message } from '../api.ts';
+import { ConnectorLogo, connectorName } from '../logos.tsx';
 
 export function SettingsView() {
   const { act, server, setView } = useApp();
@@ -720,7 +721,8 @@ function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: 
           <div key={id} className="connector-group">
             <div className="connector-row">
               <span className={`dot ${c?.connected ? 'dot-connected' : 'dot-off'}`} />
-              <span className="strong connector-id">{id}</span>
+              <ConnectorLogo id={id} />
+              <span className="strong connector-id">{connectorName(id)}</span>
               <span className="small muted grow ellipsis">
                 {c?.connected ? sanitizeLine(c.account ?? 'connected') : 'not connected'}
               </span>
@@ -799,7 +801,8 @@ function Services({ status, onChange }: { status: SetupStatus; onChange: () => v
         return (
           <div key={s.id} className="connector-row">
             <span className={`dot ${s.connected ? 'dot-connected' : 'dot-off'}`} />
-            <span className="strong connector-id">{s.id}</span>
+            <ConnectorLogo id={s.id} />
+            <span className="strong connector-id">{connectorName(s.id)}</span>
             <span className="small muted grow ellipsis">
               {s.connected
                 ? sanitizeLine(
