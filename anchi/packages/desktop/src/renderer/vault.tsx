@@ -55,13 +55,15 @@ export function VaultLockedCard({
     <section className="card">
       <h2>The vault is locked</h2>
       <p className="small muted">{EXPLANATION}</p>
-      <button
-        type="button"
-        className="btn btn-primary"
-        onClick={() => void unlock(status).then((ok) => ok && onUnlocked())}
-      >
-        Unlock the vault
-      </button>
+      <div className="row">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => void unlock(status).then((ok) => ok && onUnlocked())}
+        >
+          Unlock the vault
+        </button>
+      </div>
     </section>
   );
 }
