@@ -3,6 +3,7 @@ import {
   CONNECTOR_IDS,
   type ConnectorId,
   type ServiceConnectorId,
+  type ServiceConnectorStatus,
   type SetupStatus,
   type SkillAddResult,
   type SkillInfo,
@@ -15,6 +16,7 @@ import { useApp } from '../App.tsx';
 import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { call, message } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
+import { count } from '../format.ts';
 
 export function SettingsView() {
   const { act, server, setView } = useApp();
@@ -782,6 +784,24 @@ const SIGN_IN: Partial<
   reddit: 'services.redditLogin',
 };
 
+interface DisconnectTarget {
+  /** A Google account by name; absent for the service itself. */
+  account?: string;
+  /** What the provider calls the account, such as the email address. */
+  label: string | null;
+  /** Disconnected here, but the provider has not confirmed the revocation: disconnect again. */
+  pending: boolean;
+}
+
+/** What a Disconnect button acts on, one per entry. */
+export function disconnectable(s: ServiceConnectorStatus): DisconnectTarget[] {
+  const accounts = s.accounts.filter((a) => a.connected || a.revocationPending);
+  if (accounts.length) {
+    return accounts.map((a) => ({ account: a.name, label: a.account, pending: !a.connected }));
+  }
+  return s.connected || s.revocationPending ? [{ label: s.account, pending: !s.connected }] : [];
+}
+
 /** Services that connect with a pasted token instead of a browser sign-in. */
 const TOKEN_LABEL: Partial<Record<ServiceConnectorId, string>> = {
   notion: 'Notion token (ntn_…)',
@@ -811,6 +831,27 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
       </h2>
       {status.services.map((s) => {
         const tokenLabel = TOKEN_LABEL[s.id];
+        const targets = disconnectable(s);
+        // Several Google accounts each get a row of their own under the service's.
+        const perAccount = targets.length > 1;
+        const disconnect = (t: DisconnectTarget) => (
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() =>
+              void act(
+                () =>
+                  call(
+                    'services.disconnect',
+                    t.account ? { id: s.id, account: t.account } : { id: s.id },
+                  ),
+                `${connectorName(s.id)}${t.account && perAccount ? ` ${t.account}` : ''} disconnected`,
+              ).then(onChange)
+            }
+          >
+            {t.pending ? 'Revoke again' : 'Disconnect'}
+          </button>
+        );
         return (
           <div key={s.id} className="connector-group">
             <div className="connector-row">
@@ -818,16 +859,21 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
               <ConnectorLogo id={s.id} />
               <span className="strong connector-id">{connectorName(s.id)}</span>
               <span className="small muted grow ellipsis">
-                {s.connected
-                  ? sanitizeLine(
-                      s.accounts.map((a) => a.account ?? a.name).join(', ') ||
-                        s.account ||
-                        'connected',
-                    )
-                  : s.reauthRequired
-                    ? 'sign in again'
-                    : 'not connected'}
+                {perAccount
+                  ? count(targets.filter((t) => !t.pending).length, 'account')
+                  : s.connected
+                    ? sanitizeLine(
+                        s.accounts.map((a) => a.account ?? a.name).join(', ') ||
+                          s.account ||
+                          'connected',
+                      )
+                    : s.reauthRequired
+                      ? 'sign in again'
+                      : targets[0]?.pending
+                        ? 'revocation pending'
+                        : 'not connected'}
               </span>
+              {!perAccount && targets[0] && disconnect(targets[0])}
               {!s.connected && SIGN_IN[s.id] && (
                 <button type="button" className="btn btn-small" onClick={() => signIn(s.id)}>
                   Sign in
@@ -873,6 +919,16 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
                 </button>
               </div>
             </div>
+            {perAccount &&
+              targets.map((t) => (
+                <div key={t.account} className="connector-row account-row">
+                  <span className="connector-id">{t.account}</span>
+                  <span className="small muted grow ellipsis">
+                    {t.pending ? 'revocation pending' : sanitizeLine(t.label ?? 'connected')}
+                  </span>
+                  {disconnect(t)}
+                </div>
+              ))}
             {tokenLabel && editing === s.id && (
               <SecretForm
                 id={`connect-${s.id}`}

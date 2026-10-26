@@ -5,6 +5,7 @@ import type {
   AgentSummary,
   MethodName,
   Notifications,
+  ServiceConnectorId,
 } from '@anchi/protocol';
 
 /**
@@ -49,6 +50,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'usage.quota',
   'services.setMode',
   'services.setToken',
+  'services.disconnect',
   'services.googleLogin',
   'services.xLogin',
   'services.redditLogin',
@@ -99,6 +101,30 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
       throw new Error('skills.add: the window adds skills from https://github.com/ addresses');
     }
   },
+  'services.disconnect': (p) => {
+    const { id, account } = p as { id?: unknown; account?: unknown };
+    if (typeof id !== 'string' || !Object.hasOwn(SERVICES, id)) {
+      throw new Error('services.disconnect: unknown service');
+    }
+    if (account !== undefined && (typeof account !== 'string' || !ACCOUNT.test(account))) {
+      throw new Error('services.disconnect: invalid account name');
+    }
+  },
+};
+
+const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+
+/** Each service's name and what disconnecting does at the provider, for the dialog. */
+const SERVICES: Record<ServiceConnectorId, { name: string; remote: string }> = {
+  gmail: { name: 'Gmail', remote: 'revokes it at Google' },
+  drive: { name: 'Google Drive', remote: 'revokes it at Google' },
+  notion: {
+    name: 'Notion',
+    remote: 'cannot revoke it at Notion: remove the connection in Notion yourself',
+  },
+  slack: { name: 'Slack', remote: 'revokes it at Slack' },
+  x: { name: 'X', remote: 'revokes it at X' },
+  reddit: { name: 'Reddit', remote: 'revokes it at Reddit' },
 };
 
 /** Links from agent text open in the browser only as plain web pages. */
@@ -166,6 +192,17 @@ export async function confirmation(
       message: `Let agents post to ${p.id === 'x' ? 'X' : 'Reddit'} without asking?`,
       detail: autoPublishWarning(p.id),
       button: 'Post without asking',
+    };
+  }
+  if (call.method === 'services.disconnect') {
+    // Checked by PARAMS before this runs.
+    const p = call.params as { id: ServiceConnectorId; account?: string };
+    const { name, remote } = SERVICES[p.id];
+    const which = p.account ? ` account ${p.account}` : '';
+    return {
+      message: `Disconnect ${name}${which}?`,
+      detail: `Anchi removes the ${name}${which} credential from the vault on the server and ${remote}. Agents that use ${name} lose access until you connect it again.`,
+      button: 'Disconnect',
     };
   }
   if (call.method === 'setup.prepare') {

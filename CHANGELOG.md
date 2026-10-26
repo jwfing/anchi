@@ -7,6 +7,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 ### Added
 
 - The desktop app connects Notion and Slack: **Settings → Services** has a **Connect** button that takes the token in a password field and stores it in the server's vault (`services.setToken`), as the TUI and `anchi setup service` do.
+- The desktop app disconnects services: **Settings → Services** has **Disconnect** for each connected service and each Gmail or Drive account, and **Revoke again** while a remote revocation is pending. A system dialog asks first and says whether the provider revokes the credential.
 
 ### Changed
 
