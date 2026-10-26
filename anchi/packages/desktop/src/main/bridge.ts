@@ -48,6 +48,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'usage.summary',
   'usage.quota',
   'services.setMode',
+  'services.setToken',
   'services.googleLogin',
   'services.xLogin',
   'services.redditLogin',
