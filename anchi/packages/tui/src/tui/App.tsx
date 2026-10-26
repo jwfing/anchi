@@ -2976,7 +2976,12 @@ function ConnectorsView({
     add('Then anchi setup install and reopen Anchi.', { color: 'yellow' });
   }
   if (!setup.vaultUnlocked)
-    add('The vault is locked. Open Getting started to initialize or unlock it.', { color: 'red' });
+    add(
+      setup.vaultKeyPresent === false
+        ? 'The vault is not set up yet. Open Getting started to initialize it.'
+        : 'The vault is locked: your credentials are still stored, but nothing can use them until it is unlocked (a restart locks it). Open Getting started to unlock it.',
+      { color: 'red' },
+    );
   // One column for every id, the services' too, so firecrawl does not push its row out.
   const idWidth = Math.max(8, ...setup.connectors.map((c) => c.id.length)) + 1;
   setup.connectors.forEach((c, i) => {

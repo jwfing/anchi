@@ -4,8 +4,14 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Fixed
+
+- A locked vault (after the server or VM restarts) no longer reads as a broken, uninstalled environment with every runtime and connector gone: setup status reports the installation and `vaultUnlocked: false` without an error, and preparing unlocks it. Before, preparing stopped at `VAULT_LOCKED`, so the desktop app could not unlock the vault.
+- A daemon on a remote server unlocks the vault when it starts, with the vault key on that machine, so a reboot or disk resize no longer stops triggers and tasks until someone unlocks it. The Lima VM's vault still waits for you, since its key stays on this computer. See `docs/REMOTE_SERVER.md`.
+
 ### Changed
 
+- The desktop app shows a banner while the vault is locked, saying the credentials are still stored, with **Unlock**; Settings shows **Unlock the vault** in place of the credential cards. The TUI's message says the same.
 - The desktop app draws more of the Markdown agents write: tables (with column alignment; a wide one scrolls inside the message), horizontal rules, quotes, nested lists, numbered lists that start past 1, italics and strikethrough. Before, a table showed as lines of `|` and `---` as text. It still draws React elements, never HTML.
 
 ## 0.4.1 — 2026-10-26

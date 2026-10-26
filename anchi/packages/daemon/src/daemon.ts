@@ -169,6 +169,8 @@ export interface DaemonOptions {
   notify?: (title: string, message: string) => Promise<void>;
   /** Reap guest cells at start (default true). */
   reap?: boolean;
+  /** The vault key a remote server unlocks its vault with at start; tests point it elsewhere. */
+  vaultKeyFile?: string;
 }
 
 type Handlers = {
@@ -482,6 +484,24 @@ export class Daemon {
   }
 
   /** Reads the setup status for its side effects; a VM that is not up is not an error. */
+  /**
+   * A remote server's restart (a reboot, a disk resize) clears the vault's master key from tmpfs,
+   * and its triggers and tasks then fail until someone unlocks it. Its vault key lies on the same
+   * machine as the encrypted vault, so staying locked protects nothing there: unlock it at start.
+   * The Lima VM is different: its key stays on this computer, outside the VM's disk.
+   */
+  private async unlockServerVault(): Promise<void> {
+    if (!existsSync(this.opts.vaultKeyFile ?? VAULT_KEY)) return;
+    try {
+      if (!(await this.guest.servicesInstalled())) return;
+      if ((await this.guest.vaultStatus()).unlocked) return;
+      await this.setup.run('vault-unlock', () => {});
+      this.log('unlocked the vault with the vault key on this server');
+    } catch (err) {
+      this.log(`the vault stays locked: ${(err as Error).message}`);
+    }
+  }
+
   private async refreshSetup(): Promise<void> {
     const status = await setupStatus(this.guest, this.vm, this.services).catch(() => undefined);
     if (status) this.noteSetup(status);
@@ -1341,6 +1361,8 @@ export class Daemon {
     }
     // Which runtime the builder gets and whether the guest is outdated, before any client asks.
     if (migration) void migration.then(() => this.refreshSetup());
+    else if (this.vm.placement === 'local')
+      void this.unlockServerVault().then(() => this.refreshSetup());
     else void this.refreshSetup();
     this.hub.recoverInterrupted();
 

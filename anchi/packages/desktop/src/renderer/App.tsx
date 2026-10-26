@@ -20,6 +20,7 @@ import { SettingsView } from './views/Settings.tsx';
 import { onboarded, setOnboarded, WelcomeView } from './views/Welcome.tsx';
 import { welcomeStep } from '@anchi/core/welcome';
 import { UsageView } from './views/Usage.tsx';
+import { VaultBanner } from './vault.tsx';
 
 export const BUILDER = 'builder';
 
@@ -173,6 +174,7 @@ export function App() {
     <Ctx.Provider value={ctx}>
       <div className="app">
         <ConnectionBanner onOpen={() => setView({ kind: 'settings' })} />
+        <VaultBanner />
         {flash && (
           <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
             {flash.text}

@@ -34,6 +34,7 @@ import {
   Services,
 } from '../src/renderer/views/Settings.tsx';
 import { onboarded, setOnboarded, stageFor } from '../src/renderer/views/Welcome.tsx';
+import { vaultLocked } from '../src/renderer/vault.tsx';
 
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
 
@@ -710,10 +711,46 @@ describe('getting started', () => {
       }),
     ).rejects.toThrow('cancelled');
     expect(asked).toContain('vault.key');
-    expect(sent, 'refused: nothing prepared').toEqual([]);
+    expect(sent, 'refused: only the status was read').toEqual(['setup.status']);
     for (const method of ['setup.run', 'setup.reset']) {
       expect(() => checkCall(method, {})).toThrow(/does not call/);
     }
+  });
+
+  it('asks to unlock, not to install, when unlocking is all preparing does', async () => {
+    const status = {
+      vm: 'running',
+      installed: true,
+      vaultUnlocked: false,
+      vaultKeyPresent: true,
+      guestOutdated: false,
+      preparedRuntimes: ['codex'],
+    } as SetupStatus;
+    const ask = async (s: Partial<SetupStatus>) => {
+      let message = '';
+      const read = async (method: string) =>
+        method === 'setup.status' ? { ...status, ...s } : null;
+      await guardedCall('setup.prepare', { runtime: 'codex', confirm: true }, read, async (q) => {
+        message = q.message;
+        return false;
+      }).catch(() => undefined);
+      return message;
+    };
+    expect(await ask({})).toBe('Unlock the vault?');
+    for (const other of [
+      { installed: false },
+      { guestOutdated: true },
+      { preparedRuntimes: [] },
+      { vaultUnlocked: true },
+    ]) {
+      expect(await ask(other), JSON.stringify(other)).toBe('Prepare the Anchi environment?');
+    }
+    expect(vaultLocked({ ...status })).toBe(true);
+    expect(vaultLocked({ ...status, error: 'GUEST_UNAVAILABLE' })).toBe(false);
+    expect(
+      vaultLocked({ ...status, vaultKeyPresent: false }),
+      'a new vault, not a locked one',
+    ).toBe(false);
   });
 
   it('remembers the guide per server, so switching to a new server opens it again', () => {

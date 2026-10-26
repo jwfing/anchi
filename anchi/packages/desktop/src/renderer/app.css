@@ -1392,6 +1392,10 @@ h2 {
   background: #fdecea;
   color: var(--danger);
 }
+.vault-banner {
+  background: #fdecea;
+  color: var(--danger);
+}
 
 .server-tag {
   flex: none;
