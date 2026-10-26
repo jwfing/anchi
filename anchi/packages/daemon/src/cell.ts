@@ -33,7 +33,7 @@ const START_HINTS: Record<string, string> = {
   WORKSPACE_TOO_MANY_MASKS:
     'the writable folder (named after the colon) has more git repositories and editor folders than Anchi masks; share a smaller folder',
   DISK_FULL:
-    "the VM's disk has under 512 MB free; free space in the VM (agents' homes under /var/lib/anchi/agents, image layers under /var/lib/anchi/layers) or recreate the VM with a larger disk",
+    "the guest disk that holds /var/lib/anchi has under 512 MB free; free space there (agents' homes under /var/lib/anchi/agents, image layers under /var/lib/anchi/layers), or give it more: a remote server can keep that data on a larger disk with scripts/remote.sh <server> --data-dir <path> (see docs/REMOTE_SERVER.md), and a Lima VM is recreated with a larger disk",
 };
 
 /** Anchi tool calls one turn may make; a limit on runaway loops, not a security control. */

@@ -3,13 +3,27 @@
 # instabox VM (created when missing) or any Debian or Ubuntu host reached with ssh. It copies this
 # checkout, then scripts/server-install.sh there sets up the daemon and anchi-bridge. The guest
 # (trusted services, cells, base image) follows from the client: anchi --server <target> setup install.
+# --data-dir <path> keeps Anchi's guest data (agents' homes, image layers) on that directory, bind-
+# mounted at /var/lib/anchi; an instabox machine uses /data/anchi on its data disk unless told.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 usage() {
-  echo 'usage: scripts/remote.sh instabox:<machine> | ssh:<[user@]host>' >&2
+  echo 'usage: scripts/remote.sh instabox:<machine> | ssh:<[user@]host> [--data-dir <path>]' >&2
   exit 64
 }
 target=${1:-}
+shift || true
+data_dir=
+while (($#)); do
+  case $1 in
+    --data-dir)
+      (($# >= 2)) || usage
+      data_dir=$2
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
 # The names parseServer (anchi/packages/daemon/src/remote.ts) accepts, never an ssh option.
 case $target in
   instabox:*)
@@ -38,6 +52,14 @@ case $target in
     ;;
   *) usage ;;
 esac
+# The instabox data disk (/data) is the one a user resizes; the root disk stays small.
+if [[ -z $data_dir && $target == instabox:* ]]; then data_dir=/data/anchi; fi
+# /var/lib/anchi itself means no separate directory. The server checks the rest again.
+[[ $data_dir == /var/lib/anchi ]] && data_dir=
+if [[ -n $data_dir && ! $data_dir =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+  echo 'The --data-dir path must be absolute, of letters, digits, ".", "_", "-" and "/"' >&2
+  exit 64
+fi
 command -v pnpm >/dev/null || { echo 'pnpm is required to bundle the cell runner' >&2; exit 1; }
 (cd anchi && pnpm --dir packages/cell-runner run bundle >/dev/null)
 # Tracked and new files of the parts a server runs, plus the bundled runner; never node_modules,
@@ -49,6 +71,7 @@ ls anchi/packages/cell-runner/dist/{runner,forward,mcp}.mjs >>"$files"
 echo "Copying this checkout to $target"
 COPYFILE_DISABLE=1 tar czf - --no-xattrs -T "$files" |
   "${ssh[@]}" 'rm -rf ~/anchi.new && mkdir -p ~/anchi.new && tar xzf - -C ~/anchi.new 2>/dev/null'
-"${ssh[@]}" 'bash ~/anchi.new/scripts/server-install.sh'
+if [[ -n $data_dir ]]; then echo "Anchi's data on the server: $data_dir"; fi
+"${ssh[@]}" "bash ~/anchi.new/scripts/server-install.sh $data_dir"
 echo "Done. In the desktop app, choose Use beside this server (Settings, Server), then Prepare."
 echo "From the CLI: anchi server $target; then anchi setup install and anchi setup vault init."

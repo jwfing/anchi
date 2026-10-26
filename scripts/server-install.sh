@@ -2,7 +2,9 @@
 # Runs on a remote server from the copy scripts/remote.sh made in ~/anchi.new: moves it to
 # ~/anchi, installs its packages, anchi-bridge, and the daemon as a systemd user unit that drives
 # this machine as its guest (ANCHI_GUEST=local) and keeps running without a login session.
+# With a directory argument, Anchi's guest data moves there (guest/anchi_data_dir.py).
 set -euo pipefail
+data_dir=${1:-}
 new=$HOME/anchi.new
 dest=$HOME/anchi
 cd "$new"
@@ -31,6 +33,13 @@ sudo -n loginctl enable-linger "$USER"
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
 for _ in $(seq 50); do [[ -S $XDG_RUNTIME_DIR/bus ]] && break; sleep 0.2; done
+if [[ -n $data_dir ]]; then
+  # Cells use the data: stop the daemon, which ends them, and clear what they left. The restart
+  # below starts it again.
+  systemctl --user stop anchi-daemon.service 2>/dev/null || true
+  if command -v anchi-cell >/dev/null; then sudo -n anchi-cell reap >/dev/null || true; fi
+  sudo -n python3 "$dest/guest/anchi_data_dir.py" "$data_dir" --home "$HOME"
+fi
 "$dest/scripts/anchi" daemon install
 systemctl --user restart anchi-daemon.service
 echo "Anchi daemon running on $(hostname) (guest: this machine)."
