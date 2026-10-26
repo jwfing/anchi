@@ -4,11 +4,16 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.4.1 — 2026-10-26
+
+The desktop app sets up every connector without the terminal: Notion and Slack connect with a token, Gmail, Drive, X and Reddit import their OAuth app with **Add app**, services disconnect after a system dialog, and each connector links its setup guide. The landing page leads with the desktop app, and `scripts/remote.sh` keeps instabox servers from pausing.
+
+Update with `anchi update`, which also updates a desktop app installed with `--desktop`. Then wait for tasks to finish, run `anchi daemon stop` and `anchi setup install`, and reopen Anchi. The VM services and cells are unchanged since 0.4.0, but the daemon reports a VM installed by another version as outdated until `anchi setup install` records the new one. For an existing instabox server, run `scripts/remote.sh instabox:<machine>` again from the new release's checkout to turn off its idle pause. Choosing a Google client file in the desktop app and the sign-ins after **Add app** have not been run against real accounts.
+
 ### Added
 
 - The desktop app connects Notion and Slack: **Settings → Services** has a **Connect** button that takes the token in a password field and stores it in the server's vault (`services.setToken`), as the TUI and `anchi setup service` do.
 - The desktop app disconnects services: **Settings → Services** has **Disconnect** for each connected service and each Gmail or Drive account, and **Revoke again** while a remote revocation is pending. A system dialog asks first and says whether the provider revokes the credential.
-
 - The desktop app links each connector and service that is not connected to its setup guide, and its token forms say where the token comes from. Gmail, Drive, X and Reddit without the OAuth app their sign-in needs say so and link the guide. `docs/CONNECTORS.md` has a section per connector: where to create the credential, what to grant and how to enter it.
 - The desktop app imports the OAuth app that Gmail, Drive, X and Reddit sign in with: **Add app** on the service's row takes Google's client JSON from a system file dialog, or the X or Reddit app's Client ID. Before, only `anchi setup google-client`, `x-client` and `reddit-client` could.
 - The website redirects `https://anchi.elseward.xyz/docs/connect/<name>` to that connector's setup guide, so the links in an installed app keep working when the documentation moves.
