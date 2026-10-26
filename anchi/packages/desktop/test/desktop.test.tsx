@@ -203,6 +203,70 @@ describe('markdown', () => {
     expect(out).toContain('<pre><code>ls -la</code></pre>');
   });
 
+  it('draws tables with their alignment, and formatting inside cells', () => {
+    const out = html(
+      [
+        '博通主要经营两类业务：',
+        '',
+        '| 业务 | 2026 财年 Q3 收入 | 占比 |',
+        '|---|---:|:---:|',
+        '| 半导体解决方案 | **20.839** | 70% |',
+        '| 基础设施软件 | 8.752 |',
+        '',
+        '最新季度',
+      ].join('\n'),
+    );
+    expect(out).toContain('<div class="md-table"><table><thead><tr><th>业务</th>');
+    expect(out).toContain('<th style="text-align:right">2026 财年 Q3 收入</th>');
+    expect(out).toContain('<td style="text-align:right"><strong>20.839</strong></td>');
+    expect(out, 'a short row is padded to the header').toContain(
+      '<td style="text-align:right">8.752</td><td style="text-align:center"></td>',
+    );
+    expect(out).toContain('<p>最新季度</p>');
+    expect(out).not.toContain('|---');
+  });
+
+  it('draws rules, quotes, nested and loose lists, italics and strikethrough', () => {
+    const out = html(
+      [
+        '估值置信度为**中等**。',
+        '',
+        '---',
+        '',
+        '> quoted **text**',
+        '',
+        '3. third',
+        '',
+        '4. fourth',
+        '   - nested',
+        '- other kind',
+        '',
+        '*italic* and ~~gone~~ but snake_case_name and 2*3*4 stay',
+      ].join('\n'),
+    );
+    expect(out).toContain('<hr/>');
+    expect(out).toContain('<blockquote><p>quoted <strong>text</strong></p></blockquote>');
+    expect(out).toContain(
+      '<ol start="3"><li>third</li><li>fourth<ul><li>nested</li></ul></li></ol>',
+    );
+    expect(out).toContain('<ul><li>other kind</li></ul>');
+    expect(out).toContain('<em>italic</em> and <del>gone</del> but snake_case_name and 2*3*4 stay');
+  });
+
+  it('ends a list at a heading or table that follows it without a blank line', () => {
+    const out = html('- one\n## Next\n| a | b |\n|---|---|\n| 1 | 2 |');
+    expect(out).toContain(
+      '<ul><li>one</li></ul><p class="md-h md-h2">Next</p><div class="md-table">',
+    );
+  });
+
+  it('bounds what agent text can make it nest or draw', () => {
+    const deep = html('>'.repeat(50) + ' deep');
+    expect(deep.match(/<blockquote>/g)).toHaveLength(8);
+    const wide = html(`|${' c |'.repeat(100)}\n|${'---|'.repeat(100)}`);
+    expect(wide.match(/<th>/g)).toHaveLength(30);
+  });
+
   it('never turns agent text into HTML or a non-web link', () => {
     const out = html(
       '<img src=x onerror=alert(1)> [click](javascript:alert(1)) [ok](https://example.com/a)',

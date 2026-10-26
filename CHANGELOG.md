@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Changed
+
+- The desktop app draws more of the Markdown agents write: tables (with column alignment; a wide one scrolls inside the message), horizontal rules, quotes, nested lists, numbered lists that start past 1, italics and strikethrough. Before, a table showed as lines of `|` and `---` as text. It still draws React elements, never HTML.
+
 ## 0.4.1 — 2026-10-26
 
 The desktop app sets up every connector without the terminal: Notion and Slack connect with a token, Gmail, Drive, X and Reddit import their OAuth app with **Add app**, services disconnect after a system dialog, and each connector links its setup guide. The landing page leads with the desktop app, and `scripts/remote.sh` keeps instabox servers from pausing.
