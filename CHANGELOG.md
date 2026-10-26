@@ -4,8 +4,13 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- `scripts/remote.sh <target> --data-dir <path>` keeps a remote server's agent homes and image layers on a disk of your choice, bind-mounted at `/var/lib/anchi`; an instabox machine uses `/data/anchi` on its resizable data disk by default, and running the script again moves an existing server's data there. Agents' caches no longer fill the 16 GB root disk. The egress proxy is kept out of the new path as it is out of `/var/lib/anchi`. See `docs/REMOTE_SERVER.md`.
+
 ### Fixed
 
+- The `DISK_FULL` message names the disk that holds `/var/lib/anchi` and, for a remote server, `--data-dir`, instead of telling everyone to recreate the VM.
 - A locked vault (after the server or VM restarts) no longer reads as a broken, uninstalled environment with every runtime and connector gone: setup status reports the installation and `vaultUnlocked: false` without an error, and preparing unlocks it. Before, preparing stopped at `VAULT_LOCKED`, so the desktop app could not unlock the vault.
 - A daemon on a remote server unlocks the vault when it starts, with the vault key on that machine, so a reboot or disk resize no longer stops triggers and tasks until someone unlocks it. The Lima VM's vault still waits for you, since its key stays on this computer. See `docs/REMOTE_SERVER.md`.
 

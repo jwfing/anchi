@@ -39,6 +39,19 @@ anchi server build
 
 The script refuses while task cells run, because restarting the daemon ends them. Run it again to update the server, then `anchi setup install`.
 
+### Where Anchi keeps its data
+
+Agents' homes (their checkouts, caches and build output) and the image layers live under `/var/lib/anchi` on the server, and grow with use: an agent that builds Go or Node projects keeps gigabytes of caches. `scripts/remote.sh <target> --data-dir <path>` keeps them on a disk of your choice instead. An instabox machine uses `/data/anchi` unless you name another path: `/data` is its data disk, the one you can resize, while its root disk stays small. An SSH host keeps `/var/lib/anchi` unless you pass `--data-dir`, and `--data-dir /var/lib/anchi` means the same.
+
+`guest/anchi_data_dir.py` does this as root, with the daemon stopped:
+
+- it refuses a path that is relative, contains `.` or `..`, lies inside `/var/lib/anchi` or the login user's home, or is on a filesystem other than ext4, xfs or btrfs (the image layers are overlays);
+- it creates the directory (root, mode 0700), copies the existing data there with its owners, checks the copy, and bind-mounts it at `/var/lib/anchi` with the systemd unit `var-lib-anchi.mount`, so the cell manager and the checks keep their paths;
+- it adds a drop-in that keeps the egress proxy out of the new path, as its unit keeps it out of `/var/lib/anchi`;
+- only then it removes the old copy. If the mount fails, the data stays where it was.
+
+Running it again with the same directory changes nothing. Moving the data a second time, to another directory, is refused. The copy needs room for all of the data plus 512 MB. A cell refuses to start with `DISK_FULL` when the disk holding `/var/lib/anchi` has under 512 MB free.
+
 ### Keep an instabox server running
 
 instabox pauses a machine once it has been idle for 30 minutes (no agent working, no terminal use, little CPU), and on the free plan after 480 running minutes as well. A daemon waiting for its next schedule or poll counts as idle, and a paused machine runs no triggers until something resumes it. For an instabox target, `scripts/remote.sh` therefore turns both off, on new and existing machines:
