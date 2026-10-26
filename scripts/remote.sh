@@ -21,6 +21,15 @@ case $target in
       echo "Creating the instabox machine $name (no timeout: it is a server; pause or stop it with instabox)."
       instabox create --name "$name" --no-vault
     fi
+    # instabox pauses a machine after 30 idle minutes, and on the free plan after 480 running
+    # minutes; a paused server runs no triggers. Turn both off where the plan allows it.
+    if instabox auto-suspend "$name" 0 >/dev/null && instabox max-run "$name" -1 >/dev/null; then
+      echo "$name stays running: idle pause off, no runtime limit."
+    else
+      echo "warning: $name still pauses itself (after 30 idle minutes, or 480 running minutes on" >&2
+      echo "  the free plan), and runs no triggers while paused. On a paid plan, run:" >&2
+      echo "  instabox auto-suspend $name 0 && instabox max-run $name -1" >&2
+    fi
     ;;
   ssh:*)
     name=${target#ssh:}
