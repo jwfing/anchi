@@ -1,6 +1,6 @@
 # Remote server
 
-By default the Anchi daemon runs on your computer and drives a Lima VM there. A remote server runs the same daemon, trusted services and task cells on a Linux machine elsewhere, so agents and triggers keep running while your computer sleeps. The machine can be a VM from any provider that you reach with SSH. [instabox](https://instabox.sh) is the recommended provider: `scripts/remote.sh` creates the machine for you. The TUI and CLI stay on your computer and reach the server's daemon through SSH.
+By default the Anchi daemon runs on your computer and drives a Lima VM there. A remote server runs the same daemon, trusted services and task cells on a Linux machine elsewhere, so agents and triggers keep running while your computer sleeps, as long as the machine runs (see [Keep an instabox server running](#keep-an-instabox-server-running)). The machine can be a VM from any provider that you reach with SSH. [instabox](https://instabox.sh) is the recommended provider: `scripts/remote.sh` creates the machine for you. The TUI and CLI stay on your computer and reach the server's daemon through SSH.
 
 ```text
 your computer                          remote server (Debian or Ubuntu, systemd, passwordless sudo)
@@ -38,6 +38,17 @@ anchi server build
 - runs the daemon as the systemd user unit `anchi-daemon.service` with `ANCHI_GUEST=local`.
 
 The script refuses while task cells run, because restarting the daemon ends them. Run it again to update the server, then `anchi setup install`.
+
+### Keep an instabox server running
+
+instabox pauses a machine once it has been idle for 30 minutes (no agent working, no terminal use, little CPU), and on the free plan after 480 running minutes as well. A daemon waiting for its next schedule or poll counts as idle, and a paused machine runs no triggers until something resumes it. For an instabox target, `scripts/remote.sh` therefore turns both off, on new and existing machines:
+
+```bash
+instabox auto-suspend anchi-server 0   # no idle pause
+instabox max-run anchi-server -1       # no runtime limit
+```
+
+Only paid plans allow this. On the free plan the script warns and the machine keeps pausing: tasks you start run while you use it, but triggers stop when it pauses. `instabox get anchi-server --json` shows the settings (`autoSuspendAfterSeconds` null, `maxRunMinutes` -1).
 
 `ssh:<[user@]host>` targets any Debian or Ubuntu host with Node.js 22+, Python 3.11+ and passwordless sudo, whoever provides it. The client runs `ssh -T -o BatchMode=yes`, so the host must be reachable with keys.
 

@@ -7,6 +7,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 ### Changed
 
 - The landing page leads with the desktop app: its install command (`install.sh | sh -s -- --desktop`) comes first, then direct downloads of the app (which need the `anchi` command) and the terminal-only install.
+### Fixed
+
+- `scripts/remote.sh` turns off instabox's idle pause and runtime limit (`instabox auto-suspend <machine> 0`, `instabox max-run <machine> -1`) on new and existing machines, so a remote server keeps running triggers while nobody uses it. The free plan does not allow it: the script then warns that the machine pauses after 30 idle minutes or 480 running minutes. See `docs/REMOTE_SERVER.md`.
 
 ## 0.4.0 — 2026-10-25
 
