@@ -80,6 +80,8 @@ The in-cell tool keeps the same request ID while waiting and times out after ten
 - Slack: revoke local access, call `auth.revoke`, then remove the token.
 - Notion: revoke local access and remove the token. No remote revoke API is available; remove the integration in Notion settings yourself.
 
+The desktop app's **Settings → Services** does the same with **Disconnect** (per account for Gmail and Drive, **Revoke again** while a revocation is pending), after a system dialog.
+
 ## Data handling and limits
 
 - Read mail, files, pages and messages may enter agent context and cloud models. Credential isolation does not keep all content local.

@@ -28,6 +28,7 @@ import {
   codexLoginHelp,
   ProbeNote,
   Runtimes,
+  disconnectable,
   SecretForm,
   Services,
 } from '../src/renderer/views/Settings.tsx';
@@ -335,7 +336,39 @@ describe('settings', () => {
     );
     const buttons = (row: string) =>
       [...row.matchAll(/class="btn btn-small"[^>]*>([^<]+)</g)].map((m) => m[1]);
-    expect(rows.slice(1).map(buttons)).toEqual([['Sign in'], ['Connect'], ['Connect'], []]);
+    expect(rows.slice(1).map(buttons)).toEqual([
+      ['Sign in'],
+      ['Connect'],
+      ['Connect'],
+      ['Disconnect'],
+    ]);
+  });
+
+  it('disconnects each connected or pending Google account by name, else the service', () => {
+    const account = (name: string, connected: boolean, revocationPending = false) => ({
+      name,
+      connected,
+      account: null,
+      reauthRequired: false,
+      revocationPending,
+    });
+    const service = (
+      connected: boolean,
+      accounts: ReturnType<typeof account>[] = [],
+      pending = false,
+    ) => ({ id: 'gmail', connected, mode: 'ask', accounts, revocationPending: pending }) as never;
+    const names = (s: never) => disconnectable(s).map((t) => [t.account, t.pending]);
+    expect(
+      names(
+        service(true, [account('work', true), account('old', false, true), account('gone', false)]),
+      ),
+    ).toEqual([
+      ['work', false],
+      ['old', true],
+    ]);
+    expect(names(service(true))).toEqual([[undefined, false]]);
+    expect(names(service(false, [], true))).toEqual([[undefined, true]]);
+    expect(names(service(false))).toEqual([]);
   });
 
   it('asks for secrets in password fields and keeps Save off until every field is filled', () => {
@@ -644,6 +677,40 @@ describe('approval choices', () => {
         guardedCall('services.setMode', params, recorder().read, never),
       ).resolves.toBeNull();
     }
+  });
+
+  it('disconnects a service only after the system dialog says what is revoked', async () => {
+    const { sent, read } = recorder();
+    let question = { message: '', detail: '' };
+    await expect(
+      guardedCall('services.disconnect', { id: 'gmail', account: 'work' }, read, async (q) => {
+        question = q;
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'refused, nothing sent').toEqual([]);
+    expect(question.message).toBe('Disconnect Gmail account work?');
+    expect(question.detail).toContain('revokes it at Google');
+
+    await guardedCall('services.disconnect', { id: 'notion' }, read, async (q) => {
+      expect(q.detail).toContain('remove the connection in Notion yourself');
+      return true;
+    });
+    expect(sent).toEqual(['services.disconnect']);
+
+    const never = async () => {
+      throw new Error('asked');
+    };
+    for (const params of [
+      { id: 'github' },
+      { id: 'toString' },
+      { id: 'gmail', account: 'Bad Name' },
+    ]) {
+      await expect(guardedCall('services.disconnect', params, read, never)).rejects.toThrow(
+        /unknown service|invalid account/,
+      );
+    }
+    expect(sent, 'invalid calls never reach the daemon').toEqual(['services.disconnect']);
   });
 
   it('asks before an agent may do a new high-risk operation without approval', async () => {

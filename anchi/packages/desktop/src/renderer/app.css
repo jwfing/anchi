@@ -1049,6 +1049,10 @@ h2 {
 .connector-id {
   width: 100px;
 }
+/* A Google account under its service, lined up with the service's name. */
+.account-row {
+  padding-left: 46px;
+}
 .logo {
   width: 18px;
   height: 18px;
