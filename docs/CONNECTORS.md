@@ -45,11 +45,11 @@ Create an application in the [Discord Developer Portal](https://discord.com/deve
 
 Gmail, Google Drive, Notion, Slack, X and Reddit are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X and Reddit read automatically and ask for approval to publish unless you set their writes to `auto`. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
 
-Gmail, Drive, X and Reddit sign in through the browser with an OAuth app you create first. The desktop app's **Sign in** needs that app's client imported with the command in its section; the desktop app cannot import it yet. Notion and Slack take a token, which the desktop app's **Connect** accepts.
+Gmail, Drive, X and Reddit sign in through the browser with an OAuth app you create first. Import the app once, with the command in its section or the desktop app's **Add app**; **Sign in** appears after that. Notion and Slack take a token, which the desktop app's **Connect** accepts.
 
 ### Gmail
 
-Without a built-in client, enable Gmail API in Google Cloud and create a Desktop OAuth client; [Gmail setup](GMAIL_SETUP.md#1-prepare-google-oauth) has the steps. Import its JSON once with `anchi setup google-client <json>`, then sign in with **Sign in** or `anchi setup service gmail [--account <name>]` (read-only scope).
+Without a built-in client, enable Gmail API in Google Cloud and create a Desktop OAuth client; [Gmail setup](GMAIL_SETUP.md#1-prepare-google-oauth) has the steps. Import its JSON once with `anchi setup google-client <json>` or **Add app** (choose the file), then sign in with **Sign in** or `anchi setup service gmail [--account <name>]` (read-only scope).
 
 ### Google Drive
 
@@ -65,11 +65,11 @@ Create an app at [api.slack.com/apps](https://api.slack.com/apps). Under **OAuth
 
 ### Reddit
 
-Reddit needs approved Data API access and an installed OAuth app; [Reddit setup](REDDIT_SETUP.md#connect-your-account) has the steps. Import the app with `anchi setup reddit-client <client-id> <developer-username>`, then sign in with **Sign in** or `anchi setup service reddit`.
+Reddit needs approved Data API access and an installed OAuth app; [Reddit setup](REDDIT_SETUP.md#connect-your-account) has the steps. Import the app with `anchi setup reddit-client <client-id> <developer-username>` or **Add app**, then sign in with **Sign in** or `anchi setup service reddit`.
 
 ### X
 
-X needs a native OAuth 2.0 app with an exact loopback callback, and API credits; [X setup](X_SETUP.md#connect-your-account) has the steps. Import the app with `anchi setup x-client <client-id>`, then sign in with **Sign in** or `anchi setup service x`.
+X needs a native OAuth 2.0 app with an exact loopback callback, and API credits; [X setup](X_SETUP.md#connect-your-account) has the steps. Import the app with `anchi setup x-client <client-id>` or **Add app**, then sign in with **Sign in** or `anchi setup service x`.
 
 The TUI's **Connectors → Services** does the same with masked input in a full-screen dialog that agent output cannot draw over; **Tab** shows the input to check it and hides it again. The desktop app's **Settings → Services** takes the Notion or Slack token in a password field under the service's row (**Connect**). Tokens go from the client to the daemon and over stdin to the encrypted vault; they are never logged or stored on the Mac. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
 

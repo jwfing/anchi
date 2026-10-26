@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homeLayout } from '@anchi/core';
 import {
@@ -165,6 +166,27 @@ ipcMain.handle('anchi:addSkillFolder', async (event) => {
     : await dialog.showOpenDialog(options);
   if (picked.canceled || !picked.filePaths[0]) return null;
   return client.call('skills.add', { source: picked.filePaths[0] });
+});
+/**
+ * A Google OAuth client JSON, chosen in a native picker and read here: the window never names a
+ * host path. Its contents go to the daemon, so this works for a remote server too.
+ */
+ipcMain.handle('anchi:importGoogleClient', async (event) => {
+  fromApp(event);
+  if (!client) throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
+  const options = {
+    title: 'Choose the Google OAuth client JSON',
+    properties: ['openFile' as const],
+    filters: [{ name: 'OAuth client', extensions: ['json'] }],
+  };
+  const picked = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  const path = picked.filePaths[0];
+  if (picked.canceled || !path) return false;
+  if ((await stat(path)).size > 16_384) throw new Error('that file is too large for a client JSON');
+  await client.call('services.googleClient', { json: await readFile(path, 'utf8') });
+  return true;
 });
 ipcMain.handle('anchi:server', (event) => {
   fromApp(event);

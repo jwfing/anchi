@@ -732,6 +732,76 @@ function TokenNote({ id }: { id: ConnectorId | ServiceConnectorId }) {
   );
 }
 
+/**
+ * The OAuth app a browser sign-in needs: Google's client JSON, picked in a native dialog, or the
+ * Client ID of an X or Reddit app. Sign in appears once the server has it.
+ */
+function OAuthAppForm({
+  id,
+  done,
+  onCancel,
+}: {
+  id: ServiceConnectorId;
+  done: () => void;
+  onCancel: () => void;
+}) {
+  const { act } = useApp();
+  if (id === 'gmail' || id === 'drive') {
+    return (
+      <div
+        id={`connect-${id}`}
+        className="drawer"
+        onKeyDown={(e) => e.key === 'Escape' && onCancel()}
+      >
+        <p className="small muted">
+          Create a Desktop app OAuth client in Google Cloud with Gmail API and Drive API enabled,
+          download its JSON and choose it here. Gmail and Drive share it. <GuideLink id={id} />
+        </p>
+        <button
+          type="button"
+          className="btn btn-primary drawer-save"
+          autoFocus
+          onClick={() =>
+            void act(() => window.anchi.importGoogleClient(), 'Google client imported').then(
+              (imported) => imported && done(),
+            )
+          }
+        >
+          Choose client JSON…
+        </button>
+      </div>
+    );
+  }
+  const reddit = id === 'reddit';
+  return (
+    <SecretForm
+      id={`connect-${id}`}
+      fields={[
+        { key: 'clientId', label: 'Client ID' },
+        ...(reddit ? [{ key: 'developerUsername', label: 'Developer username (without u/)' }] : []),
+      ]}
+      note={
+        <>
+          {reddit
+            ? 'An installed app with approved Data API access and the redirect URI http://127.0.0.1:48174/callback.'
+            : 'A Native App with OAuth 2.0 and the callback URL http://127.0.0.1:48173/callback.'}{' '}
+          <GuideLink id={id} />
+        </>
+      }
+      submit={async (v) => {
+        await (reddit
+          ? call('services.redditClient', {
+              clientId: v.clientId!,
+              developerUsername: v.developerUsername!,
+            })
+          : call('services.xClient', { clientId: v.clientId! }));
+        done();
+      }}
+      onCancel={onCancel}
+    />
+  );
+}
+
 function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
   const { act } = useApp();
   const [editing, setEditing] = useState<TokenConnectorId | undefined>();
@@ -852,6 +922,18 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
     setEditing(undefined);
     buttons.current.get(id)?.focus();
   };
+  const toggle = (id: ServiceConnectorId, label: string) => (
+    <button
+      type="button"
+      className="btn btn-small"
+      ref={(el) => void (el ? buttons.current.set(id, el) : buttons.current.delete(id))}
+      aria-expanded={editing === id}
+      aria-controls={`connect-${id}`}
+      onClick={() => setEditing(editing === id ? undefined : id)}
+    >
+      {editing === id ? 'Cancel' : label}
+    </button>
+  );
   const signIn = (id: ServiceConnectorId) => {
     const method = SIGN_IN[id];
     if (!method) return;
@@ -908,9 +990,7 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
                 ) : targets[0]?.pending ? (
                   'revocation pending'
                 ) : needsOAuthApp(s.id, status) ? (
-                  <>
-                    needs an OAuth app · <GuideLink id={s.id} />
-                  </>
+                  <GuideLink id={s.id} label="Needs an OAuth app ↗" />
                 ) : (
                   <GuideLink id={s.id} label="How to connect ↗" />
                 )}
@@ -921,20 +1001,8 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
                   Sign in
                 </button>
               )}
-              {!s.connected && tokenLabel && (
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  ref={(el) =>
-                    void (el ? buttons.current.set(s.id, el) : buttons.current.delete(s.id))
-                  }
-                  aria-expanded={editing === s.id}
-                  aria-controls={`connect-${s.id}`}
-                  onClick={() => setEditing(editing === s.id ? undefined : s.id)}
-                >
-                  {editing === s.id ? 'Cancel' : 'Connect'}
-                </button>
-              )}
+              {!s.connected && tokenLabel && toggle(s.id, 'Connect')}
+              {!s.connected && needsOAuthApp(s.id, status) && toggle(s.id, 'Add app')}
               <div className="segmented" role="group" aria-label={`${s.id} writes`}>
                 <button
                   type="button"
@@ -971,6 +1039,16 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
                   {disconnect(t)}
                 </div>
               ))}
+            {editing === s.id && needsOAuthApp(s.id, status) && (
+              <OAuthAppForm
+                id={s.id}
+                done={() => {
+                  setEditing(undefined);
+                  onChange();
+                }}
+                onCancel={() => close(s.id)}
+              />
+            )}
             {tokenLabel && editing === s.id && (
               <SecretForm
                 id={`connect-${s.id}`}

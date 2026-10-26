@@ -47,6 +47,7 @@ describe('bridge', () => {
     expect(checkCall('services.setToken', { id: 'slack', token: 'x' }).method).toBe(
       'services.setToken',
     );
+    expect(checkCall('services.xClient', { clientId: 'x' }).method).toBe('services.xClient');
     for (const method of [
       'daemon.shutdown',
       'setup.reset',
@@ -54,6 +55,9 @@ describe('bridge', () => {
       'agents.delete',
       'tasks.delete',
       'agents.allowHost',
+      // Only the main process imports a Google client, from a file the user picked.
+      'services.googleClient',
+      'services.removeGoogleClient',
       'nope',
       42,
     ]) {
@@ -379,9 +383,10 @@ describe('settings', () => {
       googleClient: false,
     } as unknown as SetupStatus;
     const out = html(<Services status={status} onChange={() => undefined} />);
-    expect(out).toContain('needs an OAuth app');
+    expect(out).toContain('Needs an OAuth app');
     expect(out).toContain(`title="${guideUrl('gmail')}"`);
     expect(out).not.toContain('Sign in');
+    expect(out).toMatch(/aria-controls="connect-gmail"[^>]*>Add app</);
     expect(needsOAuthApp('x', { xClient: undefined } as SetupStatus), 'older daemon').toBe(false);
     expect(needsOAuthApp('x', { xClient: false } as SetupStatus)).toBe(true);
     expect(needsOAuthApp('slack', {} as SetupStatus)).toBe(false);
