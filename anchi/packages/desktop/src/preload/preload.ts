@@ -20,6 +20,7 @@ const api: AnchiApi = {
   removeServer: (name) => ipcRenderer.invoke('anchi:removeServer', name),
   openExternal: (url) => ipcRenderer.invoke('anchi:openExternal', url),
   addSkillFolder: () => ipcRenderer.invoke('anchi:addSkillFolder'),
+  importGoogleClient: () => ipcRenderer.invoke('anchi:importGoogleClient'),
 };
 
 contextBridge.exposeInMainWorld('anchi', api);

@@ -51,6 +51,8 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'services.setMode',
   'services.setToken',
   'services.disconnect',
+  'services.xClient',
+  'services.redditClient',
   'services.googleLogin',
   'services.xLogin',
   'services.redditLogin',

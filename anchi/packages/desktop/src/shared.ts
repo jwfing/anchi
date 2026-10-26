@@ -25,4 +25,6 @@ export interface AnchiApi {
   openExternal(url: string): Promise<void>;
   /** Picks a folder on this computer and adds the skills in it; null when cancelled. */
   addSkillFolder(): Promise<SkillAddResult | null>;
+  /** Picks a Google OAuth client JSON on this computer and imports it; false when cancelled. */
+  importGoogleClient(): Promise<boolean>;
 }
