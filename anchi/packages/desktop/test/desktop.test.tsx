@@ -29,6 +29,7 @@ import {
   ProbeNote,
   Runtimes,
   SecretForm,
+  Services,
 } from '../src/renderer/views/Settings.tsx';
 import { onboarded, setOnboarded, stageFor } from '../src/renderer/views/Welcome.tsx';
 
@@ -41,6 +42,9 @@ describe('bridge', () => {
       'approvals.decide',
     );
     expect(checkCall('setup.importHermes', {}).method).toBe('setup.importHermes');
+    expect(checkCall('services.setToken', { id: 'slack', token: 'x' }).method).toBe(
+      'services.setToken',
+    );
     for (const method of [
       'daemon.shutdown',
       'setup.reset',
@@ -314,6 +318,24 @@ describe('settings', () => {
     expect(out.match(/>Not set up</g)).toHaveLength(2);
     expect(out.match(/>Replace</g)).toHaveLength(1);
     expect(out.match(/>Set up</g)).toHaveLength(2);
+  });
+
+  it('connects Slack and Notion with a token and the others through a browser sign-in', () => {
+    const service = (id: string, connected = false) => ({
+      id,
+      connected,
+      mode: 'auto',
+      accounts: [],
+    });
+    const status = {
+      services: [service('gmail'), service('notion'), service('slack'), service('x', true)],
+    } as unknown as SetupStatus;
+    const rows = html(<Services status={status} onChange={() => undefined} />).split(
+      'class="connector-group"',
+    );
+    const buttons = (row: string) =>
+      [...row.matchAll(/class="btn btn-small"[^>]*>([^<]+)</g)].map((m) => m[1]);
+    expect(rows.slice(1).map(buttons)).toEqual([['Sign in'], ['Connect'], ['Connect'], []]);
   });
 
   it('asks for secrets in password fields and keeps Save off until every field is filled', () => {

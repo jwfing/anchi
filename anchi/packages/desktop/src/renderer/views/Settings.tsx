@@ -782,8 +782,20 @@ const SIGN_IN: Partial<
   reddit: 'services.redditLogin',
 };
 
-function Services({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
+/** Services that connect with a pasted token instead of a browser sign-in. */
+const TOKEN_LABEL: Partial<Record<ServiceConnectorId, string>> = {
+  notion: 'Notion token (ntn_…)',
+  slack: 'Slack bot token (xoxb-…)',
+};
+
+export function Services({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
   const { act } = useApp();
+  const [editing, setEditing] = useState<ServiceConnectorId | undefined>();
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const close = (id: string) => {
+    setEditing(undefined);
+    buttons.current.get(id)?.focus();
+  };
   const signIn = (id: ServiceConnectorId) => {
     const method = SIGN_IN[id];
     if (!method) return;
@@ -798,50 +810,82 @@ function Services({ status, onChange }: { status: SetupStatus; onChange: () => v
         Services <span className="small muted normal">· act for agents, writes auto or ask</span>
       </h2>
       {status.services.map((s) => {
+        const tokenLabel = TOKEN_LABEL[s.id];
         return (
-          <div key={s.id} className="connector-row">
-            <span className={`dot ${s.connected ? 'dot-connected' : 'dot-off'}`} />
-            <ConnectorLogo id={s.id} />
-            <span className="strong connector-id">{connectorName(s.id)}</span>
-            <span className="small muted grow ellipsis">
-              {s.connected
-                ? sanitizeLine(
-                    s.accounts.map((a) => a.account ?? a.name).join(', ') ||
-                      s.account ||
-                      'connected',
-                  )
-                : s.reauthRequired
-                  ? 'sign in again'
-                  : 'not connected'}
-            </span>
-            {!s.connected && SIGN_IN[s.id] && (
-              <button type="button" className="btn btn-small" onClick={() => signIn(s.id)}>
-                Sign in
-              </button>
-            )}
-            <div className="segmented" role="group" aria-label={`${s.id} writes`}>
-              <button
-                type="button"
-                aria-pressed={s.mode === 'auto'}
-                onClick={() =>
-                  void act(() => call('services.setMode', { id: s.id, mode: 'auto' })).then(
-                    onChange,
-                  )
-                }
-              >
-                auto
-              </button>
-              <button
-                type="button"
-                aria-pressed={s.mode === 'ask'}
-                className="ask"
-                onClick={() =>
-                  void act(() => call('services.setMode', { id: s.id, mode: 'ask' })).then(onChange)
-                }
-              >
-                ask
-              </button>
+          <div key={s.id} className="connector-group">
+            <div className="connector-row">
+              <span className={`dot ${s.connected ? 'dot-connected' : 'dot-off'}`} />
+              <ConnectorLogo id={s.id} />
+              <span className="strong connector-id">{connectorName(s.id)}</span>
+              <span className="small muted grow ellipsis">
+                {s.connected
+                  ? sanitizeLine(
+                      s.accounts.map((a) => a.account ?? a.name).join(', ') ||
+                        s.account ||
+                        'connected',
+                    )
+                  : s.reauthRequired
+                    ? 'sign in again'
+                    : 'not connected'}
+              </span>
+              {!s.connected && SIGN_IN[s.id] && (
+                <button type="button" className="btn btn-small" onClick={() => signIn(s.id)}>
+                  Sign in
+                </button>
+              )}
+              {!s.connected && tokenLabel && (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  ref={(el) =>
+                    void (el ? buttons.current.set(s.id, el) : buttons.current.delete(s.id))
+                  }
+                  aria-expanded={editing === s.id}
+                  aria-controls={`connect-${s.id}`}
+                  onClick={() => setEditing(editing === s.id ? undefined : s.id)}
+                >
+                  {editing === s.id ? 'Cancel' : 'Connect'}
+                </button>
+              )}
+              <div className="segmented" role="group" aria-label={`${s.id} writes`}>
+                <button
+                  type="button"
+                  aria-pressed={s.mode === 'auto'}
+                  onClick={() =>
+                    void act(() => call('services.setMode', { id: s.id, mode: 'auto' })).then(
+                      onChange,
+                    )
+                  }
+                >
+                  auto
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={s.mode === 'ask'}
+                  className="ask"
+                  onClick={() =>
+                    void act(() => call('services.setMode', { id: s.id, mode: 'ask' })).then(
+                      onChange,
+                    )
+                  }
+                >
+                  ask
+                </button>
+              </div>
             </div>
+            {tokenLabel && editing === s.id && (
+              <SecretForm
+                id={`connect-${s.id}`}
+                fields={[{ key: 'token', label: tokenLabel, secret: true }]}
+                note="Stored in the vault on the server, never shown again."
+                submit={async (v) => {
+                  await call('services.setToken', { id: s.id, token: v.token! });
+                  setEditing(undefined);
+                  onChange();
+                }}
+                onCancel={() => close(s.id)}
+              />
+            )}
           </div>
         );
       })}
