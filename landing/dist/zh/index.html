@@ -77,13 +77,18 @@
           <p class="intro">
             在本地组织 Codex、Claude Code 和 Hermes，分工处理开发、审查和运维。每个任务运行在独立 cell 中，托管凭据留在 cell 外。
           </p>
-          <p class="intro intro-security">在终端跟踪任务、审核待批准的写操作，并查看网络访问记录。</p>
-          <div class="hero-install" aria-label="安装 Anchi">
+          <p class="intro intro-security">在桌面应用或终端里跟踪任务、审核待批准的写操作，并查看网络访问记录。</p>
+          <p class="install-label">安装桌面应用</p>
+          <div class="hero-install" aria-label="安装 Anchi 桌面应用">
             <span class="install-prompt" aria-hidden="true">$</span>
-            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code>
+            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop</code>
             <button class="install-copy" type="button" aria-label="复制安装命令" aria-live="polite" hidden>复制</button>
           </div>
-          <p class="availability install-meta">未签名预览版 · Apple Silicon macOS / 实验性 Linux<br />
+          <p class="availability install-meta">在 macOS 上安装 Anchi.app，在 Linux 上把 Anchi 加入应用菜单，同时安装它依赖的 <code>anchi</code> 命令。未签名预览版 · Apple Silicon macOS / 实验性 Linux<br />
+            也可直接下载应用：<a href="https://github.com/jwfing/anchi/releases/latest/download/anchi-desktop-darwin-arm64.tar.gz">macOS ↓</a>
+            <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi/releases/latest/download/anchi-desktop-linux-x64.tar.gz">Linux x64 ↓</a>
+            （需要先装好 <code>anchi</code> 命令；macOS 会要求你手动允许打开，<a href="https://github.com/jwfing/anchi/blob/main/docs/DESKTOP.md#install">方法 ↗</a>）<br />
+            只用终端：<code>curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code><br />
             <a href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md">安装指南 ↗</a>
             <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi/releases">版本发布 ↗</a>
             <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi">源码 ↗</a>

@@ -79,13 +79,18 @@
             Run Codex, Claude Code and Hermes as a local team for coding, review and
             operations. Each task runs in an isolated cell; managed credentials stay outside it.
           </p>
-          <p class="intro intro-security">Follow tasks, review held writes and inspect network access from your terminal.</p>
-          <div class="hero-install" aria-label="Install Anchi">
+          <p class="intro intro-security">Follow tasks, review held writes and inspect network access in the desktop app or your terminal.</p>
+          <p class="install-label">Install the desktop app</p>
+          <div class="hero-install" aria-label="Install the Anchi desktop app">
             <span class="install-prompt" aria-hidden="true">$</span>
-            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code>
+            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop</code>
             <button class="install-copy" type="button" aria-label="Copy install command" aria-live="polite" hidden>Copy</button>
           </div>
-          <p class="availability install-meta">Unsigned preview · Apple Silicon macOS / experimental Linux<br />
+          <p class="availability install-meta">Adds Anchi.app on macOS, or Anchi to the applications menu on Linux, with the <code>anchi</code> command it runs on. Unsigned preview · Apple Silicon macOS / experimental Linux<br />
+            Download the app instead: <a href="https://github.com/jwfing/anchi/releases/latest/download/anchi-desktop-darwin-arm64.tar.gz">macOS ↓</a>
+            <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi/releases/latest/download/anchi-desktop-linux-x64.tar.gz">Linux x64 ↓</a>
+            (needs the <code>anchi</code> command; macOS asks you to allow it, <a href="https://github.com/jwfing/anchi/blob/main/docs/DESKTOP.md#install">how ↗</a>)<br />
+            Terminal only: <code>curl -fsSL https://anchi.elseward.xyz/install.sh | sh</code><br />
             <a href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md">Setup guide ↗</a>
             <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi/releases">Releases ↗</a>
             <span aria-hidden="true"> · </span><a href="https://github.com/jwfing/anchi">Source ↗</a>
