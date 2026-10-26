@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Changed
+
+- The landing page leads with the desktop app: its install command (`install.sh | sh -s -- --desktop`) comes first, then direct downloads of the app (which need the `anchi` command) and the terminal-only install.
+
 ## 0.4.0 — 2026-10-25
 
 Anchi gets a desktop app, installed with `curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop`, and can run on a remote server (an instabox VM or any SSH host) so agents keep working while this computer sleeps. X and Reddit writes can be set to post without approval, agents can exempt single high-risk operations, and connectors and services show the service's name and mark.

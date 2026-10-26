@@ -1244,7 +1244,14 @@ html[lang="zh-CN"] .fleet-hero h1 {
 .install-copy:hover { color: var(--lime); background: var(--panel); }
 .install-copy:focus-visible { outline: 2px solid var(--lime); outline-offset: -3px; }
 .hero-install:has(.install-copy[hidden]) { padding-right: 16px; }
+.install-label {
+  margin: 30px 0 0;
+  color: var(--lime);
+  font-size: 11px;
+}
+.install-label + .hero-install { margin-top: 10px; }
 .install-meta { line-height: 2; }
+.install-meta code { color: var(--ink); overflow-wrap: anywhere; }
 .install-meta a { color: var(--lime); }
 .install-meta a:hover { text-decoration: underline; }
 @media (max-width: 560px) {

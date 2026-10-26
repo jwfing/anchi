@@ -38,7 +38,8 @@ gateway. The wordmark is live text so it stays crisp and accessible.
 
 ## Terminal design
 
-The page introduces safe agent collaboration with a looping hero animation,
+The hero leads with the desktop app's install command (`--desktop`), then direct app
+downloads from the latest release and the terminal-only install. The page introduces safe agent collaboration with a looping hero animation,
 followed by security boundaries, workflow, platforms/runtimes, and a TUI
 preview. Keep the platform status and security claims aligned with the root README.
 
