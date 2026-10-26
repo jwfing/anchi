@@ -108,15 +108,7 @@ accounts: { gmail: work }       # Drive stays on `default`
 
 The account is pinned to the agent's cells by the bridge in the VM; the agent cannot ask for another account, and approvals bind to the account they were given for. `anchi setup disconnect gmail --account work` disconnects one account.
 
-Grant only what agents need:
-
-- **GitHub:** a fine-grained token limited to the repositories the agents work on: contents, pull requests and issues read/write. For an organization's private repositories, choose the organization as the token's resource owner; the organization may also have to approve the token.
-- **AWS:** a principal whose IAM policy allows only what the agents should do, for example `logs:FilterLogEvents` on specific log groups.
-- **PostHog:** a personal API key with only the scopes the agents need (for example `query:read`, `insight:read`) and only the projects they work on. US Cloud (`us.posthog.com`) and EU Cloud (`eu.posthog.com`); self-hosted PostHog is not supported. The import tries the US first, then the EU, and the account label says which.
-- **Sentry:** a user auth token with the scopes the agents need (for example `org:read`, `project:read`, `event:read`); organization tokens (`sntrys_`) cannot read the API and are refused. `sentry.io` and its `us.`/`de.` region hosts; self-hosted Sentry is not supported. `sentry-cli` in a cell reads the placeholder `SENTRY_AUTH_TOKEN`.
-- **Firecrawl:** an API key. Firecrawl fetches any URL on the agent's behalf, so it reaches pages beyond the agent's `egress` list, and a URL it is asked to fetch can carry data out; grant it only to agents that should read the web freely.
-- **Figma:** a personal access token with read scopes, plus `file_comments:write` if agents comment.
-- **Discord:** a bot token of an application you created, invited to the servers the agents work in, with the Message Content intent if they read messages. Agents use the REST API (`https://discord.com/api/v10`); the gateway, a WebSocket that carries the token inside a message, does not work, so a bot cannot receive events in real time.
+Grant only what agents need. [Token connectors](CONNECTORS.md#token-connectors) says where to create each credential and which scopes to give it.
 
 Agents see each credential as a placeholder environment variable: `GH_TOKEN`, `LINEAR_API_KEY`, `POSTHOG_PERSONAL_API_KEY`, `SENTRY_AUTH_TOKEN`, `FIRECRAWL_API_KEY`, `FIGMA_ACCESS_TOKEN`, `DISCORD_BOT_TOKEN`, and AWS's variables. The proxy injects the real one into requests to that service's API only.
 

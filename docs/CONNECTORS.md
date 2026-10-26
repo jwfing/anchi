@@ -1,17 +1,75 @@
-# Account connectors
+# Connectors
 
-Gmail, Google Drive, Notion, Slack, X and Reddit are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X and Reddit read automatically and ask for approval to publish unless you set their writes to `auto`. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
+Anchi has two kinds of connectors. Each section below says where to get the credential, what to grant and how to enter it. The desktop app links each connector in **Settings** to its section here.
+
+- **Token connectors** (GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord): the egress proxy adds the credential to the agent's requests to that service's API. Agents see a placeholder.
+- **Account connectors** (Gmail, Google Drive, Notion, Slack, X, Reddit): trusted services in the VM act for agents through structured Anchi tools.
+
+## Token connectors
+
+Enter a token in the desktop app's **Settings → Connectors** (**Connect** on the row), the TUI's **Connectors**, or with `anchi setup connector <name>`, which prompts without echo. Anchi checks the credential with the service and shows the account it belongs to; a credential the service refuses is not kept. Grant only what agents need: any call the proxy permits acts with the full authority of the credential.
+
+### GitHub
+
+Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) (GitHub → Settings → Developer settings → Personal access tokens). Limit it to the repositories the agents work on, with contents, pull requests and issues read/write. For an organization's private repositories, choose the organization as the token's resource owner; the organization may also have to approve the token. `anchi setup connector github --from-gh` imports the token of the `gh` CLI instead, which usually has broader scopes.
+
+### AWS
+
+Use a dedicated IAM principal whose policy allows only what agents should do, for example `logs:FilterLogEvents` on specific log groups, and create its access keys in the [IAM console](https://console.aws.amazon.com/iam/). AWS is entered from the CLI or the TUI, not the desktop app: `anchi setup connector aws` asks for the keys and a region, and `anchi setup connector aws --profile <name>` uses a profile on this computer, such as AWS SSO, and refreshes its temporary credentials. See [Agent team](AGENT_TEAM.md) for the profile mode.
+
+### Linear
+
+Create a personal API key (`lin_api_…`) under Linear → Settings → Security & access → Personal API keys. Choose only the teams and permissions the agents need. Workspace admins can turn off API key creation for members.
+
+### PostHog
+
+Create a personal API key (`phx_…`) under PostHog → Settings → [Personal API keys](https://us.posthog.com/settings/user-api-keys) ([EU Cloud](https://eu.posthog.com/settings/user-api-keys)). Give it only the scopes the agents need, for example `query:read` and `insight:read`, and only their projects. US and EU Cloud are supported; self-hosted PostHog is not. The import tries the US first, then the EU, and the account label says which.
+
+### Sentry
+
+Create a user auth token (`sntryu_…`) under Sentry → User settings → [Personal Tokens](https://sentry.io/settings/account/api/auth-tokens/), with the scopes the agents need, for example `org:read`, `project:read` and `event:read`. Organization tokens (`sntrys_`) cannot read the API and are refused. `sentry.io` and its `us.` and `de.` region hosts are supported; self-hosted Sentry is not.
+
+### Firecrawl
+
+Copy an API key (`fc-…`) from the [Firecrawl dashboard](https://www.firecrawl.dev/app/api-keys). Firecrawl fetches any URL on the agent's behalf, so it reaches pages beyond the agent's `egress` list, and a URL it is asked to fetch can carry data out. Grant it only to agents that should read the web freely.
+
+### Figma
+
+Create a personal access token (`figd_…`) under Figma → Settings → Security → Personal access tokens, with read scopes, plus `file_comments:write` if agents comment. Figma shows the token once. See Figma's [token guide](https://developers.figma.com/docs/rest-api/personal-access-tokens/).
+
+### Discord
+
+Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), open **Bot** and reset the token to copy it. Invite the bot to the servers the agents work in, and turn on the Message Content intent if they read messages. Agents use the REST API (`https://discord.com/api/v10`). The gateway, a WebSocket that carries the token inside a message, does not work, so a bot cannot receive events in real time.
 
 ## Account setup
 
-| Connector | Preparation | Connect |
-|---|---|---|
-| Gmail | Without a built-in client: enable Gmail API in Google Cloud and import a Desktop OAuth client JSON | `anchi setup google-client <json>` once, then `anchi setup service gmail [--account <name>]` (read-only scope) |
-| Google Drive | Enable Drive API in the same project; add `drive.readonly` and `drive.file` to the consent configuration | `anchi setup service drive [--account <name>]`; tokens are stored independently from Gmail |
-| Notion | As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration, copy its Installation access token, and share a test page through Content access or the page's Connections menu | `anchi setup service notion`, then enter the `ntn_` token without echo |
-| Slack | Create an app at api.slack.com; add `channels:read`, `channels:history`, `groups:read`, `groups:history`, `chat:write`; install it and invite the bot to the intended channels | `anchi setup service slack`, then enter the `xoxb-` Bot User OAuth Token |
-| Reddit | Approved Data API access and an installed OAuth app; see [Reddit setup](REDDIT_SETUP.md) | `anchi setup reddit-client <client-id> <developer-username>`, then `anchi setup service reddit` |
-| X | Native OAuth 2.0 app, exact loopback callback and API credits; see [X setup](X_SETUP.md) | `anchi setup x-client <client-id>`, then `anchi setup service x` |
+Gmail, Google Drive, Notion, Slack, X and Reddit are registered in `services/connectors.py`. Each has its own UID, socket and egress identity. Gmail, Drive, Notion and Slack grant standing authorization by default and can switch to per-request approval. X and Reddit read automatically and ask for approval to publish unless you set their writes to `auto`. Credentials stay in the VM vault. An agent cell gets the bridge sockets of its agent's own connectors only, and the agent can invoke only their structured operations, as Anchi tools (`gmail_list`, `notion_create_page`, `x_post`, …).
+
+Gmail, Drive, X and Reddit sign in through the browser with an OAuth app you create first. The desktop app's **Sign in** needs that app's client imported with the command in its section; the desktop app cannot import it yet. Notion and Slack take a token, which the desktop app's **Connect** accepts.
+
+### Gmail
+
+Without a built-in client, enable Gmail API in Google Cloud and create a Desktop OAuth client; [Gmail setup](GMAIL_SETUP.md#1-prepare-google-oauth) has the steps. Import its JSON once with `anchi setup google-client <json>`, then sign in with **Sign in** or `anchi setup service gmail [--account <name>]` (read-only scope).
+
+### Google Drive
+
+Enable Drive API in the same Google Cloud project and add `drive.readonly` and `drive.file` to the consent configuration. Sign in with **Sign in** or `anchi setup service drive [--account <name>]`. Its tokens are stored independently from Gmail's.
+
+### Notion
+
+As workspace Owner, open [developer connections](https://app.notion.com/developers/connections), create an Internal connection, enable read/insert/update content under Configuration and copy its Installation access token (`ntn_…`). Share the pages agents should use through Content access or each page's Connections menu. Enter the token with **Connect** or `anchi setup service notion`.
+
+### Slack
+
+Create an app at [api.slack.com/apps](https://api.slack.com/apps). Under **OAuth & Permissions**, add the bot scopes `channels:read`, `channels:history`, `groups:read`, `groups:history` and `chat:write`, install the app to the workspace and copy the Bot User OAuth Token (`xoxb-…`). Invite the bot to each channel agents should use (`/invite @<bot>`). Enter the token with **Connect** or `anchi setup service slack`.
+
+### Reddit
+
+Reddit needs approved Data API access and an installed OAuth app; [Reddit setup](REDDIT_SETUP.md#connect-your-account) has the steps. Import the app with `anchi setup reddit-client <client-id> <developer-username>`, then sign in with **Sign in** or `anchi setup service reddit`.
+
+### X
+
+X needs a native OAuth 2.0 app with an exact loopback callback, and API credits; [X setup](X_SETUP.md#connect-your-account) has the steps. Import the app with `anchi setup x-client <client-id>`, then sign in with **Sign in** or `anchi setup service x`.
 
 The TUI's **Connectors → Services** does the same with masked input in a full-screen dialog that agent output cannot draw over; **Tab** shows the input to check it and hides it again. The desktop app's **Settings → Services** takes the Notion or Slack token in a password field under the service's row (**Connect**). Tokens go from the client to the daemon and over stdin to the encrypted vault; they are never logged or stored on the Mac. After import, the connector's own identity probes `auth.test`, `users/me` or `about` for the account label. A failed probe affects label verification, not the stored token.
 

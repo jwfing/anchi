@@ -9,6 +9,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 - The desktop app connects Notion and Slack: **Settings → Services** has a **Connect** button that takes the token in a password field and stores it in the server's vault (`services.setToken`), as the TUI and `anchi setup service` do.
 - The desktop app disconnects services: **Settings → Services** has **Disconnect** for each connected service and each Gmail or Drive account, and **Revoke again** while a remote revocation is pending. A system dialog asks first and says whether the provider revokes the credential.
 
+- The desktop app links each connector and service that is not connected to its setup guide, and its token forms say where the token comes from. Gmail, Drive, X and Reddit without the OAuth app their sign-in needs say so and link the guide instead of offering **Sign in**. `docs/CONNECTORS.md` has a section per connector: where to create the credential, what to grant and how to enter it.
+- The website redirects `https://anchi.elseward.xyz/docs/connect/<name>` to that connector's setup guide, so the links in an installed app keep working when the documentation moves.
+
 ### Changed
 
 - The landing page leads with the desktop app: its install command (`install.sh | sh -s -- --desktop`) comes first, then direct downloads of the app (which need the `anchi` command) and the terminal-only install.

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { SERVICE_CONNECTORS } from '@anchi/core';
-import { CONNECTOR_IDS } from '@anchi/protocol';
+import { CONNECTOR_IDS, TOKEN_CONNECTOR_IDS } from '@anchi/protocol';
 import type {
   AgentSettingValues,
   AgentSummary,
@@ -16,6 +16,7 @@ import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/mai
 import { mergePath, parseShellPath } from '../src/main/env.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
 import { count } from '../src/renderer/format.ts';
+import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../src/renderer/guides.ts';
 import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
@@ -330,6 +331,7 @@ describe('settings', () => {
     });
     const status = {
       services: [service('gmail'), service('notion'), service('slack'), service('x', true)],
+      googleClient: true,
     } as unknown as SetupStatus;
     const rows = html(<Services status={status} onChange={() => undefined} />).split(
       'class="connector-group"',
@@ -369,6 +371,20 @@ describe('settings', () => {
     expect(names(service(true))).toEqual([[undefined, false]]);
     expect(names(service(false, [], true))).toEqual([[undefined, true]]);
     expect(names(service(false))).toEqual([]);
+  });
+
+  it('points a sign-in without its OAuth app to the guide instead of signing in', () => {
+    const status = {
+      services: [{ id: 'gmail', connected: false, mode: 'ask', accounts: [] }],
+      googleClient: false,
+    } as unknown as SetupStatus;
+    const out = html(<Services status={status} onChange={() => undefined} />);
+    expect(out).toContain('needs an OAuth app');
+    expect(out).toContain(`title="${guideUrl('gmail')}"`);
+    expect(out).not.toContain('Sign in');
+    expect(needsOAuthApp('x', { xClient: undefined } as SetupStatus), 'older daemon').toBe(false);
+    expect(needsOAuthApp('x', { xClient: false } as SetupStatus)).toBe(true);
+    expect(needsOAuthApp('slack', {} as SetupStatus)).toBe(false);
   });
 
   it('asks for secrets in password fields and keeps Save off until every field is filled', () => {
@@ -562,6 +578,35 @@ describe('connector logos', () => {
     expect(renderToStaticMarkup(<ConnectorLogo id="github" />)).toMatch(/^<svg class="logo"/);
     expect(renderToStaticMarkup(<ConnectorLogo id="aws" />)).toContain('>A</span>');
     expect(connectorName('someday')).toBe('someday');
+  });
+});
+
+describe('setup guides', () => {
+  const repo = new URL('../../../../', import.meta.url);
+  const nginx = readFileSync(new URL('landing/nginx.conf', repo), 'utf8');
+  const slug = (heading: string) =>
+    heading
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N} -]/gu, '')
+      .replace(/ /g, '-');
+
+  it('says where every token comes from', () => {
+    for (const id of [...TOKEN_CONNECTOR_IDS, 'notion', 'slack']) {
+      expect(TOKEN_SOURCE[id], id).toBeTruthy();
+    }
+  });
+
+  it('sends every connector to a section that exists in the documentation', () => {
+    for (const id of [...CONNECTOR_IDS, ...SERVICE_CONNECTORS]) {
+      const path = new URL(guideUrl(id)).pathname;
+      const target = nginx.match(new RegExp(`^\\s*${path}\\s+(\\S+);$`, 'm'))?.[1];
+      expect(target, `${id}: no redirect in landing/nginx.conf`).toBeTruthy();
+      const [file, anchor] = target!.split('#');
+      const doc = readFileSync(new URL(`docs/${file}`, repo), 'utf8');
+      const anchors = [...doc.matchAll(/^#+ (.+)$/gm)].map((m) => slug(m[1]!));
+      expect(anchors, `${id}: docs/${file} has no #${anchor}`).toContain(anchor);
+    }
   });
 });
 

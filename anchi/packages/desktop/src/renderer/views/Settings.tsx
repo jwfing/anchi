@@ -17,6 +17,7 @@ import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { call, message } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { count } from '../format.ts';
+import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../guides.ts';
 
 export function SettingsView() {
   const { act, server, setView } = useApp();
@@ -478,7 +479,7 @@ export function SecretForm({
 }: {
   id: string;
   fields: Field[];
-  note: string;
+  note: React.ReactNode;
   submit: (values: Record<string, string>) => Promise<unknown>;
   onCancel: () => void;
 }) {
@@ -700,6 +701,37 @@ export function Runtimes({
   );
 }
 
+/** Opens the connector's setup guide in the browser. */
+function GuideLink({
+  id,
+  label = 'Setup guide ↗',
+}: {
+  id: ConnectorId | ServiceConnectorId;
+  label?: string;
+}) {
+  const url = guideUrl(id);
+  return (
+    <button
+      type="button"
+      className="link"
+      title={url}
+      onClick={() => void window.anchi.openExternal(url)}
+    >
+      {label}
+    </button>
+  );
+}
+
+function TokenNote({ id }: { id: ConnectorId | ServiceConnectorId }) {
+  return (
+    <>
+      {TOKEN_SOURCE[id]} <GuideLink id={id} />
+      <br />
+      Stored in the vault on the server, never shown again.
+    </>
+  );
+}
+
 function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
   const { act } = useApp();
   const [editing, setEditing] = useState<TokenConnectorId | undefined>();
@@ -726,7 +758,11 @@ function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: 
               <ConnectorLogo id={id} />
               <span className="strong connector-id">{connectorName(id)}</span>
               <span className="small muted grow ellipsis">
-                {c?.connected ? sanitizeLine(c.account ?? 'connected') : 'not connected'}
+                {c?.connected ? (
+                  sanitizeLine(c.account ?? 'connected')
+                ) : (
+                  <GuideLink id={id} label="How to connect ↗" />
+                )}
               </span>
               {c?.connected ? (
                 <button
@@ -759,7 +795,7 @@ function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: 
               <SecretForm
                 id={`connect-${id}`}
                 fields={[{ key: 'token', label: `${id} token`, secret: true }]}
-                note="Stored in the vault on the server, never shown again."
+                note={<TokenNote id={id} />}
                 submit={async (v) => {
                   await call('connectors.set', { id: tokenId, token: v.token! });
                   setEditing(undefined);
@@ -859,22 +895,28 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
               <ConnectorLogo id={s.id} />
               <span className="strong connector-id">{connectorName(s.id)}</span>
               <span className="small muted grow ellipsis">
-                {perAccount
-                  ? count(targets.filter((t) => !t.pending).length, 'account')
-                  : s.connected
-                    ? sanitizeLine(
-                        s.accounts.map((a) => a.account ?? a.name).join(', ') ||
-                          s.account ||
-                          'connected',
-                      )
-                    : s.reauthRequired
-                      ? 'sign in again'
-                      : targets[0]?.pending
-                        ? 'revocation pending'
-                        : 'not connected'}
+                {perAccount ? (
+                  count(targets.filter((t) => !t.pending).length, 'account')
+                ) : s.connected ? (
+                  sanitizeLine(
+                    s.accounts.map((a) => a.account ?? a.name).join(', ') ||
+                      s.account ||
+                      'connected',
+                  )
+                ) : s.reauthRequired ? (
+                  'sign in again'
+                ) : targets[0]?.pending ? (
+                  'revocation pending'
+                ) : needsOAuthApp(s.id, status) ? (
+                  <>
+                    needs an OAuth app · <GuideLink id={s.id} />
+                  </>
+                ) : (
+                  <GuideLink id={s.id} label="How to connect ↗" />
+                )}
               </span>
               {!perAccount && targets[0] && disconnect(targets[0])}
-              {!s.connected && SIGN_IN[s.id] && (
+              {!s.connected && SIGN_IN[s.id] && !needsOAuthApp(s.id, status) && (
                 <button type="button" className="btn btn-small" onClick={() => signIn(s.id)}>
                   Sign in
                 </button>
@@ -933,7 +975,7 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
               <SecretForm
                 id={`connect-${s.id}`}
                 fields={[{ key: 'token', label: tokenLabel, secret: true }]}
-                note="Stored in the vault on the server, never shown again."
+                note={<TokenNote id={s.id} />}
                 submit={async (v) => {
                   await call('services.setToken', { id: s.id, token: v.token! });
                   setEditing(undefined);

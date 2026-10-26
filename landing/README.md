@@ -13,6 +13,10 @@ Do not create a Sites project or attach a custom domain unless explicitly reques
 
 The page presents Anchi as a secured agent team and describes the current development preview. Keep product and security claims aligned with the root `README.md` and `SECURITY.md`. The canonical URL and sitemap target the intended custom domain; publishing and DNS configuration are separate from the page source.
 
+## Setup guide redirects
+
+`nginx.conf` redirects `/docs/connect/<name>` to that connector's section in `docs/` on GitHub (`main`). The desktop app links there, and an installed app cannot change its links, so when a guide moves or a heading changes, update the map rather than the app. Every connector the app lists must have an entry; `anchi/packages/desktop/test/desktop.test.tsx` checks that each target file and heading exists. Redirect changes reach users only after a landing deploy.
+
 ## Languages
 
 `/zh/` and `/en/` are complete, independently accessible Chinese and English pages.
