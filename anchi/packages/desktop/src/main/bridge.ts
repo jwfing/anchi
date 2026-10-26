@@ -5,7 +5,9 @@ import type {
   AgentSummary,
   MethodName,
   Notifications,
+  RuntimeId,
   ServiceConnectorId,
+  SetupStatus,
 } from '@anchi/protocol';
 
 /**
@@ -209,6 +211,22 @@ export async function confirmation(
   }
   if (call.method === 'setup.prepare') {
     const runtime = String((call.params as { runtime?: unknown }).runtime ?? '');
+    const s = (await read('setup.status', {}).catch(() => undefined)) as SetupStatus | undefined;
+    if (
+      s?.vm === 'running' &&
+      s.installed &&
+      !s.guestOutdated &&
+      !s.vaultUnlocked &&
+      s.vaultKeyPresent !== false &&
+      s.preparedRuntimes?.includes(runtime as RuntimeId)
+    ) {
+      return {
+        message: 'Unlock the vault?',
+        detail:
+          'Anchi unlocks the vault on the server with its vault key (~/.config/anchi/vault.key there). The credentials you stored become usable by its services again. Nothing is installed.',
+        button: 'Unlock',
+      };
+    }
     return {
       message: 'Prepare the Anchi environment?',
       detail:

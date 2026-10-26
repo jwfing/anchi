@@ -18,6 +18,7 @@ import { call, message } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { count } from '../format.ts';
 import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../guides.ts';
+import { onVaultUnlocked, vaultLocked, VaultLockedCard } from '../vault.tsx';
 
 export function SettingsView() {
   const { act, server, setView } = useApp();
@@ -30,6 +31,7 @@ export function SettingsView() {
   useEffect(() => {
     if (server.status === 'connected') refresh();
   }, [server.status, server.name, refresh]);
+  useEffect(() => onVaultUnlocked(refresh), [refresh]);
 
   return (
     <main className="main page scroll">
@@ -65,11 +67,17 @@ export function SettingsView() {
               <dd>{status.workspaces ? 'shared' : 'not shared'}</dd>
             </dl>
           </section>
-          <Runtimes status={status} server={server.name} onChange={refresh} />
-          <div className="grid2">
-            <ProxyConnectors status={status} onChange={refresh} />
-            <Services status={status} onChange={refresh} />
-          </div>
+          {vaultLocked(status) ? (
+            <VaultLockedCard status={status} onUnlocked={refresh} />
+          ) : (
+            <>
+              <Runtimes status={status} server={server.name} onChange={refresh} />
+              <div className="grid2">
+                <ProxyConnectors status={status} onChange={refresh} />
+                <Services status={status} onChange={refresh} />
+              </div>
+            </>
+          )}
         </>
       )}
       <Skills skills={skills} local={server.name === 'local'} onChange={refresh} />

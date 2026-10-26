@@ -178,25 +178,26 @@ export async function setupStatus(
   const current = await transport.vmSize().catch(() => undefined);
   if (current) empty.vmSize = { ...empty.vmSize!, current };
   try {
+    // The credential reads fail while the vault is locked (a restarted guest). That is a state of
+    // its own, not an error: the credentials are still there, and preparing unlocks it.
+    const failures: unknown[] = [];
+    const credentials = <T>(p: Promise<T>) =>
+      p.catch((err: unknown) => {
+        failures.push(err);
+        return undefined;
+      });
     const [vault, codex, claude, hermes, connectors, base, workspaces, guestVersion] =
       await Promise.all([
         guest.vaultStatus(),
-        codexStatus(guest),
-        claudeStatus(guest),
+        credentials(codexStatus(guest)),
+        credentials(claudeStatus(guest)),
         // A guest installed before Hermes support has no hermes_admin.py.
         hermesStatus(guest).catch(() => empty.hermes!),
-        connectorStatuses(guest),
+        credentials(connectorStatuses(guest)),
         guest.imageStatus('codex', 'base').catch(() => false),
         guest.workspacesMounted().catch(() => false),
         guest.version().catch(() => null),
       ]);
-    const svc = (await services?.status().catch(() => undefined)) ?? {
-      services: [],
-      googleClient: false,
-      xClient: false,
-      redditClient: false,
-      googleClientSource: null,
-    };
     const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
     const prepared = base
       ? await Promise.all(
@@ -207,26 +208,38 @@ export async function setupStatus(
           ),
         )
       : [];
-    return {
-      ...empty,
+    const installation = {
       preparedRuntimes: prepared.filter((runtime): runtime is RuntimeId => runtime !== null),
       vm,
-      vaultUnlocked: vault.unlocked,
       installed: base,
-      codex,
-      claude,
-      hermes,
-      connectors,
-      services: svc.services,
-      googleClient: svc.googleClient,
-      xClient: svc.xClient,
-      redditClient: svc.redditClient,
-      googleClientSource: svc.googleClientSource,
       workspaces,
       guestVersion,
       // Until the base image is built, installing is the next step anyway. A guest too old to
       // say its version is older than this Anchi.
       guestOutdated: base && guestVersion !== APP_VERSION,
+    };
+    if (!vault.unlocked) return { ...empty, ...installation, vaultUnlocked: false };
+    if (failures.length) throw failures[0];
+    const svc = (await services?.status().catch(() => undefined)) ?? {
+      services: [],
+      googleClient: false,
+      xClient: false,
+      redditClient: false,
+      googleClientSource: null,
+    };
+    return {
+      ...empty,
+      ...installation,
+      vaultUnlocked: true,
+      codex: codex!,
+      claude: claude!,
+      hermes,
+      connectors: connectors!,
+      services: svc.services,
+      googleClient: svc.googleClient,
+      xClient: svc.xClient,
+      redditClient: svc.redditClient,
+      googleClientSource: svc.googleClientSource,
     };
   } catch (err) {
     // The VM runs but a guest command failed (sudo, a missing script, an SSH hiccup): say so

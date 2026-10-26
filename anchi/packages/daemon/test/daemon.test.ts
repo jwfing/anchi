@@ -393,6 +393,60 @@ afterEach(async () => {
   daemon = undefined;
 });
 
+describe('vault after a restart', () => {
+  /** The fake guest as a remote server's own machine: `placement: 'local'`. */
+  const inGuest = () => ({
+    placement: 'local' as const,
+    vmStatus: async () => 'running' as const,
+    vmSize: async () => undefined,
+    exec: (args: string[], stdin?: string) => transport.exec(args, stdin),
+    spawn: (args: string[]) => transport.spawn(args),
+  });
+  /** Starts a daemon whose vault-unlock step leaves a marker file, and says whether it ran. */
+  const unlockRan = async (extra: Partial<ConstructorParameters<typeof Daemon>[0]>) => {
+    const marker = join(root, 'unlock-ran');
+    const keyFile = join(root, 'vault.key');
+    writeFileSync(keyFile, 'k');
+    await start(60_000, undefined, undefined, {
+      vaultKeyFile: keyFile,
+      setupSteps: {
+        ...SETUP_STEPS,
+        'vault-unlock': [
+          [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, '')`],
+        ],
+      },
+      ...extra,
+    });
+    // The unlock runs after start resolves; the status refresh it is chained before logs last.
+    await new Promise((r) => setTimeout(r, 500));
+    return existsSync(marker);
+  };
+
+  it("unlocks a remote server's vault at start with the key beside it", async () => {
+    transport.vaultUnlocked = false;
+    expect(await unlockRan({ vm: inGuest() })).toBe(true);
+    expect(logs).toContain('unlocked the vault with the vault key on this server');
+  });
+
+  it("leaves the Lima VM's vault locked, and a server without the key or already unlocked alone", async () => {
+    transport.vaultUnlocked = false;
+    vmRunning = true;
+    expect(await unlockRan({}), 'Lima VM').toBe(false);
+    await daemon?.stop();
+    client?.close();
+
+    expect(
+      await unlockRan({ vm: inGuest(), vaultKeyFile: join(root, 'no-such-key') }),
+      'no key on the server',
+    ).toBe(false);
+    await daemon?.stop();
+    client?.close();
+
+    transport.vaultUnlocked = true;
+    expect(await unlockRan({ vm: inGuest() }), 'already unlocked').toBe(false);
+  });
+});
+
 describe('daemon tasks', () => {
   it('validates X setup RPCs before touching the guest', async () => {
     const { client } = await start();
@@ -988,6 +1042,8 @@ describe('daemon tasks', () => {
 
   it('prepares only the selected runtime and refuses concurrent setup and reset', async () => {
     vmRunning = true;
+    // Credentials are read only from an unlocked vault.
+    transport.vaultUnlocked = true;
     const { client } = await start();
     const status = await client.call('setup.status');
     const original = setupModule.setupStatus;
@@ -1931,6 +1987,7 @@ describe('builder', () => {
   it('runs the builder on the connected runtime, or the one settings.yaml names, and a task keeps its runtime', async () => {
     vmRunning = true;
     transport.claude = true;
+    transport.vaultUnlocked = true;
     const { client } = await start();
     // The status says Claude Code is the only runtime connected.
     expect((await client.call('setup.status')).claude.connected).toBe(true);
