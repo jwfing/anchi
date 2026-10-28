@@ -4,6 +4,12 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.4.2 — 2026-10-27
+
+One team can delegate across local and remote execution nodes, and the desktop app shows agents from several machines together while keeping each machine's settings, tasks and approvals separate. Task conversations open on demand, remote servers can keep agent data on a larger disk, and locked vaults recover after restarts.
+
+Update with `anchi update`, which also updates a desktop app installed with `--desktop`. Wait for tasks to finish, run `anchi daemon stop` and `anchi setup install`, then reopen Anchi. Reinstall daemon login startup with `anchi daemon install` if enabled. For each remote server, run `scripts/remote.sh <target>` again from the 0.4.2 checkout, then `anchi --server <saved-server> setup install`. Upgrade the coordinator and every execution node before using cross-server delegation. Existing agents, tasks and credentials are retained; on instabox, the remote setup script moves agent homes and image layers to `/data/anchi` unless another data directory is selected. Cross-server model-driven delegation has not been exercised with real accounts.
+
 ### Added
 
 - The desktop app connects to local and saved remote machines together. Team lists their agents with machine labels; Settings selects a machine for its runtimes, connectors, services and skills. Tasks, approvals, transcripts and configuration requests stay scoped to their owning daemon, including when ids match on different machines.
