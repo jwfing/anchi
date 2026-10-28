@@ -6,6 +6,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- The website hero focuses on an agent team for core business, access controls and human approval, with one desktop install command. Setup details and download alternatives remain in the guides.
 - The README, setup guide and release-note install command include the desktop app with `--desktop`. The website recommends the same command and explains how to open the GUI; terminal-only installation remains available in the setup guide.
 
 ## 0.4.2 — 2026-10-27
