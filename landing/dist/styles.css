@@ -931,19 +931,9 @@ html[lang="zh-CN"] .fleet-hero h1 {
   max-width: 510px;
   font-size: 13px;
 }
-.fleet-hero .intro-security {
-  margin-top: 12px;
-}
 .fleet-figure {
   margin: 0;
   min-width: 0;
-}
-.fleet-figure figcaption {
-  border-top: 1px dashed var(--line);
-  margin-top: 19px;
-  padding-top: 13px;
-  color: var(--muted);
-  font-size: 10px;
 }
 .section {
   padding-block: 59px;
@@ -1244,16 +1234,6 @@ html[lang="zh-CN"] .fleet-hero h1 {
 .install-copy:hover { color: var(--lime); background: var(--panel); }
 .install-copy:focus-visible { outline: 2px solid var(--lime); outline-offset: -3px; }
 .hero-install:has(.install-copy[hidden]) { padding-right: 16px; }
-.install-label {
-  margin: 30px 0 0;
-  color: var(--lime);
-  font-size: 11px;
-}
-.install-label + .hero-install { margin-top: 10px; }
-.install-meta { line-height: 2; }
-.install-meta code { color: var(--ink); overflow-wrap: anywhere; }
-.install-meta a { color: var(--lime); }
-.install-meta a:hover { text-decoration: underline; }
 @media (max-width: 560px) {
   .hero-install { gap: 10px; padding-left: 12px; }
   .hero-install code { white-space: normal; overflow-wrap: anywhere; }
