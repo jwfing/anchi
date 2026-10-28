@@ -200,7 +200,8 @@ describe('a guest whose vault is locked (after a restart)', () => {
     await expect(
       prepareEnvironment(
         'codex',
-        async () => status,
+        // This restart scenario has the original key, regardless of the test host's setup.
+        async () => ({ ...status, vaultKeyPresent: true }),
         async (action) => {
           calls.push(action);
           throw new Error('stop after the first step');
