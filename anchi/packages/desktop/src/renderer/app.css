@@ -316,10 +316,12 @@ h2 {
 .dot-connected {
   background: var(--accent);
 }
-.dot-connecting {
+.dot-connecting,
+.dot-installing {
   background: var(--queued);
 }
-.dot-error {
+.dot-error,
+.dot-needs-setup {
   background: var(--danger);
 }
 .dot-off {

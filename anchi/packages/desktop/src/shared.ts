@@ -6,7 +6,7 @@ export interface ServerState {
   /** `local`, `instabox:<machine>` or `ssh:<host>`. */
   name: string;
   label: string;
-  status: 'connecting' | 'connected' | 'error' | 'disconnected';
+  status: 'connecting' | 'connected' | 'error' | 'disconnected' | 'needs-setup' | 'installing';
   error?: string;
 }
 
@@ -24,6 +24,7 @@ export interface AnchiApi {
   /** `local` first, then the saved remote servers. */
   servers(): Promise<SavedServer[]>;
   addServer(name: string, target: string): Promise<{ saved: SavedServer; probe: ProbeResult }>;
+  initializeServer(target: string): Promise<boolean>;
   removeServer(name: string): Promise<SavedServer[]>;
   openExternal(url: string): Promise<void>;
   /** Picks a folder on this computer and adds the skills in it; null when cancelled. */

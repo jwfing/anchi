@@ -38,7 +38,7 @@ const stage = mkdtempSync(join(tmpdir(), 'anchi-desktop-'));
 /** What resources/app holds: the bundles, the page and the icon, with Electron's entry point. */
 function addApp(dir) {
   mkdirSync(dir, { recursive: true });
-  for (const file of ['main.cjs', 'preload.cjs', 'icon.png', 'renderer']) {
+  for (const file of ['main.cjs', 'preload.cjs', 'icon.png', 'renderer', 'remote']) {
     cpSync(join(dist, file), join(dir, file), { recursive: true });
   }
   const manifest = { name: 'anchi-desktop', productName: 'Anchi', version, main: 'main.cjs' };

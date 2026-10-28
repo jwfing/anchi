@@ -1,4 +1,4 @@
-import type { SavedServer } from '@anchi/daemon/client';
+import { bridgeMissing, type SavedServer } from '@anchi/daemon/client';
 import type { Notifications } from '@anchi/protocol';
 import type { ServerState } from '../shared.ts';
 import { guardedCall, NOTIFICATIONS, type Confirmation, type Read } from './bridge.ts';
@@ -63,7 +63,7 @@ export class Connections {
 
   async connect(target: string): Promise<void> {
     const entry = this.entry(target);
-    if (entry.state.status === 'connected' || entry.state.status === 'connecting') return;
+    if (['connected', 'connecting', 'installing'].includes(entry.state.status)) return;
     this.stop(entry);
     const generation = entry.generation;
     const current = () => this.entries.get(target) === entry && generation === entry.generation;
@@ -80,6 +80,10 @@ export class Connections {
     try {
       client = await this.opts.open(target);
     } catch (err) {
+      if (current() && bridgeMissing(err)) {
+        this.setupState(target, 'needs-setup');
+        return;
+      }
       failed(err instanceof Error ? err.message : 'connection failed', 5000);
       return;
     }
@@ -103,6 +107,24 @@ export class Connections {
     this.stop(entry);
     entry.state = { name: target, label: entry.state.label, status: 'disconnected' };
     this.publish();
+  }
+
+  setupState(target: string, status: 'needs-setup' | 'installing', error?: string) {
+    const entry = this.entry(target);
+    this.stop(entry);
+    entry.state = { name: target, label: entry.state.label, status, ...(error ? { error } : {}) };
+    this.publish();
+  }
+
+  /** A saved machine can be confirmed before its daemon exists. */
+  pin(target: string): () => void {
+    const entry = this.entry(target);
+    const generation = entry.generation;
+    return () => {
+      if (this.entries.get(target) !== entry || entry.generation !== generation) {
+        throw new Error('machine connection changed; review the action again');
+      }
+    };
   }
 
   remove(target: string) {

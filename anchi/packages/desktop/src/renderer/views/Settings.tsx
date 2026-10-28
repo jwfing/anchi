@@ -303,26 +303,45 @@ export function ServerCard() {
               {active && <Icon name="check" size={18} />}
             </button>
             <div className="row gap machine-actions">
-              <button
-                type="button"
-                className="btn btn-small"
-                onClick={() =>
-                  void run(() =>
-                    window.anchi.connectServer(
-                      node.name,
-                      node.status === 'disconnected' || node.status === 'error',
-                    ),
-                  )
-                }
-              >
-                {node.status === 'disconnected' || node.status === 'error'
-                  ? 'Connect'
-                  : 'Disconnect'}
-              </button>
+              {node.status === 'needs-setup' || node.status === 'installing' ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={node.status === 'installing'}
+                  onClick={() =>
+                    void run(async () => {
+                      if (await window.anchi.initializeServer(node.name)) {
+                        setAdded(undefined);
+                        selectServer(node.name);
+                      }
+                    })
+                  }
+                >
+                  {node.status === 'installing' ? 'Initializing…' : 'Initialize'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() =>
+                    void run(() =>
+                      window.anchi.connectServer(
+                        node.name,
+                        node.status === 'disconnected' || node.status === 'error',
+                      ),
+                    )
+                  }
+                >
+                  {node.status === 'disconnected' || node.status === 'error'
+                    ? 'Connect'
+                    : 'Disconnect'}
+                </button>
+              )}
               {saved && saved.name !== 'local' && (
                 <button
                   type="button"
                   className="btn btn-small"
+                  disabled={node.status === 'installing'}
                   onClick={() =>
                     void run(() => window.anchi.removeServer(saved.name).then(setServers))
                   }
@@ -345,6 +364,7 @@ export function ServerCard() {
             setAdded(result);
             setAdding(false);
             void window.anchi.servers().then(setServers);
+            if (result.probe.kind === 'ok') selectServer(result.saved.target);
           }}
         />
       ) : (
@@ -440,7 +460,7 @@ function AddServer({
           className="btn btn-primary"
           disabled={busy || !name.trim() || !where.trim()}
         >
-          {busy ? 'Saving and trying it…' : 'Save'}
+          {busy ? 'Connecting and preparing…' : 'Save'}
         </button>
         <button type="button" className="btn" onClick={onCancel}>
           Cancel
@@ -471,8 +491,8 @@ export function ProbeNote({
   if (probe.kind === 'bridge-missing') {
     return (
       <div className="banner banner-warn">
-        Saved {saved.name}, but Anchi is not installed there yet. From an Anchi source checkout on
-        this computer, run <code className="mono">{probe.hint}</code>, then choose Use.
+        Saved {saved.name}. Choose Initialize on its machine card to install Anchi, then continue
+        with environment setup.
       </div>
     );
   }
