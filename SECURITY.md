@@ -21,6 +21,14 @@ was reviewed; a disconnect, reconnect or removal during the dialog refuses submi
 Switching machines clears credential forms. Vaults and runtime logins remain on their machines;
 showing their agents together does not grant new delegation or copy credentials.
 
+Before a remote daemon exists, the desktop can initialize a saved Linux server through SSH.
+A native dialog names the saved alias and target; cancellation or a changed machine refuses
+installation. Only bundled public setup resources cross SSH. The installer downloads the app's
+matching release with its SHA-256 check, uses passwordless sudo for the bridge and systemd
+configuration, and sends no host credentials. SSH authentication failures do not trigger an
+installation. This first-time path refuses configured servers with a missing bridge, except
+an interrupted initialization of the same version before guest services were installed.
+
 ## Cross-server teams
 
 A team coordinator may execute a logical member as an existing agent on a saved remote

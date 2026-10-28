@@ -32,6 +32,7 @@ import {
   disconnectable,
   SecretForm,
   Services,
+  ServerCard,
 } from '../src/renderer/views/Settings.tsx';
 import { onboarded, setOnboarded, stageFor } from '../src/renderer/views/Welcome.tsx';
 import { vaultLocked } from '../src/renderer/vault.tsx';
@@ -716,13 +717,40 @@ describe('servers', () => {
       />,
     );
 
-  it('says what to run when a saved host has no Anchi yet, and offers a server that answers', () => {
+  it('offers initialization when a saved host has no Anchi yet, and offers a server that answers', () => {
     expect(
       note({ kind: 'bridge-missing', detail: 'x', hint: 'scripts/remote.sh ssh:dev@box' }),
-    ).toContain('scripts/remote.sh ssh:dev@box');
+    ).toContain('Choose Initialize');
     expect(note({ kind: 'ok' })).toContain('Use box');
     expect(note({ kind: 'unreachable', detail: 'no route\u001b[31m' })).toContain('no route');
     expect(note({ kind: 'unreachable', detail: 'no route\u001b[31m' })).not.toContain('\u001b');
+  });
+
+  it('keeps initialization available for saved machines and disables it while installing', () => {
+    for (const status of ['needs-setup', 'installing'] as const) {
+      const server = { name: 'instabox:dora', label: 'dora', status };
+      const ctx: AppContext = {
+        model: EMPTY_MODEL,
+        dispatch: () => {},
+        server,
+        connections: [server],
+        selectServer: () => {},
+        call: async () => {
+          throw new Error('unexpected RPC while rendering');
+        },
+        loadEvents: () => {},
+        act: async (fn) => fn(),
+        setView: () => {},
+      };
+      const out = renderToStaticMarkup(
+        <Ctx.Provider value={ctx}>
+          <ServerCard />
+        </Ctx.Provider>,
+      );
+      expect(out).toContain(status === 'installing' ? 'disabled="">Initializing…' : '>Initialize<');
+      expect(out).not.toContain('scripts/remote.sh');
+      expect(out).not.toContain('>Disconnect<');
+    }
   });
 });
 

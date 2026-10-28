@@ -66,6 +66,21 @@ for (const file of ['index.html', 'app.css']) {
 copyFileSync(join(root, 'assets/icon.svg'), join(dist, 'renderer/icon.svg'));
 copyFileSync(join(root, 'assets/icon.png'), join(dist, 'icon.png'));
 
+const repository = join(root, '../../..');
+mkdirSync(join(dist, 'remote'), { recursive: true });
+for (const file of [
+  'scripts/bootstrap-server.sh',
+  'landing/dist/install.sh',
+  'scripts/anchi-bridge.py',
+  'guest/anchi_data_dir.py',
+]) {
+  copyFileSync(join(repository, file), join(dist, 'remote', file.split('/').at(-1)));
+}
+writeFileSync(
+  join(dist, 'remote/version'),
+  JSON.parse(readFileSync(join(root, '../../package.json'), 'utf8')).version,
+);
+
 // macOS names an app in the menu bar and the Dock from its bundle, not from app.setName: give the
 // source run its own copy of Electron.app, called Anchi, with the Anchi icon. Rebuilt only when
 // Electron or the icon changes.

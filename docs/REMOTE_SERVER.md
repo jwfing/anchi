@@ -12,7 +12,23 @@ On the server, the daemon runs inside the guest: it reaches guest root with `sud
 
 ## Set up a server
 
-From a source checkout on your computer:
+In the desktop app, open **Settings → Machines → Add a machine** and enter an existing instabox
+machine or SSH host. If Anchi is missing, a native dialog names the machine and offers
+**Initialize**. It downloads the app's matching published release, checks its SHA-256, installs
+`anchi-bridge` and starts the daemon as a systemd user service. A source checkout and Node are
+not needed on either machine. The server needs Linux x86_64 with glibc, systemd, Python 3.11+,
+curl, tar, flock and passwordless sudo. SSH must already work from this computer.
+
+After connecting, continue the environment preparation guide and connect a runtime on that
+server. Host credentials are not copied. An instabox server keeps agent data in `/data/anchi`;
+other SSH servers use `/var/lib/anchi`. Desktop initialization leaves the provider's pause
+settings unchanged; configure them as described below for scheduled work. If initialization
+is cancelled or fails, the saved machine keeps an **Initialize** button. Interrupted initial
+installs can be retried with the same app version. Existing configured servers with a damaged
+installation require the source-based repair below; initialization does not restart their tasks.
+
+For source development, other supported architectures or server updates, from a source checkout
+on your computer:
 
 ```bash
 scripts/remote.sh instabox:anchi-server      # creates the instabox machine when missing (--no-vault)
@@ -63,7 +79,7 @@ instabox max-run anchi-server -1       # no runtime limit
 
 Only paid plans allow this. On the free plan the script warns and the machine keeps pausing: tasks you start run while you use it, but triggers stop when it pauses. `instabox get anchi-server --json` shows the settings (`autoSuspendAfterSeconds` null, `maxRunMinutes` -1).
 
-`ssh:<[user@]host>` targets any Debian or Ubuntu host with Node.js 22+, Python 3.11+ and passwordless sudo, whoever provides it. The client runs `ssh -T -o BatchMode=yes`, so the host must be reachable with keys.
+`ssh:<[user@]host>` targets a Debian or Ubuntu host with Python 3.11+ and passwordless sudo, whoever provides it. The source setup also needs Node.js 22+; desktop initialization supplies Node in the release package. The client runs `ssh -T -o BatchMode=yes`, so the host must be reachable with keys.
 
 ## Saved servers
 

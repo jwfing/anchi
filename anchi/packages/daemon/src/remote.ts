@@ -326,11 +326,17 @@ export type ProbeResult =
   | { kind: 'unreachable'; detail: string }
   | { kind: 'error'; detail: string };
 
-/**
- * Connects once to a remote server's daemon and closes again. A remote shell exits 127 for a
- * command it cannot find and ssh exits 255 for its own errors; `detail` is the server's text,
- * on one line.
- */
+/** A missing bridge needs first-time setup, not an endless reconnect loop. */
+export function bridgeMissing(err: unknown): boolean {
+  const reason = err instanceof RemoteError ? err.reason : undefined;
+  if (reason === 255 || reason === 'timeout') return false;
+  return (
+    reason === 127 ||
+    (err instanceof Error && /anchi-bridge: (command )?not found/.test(err.message))
+  );
+}
+
+/** Connects once and closes again; SSH authentication and timeout failures are not missing installs. */
 export async function probeServer(target: RemoteTarget, timeoutMs = 15_000): Promise<ProbeResult> {
   try {
     (await connectRemote(target, () => {}, timeoutMs)).close();
@@ -339,7 +345,7 @@ export async function probeServer(target: RemoteTarget, timeoutMs = 15_000): Pro
     const detail = sanitizeLine((err as Error).message).slice(0, 500);
     const reason = err instanceof RemoteError ? err.reason : undefined;
     if (reason === 255 || reason === 'timeout') return { kind: 'unreachable', detail };
-    if (reason === 127 || /anchi-bridge: (command )?not found/.test(detail)) {
+    if (bridgeMissing(err)) {
       return { kind: 'bridge-missing', detail, hint: `scripts/remote.sh ${target.name}` };
     }
     return { kind: 'error', detail };

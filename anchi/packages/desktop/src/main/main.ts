@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homeLayout } from '@anchi/core';
+import { homeLayout, sanitizeLine } from '@anchi/core';
 import {
   addServer,
   chosenServer,
@@ -28,6 +28,7 @@ import {
 import { type Confirmation, externalUrl } from './bridge.ts';
 import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
+import { bootstrapServer, ServerSetup } from './server-setup.ts';
 import type { ServerState } from '../shared.ts';
 
 const layout = homeLayout();
@@ -58,6 +59,43 @@ const connections = new Connections({
   changed: (states) => window?.webContents.send('anchi:connections', states),
   notify: (server, name, params) => window?.webContents.send('anchi:notify', server, name, params),
 });
+
+const serverSetup = new ServerSetup({
+  servers: () => listServers(layout.root),
+  pin: (target) => connections.pin(target),
+  probe: probeServer,
+  confirm,
+  install: async (target) => {
+    connections.setupState(target.name, 'installing');
+    await bootstrapServer(target, join(__dirname, 'remote'));
+  },
+  connect: async (target) => {
+    connections.disconnect(target);
+    await connections.connect(target);
+  },
+});
+
+async function initializeServer(target: unknown): Promise<boolean> {
+  if (typeof target === 'string' && serverSetup.busy(target))
+    throw new Error('initialization is already running');
+  try {
+    return await serverSetup.initialize(target);
+  } catch (err) {
+    if (
+      typeof target === 'string' &&
+      connections
+        .states()
+        .some((s) => s.name === target && (s.status === 'installing' || s.status === 'needs-setup'))
+    ) {
+      connections.setupState(
+        target,
+        'needs-setup',
+        sanitizeLine(err instanceof Error ? err.message : 'Initialization failed'),
+      );
+    }
+    throw err;
+  }
+}
 
 function selectedState(): ServerState {
   return (
@@ -180,6 +218,7 @@ ipcMain.handle('anchi:connectServer', async (event, target: unknown, connected: 
     !connections.states().some((s) => s.name === target)
   )
     throw new Error('unknown machine');
+  if (serverSetup.busy(target)) throw new Error('initialization is already running');
   if (connected) await connections.connect(target);
   else connections.disconnect(target);
 });
@@ -197,18 +236,31 @@ ipcMain.handle('anchi:servers', (event) => {
   fromApp(event);
   return listServers(layout.root);
 });
-/** Saves a server and tries it once, without switching to it. */
+/** Saves a server, then offers first-time initialization if its bridge is missing. */
 ipcMain.handle('anchi:addServer', async (event, name: unknown, target: unknown) => {
   fromApp(event);
   const saved = addServer(layout.root, String(name ?? ''), String(target ?? ''));
   connections.add(saved);
-  void connections.connect(saved.target);
+  await connections.connect(saved.target);
   const server = resolveServer(layout.root, saved.target);
   const probe = server.kind === 'remote' ? await probeServer(server) : { kind: 'ok' as const };
+  if (probe.kind === 'bridge-missing') {
+    try {
+      if (await initializeServer(saved.target)) return { saved, probe: { kind: 'ok' as const } };
+    } catch {
+      // Keep the saved machine and its setup error visible so initialization can be retried.
+    }
+  }
   return { saved, probe };
+});
+ipcMain.handle('anchi:initializeServer', (event, target: unknown) => {
+  fromApp(event);
+  return initializeServer(target);
 });
 ipcMain.handle('anchi:removeServer', async (event, name: unknown) => {
   fromApp(event);
+  const saved = listServers(layout.root).find((s) => s.name === name);
+  if (saved && serverSetup.busy(saved.target)) throw new Error('initialization is already running');
   const gone = removeServer(layout.root, String(name ?? ''));
   connections.remove(gone.target);
   if (selected === gone.target) selected = 'local';

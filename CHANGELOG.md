@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Fixed
+
+- Adding a fresh remote machine in the desktop app offers to install Anchi before connecting. Saved machines without `anchi-bridge` show **Initialize** instead of endlessly retrying; Linux x86_64 servers need no source checkout or preinstalled Node. Installation uses the app's matching release and leaves credentials on their machines.
+
 ### Changed
 
 - The website hero focuses on an agent team for core business, access controls and human approval, with one desktop install command. Setup details and download alternatives remain in the guides.

@@ -35,6 +35,31 @@ describe('desktop machine routing', () => {
     return { pool, local, cloud, notify };
   }
 
+  it('waits for initialization when the bridge is missing instead of retrying forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const open = vi.fn(async () => {
+        throw new Error('bash: line 1: anchi-bridge: command not found');
+      });
+      const pool = new Connections({ open, changed: () => {}, notify: () => {} });
+      pools.push(pool);
+      pool.add({ name: 'dora', target: 'instabox:anchi-dora' });
+      await pool.connect('instabox:anchi-dora');
+      expect(pool.states()[0]?.status).toBe('needs-setup');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(open).toHaveBeenCalledTimes(1);
+      const pinned = pool.pin('instabox:anchi-dora');
+      pool.remove('instabox:anchi-dora');
+      pool.add({ name: 'dora', target: 'instabox:anchi-dora' });
+      expect(pinned).toThrow(/connection changed/);
+      pool.setupState('instabox:anchi-dora', 'installing');
+      await pool.connect('instabox:anchi-dora');
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refuses unknown and disconnected destinations instead of falling back to another daemon', async () => {
     const { pool, local, cloud } = setup();
     await pool.connect('local');

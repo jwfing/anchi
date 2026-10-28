@@ -3,6 +3,7 @@
 export { DaemonClient, Peer } from './rpc.ts';
 export {
   addServer,
+  bridgeMissing,
   callbackPort,
   chosenServer,
   connectRemote,

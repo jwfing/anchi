@@ -111,7 +111,16 @@ with tempfile.TemporaryDirectory(prefix="anchi-desktop-release-", dir="/tmp") as
         else:
             resources = current / "desktop/resources/app"
             executable = bindir / "anchi-desktop"
-        return executable, json.loads((resources / "package.json").read_text())["version"]
+        app_version = json.loads((resources / "package.json").read_text())["version"]
+        assert (resources / "remote/version").read_text().strip() == app_version
+        for bundled, source in {
+            "bootstrap-server.sh": "scripts/bootstrap-server.sh",
+            "install.sh": "landing/dist/install.sh",
+            "anchi-bridge.py": "scripts/anchi-bridge.py",
+            "anchi_data_dir.py": "guest/anchi_data_dir.py",
+        }.items():
+            assert (resources / "remote" / bundled).read_bytes() == (REPO / source).read_bytes()
+        return executable, app_version
 
     # Unknown options are refused before anything is installed.
     assert install("--desktp", ok=False).returncode != 0 and not current.exists()
