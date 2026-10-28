@@ -36,8 +36,11 @@ The app includes Node and its dependencies. VM prerequisites and setup:
 [Getting started](https://github.com/jwfing/anchi/blob/{tag}/docs/GETTING_STARTED.md).
 
 ```sh
-curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION={tag} sh
+curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION={tag} sh -s -- --desktop
 ```
+
+Open `~/Applications/Anchi.app` on macOS, or **Anchi** from the applications menu on Linux
+(`anchi-desktop`). For a terminal-only installation, omit `-s -- --desktop` and run `anchi`.
 
 Existing installations: `anchi update`. Follow any VM migration or `anchi setup install`
 steps listed above; updating the app alone does not update the VM's components.
