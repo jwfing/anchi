@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Changed
+
+- The README, setup guide and release-note install command include the desktop app with `--desktop`. The website recommends the same command and explains how to open the GUI; terminal-only installation remains available in the setup guide.
+
 ## 0.4.2 — 2026-10-27
 
 One team can delegate across local and remote execution nodes, and the desktop app shows agents from several machines together while keeping each machine's settings, tasks and approvals separate. Task conversations open on demand, remote servers can keep agent data on a larger disk, and locked vaults recover after restarts.

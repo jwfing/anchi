@@ -1,8 +1,8 @@
 # Getting started
 
-Anchi runs its agents in a Lima VM on your machine. You install the `anchi` app, prepare the
-VM's prerequisites, then let Getting started prepare the environment, connect one account and
-review a starter agent.
+Anchi runs its agents in a Lima VM on your machine. You install the desktop app and `anchi`
+command, prepare the VM's prerequisites, then let Getting started prepare the environment,
+connect one account and review a starter agent.
 
 | Host | Status | VM layer |
 |---|---|---|
@@ -17,7 +17,7 @@ Choose one way to install:
 |---|---|---|
 | For | Using Anchi | Developing or testing unreleased changes |
 | Needs | `curl` | Git, Node 22+, pnpm |
-| Command | `anchi` | `scripts/anchi` in the checkout |
+| Open | Anchi desktop app; `anchi` for the TUI | `scripts/anchi-desktop`; `scripts/anchi` for the TUI |
 | Updates | `anchi update` | `git pull`, then reinstall dependencies |
 
 Both ways need the same VM prerequisites, which differ per platform. A new VM defaults to half the host's CPUs and memory
@@ -27,8 +27,8 @@ keep at least 8 GB free for installation, and more for runtime images and projec
 ## Install the binary release
 
 The release installer downloads Anchi and its bundled Node runtime, verifies the archive's
-SHA-256 checksum, and installs an `anchi` command. Git, Node and pnpm are not required. It does
-not need sudo or modify your vault, agents or VM.
+SHA-256 checksum, and installs the desktop app and an `anchi` command with `--desktop`.
+Git, Node and pnpm are not required. It does not need sudo or modify your vault, agents or VM.
 
 ### macOS
 
@@ -42,12 +42,12 @@ not need sudo or modify your vault, agents or VM.
 2. Install the app:
 
    ```bash
-   curl -fsSL https://anchi.elseward.xyz/install.sh | sh
+   curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
    ```
 
 3. If the installer says your bin directory is missing from PATH, open a new terminal or run
    the `export PATH=…` line it prints.
-4. Continue with [Set up the VM and your first agent](#set-up-the-vm-and-your-first-agent).
+4. Open `~/Applications/Anchi.app` and follow [guided desktop setup](#guided-setup-in-the-desktop-app).
 
 ### Linux
 
@@ -57,23 +57,27 @@ not need sudo or modify your vault, agents or VM.
 4. Install the app:
 
    ```bash
-   curl -fsSL https://anchi.elseward.xyz/install.sh | sh
+   curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
    ```
 
 5. If the installer says your bin directory is missing from PATH, open a new terminal or run
    the `export PATH=…` line it prints.
-6. Continue with [Set up the VM and your first agent](#set-up-the-vm-and-your-first-agent).
+6. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
+   [guided desktop setup](#guided-setup-in-the-desktop-app). Ubuntu 23.10 and later need the
+   [desktop sandbox profile](DESKTOP.md#linux-sandbox).
 
 ### Installer options
 
 The installer configures your shell for future sessions; a script piped into `sh` cannot change
 the parent terminal's environment.
 
-- Add the desktop app with
-  `curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop` (or `ANCHI_DESKTOP=1`).
-  `anchi update` then updates it too. See [Desktop app](DESKTOP.md#install).
+- The commands above install both the desktop app and CLI. `anchi update` updates both.
+  See [Desktop app](DESKTOP.md#install).
+- For a server or terminal-only installation, omit `--desktop`:
+  `curl -fsSL https://anchi.elseward.xyz/install.sh | sh`. Run `anchi` to open the TUI.
+  Re-run the installer with `sh -s -- --desktop` to add the GUI later.
 - Install a specific release with
-  `curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION=v0.2.0 sh`.
+  `curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION=v0.4.2 sh -s -- --desktop`.
 - `ANCHI_INSTALL_ROOT` overrides the default `~/.local/share/anchi`.
 - `ANCHI_BIN_DIR` overrides the command directory. By default the installer prefers a writable
   `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` already on PATH, falling back to
@@ -219,6 +223,14 @@ limactl --version
 
 These steps are the same for both installation methods and both platforms. From a source
 checkout, replace `anchi` with `scripts/anchi`.
+
+### Guided setup in the desktop app
+
+Open **Anchi** and follow **Getting started** to choose a machine, prepare its environment,
+connect a runtime and review a starter agent. Once setup is complete, select an agent in
+**Team** and send a task. Click a task to open its conversation and results.
+Use **Agent builder** to create more agents; **Settings** configures each machine's runtimes,
+connectors, services and skills. See [Desktop app](DESKTOP.md) for the full guide.
 
 ### Guided setup in the TUI
 

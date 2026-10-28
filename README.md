@@ -4,7 +4,7 @@
 
 Anchi runs Codex, Claude Code and Hermes agents on your own machine. Give each agent a role,
 connectors and optional project folders, then follow its tasks, review held writes and inspect
-network access from a terminal UI or CLI.
+network access from the desktop app. A terminal UI and CLI are also available.
 
 [Getting started](docs/GETTING_STARTED.md) · [Documentation](docs/README.md) ·
 [Releases](https://github.com/jwfing/anchi/releases) · [Security model](SECURITY.md) ·
@@ -27,8 +27,8 @@ The same team in the terminal: [TUI preview](docs/assets/tui-team.svg).
   folders for development, review or operations. Agents can delegate to named teammates.
 - **Work with code and services.** Share a project folder read-only or writable; connect GitHub,
   AWS, Linear and other supported services without placing their credentials inside task cells.
-- **Follow the work.** See running tasks, tool activity, results and delegation in the TUI.
-  Continue or retry a task from the CLI; inspect its network audit and token usage.
+- **Follow the work.** See running tasks, tool activity, results and delegation in the desktop
+  app. Open a task's conversation to continue it, and review approvals and usage in their views.
 - **Review writes that need approval.** Set `approvals: {github: ask}` to hold GitHub writes.
   Listed high-risk operations are held by default, with explicit global and per-agent exceptions.
 
@@ -44,15 +44,15 @@ For a single local task that does not need these controls, your existing runtime
 | Linux x86_64, glibc (Ubuntu 22.04+ / Debian 12+) | Experimental | Lima, Python 3.11+, QEMU and KVM access; [Linux setup](docs/GETTING_STARTED.md#linux-prerequisites) |
 | Intel Mac, Windows, other architectures | Unsupported | — |
 
-Install the public preview, then open the guided setup:
+Install the desktop app and its command-line tools:
 
 ```bash
-curl -fsSL https://anchi.elseward.xyz/install.sh | sh
-anchi
+curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
 ```
 
-To add the [desktop app](docs/DESKTOP.md) (`~/Applications/Anchi.app` on macOS, `anchi-desktop`
-and a menu entry on Linux), run the installer with `sh -s -- --desktop` instead of `sh`.
+Open `~/Applications/Anchi.app` on macOS, or **Anchi** in the applications menu on Linux
+(`anchi-desktop` also opens it). The desktop app guides you through setup.
+For a server or terminal-only workflow, see [terminal installation](docs/GETTING_STARTED.md#installer-options).
 
 The app bundles Node and its dependencies. No source checkout or pnpm is needed. The installer
 verifies the archive checksum; this is not publisher signing. See [installer options and source
@@ -66,27 +66,19 @@ base and runtime layers; source installations build them locally. The selected r
 prepared before the first task. Setup time still depends on downloads and VM provisioning.
 Model usage consumes your subscription quota or API credit.
 
-After setup, create a starter with the runtime you connected; creation itself does not call a model:
-
-```bash
-anchi agents create dev --runtime claude-code   # or codex / hermes; review, then confirm
-anchi run dev "Explain what tools you have access to. Do not change anything."
-anchi tasks --agent dev
-```
-
-The starter has no connectors, shared folders or extra network destinations. A successful first
-task ends with `done` and a response. If it fails, use [first-task troubleshooting](docs/FIRST_TASK.md)
-before connecting more accounts. In the TUI, **Ctrl+X, N** creates a starter; **Ctrl+X, s** opens
-its settings. The conversational **Agent builder** (**Ctrl+X, b**) uses a connected runtime
-to help customize agent roles.
+After setup, select your agent in **Team** and send a first task, such as
+"Explain what tools you have access to. Do not change anything." Click the task to open its
+conversation and results. Use **Agent builder** to create and review more agents.
+If a task fails, see [first-task troubleshooting and CLI examples](docs/FIRST_TASK.md) before
+connecting more accounts.
 
 ## How access works
 
 ```text
-Host: TUI / CLI → trusted daemon
-                         │
-Lima VM:                 ├─ untrusted task cells (runtime, tools, skills)
-                         └─ trusted proxy + vault + connector services → APIs
+Host: Desktop / TUI / CLI → trusted daemon
+                                   │
+Lima VM:                           ├─ untrusted task cells (runtime, tools, skills)
+                                   └─ trusted proxy + vault + connector services → APIs
 ```
 
 Each task gets a disposable cell inside the VM. The proxy substitutes credentials for allowed

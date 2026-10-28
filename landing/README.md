@@ -43,7 +43,7 @@ gateway. The wordmark is live text so it stays crisp and accessible.
 ## Terminal design
 
 The hero leads with the desktop app's install command (`--desktop`), then direct app
-downloads from the latest release and the terminal-only install. The page introduces safe agent collaboration with a looping hero animation,
+downloads from the latest release and a link to terminal-only installation. It tells users how to open the desktop app after installing. The page introduces safe agent collaboration with a looping hero animation,
 followed by security boundaries, workflow, platforms/runtimes, and a TUI
 preview. Keep the platform status and security claims aligned with the root README.
 
@@ -97,8 +97,9 @@ and runtimes, not an endorsement.
 ## Installer
 
 The hero contains a single install command with a clipboard button (`dist/install.js`);
-keep it in sync across both languages and the root page. The installer ends by prompting
-the user to run `anchi`.
+keep it in sync across both languages and the root page, with `--desktop` as the recommended
+installation. The page directs users to open Anchi.app on macOS or Anchi from the applications
+menu on Linux (`anchi-desktop`). Terminal-only instructions live in the setup guide.
 
 `dist/install.sh` is the public POSIX installer. It downloads platform archives and SHA-256
 files from GitHub Releases. Publish both platform assets before deploying the install call
