@@ -95,13 +95,95 @@ Targets are `local`, `instabox:<machine>` and `ssh:<[user@]host>`. Any other tar
 - **Token connectors** (GitHub, AWS, Linear and the others) are entered on your computer as usual. They go to the server's vault over the SSH session and then on stdin to the vault. `anchi setup connector github --from-gh` and `--profile` read `gh` and `aws` on the server, not on your computer.
 - **Browser sign-ins** (Google, X, Reddit) open in your computer's browser. While the sign-in waits, the client listens on the same loopback callback port (`127.0.0.1:<port>`) and relays the callback to the daemon through `anchi-bridge tcp <port>`. The redirect URI the provider sees is unchanged.
 
+## One team, multiple execution nodes
+
+Select one **coordinator** for the team. The TUI and CLI connect to it; the desktop app can keep
+several machines connected and selects the coordinator for team configuration. Its agents are
+the team's members; an optional `execution` field places a member on another server. The coordinator
+keeps the complete task tree, dispatches work, collects results and usage, and shows pending
+approvals from the execution nodes. A remote member can delegate to a local member or to a
+member on a different remote node through the same coordinator.
+
+Upgrade the coordinator and execution nodes to a version with `team.*` RPCs. Prepare each
+node's runtime, credentials and agent profiles as usual. For a local coordinator and an
+existing remote agent named `coder`:
+
+```bash
+anchi server add cloud ssh:dev@build.example.com  # skip if already saved
+anchi --server local team nodes
+anchi --server local team add developer --node cloud --agent coder --preview
+anchi --server local team add developer --node cloud --agent coder --yes
+anchi --server local run developer "Review the repository and report your findings"
+```
+
+In the desktop app, use **Agent builder**, start a new conversation if needed, enter the
+team member's id, select **Run on → cloud**, enter the existing node agent id and choose
+**Preview**, then **Apply**. The binding is shown in the member header, its read-only
+settings and the task details. The builder can propose changes to the binding with a whole
+agent file. The CLI's `team add` is create-only.
+
+The resulting coordinator file `~/.anchi/agents/developer.yaml` contains:
+
+```yaml
+name: Developer
+runtime: codex                       # schema field; actual runtime comes from the node
+execution: {server: cloud, agent: coder}
+delegates: [reviewer]                 # logical team ids, on the coordinator
+```
+
+A local lead can list `developer` in its `delegates`. To let the remote developer delegate
+back to the coordinator's `reviewer`, also set `delegates: [reviewer]` in the execution node's
+`~/.anchi/agents/coder.yaml`. Both grants are required. A foreign delegate id may be written
+directly in the execution profile; it does not need a local agent of that name there. It is
+resolved against the coordinator only for imported team tasks. An ordinary task started
+directly on that node still resolves delegates locally. `team add` copies only the remote
+profile's delegates that already exist in the coordinator team; it does not modify the
+execution profile. Add further grants with Agent builder or by editing the files.
+
+The node profile determines the runtime, prompt, image, skills, connectors, workspaces,
+accounts, egress and approval policy. The coordinator member determines its display name,
+description, allowed team delegates, triggers and concurrency; the node's concurrency limit
+also applies. Local access fields in the coordinator wrapper do not change node permissions.
+Configure scheduled work on the coordinator; existing triggers on a node remain independent.
+
+Saved aliases are read **on the coordinator**, not on the desktop client. If the coordinator
+is itself remote, save its execution nodes with `anchi server add` while logged into that
+machine, and arrange SSH/instabox access from there. The coordinator makes all connections;
+remote cells need no route back to your laptop and never receive SSH keys.
+
+Operational behavior:
+
+- Closing the GUI does not stop work. The coordinator daemon must stay running and reachable
+  to dispatch tasks, process delegation and relay approvals. An execution node can continue
+  its current turn while disconnected, but team calls wait and its normal turn timeout still
+  applies. Pending writes retain their node-side approval timeout.
+- A lost connection retries the same dispatch. Coordinator restarts reattach dispatched
+  tasks without creating another turn. Cancellation is durable and stays pending until the
+  node confirms; no replacement task is launched elsewhere. Restarting the execution daemon
+  interrupts its cells and reports failure; an explicit follow-up can continue afterwards.
+- Tasks keep their original execution binding, and a dispatched task pins the resolved
+  transport and node identity. Changing a member affects new tasks. A replaced node database
+  fails existing tasks; source history should not be cloned to create a different node.
+- Task results and URLs are shared; files and workspaces are not synchronized. Pass a Git
+  commit, repository URL or another shared artifact reference for collaboration on files.
+- Each node keeps its vault, sessions and local audit log. The coordinator mirrors retained
+  events, results and usage. It reports a gap if remote events expired while disconnected;
+  in that case the transcript and usage may be incomplete. Subscription quotas and raw
+  egress audit reports remain node-local. Delete history separately on each node.
+
+The offline integration suite exercises real daemon sockets and SQLite stores with simulated
+cells, including multi-hop delegation, recovery, cancellation and approval scoping. The
+desktop has also been checked against local and instabox daemons for simultaneous agent lists,
+per-machine settings and remote member previews. Model-driven cross-server delegation and
+recovery have not been tested live.
+
 ## Limits
 
 - Workspaces (`anchi setup workspaces`), `anchi setup reset` and `anchi daemon install` do not apply to a remote server. Delete or recreate the machine to reset it.
 - **Vault key.** The master key is in `~/.config/anchi/vault.key` on the server (0600, in a 0700 directory). Neither cells nor the trusted services can read it. The server's administrator, anyone who can SSH in as its login user, and for instabox the platform itself can. A snapshot or fork of the machine copies the key together with the encrypted vault. On a Lima host, by contrast, the key stays outside the VM.
 - **Restarts.** The unlocked master key lives in tmpfs, so a restart of the server (a reboot, a disk resize, an instabox stop and start, not a pause) locks the vault. Because the key is on the same machine, locking it there protects nothing, and the daemon unlocks it again when it starts, so triggers keep working after a restart. Its log says `unlocked the vault with the vault key on this server`. A Lima VM's vault stays locked after a restart until you unlock it (**Unlock** in the desktop app, Getting started in the TUI, or `anchi setup vault unlock`).
 - **DNS.** The egress proxy may query the resolvers `/etc/resolv.conf` names on port 53. Under Lima, that is the systemd-resolved stub, `127.0.0.53`. An instabox machine names public resolvers.
-- **Separate teams.** Each server keeps its own agents, tasks and vault, and agents on different servers cannot reach each other.
+- **Separate storage.** Each server keeps its own agents, task copies and vault. A coordinator joins selected execution profiles into one team; merely switching servers does not merge their teams.
 - **Verified so far:** `instabox:` on Debian 13 x86_64 (`make verify-vm` and `make verify-anchi` with `ANCHI_GUEST=local` on the server). `ssh:` targets have not been tested live.
 
 ## Live checks on the server

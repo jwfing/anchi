@@ -190,12 +190,13 @@ export function usePanelWidth(): [number, (width: number) => void] {
 }
 
 /**
- * Sits between the conversation and the panel on its right. Dragging or the arrow keys resize
- * the panel; a double-click restores the default.
+ * The drawer's left edge. Resizing leaves part of the task list visible for switching tasks;
+ * a double-click restores the default.
  */
 export function Splitter({ width, onResize }: { width: number; onResize: (w: number) => void }) {
+  const drawerWidth = (el: HTMLElement) => el.parentElement?.getBoundingClientRect().width ?? width;
   const mainWidth = (el: HTMLElement) =>
-    el.previousElementSibling?.getBoundingClientRect().width ?? 0;
+    (el.parentElement?.parentElement?.getBoundingClientRect().width ?? width) - drawerWidth(el);
   return (
     <div
       role="separator"
@@ -209,7 +210,7 @@ export function Splitter({ width, onResize }: { width: number; onResize: (w: num
       onPointerDown={(e) => {
         e.preventDefault();
         const el = e.currentTarget;
-        const [x, start, main] = [e.clientX, width, mainWidth(el)];
+        const [x, start, main] = [e.clientX, drawerWidth(el), mainWidth(el)];
         el.setPointerCapture(e.pointerId);
         const move = (m: PointerEvent) => onResize(clampWidth(start + x - m.clientX, start, main));
         const up = () => {
@@ -225,10 +226,13 @@ export function Splitter({ width, onResize }: { width: number; onResize: (w: num
         const step = e.key === 'ArrowLeft' ? 24 : e.key === 'ArrowRight' ? -24 : 0;
         if (!step) return;
         e.preventDefault();
-        onResize(clampWidth(width + step, width, mainWidth(e.currentTarget)));
+        const now = drawerWidth(e.currentTarget);
+        onResize(clampWidth(now + step, now, mainWidth(e.currentTarget)));
       }}
       onDoubleClick={(e) =>
-        onResize(clampWidth(PANEL_WIDTH.initial, width, mainWidth(e.currentTarget)))
+        onResize(
+          clampWidth(PANEL_WIDTH.initial, drawerWidth(e.currentTarget), mainWidth(e.currentTarget)),
+        )
       }
     />
   );

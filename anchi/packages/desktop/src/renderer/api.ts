@@ -8,15 +8,17 @@ declare global {
 }
 
 /** A typed daemon call through the main process (which checks the method against its list). */
-export function call<M extends MethodName>(
-  method: M,
-  ...params: Params<M> extends Record<string, never> ? [] : [Params<M>]
-): Promise<Result<M>> {
-  return window.anchi.call(method, params[0] ?? {}) as Promise<Result<M>>;
+export function machineCall(server: string) {
+  return <M extends MethodName>(
+    method: M,
+    ...params: Params<M> extends Record<string, never> ? [] : [Params<M>]
+  ): Promise<Result<M>> => window.anchi.call(server, method, params[0] ?? {}) as Promise<Result<M>>;
 }
 
+export type Call = ReturnType<typeof machineCall>;
+
 /** Every stored event of a task, page by page. */
-export async function allEvents(taskId: string) {
+export async function allEvents(call: Call, taskId: string) {
   const out: Awaited<Result<'tasks.events'>> = [];
   let afterSeq = 0;
   for (;;) {

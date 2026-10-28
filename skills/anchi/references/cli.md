@@ -52,6 +52,8 @@ Commands:
   cancel <task>                    Cancel a running or queued task; its work and
                                    transcript are kept
   agents [options]                 List or manage agents
+  team                             Manage team members that execute on other
+                                   nodes
   setup                            Runtime and connector setup
   daemon                           Manage the background daemon
 ```
@@ -380,6 +382,41 @@ Options:
 Usage: anchi agents allow-host [options] <id> <host>
 
 Add one host to an agent's egress list (a host its cells were refused)
+```
+
+### `anchi team`
+
+```text
+Usage: anchi team [options] [command]
+
+Manage team members that execute on other nodes
+
+Commands:
+  nodes               List execution nodes saved on the team coordinator
+  add [options] <id>  Add a team member using an existing agent on an execution
+                      node
+```
+
+#### `anchi team nodes`
+
+```text
+Usage: anchi team nodes [options]
+
+List execution nodes saved on the team coordinator
+```
+
+#### `anchi team add`
+
+```text
+Usage: anchi team add [options] <id>
+
+Add a team member using an existing agent on an execution node
+
+Options:
+  --node <name>  Saved server alias on the coordinator
+  --agent <id>   Existing agent id on that node
+  --preview      Review the member configuration without saving
+  -y, --yes      Save without an interactive prompt
 ```
 
 ### `anchi setup`

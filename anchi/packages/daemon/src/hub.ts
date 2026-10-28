@@ -24,6 +24,8 @@ import { ToolDispatcher } from './tools.ts';
 import type { Guest } from './guest.ts';
 import { instructions, WORKDIR } from './prompt.ts';
 import type { Store } from './store.ts';
+import type { TeamCoordinator } from './team-coordinator.ts';
+import type { TeamWorker } from './team.ts';
 
 export const IDLE_MS = 10 * 60_000;
 /** Cells doing work at once, unless `maxCells` in settings.yaml says otherwise. */
@@ -72,6 +74,8 @@ const SHUTDOWN_SCAN_MS = 30_000;
 export const DELEGATION = { maxDepth: 3, maxChildren: 10, maxTreeTurns: 60 };
 
 export interface HubOptions {
+  team?: () => TeamCoordinator;
+  worker?: () => TeamWorker;
   layout: HomeLayout;
   store: Store;
   guest: Guest;
@@ -130,6 +134,7 @@ function cellKey(agent: ResolvedAgent, imageHash: string): string {
  * FIFO queue behind them, a cell per task that stays alive between turns until the idle timeout.
  */
 export class Hub extends EventEmitter<HubEvents> {
+  private stopping = false;
   private states = new Map<string, AgentState>();
   private cells = new Map<string, LiveCell>();
   private waiters = new Map<string, ((t: TaskRow) => void)[]>();
@@ -143,8 +148,9 @@ export class Hub extends EventEmitter<HubEvents> {
     this.log = opts.log ?? (() => {});
     this.tools = new ToolDispatcher({
       agents: () => this.summaries(),
-      delegate: (parent, agent, target, text) => this.delegate(parent, agent, target, text),
-      sendTask: (id, text) => this.sendTask(id, text),
+      delegate: (parent, agent, target, text, key) =>
+        this.delegate(parent, agent, target, text, key),
+      sendTask: (id, text, key) => this.sendTask(id, text, key),
       getTask: (id) => this.getTask(id),
       children: (id) => this.children(id),
       wait: (id) => this.wait(id),
@@ -228,6 +234,7 @@ export class Hub extends EventEmitter<HubEvents> {
         const status: AgentStatus = s.running.size ? 'working' : s.error ? 'error' : 'idle';
         return {
           id: s.id,
+          ...(s.agent?.execution ? { execution: s.agent.execution } : {}),
           name: s.agent?.name ?? s.id,
           description: s.agent?.description,
           runtime: s.agent?.runtime,
@@ -289,17 +296,30 @@ export class Hub extends EventEmitter<HubEvents> {
     const state = this.state(agentId);
     if (!state.agent) throw new Error(`agent "${agentId}" has a config error: ${state.error}`);
     if (!text.trim()) throw new Error('empty task');
-    const task = this.opts.store.createTask({ agentId, trigger, title: text });
+    let task = this.opts.store.createTask({ agentId, trigger, title: text });
+    if (state.agent.execution) {
+      this.opts.store.setExecution(task.id, state.agent.execution);
+      task = this.getTask(task.id);
+    }
     this.emit('task', task);
     this.enqueue(state, { taskId: task.id, text });
     return task;
   }
 
-  sendTask(taskId: string, text: string): TaskRow {
+  sendTask(taskId: string, text: string, requestKey?: string): TaskRow {
+    if (!text.trim()) throw new Error('empty task');
+    if (requestKey)
+      return this.opts.store.teamEffect(requestKey, ['send', taskId, text], () =>
+        this.sendTask(taskId, text),
+      );
     const task = this.getTask(taskId);
     const state = this.state(task.agentId);
     if (!state.agent) throw new Error(`agent "${task.agentId}" has a config error: ${state.error}`);
-    const mismatch = this.runtimeMismatch(task, this.agentFor(task));
+    if (!task.execution && state.agent.execution)
+      throw new Error(
+        'This task ran locally; start a new task to use the member’s new execution node.',
+      );
+    const mismatch = task.execution ? undefined : this.runtimeMismatch(task, this.agentFor(task));
     if (mismatch) throw new Error(mismatch);
     if (state.running.has(taskId) || state.queue.some((j) => j.taskId === taskId)) {
       throw new Error('this task already has a turn in progress');
@@ -321,10 +341,20 @@ export class Hub extends EventEmitter<HubEvents> {
    * target in `delegates`, and the target must not already work on an ancestor of this task:
    * that agent would wait for itself.
    */
-  delegate(parent: TaskRow, parentAgent: ResolvedAgent, targetId: string, text: string): TaskRow {
+  delegate(
+    parent: TaskRow,
+    parentAgent: ResolvedAgent,
+    targetId: string,
+    text: string,
+    requestKey?: string,
+  ): TaskRow {
     if (!parentAgent.delegates.includes(targetId)) {
       throw new Error(`@${parentAgent.id} may not delegate to @${targetId}; see list_agents`);
     }
+    if (requestKey)
+      return this.opts.store.teamEffect(requestKey, ['delegate', parent.id, targetId, text], () =>
+        this.delegate(parent, parentAgent, targetId, text),
+      );
     if (parent.depth + 1 > DELEGATION.maxDepth) {
       throw new Error(`delegation is limited to ${DELEGATION.maxDepth} levels`);
     }
@@ -346,12 +376,16 @@ export class Hub extends EventEmitter<HubEvents> {
     const state = this.state(targetId);
     if (!state.agent) throw new Error(`agent "${targetId}" has a config error: ${state.error}`);
     if (!text.trim()) throw new Error('empty task');
-    const task = this.opts.store.createTask({
+    let task = this.opts.store.createTask({
       agentId: targetId,
       trigger: 'delegation',
       title: text,
       parent,
     });
+    if (state.agent.execution) {
+      this.opts.store.setExecution(task.id, state.agent.execution);
+      task = this.getTask(task.id);
+    }
     this.emit('task', task);
     this.record(parent, { type: 'notice', text: `↳ delegated to @${targetId} as ${task.id}` });
     this.enqueue(state, { taskId: task.id, text });
@@ -363,14 +397,19 @@ export class Hub extends EventEmitter<HubEvents> {
    * e.g. `poll → @lead (t-1) → @developer (t-2)`.
    */
   origin(taskId: string): string {
+    return this.originChain(taskId).join(' → ');
+  }
+
+  originChain(taskId: string): string[] {
     const chain: TaskRow[] = [];
     for (let t = this.opts.store.getTask(taskId); t && chain.length < 10;) {
       chain.unshift(t);
       t = t.parentId ? this.opts.store.getTask(t.parentId) : undefined;
     }
-    if (!chain.length) return '';
+    if (!chain.length) return [];
     const root = chain[0]!.trigger === 'user' ? 'you' : chain[0]!.trigger;
-    return [root, ...chain.map((t) => `@${t.agentId} (${t.id})`)].join(' → ');
+    const imported = chain[0]!.teamOrigin?.chain ?? [root];
+    return [...imported, ...chain.map((t) => `@${t.agentId} (${t.id})`)];
   }
 
   /** A line from Anchi in a task's transcript (approvals, delegation). */
@@ -415,6 +454,7 @@ export class Hub extends EventEmitter<HubEvents> {
     }
     // A task already finished keeps its result: cancelling it again is a no-op.
     if (task.status !== 'queued' && task.status !== 'running') return;
+    if (task.execution) this.opts.team?.().cancel(task.id);
     const state = this.states.get(task.agentId);
     if (state) {
       state.queue = state.queue.filter((j) => j.taskId !== taskId);
@@ -516,7 +556,8 @@ export class Hub extends EventEmitter<HubEvents> {
   private enqueue(state: AgentState, job: Job) {
     state.queue.push(job);
     this.emitAgents();
-    void this.pump(state);
+    // Dispatch only after the SQLite transaction creating the task and its receipt commits.
+    queueMicrotask(() => this.pump(state));
   }
 
   private maxTasks(state: AgentState): number {
@@ -525,8 +566,10 @@ export class Hub extends EventEmitter<HubEvents> {
 
   /** Starts queued turns while the agent has free slots. */
   private pump(state: AgentState): void {
+    if (this.stopping) return;
     while (state.running.size < this.maxTasks(state) && state.queue.length) {
-      void this.run(state, state.queue.shift()!);
+      const job = state.queue.shift()!;
+      if (this.opts.store.getTask(job.taskId)?.status === 'queued') void this.run(state, job);
     }
   }
 
@@ -544,10 +587,13 @@ export class Hub extends EventEmitter<HubEvents> {
     this.pump(state);
   }
 
-  private record(task: TaskRow, event: RuntimeEvent): void {
+  record(task: TaskRow, event: RuntimeEvent): void {
     if (event.type === 'usage') {
       const agent = this.states.get(task.agentId)?.agent;
-      const runtime = agent?.runtime ?? 'unknown';
+      const runtime =
+        task.execution || agent?.execution
+          ? (this.getTask(task.id).runtime ?? 'unknown')
+          : (agent?.runtime ?? 'unknown');
       this.opts.store.recordUsage(
         {
           taskId: task.id,
@@ -593,6 +639,37 @@ export class Hub extends EventEmitter<HubEvents> {
     let task = this.getTask(job.taskId);
     const agent = this.agentFor(task);
     state.agent = agent;
+    if (task.execution) {
+      const team = this.opts.team?.();
+      if (!team) return this.finish(task.id, 'failed', 'remote execution is not configured');
+      try {
+        if (!team.active(task.id)) {
+          if (task.depth > 0 && this.opts.store.treeTurns(task.rootId) >= DELEGATION.maxTreeTurns)
+            throw new Error('delegation tree turn limit reached');
+          this.opts.store.countTurn(task.id);
+          this.record(task, {
+            type: 'input',
+            text: job.text.slice(0, 64_000),
+            source: task.trigger === 'user' ? 'user' : 'task',
+          });
+        }
+        task = this.opts.store.setStatus(task.id, 'running');
+        this.emit('task', task);
+        const outcome = await team.run(task, agent, job.text, signal);
+        if (outcome.kind === 'finished') this.finish(task.id, outcome.status, outcome.result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'remote execution failed';
+        this.record(task, { type: 'error', message: message.slice(0, 2000), fatal: true });
+        this.finish(task.id, 'failed', message);
+      }
+      return;
+    }
+    if (agent.execution)
+      return this.finish(
+        task.id,
+        'failed',
+        'The member moved to a remote node; start a new task there.',
+      );
     // The agent moved to another runtime while this turn sat in the queue (sendTask refuses
     // earlier): the old resumeId must not reach the new runtime.
     const mismatch = this.runtimeMismatch(task, agent);
@@ -874,8 +951,12 @@ export class Hub extends EventEmitter<HubEvents> {
     });
     const session = new CellSession(task.id, child);
     // The cell belongs to this task; its tool calls act as this task's agent.
-    session.toolHandler = ({ tool, args }) =>
-      this.tools.call({ task: this.getTask(task.id), agent: this.resolve(agent.id) }, tool, args);
+    session.toolHandler = (frame) => {
+      const context = { task: this.getTask(task.id), agent: this.resolve(agent.id) };
+      const relayed = this.opts.worker?.().relay(context.task, context.agent, frame);
+      if (relayed) return relayed.finally(this.block(task.id));
+      return this.tools.call(context, frame.tool, frame.args);
+    };
     const cell: LiveCell = { session, agentId: agent.id, key, lastUsed: Date.now() };
     this.cells.set(task.id, cell);
     session.on('exit', (reason) => {
@@ -1080,6 +1161,12 @@ export class Hub extends EventEmitter<HubEvents> {
   /** Marks tasks interrupted by a daemon restart as failed; their cells were reaped. */
   recoverInterrupted(): void {
     for (const task of this.opts.store.interrupted()) {
+      const text = this.opts.team?.().resumeText(task.id);
+      if (text !== undefined) {
+        this.opts.store.setStatus(task.id, 'queued');
+        this.enqueue(this.state(task.agentId), { taskId: task.id, text });
+        continue;
+      }
       this.record(task, {
         type: 'error',
         message: 'The daemon stopped while this task was running; send a follow-up to continue.',
@@ -1090,7 +1177,12 @@ export class Hub extends EventEmitter<HubEvents> {
   }
 
   /** Closes every cell, waiting for their scans up to SHUTDOWN_SCAN_MS. */
+  suspend(): void {
+    this.stopping = true;
+  }
+
   async shutdown(): Promise<void> {
+    this.suspend();
     for (const id of [...this.cells.keys()]) void this.closeCell(id, 'daemon stopping');
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([

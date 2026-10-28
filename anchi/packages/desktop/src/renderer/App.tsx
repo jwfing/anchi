@@ -1,3 +1,4 @@
+import { sanitizeLine } from '@anchi/core/sanitize';
 import type { Notifications } from '@anchi/protocol';
 import {
   createContext,
@@ -6,12 +7,21 @@ import {
   useContext,
   useEffect,
   useReducer,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import type { ServerState } from '../shared.ts';
-import { allEvents, call, message } from './api.ts';
-import { type Action, agentActivity, EMPTY_MODEL, type Model, reduce } from './model.ts';
+import { allEvents, machineCall, type Call, message } from './api.ts';
+import {
+  type Action,
+  agentActivity,
+  EMPTY_MODEL,
+  type Model,
+  type Fleet,
+  type FleetAction,
+  reduceFleet,
+} from './model.ts';
 import { Avatar, Icon } from './ui.tsx';
 import { AgentView } from './views/Agent.tsx';
 import { ApprovalsView } from './views/Approvals.tsx';
@@ -36,6 +46,9 @@ export interface AppContext {
   model: Model;
   dispatch: Dispatch<Action>;
   server: ServerState;
+  connections: ServerState[];
+  selectServer(name: string): void;
+  call: Call;
   /** Loads a task's whole transcript once; later events arrive as notifications. */
   loadEvents(taskId: string): void;
   /** Runs a daemon action, showing its error instead of throwing. */
@@ -52,24 +65,24 @@ export function useApp(): AppContext {
   return ctx;
 }
 
+const LOCAL: ServerState = { name: 'local', label: 'local', status: 'connecting' };
+
 export function App() {
-  const [model, dispatch] = useReducer(reduce, EMPTY_MODEL);
-  const [server, setServer] = useState<ServerState>({ name: 'local', status: 'connecting' });
+  const [fleet, dispatch] = useReducer(reduceFleet, {});
+  const [connections, setConnections] = useState<ServerState[]>([LOCAL]);
+  const [selected, setSelected] = useState('local');
   const [view, setView] = useState<View>({ kind: 'builder' });
   const [flash, setFlash] = useState<{ text: string; error: boolean } | null>(null);
-  const loading = useRef(new Set<string>());
-
   const say = useCallback((text: string, error = false) => {
     setFlash({ text, error });
     setTimeout(() => setFlash((f) => (f?.text === text ? null : f)), error ? 8000 : 3000);
   }, []);
-
   const act = useCallback(
     async <T,>(fn: () => Promise<T>, done?: string): Promise<T | undefined> => {
       try {
-        const value = await fn();
+        const result = await fn();
         if (done) say(done);
-        return value;
+        return result;
       } catch (err) {
         say(message(err), true);
         return undefined;
@@ -77,219 +90,437 @@ export function App() {
     },
     [say],
   );
-
-  const loadEvents = useCallback((taskId: string) => {
-    if (loading.current.has(taskId)) return;
-    loading.current.add(taskId);
-    allEvents(taskId)
-      .then((events) => dispatch({ type: 'events', taskId, events }))
-      .catch(() => loading.current.delete(taskId));
-  }, []);
-
+  const selectServer = useCallback(
+    (name: string) => {
+      setSelected(name);
+      setView((current) => (current.kind === 'agent' ? { kind: 'builder' } : current));
+      void act(() => window.anchi.setServer(name));
+    },
+    [act],
+  );
   useEffect(() => {
-    void window.anchi.server().then(setServer);
-    const offServer = window.anchi.onServer(setServer);
-    const offNotify = window.anchi.onNotify((name, params) => {
-      const p = params as Notifications[keyof Notifications];
+    let current = true;
+    let notified = false;
+    const receive = (states: ServerState[]) => {
+      if (!current) return;
+      setConnections(states);
+      dispatch({ type: 'retain', servers: states.map((s) => s.name) });
+    };
+    const off = window.anchi.onConnections((states) => {
+      notified = true;
+      receive(states);
+    });
+    void window.anchi.connections().then((states) => {
+      if (!notified) receive(states);
+    });
+    void window.anchi.server().then((server) => {
+      if (current) setSelected(server.name);
+    });
+    return () => {
+      current = false;
+      off();
+    };
+  }, []);
+  const server = connections.find((s) => s.name === selected) ?? connections[0] ?? LOCAL;
+  const team = (fleet[server.name] ?? EMPTY_MODEL).agents.filter((a) => a.id !== BUILDER);
+  const approvals = Object.values(fleet).reduce((count, m) => count + m.approvals.length, 0);
+  const connected = connections.filter((s) => s.status === 'connected').length;
+  const openAgent = (name: string, agentId: string) => {
+    selectServer(name);
+    setView({ kind: 'agent', agentId });
+  };
+  return (
+    <div className="app">
+      {connections.map((node) => (
+        <MachineSync key={node.name} server={node} dispatch={dispatch} say={say} />
+      ))}
+      {flash && (
+        <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
+          {sanitizeLine(flash.text)}
+        </div>
+      )}
+      <div className="body">
+        <nav className="rail" aria-label="Main">
+          <RailButton
+            label="Team"
+            icon="chat"
+            active={view.kind === 'agent' || view.kind === 'builder'}
+            onClick={() =>
+              setView(team[0] ? { kind: 'agent', agentId: team[0].id } : { kind: 'builder' })
+            }
+          />
+          <RailButton
+            label="Approvals"
+            icon="shield"
+            badge={approvals}
+            active={view.kind === 'approvals'}
+            onClick={() => setView({ kind: 'approvals' })}
+          />
+          <RailButton
+            label="Usage"
+            icon="chart"
+            active={view.kind === 'usage'}
+            onClick={() => setView({ kind: 'usage' })}
+          />
+          <div className="spacer" />
+          <button
+            type="button"
+            className="rail-button"
+            title={`${connected}/${connections.length} machines connected`}
+            aria-label={`${connected} machines connected. Open settings`}
+            onClick={() => setView({ kind: 'settings' })}
+          >
+            <Icon name="server" size={20} />
+            <span className={`rail-dot dot-${connected ? 'connected' : 'error'}`} />
+          </button>
+          <RailButton
+            label="Settings"
+            icon="gear"
+            active={view.kind === 'settings'}
+            onClick={() => setView({ kind: 'settings' })}
+          />
+        </nav>
+        {(view.kind === 'agent' || view.kind === 'builder') && (
+          <aside className="agents" aria-label="Agents on all machines">
+            <button
+              type="button"
+              className={`new-agent ${view.kind === 'builder' ? 'selected' : ''}`}
+              onClick={() => setView({ kind: 'builder' })}
+            >
+              <span className="new-agent-icon">
+                <Icon name="plus" size={16} />
+              </span>
+              <span className="col">
+                <span className="strong">New agent</span>
+                <span className="small muted">Choose a machine in the builder</span>
+              </span>
+            </button>
+            <TeamList
+              fleet={fleet}
+              connections={connections}
+              selected={server.name}
+              view={view}
+              onSelect={openAgent}
+              onBuilder={(name) => {
+                selectServer(name);
+                setView({ kind: 'builder' });
+              }}
+            />
+          </aside>
+        )}
+        <ScopedView
+          key={`${server.name}:${server.status}`}
+          server={server}
+          connections={connections}
+          model={fleet[server.name] ?? EMPTY_MODEL}
+          dispatchFleet={dispatch}
+          act={act}
+          selectServer={selectServer}
+          view={view}
+          setView={setView}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** A machine stays subscribed while another machine's view is selected. */
+function MachineSync({
+  server,
+  dispatch,
+  say,
+}: {
+  server: ServerState;
+  dispatch: Dispatch<FleetAction>;
+  say(text: string, error?: boolean): void;
+}) {
+  useEffect(() => {
+    if (server.status !== 'connected') return;
+    let current = true;
+    const call = machineCall(server.name);
+    const send = (action: Action) => {
+      if (current) dispatch({ type: 'machine', server: server.name, action });
+    };
+    const fail = (err: unknown) => {
+      if (current) say(`${server.label}: ${message(err)}`, true);
+    };
+    const tasks = () =>
+      call('tasks.list', { limit: 500 }).then((tasks) =>
+        send({ type: 'tasks', tasks, replace: true }),
+      );
+    const off = window.anchi.onNotify((origin, name, params) => {
+      if (origin !== server.name) return;
       switch (name as keyof Notifications) {
         case 'event': {
-          const e = p as Notifications['event'];
-          dispatch({ type: 'event', taskId: e.taskId, seq: e.seq, event: e.event, ts: Date.now() });
+          const e = params as Notifications['event'];
+          send({ type: 'event', taskId: e.taskId, seq: e.seq, event: e.event, ts: Date.now() });
           break;
         }
         case 'tasks':
-          dispatch({ type: 'tasks', tasks: [(p as Notifications['tasks']).task] });
+          send({ type: 'tasks', tasks: [(params as Notifications['tasks']).task] });
           break;
         case 'agents':
-          dispatch({ type: 'agents', agents: (p as Notifications['agents']).agents });
+          send({ type: 'agents', agents: (params as Notifications['agents']).agents });
           break;
         case 'approvals':
-          dispatch({ type: 'approvals', approvals: (p as Notifications['approvals']).approvals });
+          send({ type: 'approvals', approvals: (params as Notifications['approvals']).approvals });
           break;
         case 'proposal':
-          dispatch({ type: 'proposal', proposal: (p as Notifications['proposal']).proposal });
+          send({ type: 'proposal', proposal: (params as Notifications['proposal']).proposal });
           break;
         case 'tasksDeleted':
-          void call('tasks.list', { limit: 500 }).then((tasks) =>
-            dispatch({ type: 'tasks', tasks, replace: true }),
-          );
+          void tasks().catch(fail);
           break;
         case 'oauth': {
-          const o = p as Notifications['oauth'];
-          say(o.ok ? `${o.id} connected` : `${o.id}: ${o.error ?? 'sign-in failed'}`, !o.ok);
+          const o = params as Notifications['oauth'];
+          say(
+            `${server.label}: ${o.id} ${o.ok ? 'connected' : (o.error ?? 'sign-in failed')}`,
+            !o.ok,
+          );
           break;
         }
       }
     });
-    return () => {
-      offServer();
-      offNotify();
-    };
-  }, [say]);
-
-  // Everything is read again on each (re)connection: notifications missed meanwhile are lost.
-  useEffect(() => {
-    if (server.status !== 'connected') return;
-    loading.current.clear();
     void Promise.all([
-      call('agents.list').then((agents) => dispatch({ type: 'agents', agents })),
-      call('tasks.list', { limit: 500 }).then((tasks) =>
-        dispatch({ type: 'tasks', tasks, replace: true }),
-      ),
-      call('approvals.list').then((approvals) => dispatch({ type: 'approvals', approvals })),
-    ]).catch((err) => say(message(err), true));
-  }, [server.status, server.name, say]);
+      call('agents.list').then((agents) => send({ type: 'agents', agents })),
+      tasks(),
+      call('approvals.list').then((approvals) => send({ type: 'approvals', approvals })),
+    ]).catch(fail);
+    return () => {
+      current = false;
+      off();
+    };
+  }, [server.name, server.label, server.status, dispatch, say]);
+  return null;
+}
 
-  // The guide opens once per server this window has not finished it for, unless the server
-  // needs nothing; switching to a server that still needs preparing opens it again.
-  const prompted = useRef(new Set<string>());
+export function TeamList({
+  fleet,
+  connections,
+  selected,
+  view,
+  onSelect,
+  onBuilder,
+}: {
+  fleet: Fleet;
+  connections: ServerState[];
+  selected: string;
+  view: View;
+  onSelect(server: string, agentId: string): void;
+  onBuilder(server: string): void;
+}) {
+  const total = Object.values(fleet).reduce(
+    (n, m) => n + m.agents.filter((a) => a.id !== BUILDER).length,
+    0,
+  );
+  return (
+    <>
+      <div className="section-label">TEAM · {total}</div>
+      {connections.map((server) => {
+        const model = fleet[server.name] ?? EMPTY_MODEL;
+        const agents = model.agents.filter((a) => a.id !== BUILDER);
+        const proposals = Object.keys(model.proposals).length;
+        return (
+          <section key={server.name} aria-label={`Agents on ${server.label}`}>
+            <div className="section-label row gap">
+              <span className={`dot dot-${server.status}`} />
+              {sanitizeLine(server.label)} · {server.status}
+            </div>
+            {!!proposals && (
+              <button className="btn btn-small" onClick={() => onBuilder(server.name)}>
+                Proposals on {sanitizeLine(server.label)} ({proposals})
+              </button>
+            )}
+            {agents.map((agent) => {
+              const activity = agentActivity(model, agent);
+              const active =
+                selected === server.name && view.kind === 'agent' && view.agentId === agent.id;
+              return (
+                <button
+                  type="button"
+                  key={agent.id}
+                  className={`agent-row ${active ? 'selected' : ''}`}
+                  aria-current={active}
+                  aria-label={`@${agent.id} on ${server.label}`}
+                  onClick={() => onSelect(server.name, agent.id)}
+                >
+                  <span className="avatar-wrap">
+                    <Avatar id={agent.id} />
+                    <span
+                      className={`presence presence-${server.status === 'connected' ? activity.tone : 'idle'}`}
+                    />
+                  </span>
+                  <span className="col grow min0">
+                    <span className="strong ellipsis">@{sanitizeLine(agent.id)}</span>
+                    <span className="small muted ellipsis">
+                      {sanitizeLine(
+                        agent.execution
+                          ? `${server.label} → ${agent.execution.server}`
+                          : server.label,
+                      )}
+                      {agent.runtime ? ` · ${agent.runtime}` : ''}
+                    </span>
+                    <span className={`small agent-preview tone-${activity.tone}`}>
+                      {server.status === 'connected'
+                        ? sanitizeLine(activity.text)
+                        : 'Offline · last known state'}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+            {!agents.length && (
+              <p className="small muted pad">
+                {server.status === 'connected'
+                  ? 'No agents yet.'
+                  : 'Agents appear when this machine connects.'}
+              </p>
+            )}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function ScopedView({
+  server,
+  connections,
+  model,
+  dispatchFleet,
+  act,
+  selectServer,
+  view,
+  setView,
+}: {
+  server: ServerState;
+  connections: ServerState[];
+  model: Model;
+  dispatchFleet: Dispatch<FleetAction>;
+  act: AppContext['act'];
+  selectServer: AppContext['selectServer'];
+  view: View;
+  setView(view: View): void;
+}) {
+  const call = useMemo(() => machineCall(server.name), [server.name]);
+  const active = useRef(true);
   useEffect(() => {
-    if (onboarded(server.name) || prompted.current.has(server.name)) return;
-    if (server.status !== 'connected') {
-      if (server.status === 'error') {
-        prompted.current.add(server.name);
-        setView({ kind: 'welcome' });
-      }
-      return;
-    }
-    const name = server.name;
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const navigate = useCallback(
+    (next: View) => {
+      if (active.current) setView(next);
+    },
+    [setView],
+  );
+  const dispatch = useCallback(
+    (action: Action) => dispatchFleet({ type: 'machine', server: server.name, action }),
+    [server.name, dispatchFleet],
+  );
+  const loading = useRef(new Set<string>());
+  const loadEvents = useCallback(
+    (taskId: string) => {
+      if (loading.current.has(taskId) || server.status !== 'connected') return;
+      loading.current.add(taskId);
+      void allEvents(call, taskId)
+        .then((events) => {
+          if (active.current) dispatch({ type: 'events', taskId, events });
+        })
+        .catch(() => loading.current.delete(taskId));
+    },
+    [call, dispatch, server.status],
+  );
+  useEffect(() => {
+    if (onboarded(server.name) || server.status !== 'connected') return;
+    let current = true;
     void Promise.all([
       call('setup.status'),
       call('agents.list'),
       call('tasks.list', { limit: 500 }),
     ])
       .then(([status, agents, tasks]) => {
-        if (welcomeStep(status, agents, tasks) === 'done') return setOnboarded(name);
-        prompted.current.add(name);
-        setView({ kind: 'welcome' });
+        if (!current) return;
+        if (welcomeStep(status, agents, tasks) === 'done') setOnboarded(server.name);
+        else setView({ kind: 'welcome' });
       })
-      .catch(() => undefined);
-  }, [server.status, server.name]);
-
-  const ctx: AppContext = { model, dispatch, server, loadEvents, act, setView };
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [call, server.name, server.status, setView]);
+  const ctx: AppContext = {
+    model,
+    dispatch,
+    server,
+    connections,
+    selectServer,
+    call,
+    loadEvents,
+    act,
+    setView: navigate,
+  };
   const team = model.agents.filter((a) => a.id !== BUILDER);
-  const pendingProposals = Object.keys(model.proposals).length;
-
   return (
     <Ctx.Provider value={ctx}>
-      <div className="app">
-        <ConnectionBanner onOpen={() => setView({ kind: 'settings' })} />
-        <VaultBanner />
-        {flash && (
-          <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
-            {flash.text}
+      <div className="machine-content">
+        {view.kind !== 'settings' && view.kind !== 'agent' && (
+          <div className="machine-toolbar">
+            <MachinePicker />
+            <span className="small muted">Tasks belong to the selected machine</span>
           </div>
         )}
-
-        <div className="body">
-          <nav className="rail" aria-label="Main">
-            <RailButton
-              label="Team"
-              icon="chat"
-              active={view.kind === 'agent' || view.kind === 'builder'}
-              onClick={() =>
+        <ConnectionBanner onOpen={() => setView({ kind: 'settings' })} />
+        {server.status === 'connected' && <VaultBanner />}
+        <div className="machine-body">
+          {view.kind === 'settings' ? (
+            <SettingsView />
+          ) : view.kind === 'welcome' ? (
+            <WelcomeView
+              onFinish={() =>
                 setView(team[0] ? { kind: 'agent', agentId: team[0].id } : { kind: 'builder' })
               }
             />
-            <RailButton
-              label="Approvals"
-              icon="shield"
-              badge={model.approvals.length}
-              active={view.kind === 'approvals'}
-              onClick={() => setView({ kind: 'approvals' })}
-            />
-            <RailButton
-              label="Usage"
-              icon="chart"
-              active={view.kind === 'usage'}
-              onClick={() => setView({ kind: 'usage' })}
-            />
-            <div className="spacer" />
-            <button
-              type="button"
-              className="rail-button"
-              title={`Server ${server.name} · ${server.status}`}
-              aria-label={`Server ${server.name}, ${server.status}. Open settings`}
-              onClick={() => setView({ kind: 'settings' })}
-            >
-              <Icon name="server" size={20} />
-              <span className={`rail-dot dot-${server.status}`} />
-            </button>
-            <RailButton
-              label="Settings"
-              icon="gear"
-              active={view.kind === 'settings'}
-              onClick={() => setView({ kind: 'settings' })}
-            />
-          </nav>
-
-          {(view.kind === 'agent' || view.kind === 'builder') && (
-            <aside className="agents" aria-label="Agents">
-              <button
-                type="button"
-                className={`new-agent ${view.kind === 'builder' ? 'selected' : ''}`}
-                onClick={() => setView({ kind: 'builder' })}
-              >
-                <span className="new-agent-icon">
-                  <Icon name={pendingProposals ? 'sparkle' : 'plus'} size={16} />
-                </span>
-                <span className="col">
-                  <span className="strong">
-                    {pendingProposals ? `Proposal waiting (${pendingProposals})` : 'New agent'}
-                  </span>
-                  <span className="small muted">Describe it to the builder</span>
-                </span>
-              </button>
-              <div className="section-label">TEAM · {team.length}</div>
-              {team.map((a) => {
-                const activity = agentActivity(model, a);
-                const selected = view.kind === 'agent' && view.agentId === a.id;
-                return (
-                  <button
-                    type="button"
-                    key={a.id}
-                    className={`agent-row ${selected ? 'selected' : ''}`}
-                    onClick={() => setView({ kind: 'agent', agentId: a.id })}
-                    aria-current={selected}
-                  >
-                    <span className="avatar-wrap">
-                      <Avatar id={a.id} />
-                      <span className={`presence presence-${activity.tone}`} />
-                    </span>
-                    <span className="col grow min0">
-                      <span className="row between">
-                        <span className="strong">@{a.id}</span>
-                        <span className="mono small muted">{a.runtime ?? ''}</span>
-                      </span>
-                      <span className={`small ellipsis tone-${activity.tone}`}>
-                        {activity.text}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-              {!team.length && server.status === 'connected' && (
-                <p className="small muted pad">No agents yet. Describe one to the builder.</p>
-              )}
-            </aside>
-          )}
-
-          {view.kind === 'agent' && <AgentView key={view.agentId} agentId={view.agentId} />}
-          {view.kind === 'builder' && <BuilderView />}
-          {view.kind === 'approvals' && <ApprovalsView />}
-          {view.kind === 'usage' && <UsageView />}
-          {view.kind === 'settings' && <SettingsView />}
-          {view.kind === 'welcome' && (
-            <WelcomeView
-              key={server.name}
-              onFinish={() => {
-                setView(team[0] ? { kind: 'agent', agentId: team[0].id } : { kind: 'builder' });
-              }}
-            />
+          ) : server.status !== 'connected' ? (
+            <main className="main empty">
+              {sanitizeLine(server.label)} is {server.status}. Connect it in Settings to open tasks
+              and make changes.
+            </main>
+          ) : (
+            <>
+              {view.kind === 'agent' && <AgentView key={view.agentId} agentId={view.agentId} />}
+              {view.kind === 'builder' && <BuilderView />}
+              {view.kind === 'approvals' && <ApprovalsView />}
+              {view.kind === 'usage' && <UsageView />}
+            </>
           )}
         </div>
       </div>
     </Ctx.Provider>
+  );
+}
+
+export function MachinePicker() {
+  const { server, connections, selectServer } = useApp();
+  return (
+    <label className="machine-picker">
+      <Icon name="server" size={18} />
+      <span className="sr-only">Machine</span>
+      <select
+        aria-label="Machine"
+        value={server.name}
+        onChange={(e) => selectServer(e.target.value)}
+      >
+        {connections.map((node) => (
+          <option key={node.name} value={node.name}>
+            {node.label} · {node.status}
+          </option>
+        ))}
+      </select>
+      <Icon name="down" size={16} />
+    </label>
   );
 }
 
@@ -302,8 +533,8 @@ function ConnectionBanner({ onOpen }: { onOpen: () => void }) {
       <span className={`dot dot-${server.status}`} />
       <span className="grow">
         {server.status === 'connecting'
-          ? `Connecting to ${server.name}…`
-          : `Not connected to ${server.name}${server.error ? `: ${server.error}` : ''}`}
+          ? `Connecting to ${sanitizeLine(server.label)}…`
+          : `Not connected to ${sanitizeLine(server.label)}${server.error ? `: ${sanitizeLine(server.error)}` : ''}`}
       </span>
       <button type="button" className="btn btn-small" onClick={onOpen}>
         Server settings

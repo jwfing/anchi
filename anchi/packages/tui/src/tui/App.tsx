@@ -2427,9 +2427,9 @@ export function App({
   }
 
   const header = detail
-    ? `${detail.id} · @${detail.agentId} · ${detail.status}${detail.parentId ? ` · delegated by ${detail.parentId}` : ''}${detail.trigger !== 'user' && detail.trigger !== 'delegation' ? ` · ${detail.trigger}` : ''}`
+    ? `${detail.id} · @${detail.agentId} · ${detail.status}${detail.execution ? ` · on ${detail.execution.server}/@${detail.execution.agent}` : ''}${detail.parentId ? ` · delegated by ${detail.parentId}` : ''}${detail.trigger !== 'user' && detail.trigger !== 'delegation' ? ` · ${detail.trigger}` : ''}`
     : agent
-      ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}${
+      ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.execution ? `on ${agent.execution.server}/@${agent.execution.agent}` : `${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}`}${
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
         }${
           agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
@@ -3714,7 +3714,9 @@ function ModalView({
       </Box>,
       editing
         ? `${editing.error ? `✗ ${editing.error}` : `Type the ${editing.field}${editing.field === 'model' ? ' (empty: the runtime default)' : ''}`} · Enter keep · Esc undo`
-        : `↑↓ choose · Space change · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'}${modal.proposalId ? '' : ' · D delete the agent'} · Esc cancel`,
+        : modal.data.fixed.execution
+          ? 'Execution profile is managed on the node · Esc close'
+          : `↑↓ choose · Space change · Enter ${modal.proposalId ? 'update the proposal' : 'review the change'}${modal.proposalId ? '' : ' · D delete the agent'} · Esc cancel`,
     );
   }
   if (modal.kind === 'deleteAgent') {

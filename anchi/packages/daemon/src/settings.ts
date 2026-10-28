@@ -123,6 +123,7 @@ export function settingsView(
     },
     inherited,
     fixed: {
+      ...(agent.execution ? { execution: agent.execution } : {}),
       ...(own.extends ? { extends: own.extends } : {}),
       ...(own.prompt?.file ? { promptFile: own.prompt.file } : {}),
       image: agent.image ?? BASE_IMAGE,
@@ -219,6 +220,14 @@ export function updateAgentFile(
   }
   try {
     const agent = resolveAgent(id, layout, next);
+    if (
+      agent.execution &&
+      Object.keys(patch).some((key) => !['name', 'description', 'delegates'].includes(key))
+    ) {
+      errors.push(
+        'Runtime, prompt and access settings belong to the execution node. Edit that node’s agent profile.',
+      );
+    }
     // The user confirms the diff, so say which approvals it gives up.
     const added = agent.highRisk.disable.filter((h) => !before.includes(h));
     if (added.length) {

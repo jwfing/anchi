@@ -14,20 +14,21 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../App.tsx';
 import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
-import { call, message } from '../api.ts';
+import { message, type Call } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { count } from '../format.ts';
+import { Icon } from '../ui.tsx';
 import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../guides.ts';
 import { onVaultUnlocked, vaultLocked, VaultLockedCard } from '../vault.tsx';
 
 export function SettingsView() {
-  const { act, server, setView } = useApp();
+  const { act, server, setView, call } = useApp();
   const [status, setStatus] = useState<SetupStatus>();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const refresh = useCallback(() => {
     void act(() => call('setup.status')).then((s) => s && setStatus(s));
     void act(() => call('skills.list')).then((s) => s && setSkills(s));
-  }, [act]);
+  }, [act, call]);
   useEffect(() => {
     if (server.status === 'connected') refresh();
   }, [server.status, server.name, refresh]);
@@ -36,13 +37,13 @@ export function SettingsView() {
   return (
     <main className="main page scroll">
       <div className="row between">
-        <h1>Settings</h1>
+        <h1>Settings · {sanitizeLine(server.label)}</h1>
         <button type="button" className="btn" onClick={() => setView({ kind: 'welcome' })}>
           Getting started
         </button>
       </div>
       <ServerCard />
-      {status && (
+      {server.status === 'connected' && status && (
         <>
           <section className="card">
             <h2>Environment</h2>
@@ -80,7 +81,9 @@ export function SettingsView() {
           )}
         </>
       )}
-      <Skills skills={skills} local={server.name === 'local'} onChange={refresh} />
+      {server.status === 'connected' && (
+        <Skills skills={skills} local={server.name === 'local'} onChange={refresh} />
+      )}
     </main>
   );
 }
@@ -95,7 +98,7 @@ export function Skills({
   local: boolean;
   onChange: () => void;
 }) {
-  const { act } = useApp();
+  const { act, call, server } = useApp();
   const [url, setUrl] = useState('');
   const [result, setResult] = useState<SkillAddResult>();
   const [updates, setUpdates] = useState<Record<string, SkillUpdate>>({});
@@ -135,7 +138,7 @@ export function Skills({
           <button
             type="button"
             className="btn"
-            onClick={() => void act(() => window.anchi.addSkillFolder()).then(added)}
+            onClick={() => void act(() => window.anchi.addSkillFolder(server.name)).then(added)}
           >
             Add a folder…
           </button>
@@ -249,7 +252,7 @@ type Provider = 'instabox' | 'ssh';
 
 /** Where the daemon, vault and cells run: this computer, or a saved remote server. */
 export function ServerCard() {
-  const { server } = useApp();
+  const { server, connections, selectServer } = useApp();
   const [servers, setServers] = useState<SavedServer[]>([{ name: 'local', target: 'local' }]);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<{ saved: SavedServer; probe: ProbeResult }>();
@@ -264,54 +267,77 @@ export function ServerCard() {
   };
   useEffect(() => {
     void window.anchi.servers().then(setServers);
-  }, [server.name]);
+  }, [server.name, connections.length]);
   return (
     <section className="card">
-      <h2>Server</h2>
+      <h2>Machines</h2>
       <p className="small muted">
-        The daemon, the vault and the task cells run on the server. Local runs them in a VM on this
-        computer. A remote server keeps working while this computer sleeps: an instabox machine, or
-        any Linux VM you reach over SSH.
+        Select a machine to manage its runtimes, connectors, services and skills. Your other
+        machines stay connected.
       </p>
-      {servers.map((s) => {
-        const active = s.target === server.name;
+      {connections.map((node) => {
+        const active = node.name === server.name;
+        const saved = servers.find((s) => s.target === node.name);
         return (
-          <div key={s.name} className="connector-row">
-            <span className={`dot ${active ? `dot-${server.status}` : 'dot-off'}`} />
-            <span className="strong connector-id">{s.name}</span>
-            <span className="small muted grow ellipsis">
-              {s.target !== s.name ? <span className="mono">{s.target}</span> : null}
-              {active
-                ? ` ${server.status}${server.error ? `: ${sanitizeLine(server.error)}` : ''}`
-                : ''}
-            </span>
-            {!active && (
+          <div key={node.name} className={`machine-row ${active ? 'selected' : ''}`}>
+            <button
+              type="button"
+              className="machine-choice"
+              aria-pressed={active}
+              aria-label={`Configure ${node.label}`}
+              onClick={() => selectServer(node.name)}
+            >
+              <span className="machine-icon">
+                <Icon name="server" size={20} />
+              </span>
+              <span className="col grow min0">
+                <span className="strong ellipsis">{sanitizeLine(node.label)}</span>
+                <span className="small muted ellipsis">
+                  {sanitizeLine(node.name === 'local' ? 'This computer' : node.name)}
+                </span>
+              </span>
+              <span className="machine-status small">
+                <span className={`dot dot-${node.status}`} />
+                {node.status}
+              </span>
+              {active && <Icon name="check" size={18} />}
+            </button>
+            <div className="row gap machine-actions">
               <button
                 type="button"
                 className="btn btn-small"
-                onClick={() => void run(() => window.anchi.setServer(s.name))}
+                onClick={() =>
+                  void run(() =>
+                    window.anchi.connectServer(
+                      node.name,
+                      node.status === 'disconnected' || node.status === 'error',
+                    ),
+                  )
+                }
               >
-                Use
+                {node.status === 'disconnected' || node.status === 'error'
+                  ? 'Connect'
+                  : 'Disconnect'}
               </button>
-            )}
-            {s.name !== 'local' && (
-              <button
-                type="button"
-                className="btn btn-small"
-                onClick={() => void run(() => window.anchi.removeServer(s.name).then(setServers))}
-              >
-                Remove
-              </button>
+              {saved && saved.name !== 'local' && (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={() =>
+                    void run(() => window.anchi.removeServer(saved.name).then(setServers))
+                  }
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            {node.error && (
+              <p className="small tone-warn machine-error">{sanitizeLine(node.error)}</p>
             )}
           </div>
         );
       })}
-      {added && (
-        <ProbeNote
-          added={added}
-          onUse={() => run(() => window.anchi.setServer(added.saved.name))}
-        />
-      )}
+      {added && <ProbeNote added={added} onUse={() => selectServer(added.saved.target)} />}
       {adding ? (
         <AddServer
           onCancel={() => setAdding(false)}
@@ -330,7 +356,7 @@ export function ServerCard() {
             setAdding(true);
           }}
         >
-          Add a server
+          Add a machine
         </button>
       )}
       {error && <div className="banner banner-error">{error}</div>}
@@ -570,13 +596,13 @@ const RUNTIMES: Record<
     name: string;
     fields?: Field[];
     note: string;
-    save: (v: Record<string, string>, server: string) => Promise<unknown>;
+    save: (call: Call, v: Record<string, string>, server: string) => Promise<unknown>;
   }
 > = {
   codex: {
     name: 'Codex',
     note: 'Imports the ChatGPT login of the server machine. Run codex login there first.',
-    save: (_, server) =>
+    save: (call, _, server) =>
       call('setup.importCodex').catch((err: unknown) => {
         throw new Error(codexLoginHelp(message(err), server) ?? message(err));
       }),
@@ -592,7 +618,7 @@ const RUNTIMES: Record<
       },
     ],
     note: 'Stored in the vault on the server, never shown again.',
-    save: (v) => call('setup.importClaude', { token: v.token! }),
+    save: (call, v) => call('setup.importClaude', { token: v.token! }),
   },
   hermes: {
     name: 'Hermes',
@@ -602,7 +628,7 @@ const RUNTIMES: Record<
       { key: 'apiKey', label: 'API key', secret: true },
     ],
     note: 'Any OpenAI-compatible endpoint. The key is stored in the vault on the server.',
-    save: (v) =>
+    save: (call, v) =>
       call('setup.importHermes', { baseUrl: v.baseUrl!, model: v.model!, apiKey: v.apiKey! }),
   },
 };
@@ -647,7 +673,7 @@ export function Runtimes({
   server: string;
   onChange: () => void;
 }) {
-  const { act } = useApp();
+  const { act, call } = useApp();
   const [open, setOpen] = useState<RuntimeId>();
   const buttons = useRef(new Map<RuntimeId, HTMLButtonElement>());
   const close = (id: RuntimeId) => {
@@ -680,7 +706,7 @@ export function Runtimes({
                 aria-controls={rt.fields ? `runtime-${id}` : undefined}
                 onClick={() => {
                   if (rt.fields) return setOpen(open === id ? undefined : id);
-                  void act(() => rt.save({}, server), `${rt.name} connected`).then(
+                  void act(() => rt.save(call, {}, server), `${rt.name} connected`).then(
                     (r) => r && onChange(),
                   );
                 }}
@@ -694,7 +720,7 @@ export function Runtimes({
                   fields={rt.fields}
                   note={rt.note}
                   submit={async (v) => {
-                    await rt.save(v, server);
+                    await rt.save(call, v, server);
                     setOpen(undefined);
                     onChange();
                   }}
@@ -753,7 +779,7 @@ function OAuthAppForm({
   done: () => void;
   onCancel: () => void;
 }) {
-  const { act } = useApp();
+  const { act, call, server } = useApp();
   if (id === 'gmail' || id === 'drive') {
     return (
       <div
@@ -770,9 +796,10 @@ function OAuthAppForm({
           className="btn btn-primary drawer-save"
           autoFocus
           onClick={() =>
-            void act(() => window.anchi.importGoogleClient(), 'Google client imported').then(
-              (imported) => imported && done(),
-            )
+            void act(
+              () => window.anchi.importGoogleClient(server.name),
+              'Google client imported',
+            ).then((imported) => imported && done())
           }
         >
           Choose client JSON…
@@ -811,7 +838,7 @@ function OAuthAppForm({
 }
 
 function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
-  const { act } = useApp();
+  const { act, call } = useApp();
   const [editing, setEditing] = useState<TokenConnectorId | undefined>();
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const byId = new Map(status.connectors.map((c) => [c.id, c]));
@@ -923,7 +950,7 @@ const TOKEN_LABEL: Partial<Record<ServiceConnectorId, string>> = {
 };
 
 export function Services({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
-  const { act } = useApp();
+  const { act, call } = useApp();
   const [editing, setEditing] = useState<ServiceConnectorId | undefined>();
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const close = (id: string) => {

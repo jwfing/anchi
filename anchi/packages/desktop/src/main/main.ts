@@ -25,7 +25,8 @@ import {
   session,
   shell,
 } from 'electron';
-import { checkCall, type Confirmation, externalUrl, guardedCall, NOTIFICATIONS } from './bridge.ts';
+import { type Confirmation, externalUrl } from './bridge.ts';
+import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
 import type { ServerState } from '../shared.ts';
 
@@ -39,15 +40,33 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 }
 const icon = join(__dirname, 'icon.png');
 let window: BrowserWindow | undefined;
-let client: DaemonClient | undefined;
-let state: ServerState = { name: 'local', status: 'connecting' };
-let retry: NodeJS.Timeout | undefined;
-/** Bumped by every (re)connection, so a slow attempt never replaces a newer one. */
-let generation = 0;
+let selected = 'local';
+const connections = new Connections({
+  open: async (target) => {
+    const client = await open(resolveServer(layout.root, target));
+    return {
+      read: (method, params) => client.call(method, params),
+      on: (name, listener) => {
+        client.on(name, listener);
+      },
+      onClose: (listener) => {
+        client.onClose(listener);
+      },
+      close: () => client.close(),
+    };
+  },
+  changed: (states) => window?.webContents.send('anchi:connections', states),
+  notify: (server, name, params) => window?.webContents.send('anchi:notify', server, name, params),
+});
 
-function publish(next: ServerState) {
-  state = next;
-  window?.webContents.send('anchi:server', state);
+function selectedState(): ServerState {
+  return (
+    connections.states().find((s) => s.name === selected) ?? {
+      name: selected,
+      label: selected,
+      status: 'disconnected',
+    }
+  );
 }
 
 /**
@@ -57,7 +76,7 @@ function publish(next: ServerState) {
 function startLocalDaemon(): Promise<void> {
   return new Promise((resolve, reject) => {
     const cli = process.env.ANCHI_CLI ?? 'anchi';
-    const child = spawn(cli, ['daemon', 'start'], { stdio: 'ignore' });
+    const child = spawn(cli, ['--server', 'local', 'daemon', 'start'], { stdio: 'ignore' });
     child.on('error', () =>
       reject(
         new Error(
@@ -84,57 +103,14 @@ async function open(server: ServerTarget): Promise<DaemonClient> {
   }
 }
 
-async function connect(server: ServerTarget) {
-  const mine = ++generation;
-  clearTimeout(retry);
-  client?.close();
-  client = undefined;
-  publish({ name: serverName(server), status: 'connecting' });
-  let next: DaemonClient;
-  try {
-    next = await open(server);
-  } catch (err) {
-    if (mine !== generation) return;
-    publish({ name: serverName(server), status: 'error', error: (err as Error).message });
-    retry = setTimeout(() => void connect(server), 5000);
-    return;
-  }
-  if (mine !== generation) return next.close();
-  client = next;
-  for (const name of NOTIFICATIONS) {
-    next.on(name, (params) => window?.webContents.send('anchi:notify', name, params));
-  }
-  next.onClose(() => {
-    if (mine !== generation) return;
-    client = undefined;
-    publish({
-      name: serverName(server),
-      status: 'error',
-      error: 'connection to the daemon closed',
-    });
-    retry = setTimeout(() => void connect(server), 3000);
-  });
-  publish({ name: serverName(server), status: 'connected' });
-}
-
 /** Only the app's own page talks to the main process. */
 function fromApp(event: IpcMainInvokeEvent) {
   if (!window || event.sender !== window.webContents) throw new Error('unknown sender');
 }
 
-ipcMain.handle('anchi:call', async (event, method: unknown, params: unknown) => {
+ipcMain.handle('anchi:call', async (event, server: unknown, method: unknown, params: unknown) => {
   fromApp(event);
-  const daemon = client;
-  if (!daemon) {
-    checkCall(method, params);
-    throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
-  }
-  return guardedCall(
-    method,
-    params,
-    (m, p) => (daemon.call as (m: string, p: object) => Promise<unknown>).call(daemon, m, p),
-    confirm,
-  );
+  return connections.call(server, method, params, confirm);
 });
 
 async function confirm(question: Confirmation): Promise<boolean> {
@@ -156,26 +132,26 @@ async function confirm(question: Confirmation): Promise<boolean> {
  * A skill folder on this computer, chosen in a native picker: the window never names a host path.
  * A remote server would read the path on its own disk, so this is for the local server only.
  */
-ipcMain.handle('anchi:addSkillFolder', async (event) => {
+ipcMain.handle('anchi:addSkillFolder', async (event, server: unknown) => {
   fromApp(event);
-  if (state.name !== 'local') throw new Error('add folders on the server with anchi skills add');
-  if (!client) throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
+  if (server !== 'local') throw new Error('add folders on the server with anchi skills add');
+  const lease = connections.lease(server);
   const options = { title: 'Add a skill folder', properties: ['openDirectory' as const] };
   const picked = window
     ? await dialog.showOpenDialog(window, options)
     : await dialog.showOpenDialog(options);
   if (picked.canceled || !picked.filePaths[0]) return null;
-  return client.call('skills.add', { source: picked.filePaths[0] });
+  return lease.read('skills.add', { source: picked.filePaths[0] });
 });
 /**
  * A Google OAuth client JSON, chosen in a native picker and read here: the window never names a
  * host path. Its contents go to the daemon, so this works for a remote server too.
  */
-ipcMain.handle('anchi:importGoogleClient', async (event) => {
+ipcMain.handle('anchi:importGoogleClient', async (event, server: unknown) => {
   fromApp(event);
-  if (!client) throw new Error(state.error ?? 'not connected to the Anchi daemon yet');
+  const lease = connections.lease(server);
   const options = {
-    title: 'Choose the Google OAuth client JSON',
+    title: `Choose the Google OAuth client JSON for ${lease.state.label}`,
     properties: ['openFile' as const],
     filters: [{ name: 'OAuth client', extensions: ['json'] }],
   };
@@ -185,19 +161,37 @@ ipcMain.handle('anchi:importGoogleClient', async (event) => {
   const path = picked.filePaths[0];
   if (picked.canceled || !path) return false;
   if ((await stat(path)).size > 16_384) throw new Error('that file is too large for a client JSON');
-  await client.call('services.googleClient', { json: await readFile(path, 'utf8') });
+  await lease.read('services.googleClient', { json: await readFile(path, 'utf8') });
   return true;
 });
 ipcMain.handle('anchi:server', (event) => {
   fromApp(event);
-  return state;
+  return selectedState();
+});
+ipcMain.handle('anchi:connections', (event) => {
+  fromApp(event);
+  return connections.states();
+});
+ipcMain.handle('anchi:connectServer', async (event, target: unknown, connected: unknown) => {
+  fromApp(event);
+  if (
+    typeof target !== 'string' ||
+    typeof connected !== 'boolean' ||
+    !connections.states().some((s) => s.name === target)
+  )
+    throw new Error('unknown machine');
+  if (connected) await connections.connect(target);
+  else connections.disconnect(target);
 });
 ipcMain.handle('anchi:setServer', async (event, text: unknown) => {
   fromApp(event);
-  const server = resolveServer(layout.root, typeof text === 'string' ? text : '');
+  if (typeof text !== 'string' || !text) throw new Error('unknown machine');
+  const server = resolveServer(layout.root, text);
+  const target = serverName(server);
+  if (!connections.states().some((s) => s.name === target)) throw new Error('unknown machine');
+  selected = target;
   saveServer(layout.root, server);
-  await connect(server);
-  return state;
+  return selectedState();
 });
 ipcMain.handle('anchi:servers', (event) => {
   fromApp(event);
@@ -207,6 +201,8 @@ ipcMain.handle('anchi:servers', (event) => {
 ipcMain.handle('anchi:addServer', async (event, name: unknown, target: unknown) => {
   fromApp(event);
   const saved = addServer(layout.root, String(name ?? ''), String(target ?? ''));
+  connections.add(saved);
+  void connections.connect(saved.target);
   const server = resolveServer(layout.root, saved.target);
   const probe = server.kind === 'remote' ? await probeServer(server) : { kind: 'ok' as const };
   return { saved, probe };
@@ -214,7 +210,8 @@ ipcMain.handle('anchi:addServer', async (event, name: unknown, target: unknown) 
 ipcMain.handle('anchi:removeServer', async (event, name: unknown) => {
   fromApp(event);
   const gone = removeServer(layout.root, String(name ?? ''));
-  if (state.name === gone.target) await connect({ kind: 'local' });
+  connections.remove(gone.target);
+  if (selected === gone.target) selected = 'local';
   return listServers(layout.root);
 });
 ipcMain.handle('anchi:openExternal', async (event, url: unknown) => {
@@ -254,14 +251,18 @@ app.whenReady().then(async () => {
   app.dock?.setIcon(icon);
   createWindow();
   if (app.isPackaged) await adoptLoginPath();
-  let server: ServerTarget;
+  const saved = listServers(layout.root);
+  for (const entry of saved) connections.add(entry);
   try {
-    server = chosenServer(layout.root, process.env.ANCHI_DESKTOP_SERVER);
-  } catch (err) {
-    publish({ name: 'local', status: 'error', error: (err as Error).message });
-    return;
+    const server = chosenServer(layout.root, process.env.ANCHI_DESKTOP_SERVER);
+    selected = serverName(server);
+    if (!saved.some((s) => s.target === selected)) {
+      connections.add({ name: selected, target: selected });
+    }
+  } catch {
+    selected = 'local';
   }
-  void connect(server);
+  for (const state of connections.states()) void connections.connect(state.name);
   app.on('activate', () => {
     if (!BrowserWindow.getAllWindows().length) createWindow();
   });
@@ -271,6 +272,5 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('before-quit', () => {
-  generation++;
-  client?.close();
+  connections.close();
 });

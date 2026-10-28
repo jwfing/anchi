@@ -122,7 +122,7 @@ The cell holds a placeholder access key pair, and the AWS CLI signs requests wit
 ## Orchestration
 
 - Agents never communicate directly. An agent calls an Anchi tool in its cell (`anchi_delegate_task`, `anchi_send_to_task`, `anchi_task_status`, `anchi_list_tasks`), and the call reaches the daemon, which checks the agent's `delegates` and starts or queues a task for the target agent.
-- Internally, the daemon models tasks after A2A (`Task`, `Message`, `Artifact`). A2A is not exposed externally, and agents on different servers cannot reach each other.
+- Internally, the daemon models tasks after A2A (`Task`, `Message`, `Artifact`). A2A is not exposed externally. A coordinator can delegate to execution profiles on saved servers through the owner-authenticated daemon bridge, keeping one logical task tree.
 - Delegation depth and per-task budget limits apply. These limits prevent runaway loops and cost; they are not a security control.
 - Triggers: manual tasks, cron schedules and polls of Linear issues or GitHub issue searches. Polls run fixed read-only queries on the trusted side; each task records its origin (`user`, `schedule`, `poll:<item>`, or the delegation chain), which approval dialogs show.
 
@@ -202,7 +202,7 @@ The phase 0 spikes are complete; see the [PoC summary](../../poc/README.md). Pha
 
 **After phase 3:** directories of the host, Linux hosts, key bindings, the agent settings panel and builder inventory, deleting agents, retrying failed tasks. Open requests are in the [backlog](BACKLOG.md).
 
-**Not implemented:** one team spanning several servers. Each server keeps its own agents, tasks and vault; delegation stays within one daemon.
+**Multiple execution nodes:** a coordinator owns the logical team and complete task tree. Members may bind to an existing agent on a saved server with `execution: {server, agent}`. The coordinator dispatches idempotent turns and polls events, team calls and approvals through SSH. Execution nodes retain their profiles, cells, credentials and policy. Both sides check delegation grants; the coordinator checks child ownership, cycles and global tree limits. See [Remote server](../REMOTE_SERVER.md#one-team-multiple-execution-nodes) and the `team.*` contracts. Automatic node placement, failover to another node and filesystem synchronization are not implemented.
 
 ## Known risks
 

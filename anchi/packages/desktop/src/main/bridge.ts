@@ -1,8 +1,10 @@
 import { autoPublishWarning } from '@anchi/core/publish';
+import { agentLayerSchema, parseYamlAs } from '@anchi/core';
 import type {
   AgentPatch,
   AgentSettings,
   AgentSummary,
+  BuilderProposal,
   MethodName,
   Notifications,
   RuntimeId,
@@ -19,6 +21,8 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'agents.list',
   'agents.settings',
   'agents.createPreview',
+  'team.nodes',
+  'team.preview',
   'agents.update',
   'tasks.create',
   'tasks.list',
@@ -149,7 +153,7 @@ export interface Confirmation {
   button: string;
 }
 
-type Read = (method: MethodName, params: object) => Promise<unknown>;
+export type Read = (method: MethodName, params: object) => Promise<unknown>;
 
 /** What an agent-file patch adds to the agent's reach: connectors, directories, write access. */
 export function widening(current: AgentSettings['current'], patch: AgentPatch): string[] {
@@ -177,6 +181,16 @@ export async function confirmation(
   call: { method: MethodName; params: object },
   read: Read,
 ): Promise<Confirmation | undefined> {
+  if (call.method === 'builder.apply') {
+    const proposal = (await read('builder.proposal', call.params)) as BuilderProposal;
+    const { execution } = parseYamlAs(proposal.agentYaml, agentLayerSchema);
+    if (!execution) return undefined;
+    return {
+      message: `Run @${proposal.agentId} on ${execution.server}?`,
+      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors, workspaces and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.`,
+      button: 'Use execution node',
+    };
+  }
   if (call.method === 'agents.update') {
     const p = call.params as { agentId?: unknown; patch?: AgentPatch; apply?: unknown };
     if (p.apply !== true || typeof p.agentId !== 'string' || !p.patch) return undefined;

@@ -40,6 +40,7 @@ const START_HINTS: Record<string, string> = {
 export const TURN_MAX_TOOL_CALLS = 200;
 
 export interface ToolCall {
+  id: string;
   turn: string;
   tool: string;
   args: Record<string, unknown>;

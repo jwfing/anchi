@@ -50,6 +50,13 @@ describe('mergeLayers', () => {
 });
 
 describe('resolveAgent', () => {
+  it('resolves an inherited execution location and refuses raw transport arguments', () => {
+    write('templates/remote.yaml', 'runtime: codex\nexecution: {server: cloud, agent: coder}\n');
+    write('agents/dev.yaml', 'extends: remote\n');
+    expect(resolveAgent('dev', layout()).execution).toEqual({ server: 'cloud', agent: 'coder' });
+    write('agents/dev.yaml', 'runtime: codex\nexecution: {server: "ssh:host", agent: coder}\n');
+    expect(() => resolveAgent('dev', layout())).toThrow(ConfigError);
+  });
   it('applies defaults', () => {
     write('agents/dev.yaml', 'runtime: codex\n');
     const agent = resolveAgent('dev', layout());

@@ -6,13 +6,21 @@ import { z } from 'zod';
 export interface ToolContext {
   task: TaskRow;
   agent: ResolvedAgent;
+  requestKey?: string;
+  signal?: AbortSignal;
 }
 
 /** Services the tools use, provided by the hub. */
 export interface ToolHost {
   agents(): AgentSummary[];
-  delegate(parent: TaskRow, parentAgent: ResolvedAgent, target: string, text: string): TaskRow;
-  sendTask(taskId: string, text: string): TaskRow;
+  delegate(
+    parent: TaskRow,
+    parentAgent: ResolvedAgent,
+    target: string,
+    text: string,
+    requestKey?: string,
+  ): TaskRow;
+  sendTask(taskId: string, text: string, requestKey?: string): TaskRow;
   getTask(taskId: string): TaskRow;
   children(taskId: string): TaskRow[];
   wait(taskId: string): Promise<TaskRow>;
@@ -65,14 +73,29 @@ async function waitFor(
   t: TaskRow,
   wait: boolean,
   minutes: number,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   if (!wait) return { ...summary(t), note: 'started; use anchi_task_status to follow it' };
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<null>((r) => (timer = setTimeout(() => r(null), minutes * 60_000)));
   // The waiting turn holds its cell but does no work: the delegated task may take its place.
   const release = host.blocked(waiter.id);
-  const done = await Promise.race([host.wait(t.id), timeout]).finally(release);
-  clearTimeout(timer);
+  let abort: (() => void) | undefined;
+  const interrupted = new Promise<never>((_, reject) => {
+    if (signal) {
+      abort = () => reject(new Error('coordinator stopped'));
+      signal.addEventListener('abort', abort, { once: true });
+    }
+  });
+  let done: TaskRow | null;
+  try {
+    done = await Promise.race([host.wait(t.id), timeout, interrupted]);
+  } finally {
+    release();
+    clearTimeout(timer);
+    if (abort) signal?.removeEventListener('abort', abort);
+  }
   if (done) return summary(done);
   return { ...summary(host.getTask(t.id)), note: 'still running; use anchi_task_status later' };
 }
@@ -147,9 +170,10 @@ export const DELEGATION_TOOLS: AnchiTool[] = [
       waitFor(
         host,
         ctx.task,
-        host.delegate(ctx.task, ctx.agent, a.agent, a.task),
+        host.delegate(ctx.task, ctx.agent, a.agent, a.task, ctx.requestKey),
         a.wait,
         a.timeout_minutes,
+        ctx.signal,
       ),
   }),
   tool({
@@ -166,7 +190,14 @@ export const DELEGATION_TOOLS: AnchiTool[] = [
     available: delegates,
     run: async (ctx, a, host) => {
       ownChild(ctx, host, a.task);
-      return waitFor(host, ctx.task, host.sendTask(a.task, a.message), a.wait, a.timeout_minutes);
+      return waitFor(
+        host,
+        ctx.task,
+        host.sendTask(a.task, a.message, ctx.requestKey),
+        a.wait,
+        a.timeout_minutes,
+        ctx.signal,
+      );
     },
   }),
   tool({

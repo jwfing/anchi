@@ -1,4 +1,9 @@
 import { randomBytes } from 'node:crypto';
+import { executionSchema } from '@anchi/protocol';
+import { TeamCoordinator } from './team-coordinator.ts';
+import { TeamWorker } from './team.ts';
+import { listServers } from './remote.ts';
+import type { DaemonClient } from './rpc.ts';
 import {
   chmodSync,
   existsSync,
@@ -171,6 +176,9 @@ export interface DaemonOptions {
   reap?: boolean;
   /** The vault key a remote server unlocks its vault with at start; tests point it elsewhere. */
   vaultKeyFile?: string;
+  /** Tests connect real daemon sockets in place of SSH, with the same RPC boundary. */
+  teamConnect?: (target: string) => Promise<DaemonClient>;
+  teamPollMs?: number;
 }
 
 type Handlers = {
@@ -227,6 +235,8 @@ export class Daemon {
   readonly vm: VmTransport;
   readonly proposals: Proposals;
   readonly approvals: ApprovalWatcher;
+  readonly team: TeamCoordinator;
+  readonly worker: TeamWorker;
   private quotaAlerts: QuotaAlerts;
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
@@ -548,7 +558,9 @@ export class Daemon {
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
       this.hub.origin(id),
     );
-    this.approvals.on('changed', (approvals) => this.broadcast('approvals', { approvals }));
+    this.approvals.on('changed', () =>
+      this.broadcast('approvals', { approvals: this.allApprovals() }),
+    );
     this.approvals.on('added', (a) => {
       this.hub.notice(
         a.task,
@@ -582,6 +594,8 @@ export class Daemon {
     });
     this.hostRun = opts.hostRun ?? hostOutput;
     this.hub = new Hub({
+      team: () => this.team,
+      worker: () => this.worker,
       layout: opts.layout,
       store: this.store,
       guest: this.guest,
@@ -604,6 +618,23 @@ export class Daemon {
       builtins: [
         { id: BUILDER_ID, agent: (runtime) => builderAgent(runtime ?? this.builderRuntime()) },
       ],
+    });
+    this.team = new TeamCoordinator({
+      layout: opts.layout,
+      store: this.store,
+      tools: this.hub.tools,
+      origin: (id) => this.hub.originChain(id),
+      record: (task, event) => this.hub.record(task, event),
+      changed: () => this.broadcast('approvals', { approvals: this.allApprovals() }),
+      connect: opts.teamConnect,
+      pollMs: opts.teamPollMs,
+    });
+    this.worker = new TeamWorker({
+      layout: opts.layout,
+      store: this.store,
+      hub: this.hub,
+      approvals: () => this.approvals.list(),
+      decide: (id, allow) => this.approvals.decide(id, allow, this.guest),
     });
     this.triggers = new TriggerRunner(
       {
@@ -687,6 +718,9 @@ export class Daemon {
     const status = await setupStatus(this.guest, this.vm, this.services).catch(() => undefined);
     const known = status?.vm === 'running' && status.vaultUnlocked;
     const inventory: Inventory = {
+      servers: listServers(this.opts.layout.root)
+        .filter((server) => server.name !== 'local')
+        .map((server) => server.name),
       skills: this.skills.list().map(({ id, name, description }) => ({ id, name, description })),
       connectors: [
         ...(status?.connectors ?? []).map((c) => ({
@@ -729,8 +763,14 @@ export class Daemon {
   }
 
   /** The inventory without asking the VM: connector states from the last full one. */
-  private quickInventory(): Pick<Inventory, 'skills' | 'connectors' | 'runtimes' | 'agents'> {
+  private quickInventory(): Pick<
+    Inventory,
+    'skills' | 'connectors' | 'runtimes' | 'agents' | 'servers'
+  > {
     return {
+      servers: listServers(this.opts.layout.root)
+        .filter((server) => server.name !== 'local')
+        .map((server) => server.name),
       skills: this.skills.list(),
       connectors: this.lastInventory?.connectors ?? [],
       runtimes: this.lastInventory?.runtimes ?? [],
@@ -905,7 +945,25 @@ export class Daemon {
     for (const peer of this.clients.values()) peer.notify(method, params);
   }
 
+  private allApprovals() {
+    return [...this.approvals.list(), ...(this.team?.listApprovals() ?? [])];
+  }
+
   private handlers: Handlers = {
+    'team.describe': (params) => this.worker.describe(params),
+    'team.run': (params) => this.worker.run(params),
+    'team.poll': (params) => this.worker.poll(params),
+    'team.reply': (params) => this.worker.reply(params),
+    'team.cancel': (params) => this.worker.cancel(params),
+    'team.approve': (params) => this.worker.approve(params),
+    'team.nodes': () => listServers(this.opts.layout.root).filter((node) => node.name !== 'local'),
+    'team.preview': async (raw) => {
+      const { agentId, execution } = z
+        .strictObject({ agentId: idSchema, execution: executionSchema })
+        .parse(raw);
+      const description = await this.team.describe(execution);
+      return this.proposals.remoteStarter(agentId, execution, description);
+    },
     'daemon.status': () => ({
       pid: process.pid,
       home: this.opts.layout.root,
@@ -974,10 +1032,17 @@ export class Daemon {
       this.broadcast('tasksDeleted', {});
       return { deleted };
     },
-    'tasks.send': ({ taskId: id, text }) =>
-      this.hub.sendTask(taskId(id), str(text, 'text', 200_000)),
+    'tasks.send': ({ taskId: id, text }) => {
+      const task = this.hub.getTask(taskId(id));
+      if (task.teamOrigin) throw new Error('Continue this team task on its coordinator.');
+      return this.hub.sendTask(task.id, str(text, 'text', 200_000));
+    },
     'tasks.audit': async ({ taskId: id }) => {
       const task = this.hub.getTask(taskId(id));
+      if (task.execution)
+        throw new Error(
+          `View this task's egress audit on ${task.execution.server}, under @${task.execution.agent}; raw audit logs remain on the execution node.`,
+        );
       const scan = this.store
         .events(task.id)
         .map((e) => e.event)
@@ -997,7 +1062,11 @@ export class Daemon {
         scan ?? null,
       );
     },
-    'tasks.retry': ({ taskId: id, fresh }) => this.hub.retryTask(taskId(id), fresh === true),
+    'tasks.retry': ({ taskId: id, fresh }) => {
+      const task = this.hub.getTask(taskId(id));
+      if (task.teamOrigin) throw new Error('Retry this team task on its coordinator.');
+      return this.hub.retryTask(task.id, fresh === true);
+    },
     'tasks.cancel': ({ taskId: id }) => {
       this.hub.cancelTask(taskId(id));
       return null;
@@ -1144,7 +1213,7 @@ export class Daemon {
       if (imageId) this.log(`image "${imageId}" will be built on the first task that uses it`);
       return agents;
     },
-    'approvals.list': () => this.approvals.list(),
+    'approvals.list': () => this.allApprovals(),
     'triggers.list': () => this.triggers.list(),
     'skills.list': () => this.skills.list(),
     'usage.quota': () => this.quota(),
@@ -1232,6 +1301,7 @@ export class Daemon {
       return null;
     },
     'approvals.decide': async ({ id, allow }) => {
+      if (await this.team.decide(str(id, 'approval', 40), allow === true)) return null;
       const a = this.approvals.list().find((x) => x.id === id);
       await this.approvals.decide(str(id, 'approval', 40), allow === true, this.guest);
       if (a)
@@ -1459,6 +1529,9 @@ export class Daemon {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.hub.suspend();
+    this.worker.stop();
+    await this.team.stop();
     clearTimeout(this.hostLoginDebounce);
     await this.hostLoginSync;
     await this.hub.shutdown();

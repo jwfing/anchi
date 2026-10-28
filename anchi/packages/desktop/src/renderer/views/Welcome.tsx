@@ -10,7 +10,6 @@ import {
 import type { Notifications, SetupStatus } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { BUILDER, useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { Icon } from '../ui.tsx';
 import { Runtimes, ServerCard } from './Settings.tsx';
 
@@ -60,7 +59,7 @@ const STARTERS = [
 ];
 
 export function WelcomeView({ onFinish }: { onFinish: () => void }) {
-  const { model, server, act, setView } = useApp();
+  const { model, server, act, setView, call } = useApp();
   const [status, setStatus] = useState<SetupStatus>();
   // A remote server in use was chosen on purpose: start at preparing it.
   const [machineChosen, setMachineChosen] = useState(server.name !== 'local');
@@ -71,18 +70,18 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
     void call('setup.status')
       .then(setStatus)
       .catch(() => setStatus(undefined));
-  }, []);
+  }, [call]);
   useEffect(() => {
     if (server.status === 'connected') refresh();
   }, [server.status, server.name, refresh]);
   useEffect(
     () =>
-      window.anchi.onNotify((name, params) => {
-        if (name !== 'setup') return;
+      window.anchi.onNotify((origin, name, params) => {
+        if (origin !== server.name || name !== 'setup') return;
         const { line } = params as Notifications['setup'];
         setLines((l) => [...l.slice(-200), sanitizeLine(line)]);
       }),
-    [],
+    [server.name],
   );
   // A preparation started elsewhere (or before the window closed) is followed until it ends.
   useEffect(() => {

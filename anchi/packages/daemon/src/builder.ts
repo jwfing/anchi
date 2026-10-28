@@ -28,7 +28,7 @@ import {
   runtimeSchema,
   SOCIAL_CONNECTORS,
 } from '@anchi/core';
-import type { BuilderProposal, SetupStatus } from '@anchi/protocol';
+import type { BuilderProposal, SetupStatus, Execution, TeamDescription } from '@anchi/protocol';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
@@ -42,6 +42,11 @@ the user reviews your proposal in a confirmation dialog, and only then is it wri
 
 An agent is a YAML file. Fields:
 - name: display name; description: one line.
+- execution: {server: saved server alias, agent: existing agent id on that server}. Optional;
+  this member executes on that node, using its runtime, prompt, skills, connectors, workspaces
+  and security policy. Only the member's name, description, delegates, maxTasks and triggers
+  are managed here. Never invent server aliases or remote agent ids; ask the user for the
+  target agent. Delegation must be granted in both this member and the execution profile.
 - runtime: codex, claude-code or hermes (required). Use claude-code when the user asks for
   Claude, hermes when they ask for Hermes or for a model served by an OpenAI-compatible API
   (OpenRouter, a local or self-hosted endpoint). The inventory lists the runtimes and whether
@@ -440,6 +445,29 @@ export class Proposals {
     const proposal = makeProposal(this.layout, blocks, this.refs?.());
     if (!proposal) return undefined;
     this.items.set(proposal.id, { proposal, imageId: blocks.image?.id });
+    return proposal;
+  }
+
+  remoteStarter(agentId: string, execution: Execution, remote: TeamDescription): BuilderProposal {
+    if (agentId === BUILDER_ID) throw new Error('"builder" is reserved');
+    if (existsSync(agentFile(this.layout, agentId)))
+      throw new Error(`agent "${agentId}" already exists`);
+    const existing = this.refs?.().inventory.agents ?? [];
+    const proposal = this.add({
+      agent: {
+        id: agentId,
+        yaml: [
+          `name: ${JSON.stringify(remote.name)}`,
+          `description: ${JSON.stringify(remote.description)}`,
+          `runtime: ${remote.runtime}`,
+          `execution: ${JSON.stringify(execution)}`,
+          `delegates: ${JSON.stringify(remote.delegates.filter((id) => existing.includes(id) && id !== agentId))}`,
+          '',
+        ].join('\n'),
+      },
+    });
+    if (!proposal) throw new Error('remote member proposal was not created');
+    this.items.set(proposal.id, { proposal, createOnly: true });
     return proposal;
   }
 

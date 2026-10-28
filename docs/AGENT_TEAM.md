@@ -221,6 +221,13 @@ Directories of your computer in `~/AnchiWorkspaces` are not touched: they are on
 
 ## Teams, approvals, triggers and skills
 
+A team can span local and remote machines: keep one daemon as its coordinator and add members
+with `anchi team add <id> --node <saved-server> --agent <remote-id>` or **Agent builder → Run
+on** in the desktop app. Members still delegate by logical agent id, and their task tree,
+results, usage and approvals appear together. Credentials and execution policy stay on the
+chosen node. See [One team, multiple execution nodes](REMOTE_SERVER.md#one-team-multiple-execution-nodes)
+for setup, grants, recovery and file-sharing limits.
+
 ```yaml
 # ~/.anchi/agents/lead.yaml
 name: Lead

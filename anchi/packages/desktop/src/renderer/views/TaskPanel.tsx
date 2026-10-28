@@ -2,23 +2,22 @@ import { sanitizeLine } from '@anchi/core/sanitize';
 import type { TaskRow } from '@anchi/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { ago, duration, tokens } from '../format.ts';
 import { Markdown } from '../markdown.tsx';
 import { type Item, toolSummary, transcript } from '../transcript.ts';
-import { Composer, Linked, StatusPill } from '../ui.tsx';
+import { Composer, Icon, Linked, StatusPill } from '../ui.tsx';
 
 /** The selected task: its numbers, delegated work, full transcript and replies. */
 export function TaskPanel({
   task,
-  width,
+  onClose,
   focusReply,
 }: {
   task: TaskRow;
-  width: number;
+  onClose: () => void;
   focusReply: number;
 }) {
-  const { model, loadEvents, act } = useApp();
+  const { model, loadEvents, act, call } = useApp();
   useEffect(() => {
     loadEvents(task.id);
   }, [task.id, loadEvents]);
@@ -26,20 +25,32 @@ export function TaskPanel({
   const children = Object.values(model.tasks).filter((t) => t.parentId === task.id);
   const parent = task.parentId ? model.tasks[task.parentId] : undefined;
   const active = task.status === 'running' || task.status === 'queued';
-  const end = useRef<HTMLDivElement>(null);
+  const transcriptPane = useRef<HTMLDivElement>(null);
   const reply = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    if (focusReply) reply.current?.focus();
+    if (focusReply) reply.current?.focus({ preventScroll: true });
   }, [focusReply]);
   useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' });
+    const pane = transcriptPane.current;
+    if (pane) pane.scrollTop = pane.scrollHeight;
   }, [items.length]);
   const elapsed = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : 0;
 
   return (
-    <aside className="panel" aria-label="Task details" style={{ width }}>
+    <aside className="panel" role="dialog" aria-label="Task details">
       <div className="panel-head">
-        <span className="section-label">SELECTED TASK</span>
+        <div className="row between">
+          <span className="section-label">TASK CONVERSATION</span>
+          <button
+            type="button"
+            className="btn drawer-close"
+            aria-label="Close task details"
+            title="Close (Esc)"
+            onClick={onClose}
+          >
+            <Icon name="x" size={18} />
+          </button>
+        </div>
         <span className="strong">{sanitizeLine(task.title)}</span>
         <span className="row gap small">
           <StatusPill
@@ -52,6 +63,11 @@ export function TaskPanel({
           trigger: {task.trigger} · created {ago(task.createdAt)}
           {parent ? ` · delegated by @${parent.agentId}` : ''}
         </span>
+        {task.execution && (
+          <span className="small muted">
+            Run on {sanitizeLine(task.execution.server)} · @{sanitizeLine(task.execution.agent)}
+          </span>
+        )}
       </div>
       <div className="stats">
         <Stat
@@ -72,20 +88,21 @@ export function TaskPanel({
           ))}
         </div>
       )}
-      <div className="panel-section grow scroll transcript">
+      <div ref={transcriptPane} className="panel-section grow scroll transcript">
         <span className="section-label">TRANSCRIPT</span>
         {items.map((i) => (
           <TranscriptItem key={i.seq} item={i} />
         ))}
         {!items.length && <span className="small muted">Loading…</span>}
-        <div ref={end} />
       </div>
       <div className="panel-actions">
         {active ? (
           <button
             type="button"
             className="btn btn-danger"
-            onClick={() => void act(() => call('tasks.cancel', { taskId: task.id }), 'cancelled')}
+            onClick={() =>
+              void act(() => call('tasks.cancel', { taskId: task.id }), 'cancellation requested')
+            }
           >
             Cancel task
           </button>

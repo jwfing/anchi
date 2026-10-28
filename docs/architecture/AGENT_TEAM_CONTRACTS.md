@@ -1,6 +1,6 @@
 # Agent team contracts
 
-These are the interfaces between the parts of the [agent team](AGENT_TEAM_DESIGN.md): the agent configuration, and the three channels that cross a process or trust boundary. The types and zod schemas live in `anchi/packages/protocol` and `anchi/packages/core`; this document explains them.
+These are the interfaces between the parts of the [agent team](AGENT_TEAM_DESIGN.md): the agent configuration, and the channels that cross a process or trust boundary. The types and zod schemas live in `anchi/packages/protocol` and `anchi/packages/core`; this document explains them.
 
 ```text
 TUI ──(1) client socket──▶ daemon ──(2) limactl shell + sudo (or sudo in the guest), fixed commands──▶ guest root
@@ -16,6 +16,7 @@ Agents are YAML files in `~/.anchi/agents/<id>.yaml`. The file name is the id: 1
 |---|---|---|
 | `name`, `description` | id, none | Shown in the TUI |
 | `runtime` | required | `codex`, `claude-code` or `hermes` |
+| `execution` | none (this daemon) | `{server: saved-alias, agent: existing-node-agent}`. Plain validated ids only; `local` and `builder` are refused as remote targets. The target profile must execute locally on that node. Its runtime, prompt, image, skills, workspaces, credentials and policy apply; the coordinator's runtime field remains required by the file schema but does not select execution. The wrapper owns name, description, team delegates, triggers and `maxTasks`. |
 | `model`, `effort` | runtime default | Passed to the runtime |
 | `prompt` | `{mode: append, text: ''}` | `text` or `file` (relative to the declaring file). `replace` replaces the runtime's base instructions (Codex's `instructions`, Claude Code's preset system prompt); Hermes keeps its own system prompt and the text becomes its persona (`SOUL.md`) in both modes |
 | `connectors` | `[]` | `github`, `aws`, `linear`, `posthog`, `sentry`, `firecrawl`, `figma`, `discord`: the proxy injects credentials only for these. `gmail`, `drive`, `notion`, `slack`, `x`, `reddit`: reached through per-cell bridge sockets at `/run/anchi/connectors/<id>/api.sock`, which name the agent to the service |
@@ -71,6 +72,58 @@ JSON-RPC over `~/.anchi/run/daemon.sock` (mode 0600). Newline-delimited JSON fra
 - **Notifications:** `event` (runtime event of a task), `tasks`, `agents`, `proposal`, `setup` (a line of setup output), `approvals`, `oauth`, `tasksDeleted`.
 
 Every string in a runtime event is agent-originated. Clients must strip control characters and escape sequences before display.
+
+## Desktop ⇄ multiple daemons
+
+The desktop main process holds an independent connection for `local` and each saved remote
+target. The preload's `call(server, method, params)` and `onNotify(server, name, params)`
+include the canonical target; `connections` / `onConnections` expose per-machine status.
+`setServer` selects a machine without closing any others. `connectServer(target, connected)`
+connects or disconnects one registered machine. These are desktop IPC operations; daemon RPCs
+and the single-server TUI/CLI contract are unchanged.
+
+Renderer models are keyed first by machine, then by daemon-local agent, task, approval or
+proposal id. Every view receives a call function bound to its machine. Configuration forms
+remount on a machine or connection-state change. Main-process confirmations name and pin the
+machine's connection; a disconnected, removed or replaced connection refuses the final write.
+Folder picking remains local-only; Google client imports target the originally selected daemon.
+Listing an agent does not create a coordinator member or change its delegation grants.
+
+## Coordinator ⇄ execution daemon
+
+This uses the existing owner-authenticated SSH/instabox bridge, with the coordinator as client.
+The bounded schemas are in `protocol/src/team.ts`. No execution RPC is exposed as a cell tool
+or through the desktop renderer. Public `team.nodes` lists aliases on the coordinator;
+`team.preview {agentId, execution}` reads the selected profile and creates a reviewable,
+create-only builder proposal. The CLI exposes `team nodes` and `team add`; the desktop builder
+uses the same preview/apply flow. TUI builder proposals accept `execution` and settings show
+it read-only. `AgentSummary.execution`, `TaskRow.execution` and `AgentSettings.fixed.execution`
+identify the location. `Inventory.servers` supplies the builder's saved aliases.
+
+| RPC | Input and result |
+|---|---|
+| `team.describe` | `{agent}` → stable 128-bit node id, agent id, name, description, runtime, delegates, connectors and skills; refuses the builder or another remote wrapper |
+| `team.run` | `{origin: {coordinator, task, agent, chain}, agent, turn, text}` → `null`. Coordinator UUID + source task id + monotonic turn deduplicate dispatch, with a digest to refuse different payloads for the same turn. A job maps to one node task across follow-ups. |
+| `team.poll` | `{coordinator, task, afterSeq}` → task state/result/runtime, an ordered bounded event page, pending team calls, complete pending approval actions for this job only |
+| `team.reply` | `{coordinator, task, request, outcome}` → `null`; outcome is `{kind: 'result', value}` or `{kind: 'error', message}`. A request belongs to the current job turn; conflicting duplicate replies are refused. |
+| `team.cancel` | `{coordinator, task, turn}` → `null`; durable cancellation through that turn, including before dispatch. Later explicit turns have new numbers. |
+| `team.approve` | `{coordinator, task, id, allow}` → `null`; only an approval of the job's node task can be decided. The node retains and enforces the policy digest. |
+
+Imported tasks have `TaskRow.teamOrigin`. Their base/delegation tools are relayed; connector
+approval notifications remain node-local. The coordinator reconstructs task identity from
+its persisted job, validates the tool schema and current member grant, and enforces the
+normal depth/children/tree-turn/cycle/child-ownership checks. The node independently validates
+its profile's grant. `anchi_whoami` returns the logical member and source task id. Discovery
+returns the intersection of grants. No remote call can choose its parent, transport or policy.
+
+SQLite `team_state` holds the node id, pinned outbound jobs and event cursors, worker job maps,
+dispatch receipts, pending tool calls and tool outcomes. Delegate/send effects and their
+receipts commit in the same transaction, so a reconnect or coordinator restart cannot repeat
+the mutation. Job state stores pending cancellation. Worker session ids never become source
+resume ids. On restart, the coordinator resumes active outbound jobs; a worker restart fails
+interrupted cells as before. Task deletion removes content-bearing team records on that
+daemon; minimal worker receipts remain to prevent delayed replay. Polling delivers stored
+events, not token deltas, and reports retention gaps. Quota and raw egress audit remain local.
 
 ## (2) Daemon ⇄ guest administration
 

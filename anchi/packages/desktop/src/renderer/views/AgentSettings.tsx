@@ -10,7 +10,6 @@ import type {
 } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { Icon } from '../ui.tsx';
 import { Diff } from './Builder.tsx';
@@ -35,7 +34,7 @@ export function settingsPatch(current: AgentSettingValues, draft: AgentSettingVa
 
 /** An agent's editable settings: edit, review the change to its file, apply. */
 export function AgentSettingsView({ agentId }: { agentId: string }) {
-  const { act, server } = useApp();
+  const { act, server, call } = useApp();
   const [settings, setSettings] = useState<AgentSettings>();
   const [draft, setDraft] = useState<AgentSettingValues>();
   const [review, setReview] = useState<AgentUpdate>();
@@ -69,6 +68,32 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
     ) : null;
   const toggle = (list: string[], id: string) =>
     list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+
+  if (fixed.execution) {
+    return (
+      <div className="scroll settings-form">
+        <section className="card">
+          <h2>Execution node</h2>
+          <p>
+            @{sanitizeLine(agentId)} runs as @{sanitizeLine(fixed.execution.agent)} on{' '}
+            <strong>{sanitizeLine(fixed.execution.server)}</strong>.
+          </p>
+          <p>
+            Manage its runtime, prompt, connectors, skills, workspaces and security policy on that
+            node. Its credentials stay there.
+          </p>
+          <p>
+            Team delegates: {fixed.delegates.map((id) => `@${id}`).join(', ') || 'none'}. The
+            execution profile must also grant these delegates.
+          </p>
+          <p className="small muted">
+            Use Agent builder to change this member’s name, description, delegation or execution
+            location. Existing tasks keep their original location.
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   if (!settings.editable) {
     return (
