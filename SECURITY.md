@@ -13,6 +13,46 @@ This is a development project. It has not completed a security audit and is not 
 - Read content may enter agent context and cloud models. Credential isolation must not be described as keeping sensitive content on the host.
 - Clients strip control characters and escape sequences from agent text. Security decisions (builder proposals, agent settings changes, agent deletion, approvals, setup steps, secret input) use full-screen dialogs drawn by Anchi that agent output cannot reproduce; the Approvals view decides held writes the same way, in a pane that draws no agent transcript. Agent files change only after such a dialog shows the diff, or by your own edits.
 
+The desktop can hold several owner-authenticated daemon connections at once. Every call,
+notification and cached record is scoped to a machine; daemon-local ids are never resolved
+against whichever machine happens to be selected later. Unknown and disconnected targets
+are refused. Native confirmation dialogs identify the machine and pin the connection that
+was reviewed; a disconnect, reconnect or removal during the dialog refuses submission.
+Switching machines clears credential forms. Vaults and runtime logins remain on their machines;
+showing their agents together does not grant new delegation or copy credentials.
+
+## Cross-server teams
+
+A team coordinator may execute a logical member as an existing agent on a saved remote
+server. The coordinator and every execution node are trusted owner daemons. Connections use
+the existing SSH/instabox bridge to the owner's mode-0600 socket; there is no new listening
+service, and cells receive neither SSH credentials nor daemon access. Selecting an execution
+profile authorizes use of that profile's runtime, connectors and policy. The coordinator's
+wrapper does not override the node's approvals, egress, workspaces or connector grants.
+
+An imported cell's Anchi calls are queued on its execution daemon and fetched by the
+coordinator. Both daemons validate the fixed team tool surface and delegation allowlist;
+the coordinator establishes task identity, verifies child ownership, rejects cycles, and
+applies the depth, child and turn budgets to the complete tree. Remote tools cannot name a
+server, forge their parent, change configuration or approve operations. Connector operations
+and their approval checks stay on the execution node. The coordinator shows the complete
+pending action, logical member, node and origin chain; a decision is scoped to that remote
+job and its pending approval, with the original policy digest enforced on the node.
+
+Dispatch and team tool effects have durable idempotency records. Reconnecting repeats the
+same dispatch, never a new turn; a cancellation tombstone also covers a dispatch that has
+not arrived. The remote node identity and transport target are pinned once dispatched, so
+replacing a node database fails the task instead of silently running it elsewhere. Restarting
+the execution daemon still interrupts its cells; writes are not automatically retried.
+These guarantees cover Anchi dispatch and delegation, not arbitrary external operations
+that an agent or a user chooses to repeat.
+
+Task input, events, results, approval content and usage cross the SSH connection and persist
+on the coordinator and execution node. Vaults, login files, workspace files and runtime
+session ids are not copied. Deleting a task clears its queued tool content and coordinator
+state on that daemon; the other node retains its own history until separately deleted or
+expired. Worker receipts retain ids and hashes to refuse delayed duplicate dispatches.
+
 ## Authorization modes
 
 Policy stores a mode for each connector service (Gmail, Drive, Notion, Slack, X, Reddit), and optionally one per agent and service (`notion:<agent>`) that an agent's `approvals: {notion: ask}` sets. Agent writes through the egress proxy (GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord) follow the agent's `approvals` and the high-risk list; see the agent team section below.

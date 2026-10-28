@@ -51,6 +51,16 @@ const items = (state: ReturnType<typeof initialSettings>) =>
   settingsRows(data, state).filter((r) => r.kind !== 'header');
 
 describe('settings panel', () => {
+  it('shows the execution location without offering ineffective local access edits', () => {
+    const remote = {
+      ...data,
+      fixed: { ...data.fixed, execution: { server: 'cloud', agent: 'coder' } },
+    };
+    const rows = settingsRows(remote, initialSettings(remote));
+    expect(rows.every((r) => r.kind === 'header')).toBe(true);
+    expect(JSON.stringify(rows)).toContain('coder');
+    expect(JSON.stringify(rows)).toContain('cloud');
+  });
   it('lists what exists, what is selected and what is missing', () => {
     const rows = settingsRows(data, initialSettings(data));
     const selectable = items(initialSettings(data)).filter(

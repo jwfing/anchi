@@ -1,4 +1,11 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { z } from 'zod';
+import {
+  executionSchema,
+  teamOriginSchema,
+  type Execution,
+  type TeamOrigin,
+} from '@anchi/protocol';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +20,10 @@ import type {
 } from '@anchi/protocol';
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS team_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL,
@@ -121,6 +132,10 @@ export const MAX_RESULT_CHARS = 8000;
 
 function rowToTask(r: Record<string, unknown>): TaskRow {
   return {
+    ...(r.execution ? { execution: executionSchema.parse(JSON.parse(String(r.execution))) } : {}),
+    ...(r.team_origin
+      ? { teamOrigin: teamOriginSchema.parse(JSON.parse(String(r.team_origin))) }
+      : {}),
     id: r.id as string,
     agentId: r.agent_id as string,
     trigger: r.trigger as string,
@@ -160,6 +175,7 @@ export interface TriggerState {
 
 export class Store {
   private db: DatabaseSync;
+  private transactionDepth = 0;
 
   constructor(file: string) {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -178,6 +194,8 @@ export class Store {
         .map((c) => c.name as string),
     );
     const add: [string, string][] = [
+      ['execution', 'TEXT'],
+      ['team_origin', 'TEXT'],
       ['parent_id', 'TEXT'],
       ['root_id', 'TEXT'],
       ['depth', 'INTEGER NOT NULL DEFAULT 0'],
@@ -197,6 +215,90 @@ export class Store {
 
   close(): void {
     this.db.close();
+  }
+
+  /** The node identity survives reconnects and is independent of a saved server's display name. */
+  nodeId(): string {
+    const existing = this.teamGet('node', z.string().regex(/^[0-9a-f]{32}$/));
+    if (existing) return existing;
+    const id = randomBytes(16).toString('hex');
+    this.teamPut('node', id);
+    return id;
+  }
+
+  transaction<T>(run: () => T): T {
+    if (this.transactionDepth) return run();
+    this.db.exec('BEGIN IMMEDIATE');
+    this.transactionDepth++;
+    try {
+      const result = run();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    } finally {
+      this.transactionDepth--;
+    }
+  }
+
+  teamGet<T>(key: string, schema: z.ZodType<T>): T | undefined {
+    const row = this.db.prepare('SELECT value FROM team_state WHERE key = ?').get(key);
+    return row ? schema.parse(JSON.parse(String(row.value))) : undefined;
+  }
+
+  teamPut(key: string, value: unknown): void {
+    this.db
+      .prepare(
+        'INSERT INTO team_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      )
+      .run(key, JSON.stringify(value));
+  }
+
+  teamEntries<T>(prefix: string, schema: z.ZodType<T>): T[] {
+    return this.db
+      .prepare('SELECT value FROM team_state WHERE substr(key, 1, ?) = ?')
+      .all(prefix.length, prefix)
+      .map((row) => schema.parse(JSON.parse(String(row.value))));
+  }
+
+  teamDeletePrefix(prefix: string): void {
+    this.db
+      .prepare('DELETE FROM team_state WHERE substr(key, 1, ?) = ?')
+      .run(prefix.length, prefix);
+  }
+
+  setExecution(id: string, execution: Execution): void {
+    this.db
+      .prepare('UPDATE tasks SET execution = ? WHERE id = ?')
+      .run(JSON.stringify(execution), id);
+  }
+
+  setTeamOrigin(id: string, origin: TeamOrigin): void {
+    this.db
+      .prepare('UPDATE tasks SET team_origin = ? WHERE id = ?')
+      .run(JSON.stringify(origin), id);
+  }
+
+  /** Commit a tool's task mutation and its deduplication receipt together. */
+  teamEffect(key: string | undefined, input: unknown, run: () => TaskRow): TaskRow {
+    if (!key) return run();
+    const digest = createHash('sha256').update(JSON.stringify(input)).digest('hex');
+    return this.transaction(() => {
+      const receipt = this.teamGet(
+        `effect/${key}`,
+        z.strictObject({ digest: z.string(), task: z.string() }),
+      );
+      if (receipt) {
+        if (receipt.digest !== digest) throw new Error('TEAM_REQUEST_CONFLICT');
+        const task = this.getTask(receipt.task);
+        if (!task) throw new Error('TEAM_TASK_REMOVED');
+        return task;
+      }
+      const task = run();
+      this.teamPut(`effect/${key}`, { digest, task: task.id });
+      return task;
+    });
   }
 
   createTask(t: { agentId: string; trigger: string; title: string; parent?: TaskRow }): TaskRow {
@@ -489,6 +591,21 @@ export class Store {
   deleteTasks(ids: string[]): number {
     let n = 0;
     for (const id of ids) {
+      // Drop task content with its transcript. Worker receipts retain only ids and digests so
+      // delayed dispatches still cannot recreate deleted work.
+      this.db
+        .prepare(
+          'DELETE FROM team_state WHERE key = ? OR substr(key, 1, ?) = ? OR substr(key, 1, ?) = ? OR substr(key, 1, ?) = ?',
+        )
+        .run(
+          `outbound/${id}`,
+          `request/${id}/`.length,
+          `request/${id}/`,
+          `answer/${id}/`.length,
+          `answer/${id}/`,
+          `effect/${id}/`.length,
+          `effect/${id}/`,
+        );
       this.db.prepare('DELETE FROM audit_rows WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM usage_snapshot WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM events WHERE task_id = ?').run(id);

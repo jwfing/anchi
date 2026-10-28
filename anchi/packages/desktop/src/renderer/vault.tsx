@@ -1,6 +1,5 @@
 import type { SetupStatus } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
-import { call } from './api.ts';
 import { useApp } from './App.tsx';
 
 /** Says when the vault on a running, installed guest is locked (it is after a restart). */
@@ -18,7 +17,7 @@ const UNLOCKED = 'anchi:vault-unlocked';
  * With the environment installed and a runtime prepared, unlocking is all it does.
  */
 export function useUnlockVault(): (status: SetupStatus) => Promise<boolean> {
-  const { act } = useApp();
+  const { act, call } = useApp();
   return useCallback(
     async (status) => {
       const runtime = status.preparedRuntimes?.[0] ?? 'codex';
@@ -29,7 +28,7 @@ export function useUnlockVault(): (status: SetupStatus) => Promise<boolean> {
       if (done) window.dispatchEvent(new Event(UNLOCKED));
       return Boolean(done);
     },
-    [act],
+    [act, call],
   );
 }
 
@@ -70,7 +69,7 @@ export function VaultLockedCard({
 
 /** Across the window, so a locked vault is not mistaken for credentials that are gone. */
 export function VaultBanner() {
-  const { server } = useApp();
+  const { server, call } = useApp();
   const unlock = useUnlockVault();
   const [status, setStatus] = useState<SetupStatus>();
   useEffect(() => {
@@ -82,7 +81,7 @@ export function VaultBanner() {
         .catch(() => undefined);
     check();
     return onVaultUnlocked(check);
-  }, [server.status, server.name]);
+  }, [server.status, server.name, call]);
   if (!status || !vaultLocked(status)) return null;
   return (
     <div className="conn-banner vault-banner" role="status">

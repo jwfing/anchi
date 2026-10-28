@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ResolvedAgent } from '@anchi/core';
-import type { Inventory } from '@anchi/protocol';
+import type { Execution, Inventory } from '@anchi/protocol';
 
 /** Directories under the workspace root, `depth` levels deep, without dot directories or links. */
 export function listWorkspaceDirs(root: string, depth = 2, max = 200): string[] {
@@ -43,6 +43,7 @@ export function workspaceExists(root: string, path: string): boolean {
 /** Settings of an agent that refer to things that must exist. */
 export interface References {
   id: string;
+  execution?: Execution;
   runtime?: string;
   skills: string[];
   connectors: string[];
@@ -54,7 +55,7 @@ export interface References {
 
 /** What references are checked against. Runtimes are optional: without them, none is checked. */
 export type ReferenceInventory = Pick<Inventory, 'skills' | 'connectors' | 'agents'> &
-  Partial<Pick<Inventory, 'runtimes'>>;
+  Partial<Pick<Inventory, 'runtimes' | 'servers'>>;
 
 /**
  * Problems with what an agent refers to: missing skills, agents and directories block it; a
@@ -67,6 +68,18 @@ export function checkReferences(
 ): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  if (agent.execution) {
+    if (inv.servers && !inv.servers.includes(agent.execution.server))
+      errors.push(`server "${agent.execution.server}" is not saved`);
+    warnings.push(
+      `Runs as @${agent.execution.agent} on ${agent.execution.server}, using that node's runtime, credentials, skills, workspaces and security policy. Local runtime and access settings do not apply.`,
+    );
+    for (const id of agent.delegates ?? []) {
+      if (id !== agent.id && !inv.agents.includes(id))
+        errors.push(`delegate "${id}" is not an agent`);
+    }
+    return { errors, warnings };
+  }
   const skills = new Set(inv.skills.map((s) => s.id));
   for (const s of agent.skills) if (!skills.has(s)) errors.push(`skill "${s}" is not installed`);
   const agents = new Set(inv.agents);
@@ -107,6 +120,7 @@ export interface BuilderAgentInfo {
 /** A summary of an agent's settings for the builder, or why its file does not load. */
 export function agentSummary(agent: ResolvedAgent): string {
   const parts = [
+    agent.execution ? `execution ${agent.execution.server}/@${agent.execution.agent}` : '',
     `runtime ${agent.runtime}`,
     agent.model ? `model ${agent.model}` : '',
     agent.effort ? `effort ${agent.effort}` : '',
@@ -187,6 +201,7 @@ export function builderInventoryText(
     `Connectors: ${connectors}`,
     `Directories under ~/AnchiWorkspaces (workspaces: path): ${dirs}`,
     `Agents (delegates, or patch them with anchi-agent-patch):\n${agents}`,
+    `Saved execution nodes (execution.server): ${(inv.servers ?? []).join(', ') || 'none'}`,
     `Images: codex (built in)${inv.images.length ? `, ${inv.images.join(', ')}` : ''}`,
     ...(files.length
       ? [

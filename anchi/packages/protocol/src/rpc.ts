@@ -1,5 +1,14 @@
 import type { RuntimeId } from './cell.ts';
 import type { RuntimeEvent } from './events.ts';
+import type {
+  Execution,
+  TeamDescription,
+  TeamKey,
+  TeamOrigin,
+  TeamReply,
+  TeamRun,
+  TeamSnapshot,
+} from './team.ts';
 
 /**
  * Daemon ⇄ client (TUI, CLI): JSON-RPC over the daemon's Unix socket, mode 0600 in the
@@ -10,6 +19,10 @@ import type { RuntimeEvent } from './events.ts';
 export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface TaskRow {
+  /** Actual execution location, if this task belongs to a remote team member. */
+  execution?: Execution;
+  /** Trusted coordinator provenance of an execution-node task. */
+  teamOrigin?: TeamOrigin;
   id: string;
   agentId: string;
   /** What started the task: `user`, `delegation`, `schedule` or `poll`. */
@@ -64,6 +77,7 @@ export interface StoredEvent {
 export type AgentStatus = 'idle' | 'working' | 'error';
 
 export interface AgentSummary {
+  execution?: Execution;
   id: string;
   name: string;
   description?: string;
@@ -412,6 +426,7 @@ export interface AgentSettingValues {
 
 /** Settings the panel shows but does not edit (they are changed in the agent file). */
 export interface FixedSettings {
+  execution?: Execution;
   /** The template the agent extends. */
   extends?: string;
   /** Set when the agent's own file takes its prompt from a file: the prompt is read-only. */
@@ -435,6 +450,8 @@ export interface FixedSettings {
 
 /** What can be given to agents now. */
 export interface Inventory {
+  /** Server names saved on the coordinator; targets and credentials never enter a cell. */
+  servers?: string[];
   skills: { id: string; name: string; description: string }[];
   /** `connected` is null when the VM could not be asked. */
   connectors: {
@@ -659,6 +676,16 @@ export interface DaemonStatus {
 
 /** Request methods: name → [params, result]. */
 export interface Methods {
+  /** Internal execution RPCs. Available on the owner socket, never exposed to a task cell. */
+  'team.describe': [{ agent: string }, TeamDescription];
+  'team.run': [TeamRun, null];
+  'team.poll': [TeamKey & { afterSeq: number }, TeamSnapshot];
+  'team.reply': [TeamReply, null];
+  'team.cancel': [TeamKey & { turn: number }, null];
+  'team.approve': [TeamKey & { id: string; allow: boolean }, null];
+  /** Creates a reviewable, create-only proposal for a member on a saved execution node. */
+  'team.preview': [{ agentId: string; execution: Execution }, BuilderProposal];
+  'team.nodes': [Record<string, never>, { name: string; target: string }[]];
   'daemon.status': [Record<string, never>, DaemonStatus];
   'daemon.shutdown': [Record<string, never>, null];
   'agents.list': [Record<string, never>, AgentSummary[]];

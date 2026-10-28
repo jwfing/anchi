@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { executionSchema } from '@anchi/protocol';
 import { parseCron } from '../cron.ts';
 
 export const idSchema = z
@@ -193,6 +194,7 @@ export const runtimeImage = (runtime: string) => `${RUNTIME_IMAGE_PREFIX}${runti
 export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$/;
 
 export const agentLayerSchema = z.strictObject({
+  execution: executionSchema.optional(),
   id: idSchema.optional(),
   name: z.string().max(100).optional(),
   description: z.string().max(500).optional(),
@@ -248,6 +250,7 @@ export type AgentLayer = z.infer<typeof agentLayerSchema>;
 
 export const resolvedAgentSchema = z
   .strictObject({
+    execution: executionSchema.optional(),
     id: idSchema,
     name: z.string(),
     description: z.string().optional(),

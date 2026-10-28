@@ -39,8 +39,30 @@ import { vaultLocked } from '../src/renderer/vault.tsx';
 const ev = (seq: number, event: StoredEvent['event']): StoredEvent => ({ seq, ts: seq, event });
 
 describe('bridge', () => {
+  it('requires a system confirmation before a proposal selects a remote execution profile', async () => {
+    const calls: string[] = [];
+    const read = async (method: string) => {
+      calls.push(method);
+      return {
+        agentId: 'developer',
+        agentYaml: 'runtime: codex\nexecution: {server: cloud, agent: coder}\n',
+      };
+    };
+    await expect(
+      guardedCall('builder.apply', { proposalId: 'p-1' }, read, async (q) => {
+        expect(q.message).toContain('cloud');
+        expect(q.detail).toContain('@coder');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(calls).toEqual(['builder.proposal']);
+  });
   it('lets the window call what it shows, and nothing that deletes, resets or stops', () => {
     expect(checkCall('tasks.create', { agentId: 'dev', text: 'x' }).method).toBe('tasks.create');
+    expect(
+      checkCall('team.preview', { agentId: 'dev', execution: { server: 'cloud', agent: 'coder' } })
+        .method,
+    ).toBe('team.preview');
     expect(checkCall('approvals.decide', { id: 'a', allow: false }).method).toBe(
       'approvals.decide',
     );
@@ -51,6 +73,11 @@ describe('bridge', () => {
     expect(checkCall('services.xClient', { clientId: 'x' }).method).toBe('services.xClient');
     for (const method of [
       'daemon.shutdown',
+      'team.run',
+      'team.reply',
+      'team.cancel',
+      'team.approve',
+      'team.poll',
       'setup.reset',
       'setup.run',
       'agents.delete',

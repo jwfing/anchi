@@ -2,7 +2,6 @@ import { sanitize, sanitizeLine } from '@anchi/core/sanitize';
 import type { BuilderProposal, RuntimeId } from '@anchi/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILDER, useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { Markdown } from '../markdown.tsx';
 import { agentTasks } from '../model.ts';
 import { transcript } from '../transcript.ts';
@@ -11,7 +10,7 @@ import { TranscriptItem } from './TaskPanel.tsx';
 
 /** The builder is one conversation: the view continues its latest task until a new one starts. */
 export function BuilderView() {
-  const { model, loadEvents, act } = useApp();
+  const { model, loadEvents, act, call } = useApp();
   const tasks = agentTasks(model, BUILDER);
   const [fresh, setFresh] = useState(false);
   const task = fresh ? undefined : tasks.at(-1);
@@ -94,13 +93,30 @@ export function BuilderView() {
 
 /** A starter file without a model call: the agent's id and runtime, then the usual review. */
 function Starters() {
-  const { act, dispatch } = useApp();
+  const { act, dispatch, server, call } = useApp();
   const [agentId, setAgentId] = useState('');
   const [runtime, setRuntime] = useState<RuntimeId>('codex');
-  const valid = /^[a-z0-9][a-z0-9-]{0,39}$/.test(agentId);
+  const [nodes, setNodes] = useState<{ name: string; target: string }[]>([]);
+  const [node, setNode] = useState('');
+  const [worker, setWorker] = useState('');
+  useEffect(() => {
+    let current = true;
+    setNode('');
+    setNodes([]);
+    if (server.status !== 'connected') return;
+    void act(() => call('team.nodes')).then((value) => {
+      if (value && current) setNodes(value);
+    });
+    return () => {
+      current = false;
+    };
+  }, [act, call, server.status, server.name]);
+  const valid =
+    /^[a-z0-9][a-z0-9-]{0,39}$/.test(agentId) &&
+    (!node || /^[a-z0-9][a-z0-9-]{0,39}$/.test(worker));
   return (
     <div className="starter">
-      <p className="strong">Describe the agent you want below, or start from an empty one:</p>
+      <p className="strong">Add a team member, or describe the agent you want below.</p>
       <div className="row gap wrap bottom">
         <label className="field">
           <span className="small muted">Agent id</span>
@@ -111,25 +127,56 @@ function Starters() {
           />
         </label>
         <label className="field">
-          <span className="small muted">Runtime</span>
-          <select value={runtime} onChange={(e) => setRuntime(e.target.value as RuntimeId)}>
-            <option value="codex">Codex</option>
-            <option value="claude-code">Claude Code</option>
-            <option value="hermes">Hermes</option>
+          <span className="small muted">Run on</span>
+          <select value={node} onChange={(e) => setNode(e.target.value)}>
+            <option value="">This server</option>
+            {nodes.map((n) => (
+              <option key={n.name} value={n.name}>
+                {n.name}
+              </option>
+            ))}
           </select>
         </label>
+        {node ? (
+          <label className="field">
+            <span className="small muted">Existing agent on {sanitizeLine(node)}</span>
+            <input
+              value={worker}
+              placeholder="developer"
+              onChange={(e) => setWorker(e.target.value.toLowerCase())}
+            />
+          </label>
+        ) : (
+          <label className="field">
+            <span className="small muted">Runtime</span>
+            <select value={runtime} onChange={(e) => setRuntime(e.target.value as RuntimeId)}>
+              <option value="codex">Codex</option>
+              <option value="claude-code">Claude Code</option>
+              <option value="hermes">Hermes</option>
+            </select>
+          </label>
+        )}
         <button
           type="button"
           className="btn"
           disabled={!valid}
           onClick={async () => {
-            const proposal = await act(() => call('agents.createPreview', { agentId, runtime }));
+            const proposal = await act(() =>
+              node
+                ? call('team.preview', { agentId, execution: { server: node, agent: worker } })
+                : call('agents.createPreview', { agentId, runtime }),
+            );
             if (proposal) dispatch({ type: 'proposal', proposal });
           }}
         >
           Preview
         </button>
       </div>
+      <p className="small muted">
+        {node
+          ? 'The member uses the selected node’s agent profile and access. Tasks, results and approvals appear in this team.'
+          : 'To use another machine, save a server on the team’s coordinator, then select it under Run on.'}
+      </p>
     </div>
   );
 }
@@ -166,7 +213,7 @@ export function Diff({ text }: { text: string }) {
 
 /** The proposal as Anchi read it from the builder's files: agent text cannot draw this panel. */
 function ProposalPanel({ proposal: p }: { proposal: BuilderProposal }) {
-  const { act, dispatch, setView } = useApp();
+  const { act, dispatch, setView, call } = useApp();
   const title =
     p.kind === 'create'
       ? 'NEW AGENT'

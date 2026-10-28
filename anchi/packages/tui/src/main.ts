@@ -591,13 +591,62 @@ program
   .description('Cancel a running or queued task; its work and transcript are kept')
   .action(async (taskId: string) => {
     await withClient((client) => client.call('tasks.cancel', { taskId }));
-    console.log(`cancelled ${sanitizeLine(taskId)}`);
+    console.log(
+      `Cancellation requested for ${sanitizeLine(taskId)}; check its status for confirmation.`,
+    );
   });
 
 const agentsCmd = program
   .command('agents')
   .description('List or manage agents')
   .option('--json', 'Print the agent array as JSON');
+const teamCmd = program
+  .command('team')
+  .description('Manage team members that execute on other nodes');
+teamCmd
+  .command('nodes')
+  .description('List execution nodes saved on the team coordinator')
+  .action(() =>
+    withClient(async (client) => {
+      for (const node of await client.call('team.nodes'))
+        console.log(`${node.name}\t${node.target}`);
+    }),
+  );
+teamCmd
+  .command('add <id>')
+  .description('Add a team member using an existing agent on an execution node')
+  .requiredOption('--node <name>', 'Saved server alias on the coordinator')
+  .requiredOption('--agent <id>', 'Existing agent id on that node')
+  .option('--preview', 'Review the member configuration without saving')
+  .option('-y, --yes', 'Save without an interactive prompt')
+  .action(
+    (agentId: string, opts: { node: string; agent: string; preview?: boolean; yes?: boolean }) =>
+      withClient(async (client) => {
+        const p = await client.call('team.preview', {
+          agentId,
+          execution: { server: opts.node, agent: opts.agent },
+        });
+        try {
+          console.log(p.agentYaml);
+          for (const warning of p.warnings) console.log(`Warning: ${sanitizeLine(warning)}`);
+          if (p.errors.length) throw new Error(p.errors.join('; '));
+          if (opts.preview) return;
+          if (!opts.yes && !process.stdin.isTTY)
+            throw new Error('Review with --preview, then use --yes to save without a terminal');
+          if (
+            !opts.yes &&
+            (await ask(`Add @${agentId} to this team? [y/N] `)).toLowerCase() !== 'y'
+          )
+            return;
+          await client.call('builder.apply', { proposalId: p.id });
+          console.log(
+            `Added @${agentId} on ${opts.node}. Assign work with anchi run ${agentId} "your task".`,
+          );
+        } finally {
+          await client.call('builder.discard', { proposalId: p.id });
+        }
+      }),
+  );
 agentsCmd
   .command('create <id>')
   .description('Review and create a starter agent without a model call')
@@ -645,7 +694,9 @@ agentsCmd.action((opts: { json?: boolean }) =>
     for (const a of list) {
       const extra = a.error
         ? styleText('red', ` ${sanitizeLine(a.error)}`)
-        : ` ${a.runtime ?? '-'} · ${a.connectors.join(',') || '-'} · ${a.image}`;
+        : a.execution
+          ? ` ${a.execution.server}/@${a.execution.agent}`
+          : ` ${a.runtime ?? '-'} · ${a.connectors.join(',') || '-'} · ${a.image}`;
       console.log(`${a.id.padEnd(14)} ${a.status.padEnd(8)}${extra}`);
     }
   }),

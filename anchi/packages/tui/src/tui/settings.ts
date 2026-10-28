@@ -84,6 +84,26 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
     note,
   });
   const runtime = inv.runtimes.find((r) => r.id === state.runtime)?.connected;
+  if (data.fixed.execution)
+    return [
+      { kind: 'header', text: 'EXECUTION NODE' },
+      {
+        kind: 'header',
+        text: `Runs as @${data.fixed.execution.agent} on ${data.fixed.execution.server}`,
+      },
+      {
+        kind: 'header',
+        text: 'Manage runtime, prompt, access, skills and workspaces on that node.',
+      },
+      {
+        kind: 'header',
+        text: `Team delegates: ${data.fixed.delegates.join(', ') || 'none'} (also grant them on the execution profile)`,
+      },
+      {
+        kind: 'header',
+        text: 'Use Agent builder to change this team member or its execution location.',
+      },
+    ];
   const rows: SettingsRow[] = [
     { kind: 'header', text: 'GENERAL' },
     field(

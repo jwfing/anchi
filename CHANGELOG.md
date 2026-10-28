@@ -6,6 +6,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
+- The desktop app connects to local and saved remote machines together. Team lists their agents with machine labels; Settings selects a machine for its runtimes, connectors, services and skills. Tasks, approvals, transcripts and configuration requests stay scoped to their owning daemon, including when ids match on different machines.
+- One team can delegate across local and remote execution nodes. Add an existing remote agent with **Agent builder → Run on** or `anchi team add <id> --node <saved-server> --agent <remote-id>`; the coordinator keeps the task tree, results, usage and approvals together, reattaches after disconnections and forwards cancellation. Upgrade both daemons; credentials and execution policies remain on each node. See `docs/REMOTE_SERVER.md#one-team-multiple-execution-nodes`.
 - `scripts/remote.sh <target> --data-dir <path>` keeps a remote server's agent homes and image layers on a disk of your choice, bind-mounted at `/var/lib/anchi`; an instabox machine uses `/data/anchi` on its resizable data disk by default, and running the script again moves an existing server's data there. Agents' caches no longer fill the 16 GB root disk. The egress proxy is kept out of the new path as it is out of `/var/lib/anchi`. See `docs/REMOTE_SERVER.md`.
 
 ### Fixed
@@ -16,6 +18,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- The desktop Team list truncates activity previews to two lines. Settings selects machines through cards under Machines; task conversations start closed and slide over the task list on demand, with click-to-toggle, Close and Esc. User messages and task results use wider, evenly spaced cards.
 - The desktop app shows a banner while the vault is locked, saying the credentials are still stored, with **Unlock**; Settings shows **Unlock the vault** in place of the credential cards. The TUI's message says the same.
 - The desktop app draws more of the Markdown agents write: tables (with column alignment; a wide one scrolls inside the message), horizontal rules, quotes, nested lists, numbered lists that start past 1, italics and strikethrough. Before, a table showed as lines of `|` and `---` as text. It still draws React elements, never HTML.
 

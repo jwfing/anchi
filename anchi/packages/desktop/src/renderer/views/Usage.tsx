@@ -2,7 +2,6 @@ import { sanitizeLine } from '@anchi/core/sanitize';
 import type { QuotaInfo, UsageGroup, UsageRow } from '@anchi/protocol';
 import { useEffect, useState } from 'react';
 import { useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { ago, tokens } from '../format.ts';
 
 const PERIODS = [
@@ -18,7 +17,7 @@ function tone(used: number) {
 }
 
 export function UsageView() {
-  const { act, server } = useApp();
+  const { act, server, call } = useApp();
   const [period, setPeriod] = useState(1);
   const [group, setGroup] = useState<UsageGroup>('agent');
   const [rows, setRows] = useState<UsageRow[]>([]);

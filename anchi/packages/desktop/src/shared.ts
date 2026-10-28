@@ -5,18 +5,21 @@ import type { SkillAddResult } from '@anchi/protocol';
 export interface ServerState {
   /** `local`, `instabox:<machine>` or `ssh:<host>`. */
   name: string;
-  status: 'connecting' | 'connected' | 'error';
+  label: string;
+  status: 'connecting' | 'connected' | 'error' | 'disconnected';
   error?: string;
 }
 
 /** The narrow API the preload script gives the page (`window.anchi`). */
 export interface AnchiApi {
-  call(method: string, params?: object): Promise<unknown>;
+  call(server: string, method: string, params?: object): Promise<unknown>;
   /** Daemon notifications; returns a function that stops listening. */
-  onNotify(listener: (name: string, params: unknown) => void): () => void;
+  onNotify(listener: (server: string, name: string, params: unknown) => void): () => void;
   server(): Promise<ServerState>;
-  onServer(listener: (state: ServerState) => void): () => void;
-  /** Connects to a saved server's name or a target, and makes it the one in use. */
+  connections(): Promise<ServerState[]>;
+  onConnections(listener: (states: ServerState[]) => void): () => void;
+  connectServer(target: string, connected: boolean): Promise<void>;
+  /** Selects a machine without closing the other connections. */
   setServer(target: string): Promise<ServerState>;
   /** `local` first, then the saved remote servers. */
   servers(): Promise<SavedServer[]>;
@@ -24,7 +27,7 @@ export interface AnchiApi {
   removeServer(name: string): Promise<SavedServer[]>;
   openExternal(url: string): Promise<void>;
   /** Picks a folder on this computer and adds the skills in it; null when cancelled. */
-  addSkillFolder(): Promise<SkillAddResult | null>;
+  addSkillFolder(server: string): Promise<SkillAddResult | null>;
   /** Picks a Google OAuth client JSON on this computer and imports it; false when cancelled. */
-  importGoogleClient(): Promise<boolean>;
+  importGoogleClient(server: string): Promise<boolean>;
 }

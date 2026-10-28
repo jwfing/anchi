@@ -26,6 +26,20 @@ export const EMPTY_MODEL: Model = {
   proposals: {},
 };
 
+export type Fleet = Record<string, Model>;
+export type FleetAction =
+  { type: 'machine'; server: string; action: Action } | { type: 'retain'; servers: string[] };
+
+/** Daemon-local ids may repeat on another machine, including task and approval ids. */
+export function reduceFleet(fleet: Fleet, action: FleetAction): Fleet {
+  if (action.type === 'retain') {
+    return Object.fromEntries(
+      Object.entries(fleet).filter(([name]) => action.servers.includes(name)),
+    );
+  }
+  return { ...fleet, [action.server]: reduce(fleet[action.server] ?? EMPTY_MODEL, action.action) };
+}
+
 export type Action =
   | { type: 'agents'; agents: AgentSummary[] }
   | { type: 'tasks'; tasks: TaskRow[]; replace?: boolean }

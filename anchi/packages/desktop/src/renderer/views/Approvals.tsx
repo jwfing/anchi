@@ -2,7 +2,6 @@ import { sanitize, sanitizeLine } from '@anchi/core/sanitize';
 import type { Approval } from '@anchi/protocol';
 import { useEffect, useState } from 'react';
 import { useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { clock, secondsLeft } from '../format.ts';
 import { Icon } from '../ui.tsx';
 
@@ -21,7 +20,7 @@ function useNow(): number {
  * the full summary, before the two buttons. Agent text never draws this card.
  */
 export function ApprovalCard({ approval: a, full }: { approval: Approval; full?: boolean }) {
-  const { act } = useApp();
+  const { act, call } = useApp();
   const now = useNow();
   const [deciding, setDeciding] = useState(false);
   const left = secondsLeft(a.createdAt, a.timeout, now);

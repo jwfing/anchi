@@ -2,7 +2,6 @@ import { sanitize, sanitizeLine } from '@anchi/core/sanitize';
 import type { TaskRow } from '@anchi/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../App.tsx';
-import { call } from '../api.ts';
 import { count, duration, tokens } from '../format.ts';
 import { Markdown } from '../markdown.tsx';
 import { agentTasks } from '../model.ts';
@@ -16,15 +15,42 @@ import { TaskPanel } from './TaskPanel.tsx';
 const PRELOAD = 15;
 
 export function AgentView({ agentId }: { agentId: string }) {
-  const { model, loadEvents, act, server } = useApp();
+  const { model, loadEvents, act, server, call } = useApp();
   const agent = model.agents.find((a) => a.id === agentId);
   const tasks = agentTasks(model, agentId);
-  const [selected, setSelected] = useState<string | undefined>(tasks.at(-1)?.id);
+  const [details, setDetails] = useState<{ taskId: string; open: boolean }>();
   // Bumped by "Continue this task" so the panel focuses its reply box.
   const [replyFocus, setReplyFocus] = useState(0);
   const [panelWidth, setPanelWidth] = usePanelWidth();
   const [tab, setTab] = useState<'conversation' | 'settings'>('conversation');
   const end = useRef<HTMLDivElement>(null);
+  const drawer = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const closeDetails = () => {
+    if (drawer.current?.contains(document.activeElement))
+      opener.current?.focus({ preventScroll: true });
+    setDetails((current) => current && { ...current, open: false });
+  };
+  const openDetails = (taskId: string, continueTask = false) => {
+    if (
+      document.activeElement instanceof HTMLElement &&
+      !drawer.current?.contains(document.activeElement)
+    ) {
+      opener.current = document.activeElement;
+    }
+    setDetails((current) => ({
+      taskId,
+      open: continueTask || current?.taskId !== taskId || !current.open,
+    }));
+    setReplyFocus((n) => (continueTask ? n + 1 : 0));
+  };
+  useEffect(() => {
+    if (details?.open && !replyFocus) {
+      drawer.current
+        ?.querySelector<HTMLButtonElement>('[aria-label="Close task details"]')
+        ?.focus({ preventScroll: true });
+    }
+  }, [details?.open, details?.taskId, replyFocus]);
 
   const recent = tasks
     .slice(-PRELOAD)
@@ -38,10 +64,19 @@ export function AgentView({ agentId }: { agentId: string }) {
   }, [tasks.length]);
 
   if (!agent) return <main className="main empty">This agent no longer exists.</main>;
-  const selectedTask = selected ? model.tasks[selected] : undefined;
+  const selectedTask = details ? model.tasks[details.taskId] : undefined;
+  const open = !!selectedTask && details?.open === true && tab === 'conversation';
 
   return (
-    <>
+    <div
+      className="agent-workspace"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && open) {
+          e.preventDefault();
+          closeDetails();
+        }
+      }}
+    >
       <main className="main">
         <div className="main-head">
           <Avatar id={agent.id} size={36} />
@@ -51,15 +86,19 @@ export function AgentView({ agentId }: { agentId: string }) {
                 @{agent.id} <span className="muted normal">· {sanitizeLine(agent.name)}</span>
               </span>
               <span className="tag tag-off server-tag" title="The server this agent runs on">
-                on {server.name}
+                on {sanitizeLine(agent.execution?.server ?? server.label)}
               </span>
             </span>
             <span className="small muted ellipsis">
               {[
-                agent.runtime,
-                agent.model,
-                agent.connectors.length ? agent.connectors.join(', ') : 'no connectors',
-                agent.skills?.length ? count(agent.skills.length, 'skill') : '',
+                ...(agent.execution
+                  ? [`profile @${agent.execution.agent} on ${agent.execution.server}`]
+                  : [
+                      agent.runtime,
+                      agent.model,
+                      agent.connectors.length ? agent.connectors.join(', ') : 'no connectors',
+                      agent.skills?.length ? count(agent.skills.length, 'skill') : '',
+                    ]),
                 agent.delegates?.length
                   ? `delegates to ${agent.delegates.map((d) => '@' + d).join(', ')}`
                   : '',
@@ -78,7 +117,10 @@ export function AgentView({ agentId }: { agentId: string }) {
                 key={t}
                 aria-selected={tab === t}
                 aria-pressed={tab === t}
-                onClick={() => setTab(t)}
+                onClick={() => {
+                  closeDetails();
+                  setTab(t);
+                }}
               >
                 {t === 'conversation' ? 'Conversation' : 'Settings'}
               </button>
@@ -95,24 +137,17 @@ export function AgentView({ agentId }: { agentId: string }) {
           <AgentSettingsView agentId={agent.id} />
         ) : (
           <>
-            <div className="scroll conversation">
+            <div className="scroll conversation agent-conversation">
               <div className="center small muted">
-                Each message below starts a new task in a new session. To continue a task, open it
-                and reply beside it.
+                Each message starts a new task. Click a task to show or hide its conversation.
               </div>
               {tasks.map((t) => (
                 <TaskTurn
                   key={t.id}
                   task={t}
-                  selected={t.id === selected}
-                  onSelect={() => {
-                    setSelected(t.id);
-                    setReplyFocus(0);
-                  }}
-                  onContinue={() => {
-                    setSelected(t.id);
-                    setReplyFocus((n) => n + 1);
-                  }}
+                  selected={open && t.id === details?.taskId}
+                  onSelect={() => openDetails(t.id)}
+                  onContinue={() => openDetails(t.id, true)}
                 />
               ))}
               <div ref={end} />
@@ -125,24 +160,33 @@ export function AgentView({ agentId }: { agentId: string }) {
               disabled={!!agent.error}
               onSend={async (text) => {
                 const task = await act(() => call('tasks.create', { agentId, text }));
-                if (task) setSelected(task.id);
+                if (task) openDetails(task.id);
               }}
             />
           </>
         )}
       </main>
-      {tab === 'conversation' && selectedTask && (
-        <>
-          <Splitter width={panelWidth} onResize={setPanelWidth} />
-          <TaskPanel
-            key={selectedTask.id}
-            task={selectedTask}
-            width={panelWidth}
-            focusReply={replyFocus}
-          />
-        </>
-      )}
-    </>
+      <div
+        ref={drawer}
+        id="task-details"
+        className={`task-drawer ${open ? 'is-open' : ''}`}
+        style={{ width: panelWidth }}
+        inert={!open}
+        aria-hidden={!open}
+      >
+        {selectedTask && (
+          <>
+            <Splitter width={panelWidth} onResize={setPanelWidth} />
+            <TaskPanel
+              key={selectedTask.id}
+              task={selectedTask}
+              focusReply={replyFocus}
+              onClose={closeDetails}
+            />
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -183,10 +227,15 @@ export function TaskTurn({
           type="button"
           className="task-card-head"
           onClick={onSelect}
-          aria-label={`Open task ${task.id}`}
+          aria-label={`${selected ? 'Hide' : 'Open'} task ${task.id}`}
+          aria-expanded={selected}
+          aria-controls="task-details"
         >
           <StatusPill status={task.status} waiting={approvals.length > 0} />
           <span className="mono small muted">{task.id}</span>
+          {task.execution && (
+            <span className="tag tag-off">{sanitizeLine(task.execution.server)}</span>
+          )}
           <span className="small muted">
             {task.startedAt ? duration(elapsed) : 'not started'} · {task.turns} turn
             {task.turns === 1 ? '' : 's'}
@@ -225,6 +274,7 @@ export function TaskTurn({
               {children.map((c) => (
                 <span key={c.id} className="chip">
                   ↳ @{c.agentId} · {c.status}
+                  {c.execution ? ` · ${sanitizeLine(c.execution.server)}` : ''}
                 </span>
               ))}
             </div>
