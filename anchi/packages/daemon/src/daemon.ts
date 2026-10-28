@@ -1,3 +1,6 @@
+import { PeerNetwork } from './peer-network.ts';
+import { PeerTasks } from './peer-tasks.ts';
+import { peerNodeSchema, peerRecordSchema } from '@anchi/protocol';
 import { randomBytes } from 'node:crypto';
 import { executionSchema } from '@anchi/protocol';
 import { TeamCoordinator } from './team-coordinator.ts';
@@ -179,6 +182,7 @@ export interface DaemonOptions {
   /** Tests connect real daemon sockets in place of SSH, with the same RPC boundary. */
   teamConnect?: (target: string) => Promise<DaemonClient>;
   teamPollMs?: number;
+  peerPollMs?: number;
 }
 
 type Handlers = {
@@ -237,6 +241,8 @@ export class Daemon {
   readonly approvals: ApprovalWatcher;
   readonly team: TeamCoordinator;
   readonly worker: TeamWorker;
+  readonly peers: PeerNetwork;
+  readonly peerTasks: PeerTasks;
   private quotaAlerts: QuotaAlerts;
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
@@ -558,9 +564,9 @@ export class Daemon {
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
       this.hub.origin(id),
     );
-    this.approvals.on('changed', () =>
-      this.broadcast('approvals', { approvals: this.allApprovals() }),
-    );
+    this.approvals.on('changed', () => {
+      if (!this.stopping) this.broadcast('approvals', { approvals: this.allApprovals() });
+    });
     this.approvals.on('added', (a) => {
       this.hub.notice(
         a.task,
@@ -594,6 +600,7 @@ export class Daemon {
     });
     this.hostRun = opts.hostRun ?? hostOutput;
     this.hub = new Hub({
+      peers: () => this.peerTasks,
       team: () => this.team,
       worker: () => this.worker,
       layout: opts.layout,
@@ -636,6 +643,27 @@ export class Daemon {
       approvals: () => this.approvals.list(),
       decide: (id, allow) => this.approvals.decide(id, allow, this.guest),
     });
+    this.peers = new PeerNetwork({
+      layout: opts.layout,
+      store: this.store,
+      agents: () => this.hub.summaries(),
+      handle: (node, method, params) => this.peerTasks.handle(node, method, params),
+      intervalMs: opts.peerPollMs,
+      changed: () => {
+        if (!this.stopping && this.peerTasks)
+          this.broadcast('agents', { agents: this.teamAgents() });
+      },
+    });
+    this.peerTasks = new PeerTasks({
+      layout: opts.layout,
+      store: this.store,
+      hub: this.hub,
+      network: this.peers,
+      approvals: () => this.approvals.list(),
+      decide: (id, allow) => this.approvals.decide(id, allow, this.guest),
+      changed: () => this.broadcast('approvals', { approvals: this.allApprovals() }),
+      pollMs: opts.peerPollMs,
+    });
     this.triggers = new TriggerRunner(
       {
         agents: () => this.hub.resolvedAgents(),
@@ -646,7 +674,9 @@ export class Daemon {
       this.log,
     );
     this.hub.on('event', (e) => this.broadcast('event', e));
-    this.hub.on('agents', (agents) => this.broadcast('agents', { agents }));
+    this.hub.on('agents', () => {
+      if (!this.stopping) this.broadcast('agents', { agents: this.teamAgents() });
+    });
     this.hub.on('scanPartial', ({ taskId, agentId, files, reason }) => {
       this.log(`credential scan of ${taskId} stopped at its ${reason} limit after ${files} files`);
       this.notify(
@@ -746,10 +776,20 @@ export class Daemon {
         shared: status?.vm === 'running' ? status.workspaces : null,
         dirs: listWorkspaceDirs(this.workspaceRoot),
       },
-      agents: this.hub
-        .summaries()
+      agents: [...this.hub.summaries(), ...this.peerTasks.agents()]
         .map((a) => a.id)
         .filter((id) => id !== BUILDER_ID),
+      peerAgents: this.peers
+        .directory()
+        .nodes.filter((n) => n.node !== this.peers.node)
+        .flatMap((n) =>
+          n.agents.map((a) => ({
+            id: `${n.node}/${a.id}/${a.generation}`,
+            name: a.name,
+            machine: n.label,
+            online: n.online,
+          })),
+        ),
       images: listImageIds(this.opts.layout),
       highRisk: [...HIGH_RISK_IDS],
     };
@@ -765,7 +805,7 @@ export class Daemon {
   /** The inventory without asking the VM: connector states from the last full one. */
   private quickInventory(): Pick<
     Inventory,
-    'skills' | 'connectors' | 'runtimes' | 'agents' | 'servers'
+    'skills' | 'connectors' | 'runtimes' | 'agents' | 'servers' | 'peerAgents'
   > {
     return {
       servers: listServers(this.opts.layout.root)
@@ -774,10 +814,20 @@ export class Daemon {
       skills: this.skills.list(),
       connectors: this.lastInventory?.connectors ?? [],
       runtimes: this.lastInventory?.runtimes ?? [],
-      agents: this.hub
-        .summaries()
+      agents: [...this.hub.summaries(), ...this.peerTasks.agents()]
         .map((a) => a.id)
         .filter((id) => id !== BUILDER_ID),
+      peerAgents: this.peers
+        .directory()
+        .nodes.filter((n) => n.node !== this.peers.node)
+        .flatMap((n) =>
+          n.agents.map((a) => ({
+            id: `${n.node}/${a.id}/${a.generation}`,
+            name: a.name,
+            machine: n.label,
+            online: n.online,
+          })),
+        ),
     };
   }
 
@@ -945,11 +995,33 @@ export class Daemon {
     for (const peer of this.clients.values()) peer.notify(method, params);
   }
 
+  private teamAgents() {
+    return [
+      ...this.hub.summaries().map((a) => ({ ...a, node: this.peers.node })),
+      ...this.peerTasks.agents(),
+    ];
+  }
+
   private allApprovals() {
-    return [...this.approvals.list(), ...(this.team?.listApprovals() ?? [])];
+    return [
+      ...this.approvals.list(),
+      ...(this.team?.listApprovals() ?? []),
+      ...(this.peerTasks?.listApprovals() ?? []),
+    ];
   }
 
   private handlers: Handlers = {
+    'peers.configure': (params) => this.peers.configure(params),
+    'peers.identity': () => this.peers.identity(),
+    'peers.directory': () => this.peers.directory(),
+    'peers.admit': (params) => {
+      this.peers.admit(peerRecordSchema.parse(params.record));
+      return null;
+    },
+    'peers.remove': (params) => {
+      this.peers.remove(peerNodeSchema.parse(params.node));
+      return null;
+    },
     'team.describe': (params) => this.worker.describe(params),
     'team.run': (params) => this.worker.run(params),
     'team.poll': (params) => this.worker.poll(params),
@@ -975,7 +1047,7 @@ export class Daemon {
       setTimeout(() => void this.stop().then(() => process.exit(0)), 50);
       return null;
     },
-    'agents.list': () => this.hub.summaries(),
+    'agents.list': () => this.teamAgents(),
     'agents.createPreview': (params) => this.proposals.starter(params),
     'agents.reload': () => this.hub.reload(),
     'agents.settings': async (params) => this.agentSettings(params),
@@ -1008,7 +1080,7 @@ export class Daemon {
       return result;
     },
     'tasks.create': ({ agentId, text }) => {
-      const task = this.hub.createTask(str(agentId, 'agent', 40), str(text, 'text', 200_000));
+      const task = this.hub.createTask(str(agentId, 'agent', 100), str(text, 'text', 200_000));
       // CLI users see no Runtimes screen: say it where they look.
       if (this.guestOutdated) this.hub.notice(task.id, this.guestWarning());
       return task;
@@ -1018,7 +1090,7 @@ export class Daemon {
     'tasks.get': ({ taskId: id }) => this.hub.getTask(taskId(id)),
     'tasks.search': (q) =>
       this.store.search({
-        agentId: q.agentId ? str(q.agentId, 'agent', 40) : undefined,
+        agentId: q.agentId ? str(q.agentId, 'agent', 100) : undefined,
         status: q.status && STATUSES.includes(q.status) ? q.status : undefined,
         text: q.text ? str(q.text, 'text', 200) : undefined,
         since: typeof q.since === 'number' ? q.since : undefined,
@@ -1035,10 +1107,16 @@ export class Daemon {
     'tasks.send': ({ taskId: id, text }) => {
       const task = this.hub.getTask(taskId(id));
       if (task.teamOrigin) throw new Error('Continue this team task on its coordinator.');
+      if (task.peer?.kind === 'execution' && task.peer.root.node !== this.peers.node)
+        throw new Error('Continue this peer task through its originating task.');
       return this.hub.sendTask(task.id, str(text, 'text', 200_000));
     },
     'tasks.audit': async ({ taskId: id }) => {
       const task = this.hub.getTask(taskId(id));
+      if (task.peer?.kind === 'mirror')
+        throw new Error(
+          'View the egress audit on the execution machine; raw audit logs remain there.',
+        );
       if (task.execution)
         throw new Error(
           `View this task's egress audit on ${task.execution.server}, under @${task.execution.agent}; raw audit logs remain on the execution node.`,
@@ -1065,6 +1143,8 @@ export class Daemon {
     'tasks.retry': ({ taskId: id, fresh }) => {
       const task = this.hub.getTask(taskId(id));
       if (task.teamOrigin) throw new Error('Retry this team task on its coordinator.');
+      if (task.peer?.kind === 'execution' && task.peer.root.node !== this.peers.node)
+        throw new Error('Retry this peer task through its originating task.');
       return this.hub.retryTask(task.id, fresh === true);
     },
     'tasks.cancel': ({ taskId: id }) => {
@@ -1301,6 +1381,7 @@ export class Daemon {
       return null;
     },
     'approvals.decide': async ({ id, allow }) => {
+      if (await this.peerTasks.decide(str(id, 'approval', 40), allow === true)) return null;
       if (await this.team.decide(str(id, 'approval', 40), allow === true)) return null;
       const a = this.approvals.list().find((x) => x.id === id);
       await this.approvals.decide(str(id, 'approval', 40), allow === true, this.guest);
@@ -1435,6 +1516,8 @@ export class Daemon {
       void this.unlockServerVault().then(() => this.refreshSetup());
     else void this.refreshSetup();
     this.hub.recoverInterrupted();
+    await this.peers.start();
+    this.peerTasks.start();
 
     this.server = createServer((socket) => {
       const clientId = randomBytes(4).toString('hex');
@@ -1532,6 +1615,8 @@ export class Daemon {
     this.hub.suspend();
     this.worker.stop();
     await this.team.stop();
+    await this.peers.stop();
+    await this.peerTasks.stop();
     clearTimeout(this.hostLoginDebounce);
     await this.hostLoginSync;
     await this.hub.shutdown();

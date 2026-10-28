@@ -1,3 +1,4 @@
+import { delegateRefSchema } from '@anchi/protocol';
 import { SERVICE_CONNECTORS, type ResolvedAgent } from '@anchi/core';
 import type { AgentSummary, TaskRow } from '@anchi/protocol';
 import { z } from 'zod';
@@ -157,7 +158,7 @@ export const DELEGATION_TOOLS: AnchiTool[] = [
       'Give another agent a task (one of anchi_list_agents). It runs in its own cell with its own ' +
       'connectors. By default waits for its turn to finish and returns the result and links.',
     args: z.strictObject({
-      agent: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
+      agent: delegateRefSchema,
       task: z
         .string()
         .min(1)

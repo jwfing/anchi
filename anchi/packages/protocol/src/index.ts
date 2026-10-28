@@ -3,3 +3,4 @@ export * from './codec.ts';
 export * from './events.ts';
 export * from './rpc.ts';
 export * from './team.ts';
+export * from './peers.ts';

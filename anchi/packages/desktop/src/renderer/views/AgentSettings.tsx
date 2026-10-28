@@ -13,6 +13,7 @@ import { useApp } from '../App.tsx';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { Icon } from '../ui.tsx';
 import { Diff } from './Builder.tsx';
+import { DeleteAgentAction } from './DeleteAgent.tsx';
 
 const RUNTIME_NAMES: Record<RuntimeId, string> = {
   codex: 'Codex',
@@ -46,7 +47,7 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
       setDraft(s.current);
       setReview(undefined);
     });
-  }, [act, agentId]);
+  }, [act, agentId, call]);
   useEffect(() => {
     if (server.status === 'connected') load();
   }, [server.status, load]);
@@ -69,9 +70,21 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
   const toggle = (list: string[], id: string) =>
     list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 
-  if (fixed.execution) {
+  if (!settings.editable) {
     return (
       <div className="scroll settings-form">
+        <div className="banner">
+          These settings cannot be changed here
+          {settings.reason ? `: ${sanitizeLine(settings.reason)}` : '.'}
+        </div>
+        <DeleteAgentAction agentId={agentId} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="scroll settings-form">
+      {fixed.execution ? (
         <section className="card">
           <h2>Execution node</h2>
           <p>
@@ -82,227 +95,235 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
             Manage its runtime, prompt, connectors, skills, workspaces and security policy on that
             node. Its credentials stay there.
           </p>
-          <p>
-            Team delegates: {fixed.delegates.map((id) => `@${id}`).join(', ') || 'none'}. The
-            execution profile must also grant these delegates.
-          </p>
+          <p>The execution profile must also grant the team delegates selected below.</p>
           <p className="small muted">
-            Use Agent builder to change this member’s name, description, delegation or execution
-            location. Existing tasks keep their original location.
+            Use Agent builder to change this member’s name, description or execution location.
+            Existing tasks keep their original location.
           </p>
         </section>
-      </div>
-    );
-  }
-
-  if (!settings.editable) {
-    return (
-      <div className="scroll settings-form">
-        <div className="banner">
-          These settings cannot be changed here
-          {settings.reason ? `: ${sanitizeLine(settings.reason)}` : '.'}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="scroll settings-form">
-      <section className="card">
-        <h2>Agent</h2>
-        <div className="grid2">
-          <label className="field">
-            <span className="small strong">Name{from('name')}</span>
-            <input value={draft.name} onChange={(e) => edit({ name: e.target.value })} />
-          </label>
-          <label className="field">
-            <span className="small strong">Description{from('description')}</span>
-            <input
-              value={draft.description}
-              onChange={(e) => edit({ description: e.target.value })}
-            />
-          </label>
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>Runtime and model</h2>
-        <div className="grid3">
-          <label className="field">
-            <span className="small strong">Runtime{from('runtime')}</span>
-            <select
-              value={draft.runtime}
-              onChange={(e) => edit({ runtime: e.target.value as RuntimeId })}
-            >
-              {inventory.runtimes.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {RUNTIME_NAMES[r.id] ?? r.id}
-                  {r.connected === false ? ' (not set up)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span className="small strong">Model{from('model')}</span>
-            <input
-              value={draft.model}
-              placeholder="the runtime's default"
-              spellCheck={false}
-              onChange={(e) => edit({ model: e.target.value.trim() })}
-            />
-          </label>
-          <label className="field">
-            <span className="small strong">Reasoning effort{from('effort')}</span>
-            <select
-              value={draft.effort}
-              onChange={(e) => edit({ effort: e.target.value as Effort | '' })}
-            >
-              {EFFORTS.map((e) => (
-                <option key={e} value={e}>
-                  {e || "the runtime's default"}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>System prompt{from('prompt')}</h2>
-        {fixed.promptFile ? (
-          <p className="small muted">
-            The prompt comes from {sanitizeLine(fixed.promptFile)}. Edit that file to change it.
-          </p>
-        ) : (
-          <>
-            <div className="segmented" role="group" aria-label="Prompt mode">
-              {(['append', 'replace'] as const).map((mode) => (
-                <button
-                  type="button"
-                  key={mode}
-                  aria-pressed={draft.prompt.mode === mode}
-                  onClick={() => edit({ prompt: { ...draft.prompt, mode } })}
-                >
-                  {mode === 'append' ? 'Add to the template' : 'Replace the template'}
-                </button>
-              ))}
-            </div>
-            <label className="field">
-              <span className="sr-only">Prompt</span>
-              <textarea
-                className="prompt-edit"
-                rows={10}
-                value={draft.prompt.text}
-                onChange={(e) => edit({ prompt: { ...draft.prompt, text: e.target.value } })}
-              />
-            </label>
-          </>
-        )}
-      </section>
-
-      <div className="grid2">
-        <section className="card">
-          <h2>Skills{from('skills')}</h2>
-          {!inventory.skills.length && <p className="small muted">No skills installed.</p>}
-          {inventory.skills.map((s) => (
-            <label key={s.id} className="check-row">
-              <input
-                type="checkbox"
-                checked={draft.skills.includes(s.id)}
-                onChange={() => edit({ skills: toggle(draft.skills, s.id) })}
-              />
-              <span className="strong">{sanitizeLine(s.id)}</span>
-              <span className="small muted ellipsis">{sanitizeLine(s.description)}</span>
-            </label>
-          ))}
-          {draft.skills
-            .filter((id) => !inventory.skills.some((s) => s.id === id))
-            .map((id) => (
-              <div key={id} className="small tone-bad">
-                {sanitizeLine(id)} is not installed
-              </div>
-            ))}
-        </section>
-        <section className="card">
-          <h2>Connectors{from('connectors')}</h2>
-          <p className="small muted">Credentials this agent's tasks may use.</p>
-          {inventory.connectors.map((c) => (
-            <label key={c.id} className="check-row">
-              <input
-                type="checkbox"
-                checked={draft.connectors.includes(c.id)}
-                onChange={() => edit({ connectors: toggle(draft.connectors, c.id) })}
-              />
-              <ConnectorLogo id={c.id} />
-              <span className="strong">{connectorName(c.id)}</span>
-              <span className="small muted">{c.connected === false ? 'not connected' : ''}</span>
-            </label>
-          ))}
-        </section>
-      </div>
-
-      <Workspaces
-        value={draft.workspaces}
-        dirs={inventory.workspaces.dirs}
-        shared={inventory.workspaces.shared}
-        label={from('workspaces')}
-        onChange={(workspaces) => edit({ workspaces })}
-      />
-
-      {highRiskIds.length > 0 && (
-        <section className="card">
-          <h2>High-risk operations{from('highRisk')}</h2>
-          <p className="small muted">
-            These wait for your approval. Tick one to let this agent's tasks do it without asking.
-          </p>
-          {highRiskIds.map((id) => {
-            const global = fixed.highRiskGlobal?.includes(id);
-            return (
-              <label key={id} className="check-row">
-                <input
-                  type="checkbox"
-                  checked={global || exempt.includes(id)}
-                  disabled={global}
-                  onChange={() => edit({ highRisk: { disable: toggle(exempt, id) } })}
-                />
-                <span className="mono">{id}</span>
-                <span className="small muted">
-                  {global ? 'without asking for every agent (settings.yaml)' : ''}
-                </span>
+      ) : (
+        <>
+          <section className="card">
+            <h2>Agent</h2>
+            <div className="grid2">
+              <label className="field">
+                <span className="small strong">Name{from('name')}</span>
+                <input value={draft.name} onChange={(e) => edit({ name: e.target.value })} />
               </label>
-            );
-          })}
-        </section>
+              <label className="field">
+                <span className="small strong">Description{from('description')}</span>
+                <input
+                  value={draft.description}
+                  onChange={(e) => edit({ description: e.target.value })}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Runtime and model</h2>
+            <div className="grid3">
+              <label className="field">
+                <span className="small strong">Runtime{from('runtime')}</span>
+                <select
+                  value={draft.runtime}
+                  onChange={(e) => edit({ runtime: e.target.value as RuntimeId })}
+                >
+                  {inventory.runtimes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {RUNTIME_NAMES[r.id] ?? r.id}
+                      {r.connected === false ? ' (not set up)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="small strong">Model{from('model')}</span>
+                <input
+                  value={draft.model}
+                  placeholder="the runtime's default"
+                  spellCheck={false}
+                  onChange={(e) => edit({ model: e.target.value.trim() })}
+                />
+              </label>
+              <label className="field">
+                <span className="small strong">Reasoning effort{from('effort')}</span>
+                <select
+                  value={draft.effort}
+                  onChange={(e) => edit({ effort: e.target.value as Effort | '' })}
+                >
+                  {EFFORTS.map((e) => (
+                    <option key={e} value={e}>
+                      {e || "the runtime's default"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>System prompt{from('prompt')}</h2>
+            {fixed.promptFile ? (
+              <p className="small muted">
+                The prompt comes from {sanitizeLine(fixed.promptFile)}. Edit that file to change it.
+              </p>
+            ) : (
+              <>
+                <div className="segmented" role="group" aria-label="Prompt mode">
+                  {(['append', 'replace'] as const).map((mode) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      aria-pressed={draft.prompt.mode === mode}
+                      onClick={() => edit({ prompt: { ...draft.prompt, mode } })}
+                    >
+                      {mode === 'append' ? 'Add to the template' : 'Replace the template'}
+                    </button>
+                  ))}
+                </div>
+                <label className="field">
+                  <span className="sr-only">Prompt</span>
+                  <textarea
+                    className="prompt-edit"
+                    rows={10}
+                    value={draft.prompt.text}
+                    onChange={(e) => edit({ prompt: { ...draft.prompt, text: e.target.value } })}
+                  />
+                </label>
+              </>
+            )}
+          </section>
+
+          <div className="grid2">
+            <section className="card">
+              <h2>Skills{from('skills')}</h2>
+              {!inventory.skills.length && <p className="small muted">No skills installed.</p>}
+              {inventory.skills.map((s) => (
+                <label key={s.id} className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={draft.skills.includes(s.id)}
+                    onChange={() => edit({ skills: toggle(draft.skills, s.id) })}
+                  />
+                  <span className="strong">{sanitizeLine(s.id)}</span>
+                  <span className="small muted ellipsis">{sanitizeLine(s.description)}</span>
+                </label>
+              ))}
+              {draft.skills
+                .filter((id) => !inventory.skills.some((s) => s.id === id))
+                .map((id) => (
+                  <div key={id} className="small tone-bad">
+                    {sanitizeLine(id)} is not installed
+                  </div>
+                ))}
+            </section>
+            <section className="card">
+              <h2>Connectors{from('connectors')}</h2>
+              <p className="small muted">Credentials this agent's tasks may use.</p>
+              {inventory.connectors.map((c) => (
+                <label key={c.id} className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={draft.connectors.includes(c.id)}
+                    onChange={() => edit({ connectors: toggle(draft.connectors, c.id) })}
+                  />
+                  <ConnectorLogo id={c.id} />
+                  <span className="strong">{connectorName(c.id)}</span>
+                  <span className="small muted">
+                    {c.connected === false ? 'not connected' : ''}
+                  </span>
+                </label>
+              ))}
+            </section>
+          </div>
+
+          <Workspaces
+            value={draft.workspaces}
+            dirs={inventory.workspaces.dirs}
+            shared={inventory.workspaces.shared}
+            label={from('workspaces')}
+            onChange={(workspaces) => edit({ workspaces })}
+          />
+
+          {highRiskIds.length > 0 && (
+            <section className="card">
+              <h2>High-risk operations{from('highRisk')}</h2>
+              <p className="small muted">
+                These wait for your approval. Tick one to let this agent's tasks do it without
+                asking.
+              </p>
+              {highRiskIds.map((id) => {
+                const global = fixed.highRiskGlobal?.includes(id);
+                return (
+                  <label key={id} className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={global || exempt.includes(id)}
+                      disabled={global}
+                      onChange={() => edit({ highRisk: { disable: toggle(exempt, id) } })}
+                    />
+                    <span className="mono">{id}</span>
+                    <span className="small muted">
+                      {global ? 'without asking for every agent (settings.yaml)' : ''}
+                    </span>
+                  </label>
+                );
+              })}
+            </section>
+          )}
+
+          <section className="card">
+            <h2>
+              Set in the agent file <span className="small muted normal">· read-only here</span>
+            </h2>
+            <dl className="facts">
+              {fixed.extends && (
+                <>
+                  <dt>Template</dt>
+                  <dd>{sanitizeLine(fixed.extends)}</dd>
+                </>
+              )}
+              <dt>Image</dt>
+              <dd>{sanitizeLine(fixed.image)}</dd>
+              <dt>Sandbox</dt>
+              <dd>{sanitizeLine(fixed.sandbox)}</dd>
+              <dt>Triggers</dt>
+              <dd>{fixed.triggers.length ? fixed.triggers.map(sanitizeLine).join(' · ') : '—'}</dd>
+              <dt>Approvals</dt>
+              <dd>
+                {Object.entries(fixed.approvals)
+                  .map(([k, v]) => `${k}: ${v}`)
+                  .join(' · ') || 'defaults'}
+              </dd>
+              <dt>Egress</dt>
+              <dd>
+                {fixed.egress === null ? 'any public host' : fixed.egress.join(', ') || 'none'}
+              </dd>
+            </dl>
+          </section>
+        </>
       )}
 
       <section className="card">
-        <h2>
-          Set in the agent file <span className="small muted normal">· read-only here</span>
-        </h2>
-        <dl className="facts">
-          {fixed.extends && (
-            <>
-              <dt>Template</dt>
-              <dd>{sanitizeLine(fixed.extends)}</dd>
-            </>
+        <h2>Delegation{from('delegates')}</h2>
+        <p className="small muted">
+          Choose which agents @{sanitizeLine(agentId)} may ask to do work on{' '}
+          {sanitizeLine(server.label)}. Each recipient keeps its own access and approval rules.
+        </p>
+        <DelegationChoices
+          agentId={agentId}
+          agents={inventory.agents}
+          labels={Object.fromEntries(
+            (inventory.peerAgents ?? []).map((a) => [
+              a.id,
+              `@${a.id.split('/')[1]} · ${a.machine}${a.online ? '' : ' (offline)'}`,
+            ]),
           )}
-          <dt>Image</dt>
-          <dd>{sanitizeLine(fixed.image)}</dd>
-          <dt>Sandbox</dt>
-          <dd>{sanitizeLine(fixed.sandbox)}</dd>
-          <dt>Delegates to</dt>
-          <dd>{fixed.delegates.length ? fixed.delegates.map((d) => '@' + d).join(', ') : '—'}</dd>
-          <dt>Triggers</dt>
-          <dd>{fixed.triggers.length ? fixed.triggers.map(sanitizeLine).join(' · ') : '—'}</dd>
-          <dt>Approvals</dt>
-          <dd>
-            {Object.entries(fixed.approvals)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join(' · ') || 'defaults'}
-          </dd>
-          <dt>Egress</dt>
-          <dd>{fixed.egress === null ? 'any public host' : fixed.egress.join(', ') || 'none'}</dd>
-        </dl>
+          value={draft.delegates}
+          legacy={fixed.delegates}
+          onChange={(delegates) => edit({ delegates })}
+        />
       </section>
 
       {review && (
@@ -327,6 +348,7 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
           ))}
         </section>
       )}
+      <DeleteAgentAction agentId={agentId} />
       <div className="settings-actions">
         <div className="row gap">
           {review ? (
@@ -372,6 +394,58 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+export function DelegationChoices({
+  agentId,
+  agents,
+  labels = {},
+  value,
+  legacy,
+  onChange,
+}: {
+  agentId: string;
+  agents: string[];
+  labels?: Record<string, string>;
+  value: string[] | undefined;
+  legacy: string[];
+  onChange(value: string[]): void;
+}) {
+  if (value === undefined)
+    return (
+      <p className="small muted">
+        Delegates to: {legacy.map((id) => `@${sanitizeLine(id)}`).join(', ') || 'none'}. Update this
+        machine’s daemon to edit delegation here.
+      </p>
+    );
+  const choices = [...new Set([...agents, ...value])].filter((id) => id !== agentId);
+  if (!choices.length)
+    return (
+      <p className="small muted">
+        Create another agent or join a peer machine to delegate work to it.
+      </p>
+    );
+  return (
+    <>
+      {choices.map((id) => {
+        const checked = value.includes(id);
+        return (
+          <label key={id} className="check-row">
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={!checked && value.length >= 50}
+              onChange={() => onChange(checked ? value.filter((d) => d !== id) : [...value, id])}
+            />
+            <span className="strong">{sanitizeLine(labels[id] ?? `@${id}`)}</span>
+            {!agents.includes(id) && (
+              <span className="small tone-warn">unavailable team member</span>
+            )}
+          </label>
+        );
+      })}
+    </>
   );
 }
 

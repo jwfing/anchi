@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { delegateRefSchema } from './agent-ref.ts';
 import { runtimeEventSchema } from './events.ts';
 
 const agentId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/);
@@ -104,7 +105,7 @@ export const teamDescribeSchema = z.strictObject({
   name: z.string().max(100),
   description: z.string().max(500),
   runtime: z.enum(['codex', 'claude-code', 'hermes']),
-  delegates: z.array(agentId).max(50),
+  delegates: z.array(delegateRefSchema).max(50),
   connectors: z.array(z.string().max(100)).max(50),
   skills: z.array(agentId).max(200),
 });

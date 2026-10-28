@@ -1,3 +1,4 @@
+import type { PeerTasks } from './peer-tasks.ts';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -74,6 +75,7 @@ const SHUTDOWN_SCAN_MS = 30_000;
 export const DELEGATION = { maxDepth: 3, maxChildren: 10, maxTreeTurns: 60 };
 
 export interface HubOptions {
+  peers?: () => PeerTasks;
   team?: () => TeamCoordinator;
   worker?: () => TeamWorker;
   layout: HomeLayout;
@@ -147,7 +149,7 @@ export class Hub extends EventEmitter<HubEvents> {
     super();
     this.log = opts.log ?? (() => {});
     this.tools = new ToolDispatcher({
-      agents: () => this.summaries(),
+      agents: () => [...this.summaries(), ...(this.opts.peers?.()?.agents() ?? [])],
       delegate: (parent, agent, target, text, key) =>
         this.delegate(parent, agent, target, text, key),
       sendTask: (id, text, key) => this.sendTask(id, text, key),
@@ -293,6 +295,7 @@ export class Hub extends EventEmitter<HubEvents> {
   // ── tasks ────────────────────────────────────────────────
 
   createTask(agentId: string, text: string, trigger = 'user'): TaskRow {
+    if (agentId.includes('/')) return this.opts.peers!().create(agentId, text);
     const state = this.state(agentId);
     if (!state.agent) throw new Error(`agent "${agentId}" has a config error: ${state.error}`);
     if (!text.trim()) throw new Error('empty task');
@@ -301,6 +304,7 @@ export class Hub extends EventEmitter<HubEvents> {
       this.opts.store.setExecution(task.id, state.agent.execution);
       task = this.getTask(task.id);
     }
+    task = this.opts.peers?.()?.root(task) ?? task;
     this.emit('task', task);
     this.enqueue(state, { taskId: task.id, text });
     return task;
@@ -313,6 +317,7 @@ export class Hub extends EventEmitter<HubEvents> {
         this.sendTask(taskId, text),
       );
     const task = this.getTask(taskId);
+    if (task.peer?.kind === 'mirror') return this.opts.peers!().send(task, text);
     const state = this.state(task.agentId);
     if (!state.agent) throw new Error(`agent "${task.agentId}" has a config error: ${state.error}`);
     if (!task.execution && state.agent.execution)
@@ -373,23 +378,27 @@ export class Hub extends EventEmitter<HubEvents> {
         throw new Error(`@${targetId} is already working on a task above this one`);
       }
     }
+    if (targetId.includes('/')) return this.opts.peers!().delegate(parent, targetId, text);
     const state = this.state(targetId);
     if (!state.agent) throw new Error(`agent "${targetId}" has a config error: ${state.error}`);
     if (!text.trim()) throw new Error('empty task');
-    let task = this.opts.store.createTask({
-      agentId: targetId,
-      trigger: 'delegation',
-      title: text,
-      parent,
+    return this.opts.store.transaction(() => {
+      let task = this.opts.store.createTask({
+        agentId: targetId,
+        trigger: 'delegation',
+        title: text,
+        parent,
+      });
+      if (state.agent?.execution) {
+        this.opts.store.setExecution(task.id, state.agent.execution);
+        task = this.getTask(task.id);
+      }
+      task = this.opts.peers?.()?.localChild(parent, task) ?? task;
+      this.emit('task', task);
+      this.record(parent, { type: 'notice', text: `↳ delegated to @${targetId} as ${task.id}` });
+      this.enqueue(state, { taskId: task.id, text });
+      return task;
     });
-    if (state.agent.execution) {
-      this.opts.store.setExecution(task.id, state.agent.execution);
-      task = this.getTask(task.id);
-    }
-    this.emit('task', task);
-    this.record(parent, { type: 'notice', text: `↳ delegated to @${targetId} as ${task.id}` });
-    this.enqueue(state, { taskId: task.id, text });
-    return task;
   }
 
   /**
@@ -408,7 +417,11 @@ export class Hub extends EventEmitter<HubEvents> {
     }
     if (!chain.length) return [];
     const root = chain[0]!.trigger === 'user' ? 'you' : chain[0]!.trigger;
-    const imported = chain[0]!.teamOrigin?.chain ?? [root];
+    const peer = chain[0]!.peer;
+    const imported =
+      peer?.kind === 'execution' && peer.parent
+        ? peer.lineage.slice(0, -1).map((ref) => `@${ref}`)
+        : (chain[0]!.teamOrigin?.chain ?? [root]);
     return [...imported, ...chain.map((t) => `@${t.agentId} (${t.id})`)];
   }
 
@@ -448,8 +461,14 @@ export class Hub extends EventEmitter<HubEvents> {
 
   cancelTask(taskId: string): void {
     const task = this.getTask(taskId);
+    if (task.peer?.kind === 'mirror') {
+      if (task.peer.observed) throw new Error('PEER_TASK_READ_ONLY');
+      this.opts.peers!().cancel(task);
+      return;
+    }
     // Delegated work goes with the task that asked for it.
     for (const child of this.opts.store.children(taskId)) {
+      if (child.peer?.kind === 'mirror' && child.peer.observed) continue;
       if (child.status === 'running' || child.status === 'queued') this.cancelTask(child.id);
     }
     // A task already finished keeps its result: cancelling it again is a no-op.
@@ -489,10 +508,22 @@ export class Hub extends EventEmitter<HubEvents> {
     const tasks = this.agentTaskTree(agentId);
     const ids = new Set(tasks.map((t) => t.id));
     const busy = tasks.filter((t) => t.status === 'running' || t.status === 'queued');
-    for (const t of busy) this.cancelTask(t.id);
+    for (const t of busy)
+      if (!(t.peer?.kind === 'mirror' && t.peer.observed)) this.cancelTask(t.id);
     const settle = (id: string) =>
       Promise.race([this.wait(id), new Promise((r) => setTimeout(r, 60_000).unref())]);
-    await Promise.all(busy.map((t) => settle(t.id)));
+    await Promise.all(
+      busy.filter((t) => !(t.peer?.kind === 'mirror' && t.peer.observed)).map((t) => settle(t.id)),
+    );
+    if (
+      busy.some(
+        (t) =>
+          t.peer?.kind === 'mirror' && ['queued', 'running'].includes(this.getTask(t.id).status),
+      )
+    )
+      throw new Error(
+        'Peer cancellation is still pending. Task records are retained; retry cleanup after the executor reconnects.',
+      );
     await Promise.all([...ids].map((id) => this.closeCell(id, `@${agentId} deleted`)));
     for (const t of tasks) {
       if (t.parentId && !ids.has(t.parentId)) {
@@ -512,6 +543,7 @@ export class Hub extends EventEmitter<HubEvents> {
    */
   retryTask(taskId: string, fresh = false): TaskRow {
     const task = this.getTask(taskId);
+    if (task.peer?.kind === 'mirror' && task.peer.observed) throw new Error('PEER_TASK_READ_ONLY');
     if (task.status !== 'failed' && task.status !== 'cancelled') {
       throw new Error(`${task.id} is ${task.status}; only failed or cancelled tasks are run again`);
     }
@@ -617,7 +649,7 @@ export class Hub extends EventEmitter<HubEvents> {
     this.emit('event', { taskId: task.id, agentId: task.agentId, seq, event });
   }
 
-  private finish(taskId: string, status: 'done' | 'failed' | 'cancelled', result?: string) {
+  finish(taskId: string, status: 'done' | 'failed' | 'cancelled', result?: string) {
     if (result !== undefined) this.opts.store.setResult(taskId, result);
     const row = this.opts.store.setStatus(taskId, status);
     this.emit('task', row);
@@ -688,6 +720,11 @@ export class Hub extends EventEmitter<HubEvents> {
         'failed',
         `this task tree used its ${DELEGATION.maxTreeTurns} turns`,
       );
+    }
+    try {
+      this.opts.peers?.()?.consume(task);
+    } catch (error) {
+      return this.finish(task.id, 'failed', (error as Error).message);
     }
     this.opts.store.countTurn(task.id);
     task = this.opts.store.setStatus(task.id, 'running');
@@ -1161,6 +1198,7 @@ export class Hub extends EventEmitter<HubEvents> {
   /** Marks tasks interrupted by a daemon restart as failed; their cells were reaped. */
   recoverInterrupted(): void {
     for (const task of this.opts.store.interrupted()) {
+      if (task.peer?.kind === 'mirror') continue;
       const text = this.opts.team?.().resumeText(task.id);
       if (text !== undefined) {
         this.opts.store.setStatus(task.id, 'queued');

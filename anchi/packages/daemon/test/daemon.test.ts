@@ -2605,6 +2605,114 @@ describe('agent settings', () => {
     }
   });
 
+  it('previews delegation through the CLI, requires confirmation and preserves other grants', async () => {
+    write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    write('agents/reviewer.yaml', 'runtime: codex\n');
+    await start();
+    const cli = (...args: string[]) =>
+      promisify(execFile)(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          join(import.meta.dirname, '../../tui/src/main.ts'),
+          '--server',
+          'local',
+          'agents',
+          'delegates',
+          'lead',
+          ...args,
+        ],
+        { env: { ...process.env, ANCHI_HOME: root } },
+      );
+    expect((await cli()).stdout).toContain('@dev');
+    expect((await cli('--allow', 'reviewer', '--preview')).stdout).toContain('dev, reviewer');
+    await expect(cli('--allow', 'reviewer')).rejects.toThrow(/--yes/);
+    expect((await cli()).stdout).not.toContain('@reviewer');
+    await cli('--allow', 'reviewer', '--yes');
+    expect((await cli()).stdout).toContain('@dev, @reviewer');
+    await cli('--revoke', 'reviewer', '--yes');
+    expect((await cli()).stdout.trim()).toBe('@dev');
+    await expect(cli('--allow', 'lead', '--yes')).rejects.toThrow();
+    await cli('--clear', '--yes');
+    expect((await cli()).stdout).toContain('no delegation allowed');
+  });
+
+  it('edits delegation only after a valid reviewed patch, including inherited revocation', async () => {
+    write('templates/team.yaml', 'runtime: codex\ndelegates: [dev]\n');
+    write('agents/lead.yaml', '# owner policy\nextends: team\n');
+    write('agents/reviewer.yaml', 'runtime: codex\n');
+    const { client } = await start();
+    const settings = await client.call('agents.settings', { agentId: 'lead' });
+    expect(settings.current.delegates).toEqual(['dev']);
+    expect(settings.inherited).toContain('delegates');
+    const original = readFileSync(join(root, 'agents/lead.yaml'), 'utf8');
+    for (const delegates of [['lead'], ['unknown']]) {
+      const preview = await client.call('agents.update', { agentId: 'lead', patch: { delegates } });
+      expect(preview.errors.length).toBeGreaterThan(0);
+      await expect(
+        client.call('agents.update', {
+          agentId: 'lead',
+          patch: { delegates },
+          apply: true,
+          base: preview.base,
+        }),
+      ).rejects.toThrow(/cannot save/);
+      expect(readFileSync(join(root, 'agents/lead.yaml'), 'utf8')).toBe(original);
+    }
+    for (const delegates of [
+      ['dev', 'dev'],
+      ['../dev'],
+      Array.from({ length: 51 }, (_, i) => `agent-${i}`),
+    ]) {
+      await expect(
+        client.call('agents.update', { agentId: 'lead', patch: { delegates } }),
+      ).rejects.toThrow(/invalid settings/);
+    }
+    const patch = { delegates: ['dev', 'reviewer'] };
+    const instruction = 'call anchi_delegate_task {"agent":"reviewer","task":"review"}';
+    const caller = await client.call('tasks.create', { agentId: 'lead', text: instruction });
+    const denied = await client.call('tasks.wait', { taskId: caller.id });
+    expect(JSON.parse(denied.result!)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('may not delegate'),
+    });
+    const preview = await client.call('agents.update', { agentId: 'lead', patch });
+    expect(preview).toMatchObject({ errors: [], applied: false });
+    expect(readFileSync(join(root, 'agents/lead.yaml'), 'utf8')).toBe(original);
+    await expect(
+      client.call('agents.update', {
+        agentId: 'lead',
+        patch,
+        apply: true,
+        base: 'stale',
+      }),
+    ).rejects.toThrow(/changed since you reviewed/);
+    await client.call('agents.update', { agentId: 'lead', patch, apply: true, base: preview.base });
+    expect((await client.call('agents.settings', { agentId: 'lead' })).current.delegates).toEqual([
+      'dev',
+      'reviewer',
+    ]);
+    await client.call('tasks.send', { taskId: caller.id, text: instruction });
+    const allowed = await client.call('tasks.wait', { taskId: caller.id });
+    expect(JSON.parse(allowed.result!)).toMatchObject({ ok: true, result: { agent: 'reviewer' } });
+    const clear = await client.call('agents.update', { agentId: 'lead', patch: { delegates: [] } });
+    await client.call('agents.update', {
+      agentId: 'lead',
+      patch: { delegates: [] },
+      apply: true,
+      base: clear.base,
+    });
+    expect((await client.call('agents.settings', { agentId: 'lead' })).current.delegates).toEqual(
+      [],
+    );
+    expect(readFileSync(join(root, 'agents/lead.yaml'), 'utf8')).toContain('delegates: []');
+    expect(readFileSync(join(root, 'agents/lead.yaml'), 'utf8')).toContain('# owner policy');
+    await client.call('tasks.send', { taskId: caller.id, text: instruction });
+    const revoked = await client.call('tasks.wait', { taskId: caller.id });
+    expect(JSON.parse(revoked.result!)).toMatchObject({ ok: false });
+  });
+
   it('shows settings and what exists, previews a patch and applies only the reviewed one', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
     const { client } = await start(60_000, undefined, workspaceTree());
@@ -2620,6 +2728,7 @@ describe('agent settings', () => {
       connectors: ['github'],
       workspaces: [],
       highRisk: { disable: [] },
+      delegates: [],
     });
     expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);

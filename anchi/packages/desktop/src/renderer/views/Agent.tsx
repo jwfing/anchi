@@ -79,14 +79,15 @@ export function AgentView({ agentId }: { agentId: string }) {
     >
       <main className="main">
         <div className="main-head">
-          <Avatar id={agent.id} size={36} />
+          <Avatar id={agent.peer?.agent ?? agent.id} size={36} />
           <div className="col grow min0">
             <span className="row min0">
               <span className="title ellipsis">
-                @{agent.id} <span className="muted normal">· {sanitizeLine(agent.name)}</span>
+                @{agent.peer?.agent ?? agent.id}{' '}
+                <span className="muted normal">· {sanitizeLine(agent.name)}</span>
               </span>
               <span className="tag tag-off server-tag" title="The server this agent runs on">
-                on {sanitizeLine(agent.execution?.server ?? server.label)}
+                on {sanitizeLine(agent.peer?.machine ?? agent.execution?.server ?? server.label)}
               </span>
             </span>
             <span className="small muted ellipsis">
@@ -103,7 +104,7 @@ export function AgentView({ agentId }: { agentId: string }) {
                   ? `delegates to ${agent.delegates.map((d) => '@' + d).join(', ')}`
                   : '',
                 agent.triggers ? count(agent.triggers, 'trigger') : '',
-                `up to ${count(agent.maxTasks, 'task')}`,
+                agent.peer ? '' : `up to ${count(agent.maxTasks, 'task')}`,
               ]
                 .filter(Boolean)
                 .join(' · ')}
@@ -134,7 +135,15 @@ export function AgentView({ agentId }: { agentId: string }) {
         )}
 
         {tab === 'settings' ? (
-          <AgentSettingsView agentId={agent.id} />
+          agent.peer ? (
+            <div className="pad">
+              Runtime, connectors, skills and delegation belong to{' '}
+              {sanitizeLine(agent.peer.machine)}. Open that machine in Settings to edit this agent.
+              Task history here contains work submitted through {sanitizeLine(server.label)}.
+            </div>
+          ) : (
+            <AgentSettingsView agentId={agent.id} />
+          )
         ) : (
           <>
             <div className="scroll conversation agent-conversation">
@@ -154,9 +163,13 @@ export function AgentView({ agentId }: { agentId: string }) {
             </div>
 
             <Composer
-              label={`New task for @${agent.id}`}
-              placeholder={`Give @${agent.id} a new task…`}
-              hint={`New task, new session · ${agent.running} running · ${agent.queued} queued (up to ${agent.maxTasks} at once)`}
+              label={`New task for @${agent.peer?.agent ?? agent.id}`}
+              placeholder={`Give @${agent.peer?.agent ?? agent.id} a new task…`}
+              hint={
+                agent.peer
+                  ? `Runs on ${sanitizeLine(agent.peer.machine)} · history submitted through ${sanitizeLine(server.label)}`
+                  : `New task, new session · ${agent.running} running · ${agent.queued} queued (up to ${agent.maxTasks} at once)`
+              }
               disabled={!!agent.error}
               onSend={async (text) => {
                 const task = await act(() => call('tasks.create', { agentId, text }));

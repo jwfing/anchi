@@ -19,7 +19,7 @@ export interface AgentPatch {
   workspaces?: Workspace[];
   /** Written as `highRisk: { disable: [...] }`; an empty list removes it. */
   highRisk?: { disable: HighRiskId[] };
-  /** Set by the daemon only (removing a deleted agent); clients cannot send it. */
+  /** Replaces the delegation allowlist, including when inherited from a template. */
   delegates?: string[];
   /** Set by the daemon only (allowing a refused host); never emptied into open egress. */
   egress?: string[];

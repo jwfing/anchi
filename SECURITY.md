@@ -29,6 +29,21 @@ configuration, and sends no host credentials. SSH authentication failures do not
 installation. This first-time path refuses configured servers with a missing bridge, except
 an interrupted initialization of the same version before guest services were installed.
 
+Desktop agent deletion requires the exact agent id and a native confirmation on the owning
+machine's pinned connection. The main process reads the deletion preview itself and checks it
+again after confirmation; a changed preview or connection refuses the write. Unknown fields,
+invalid ids, a mismatched confirmation and the built-in builder are refused before deletion.
+The window cannot supply paths or a force flag. The existing daemon deletion removes the
+agent and its task tree, cancels active tasks, cleans delegation references and purges the VM
+home, sessions, skills and policy; workspaces and audit logs remain. Partial cleanup is reported.
+
+The desktop settings editor and Agent builder require native confirmation before adding
+delegation recipients. The dialog identifies the source agent, recipients and machine, and
+the pending write stays pinned to that connection. The daemon rejects unknown recipients,
+self-delegation, duplicate entries and stale reviewed files. Emptying an allowlist overrides
+inherited grants. A delegation grant does not change the recipient's connector approvals or
+approve a pending write; the coordinator and execution node still enforce their allowlists.
+
 ## Cross-server teams
 
 A team coordinator may execute a logical member as an existing agent on a saved remote
@@ -193,3 +208,27 @@ Host and VM administrators can access trusted components. nspawn shares the gues
 Use [GitHub private vulnerability reporting](https://github.com/jwfing/anchi/security/advisories/new) to send a report to the maintainer. The repository has no dedicated public security email or bug bounty program. Do not post real tokens, mail, credential-file contents or directly usable private attack material in public issues.
 
 Include the affected version, environment, minimal synthetic reproduction, expected boundary and observed behavior. Fixes involving approval, credential reads, process escape or egress bypass require regression coverage. See the [security foundation](docs/SECURITY_FOUNDATION.md) for deployment details.
+
+
+### Peer daemon trust
+
+Peer enrollment joins owner-controlled daemons into one trust domain. Every enrolled daemon
+may assign work, relay human approvals for its own task subtrees, introduce other signed members
+and propagate revocations. Only enroll machines whose owner and host you trust. Agent cells
+are outside that domain: they cannot enroll peers, choose transport endpoints, assert caller
+identity or make approval decisions. Every delegation hop still requires the source agent's
+allowlist and keeps the destination's local connector and approval policy.
+
+Peers authenticate with mutually pinned public keys over TLS 1.3 before RPC parsing. Signed,
+versioned agent snapshots carry metadata only. Agent generations prevent a recreated name from
+inheriting an old cross-machine grant. The peer method allowlist excludes owner administration,
+vault access and arbitrary RPC forwarding. Private keys remain on each host with 0600 access;
+connector credentials, runtime sessions and audit logs are not synchronized.
+
+Task requests bind to the authenticated immediate parent, global lineage and reserved turn
+range. Durable receipts prevent dispatch replay from creating a second cell; cancellation
+records also cover requests not yet received. Approval routes bind to that caller's exact task
+subtree and the executor's current pending approval. Network partitions delay results, human
+decisions and cancellation; they do not authorize retries of external writes or expand access.
+Revocations propagate on reconnection and do not terminate work already executing on an isolated
+or removed member. See [Equal peer teams](docs/REMOTE_SERVER.md#equal-peer-teams).

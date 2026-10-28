@@ -24,6 +24,7 @@ export interface SettingsState {
   promptText: string;
   skills: string[];
   connectors: string[];
+  delegates: string[];
   workspaces: WorkspaceSetting[];
   /** High-risk ids this agent does without approval. */
   highRisk: string[];
@@ -42,7 +43,7 @@ export const MODEL = new RegExp(`^$|${MODEL_ID.source}`);
 export type SettingsRow =
   | { kind: 'header'; text: string }
   | {
-      kind: 'field' | 'skill' | 'connector' | 'workspace' | 'highRisk';
+      kind: 'field' | 'skill' | 'connector' | 'delegate' | 'workspace' | 'highRisk';
       id: string;
       label: string;
       mark: string;
@@ -59,6 +60,7 @@ export const initialSettings = (data: AgentSettings): SettingsState => ({
   promptText: data.current.prompt.text,
   skills: [...data.current.skills],
   connectors: [...data.current.connectors],
+  delegates: [...(data.current.delegates ?? data.fixed.delegates)],
   workspaces: data.current.workspaces.map((w) => ({ ...w })),
   highRisk: [...data.current.highRisk.disable],
 });
@@ -84,6 +86,31 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
     note,
   });
   const runtime = inv.runtimes.find((r) => r.id === state.runtime)?.connected;
+  const delegates: SettingsRow[] = [
+    {
+      kind: 'header',
+      text: `DELEGATION${inherited('delegates', JSON.stringify(state.delegates) !== JSON.stringify(cur.delegates))}`,
+    },
+  ];
+  if (cur.delegates === undefined) {
+    delegates.push({
+      kind: 'header',
+      text: `  ${data.fixed.delegates.join(', ') || 'none'} · update this daemon to edit delegation`,
+    });
+  } else {
+    for (const id of new Set([...inv.agents, ...state.delegates])) {
+      if (id === data.agentId) continue;
+      delegates.push({
+        kind: 'delegate',
+        id,
+        label: inv.peerAgents?.find((a) => a.id === id)
+          ? `@${id.split('/')[1]} · ${inv.peerAgents.find((a) => a.id === id)!.machine}`
+          : `@${id}`,
+        mark: state.delegates.includes(id) ? '[x]' : '[ ]',
+        note: inv.agents.includes(id) ? '' : 'missing agent',
+      });
+    }
+  }
   if (data.fixed.execution)
     return [
       { kind: 'header', text: 'EXECUTION NODE' },
@@ -97,12 +124,13 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
       },
       {
         kind: 'header',
-        text: `Team delegates: ${data.fixed.delegates.join(', ') || 'none'} (also grant them on the execution profile)`,
+        text: 'The execution profile must also grant the selected team delegates.',
       },
       {
         kind: 'header',
         text: 'Use Agent builder to change this team member or its execution location.',
       },
+      ...delegates,
     ];
   const rows: SettingsRow[] = [
     { kind: 'header', text: 'GENERAL' },
@@ -183,7 +211,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
       note: missing ? 'not installed' : s.description || s.name,
     });
   }
-  rows.push({ kind: 'header', text: 'CONNECTORS' });
+  rows.push(...delegates, { kind: 'header', text: 'CONNECTORS' });
   const known = new Map(inv.connectors.map((c) => [c.id, c.connected]));
   for (const id of CONNECTORS) {
     const connected = known.get(id);
@@ -251,7 +279,6 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
   if (f.extends) fixed('template', f.extends);
   fixed('image', f.image);
   fixed('sandbox', f.sandbox);
-  fixed('delegates', f.delegates.join(', ') || 'none');
   const approvals = Object.entries(f.approvals).map(([c, m]) => `${c}: ${m}`);
   fixed('approvals', approvals.join(', ') || 'none');
   for (const [id, what] of [
@@ -302,6 +329,7 @@ export function toggleSetting(state: SettingsState, row: SettingsRow): SettingsS
     list.includes(row.id) ? list.filter((x) => x !== row.id) : [...list, row.id];
   if (row.kind === 'skill') return { ...state, skills: flip(state.skills) };
   if (row.kind === 'connector') return { ...state, connectors: flip(state.connectors) };
+  if (row.kind === 'delegate') return { ...state, delegates: flip(state.delegates) };
   if (row.kind === 'highRisk') return { ...state, highRisk: flip(state.highRisk) };
   const w = state.workspaces.find((x) => x.path === row.id);
   if (!w) return { ...state, workspaces: [...state.workspaces, { path: row.id, mode: 'ro' }] };
@@ -333,6 +361,9 @@ export function settingsPatch(data: AgentSettings, state: SettingsState): AgentP
     if (Object.keys(prompt).length) patch.prompt = prompt;
   }
   if (!same(sorted(state.skills), sorted(data.current.skills))) patch.skills = state.skills;
+  if (cur.delegates !== undefined && !same(sorted(state.delegates), sorted(cur.delegates))) {
+    patch.delegates = state.delegates;
+  }
   if (!same(sorted(state.connectors), sorted(data.current.connectors))) {
     patch.connectors = CONNECTORS.filter((c) => state.connectors.includes(c));
   }

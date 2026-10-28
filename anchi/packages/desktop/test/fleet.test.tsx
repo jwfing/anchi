@@ -125,3 +125,32 @@ describe('all-machine desktop', () => {
     ]);
   });
 });
+
+it('discovers a third machine through one connection and deduplicates directly connected peers', () => {
+  const peer = (node: string, machine: string): AgentSummary => ({
+    ...agent,
+    id: `${node}/dev/${'c'.repeat(16)}`,
+    peer: { node, agent: 'dev', machine, online: true },
+  });
+  const cloud = 'a'.repeat(32);
+  const dora = 'b'.repeat(32);
+  const out = renderToStaticMarkup(
+    <TeamList
+      fleet={{
+        local: { ...EMPTY_MODEL, agents: [agent, peer(cloud, 'newuser'), peer(dora, 'dora')] },
+        newuser: { ...EMPTY_MODEL, agents: [{ ...agent, node: cloud }, peer(dora, 'dora')] },
+      }}
+      connections={[
+        { name: 'local', label: 'local', status: 'connected' },
+        { name: 'newuser', label: 'newuser', status: 'connected' },
+      ]}
+      selected="local"
+      view={{ kind: 'agent', agentId: peer(dora, 'dora').id }}
+      onSelect={() => {}}
+      onBuilder={() => {}}
+    />,
+  );
+  expect(out).toContain('TEAM · 3');
+  expect(out.match(/aria-label="@dev on dora"/g)).toHaveLength(1);
+  expect(out.match(/aria-label="@dev on newuser"/g)).toHaveLength(1);
+});

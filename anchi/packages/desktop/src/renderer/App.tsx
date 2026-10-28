@@ -3,6 +3,7 @@ import type { Notifications } from '@anchi/protocol';
 import {
   createContext,
   type Dispatch,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
@@ -24,6 +25,7 @@ import {
 } from './model.ts';
 import { Avatar, Icon } from './ui.tsx';
 import { AgentView } from './views/Agent.tsx';
+import { DeleteAgentDialog } from './views/DeleteAgent.tsx';
 import { ApprovalsView } from './views/Approvals.tsx';
 import { BuilderView } from './views/Builder.tsx';
 import { SettingsView } from './views/Settings.tsx';
@@ -54,6 +56,7 @@ export interface AppContext {
   /** Runs a daemon action, showing its error instead of throwing. */
   act<T>(fn: () => Promise<T>, done?: string): Promise<T | undefined>;
   setView(view: View): void;
+  deleteAgent(agentId: string): void;
 }
 
 /** Exported for tests, which give a view its own context. */
@@ -309,23 +312,47 @@ export function TeamList({
   onSelect(server: string, agentId: string): void;
   onBuilder(server: string): void;
 }) {
-  const total = Object.values(fleet).reduce(
-    (n, m) => n + m.agents.filter((a) => a.id !== BUILDER).length,
-    0,
+  const groups = connections.map((server) => ({
+    server,
+    via: server.name,
+    model: fleet[server.name] ?? EMPTY_MODEL,
+    agents: (fleet[server.name]?.agents ?? []).filter((a) => a.id !== BUILDER && !a.peer),
+  }));
+  const direct = new Set(
+    groups
+      .filter((g) => g.server.status === 'connected')
+      .flatMap((g) => g.agents.map((a) => a.node).filter(Boolean)),
   );
+  const seen = new Set<string>();
+  for (const source of [...connections].sort(
+    (a, b) => Number(b.name === selected) - Number(a.name === selected),
+  )) {
+    const model = fleet[source.name] ?? EMPTY_MODEL;
+    if (source.status !== 'connected') continue;
+    for (const agent of model.agents) {
+      const peer = agent.peer;
+      if (!peer || direct.has(peer.node) || seen.has(peer.node)) continue;
+      seen.add(peer.node);
+      groups.push({
+        server: {
+          name: `peer:${peer.node}`,
+          label: peer.machine,
+          status: peer.online ? 'connected' : 'error',
+        },
+        via: source.name,
+        model,
+        agents: model.agents.filter((a) => a.peer?.node === peer.node),
+      });
+    }
+  }
+  const total = groups.reduce((n, g) => n + g.agents.length, 0);
   return (
     <>
       <div className="section-label">TEAM · {total}</div>
-      {connections.map((server) => {
-        const model = fleet[server.name] ?? EMPTY_MODEL;
-        const agents = model.agents.filter((a) => a.id !== BUILDER);
-        const proposals = Object.keys(model.proposals).length;
+      {groups.map(({ server, via, model, agents }) => {
+        const proposals = server.name.startsWith('peer:') ? 0 : Object.keys(model.proposals).length;
         return (
-          <section key={server.name} aria-label={`Agents on ${server.label}`}>
-            <div className="section-label row gap">
-              <span className={`dot dot-${server.status}`} />
-              {sanitizeLine(server.label)} · {server.status}
-            </div>
+          <TeamGroup key={server.name} server={server} count={agents.length}>
             {!!proposals && (
               <button className="btn btn-small" onClick={() => onBuilder(server.name)}>
                 Proposals on {sanitizeLine(server.label)} ({proposals})
@@ -333,25 +360,26 @@ export function TeamList({
             )}
             {agents.map((agent) => {
               const activity = agentActivity(model, agent);
-              const active =
-                selected === server.name && view.kind === 'agent' && view.agentId === agent.id;
+              const active = selected === via && view.kind === 'agent' && view.agentId === agent.id;
               return (
                 <button
                   type="button"
                   key={agent.id}
                   className={`agent-row ${active ? 'selected' : ''}`}
                   aria-current={active}
-                  aria-label={`@${agent.id} on ${server.label}`}
-                  onClick={() => onSelect(server.name, agent.id)}
+                  aria-label={`@${agent.peer?.agent ?? agent.id} on ${server.label}`}
+                  onClick={() => onSelect(via, agent.id)}
                 >
                   <span className="avatar-wrap">
-                    <Avatar id={agent.id} />
+                    <Avatar id={agent.peer?.agent ?? agent.id} />
                     <span
                       className={`presence presence-${server.status === 'connected' ? activity.tone : 'idle'}`}
                     />
                   </span>
                   <span className="col grow min0">
-                    <span className="strong ellipsis">@{sanitizeLine(agent.id)}</span>
+                    <span className="strong ellipsis">
+                      @{sanitizeLine(agent.peer?.agent ?? agent.id)}
+                    </span>
                     <span className="small muted ellipsis">
                       {sanitizeLine(
                         agent.execution
@@ -376,10 +404,60 @@ export function TeamList({
                   : 'Agents appear when this machine connects.'}
               </p>
             )}
-          </section>
+          </TeamGroup>
         );
       })}
     </>
+  );
+}
+
+function TeamGroup({
+  server,
+  count,
+  children,
+}: {
+  server: ServerState;
+  count: number;
+  children: ReactNode;
+}) {
+  const key = `anchi.team.hostCollapsed:${server.name}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(key) !== '1';
+    } catch {
+      return true;
+    }
+  });
+  return (
+    <details
+      className="team-group"
+      open={open}
+      aria-label={`Agents on ${server.label}`}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        setOpen(next);
+        try {
+          if (next) localStorage.removeItem(key);
+          else localStorage.setItem(key, '1');
+        } catch {
+          // Storage refused: the preference lasts until this list unmounts.
+        }
+      }}
+    >
+      <summary className="team-host" title={server.name}>
+        <Icon name="chevron" size={14} className="team-chevron" />
+        <span className={`dot dot-${server.status}`} />
+        <span className="col grow min0">
+          <span className="strong ellipsis">{sanitizeLine(server.label)}</span>
+          <span className="small muted">{server.status}</span>
+        </span>
+        <span className="team-host-count">
+          {count}
+          <span className="sr-only"> agents</span>
+        </span>
+      </summary>
+      {children}
+    </details>
   );
 }
 
@@ -402,6 +480,7 @@ function ScopedView({
   view: View;
   setView(view: View): void;
 }) {
+  const [deleting, setDeleting] = useState<string>();
   const call = useMemo(() => machineCall(server.name), [server.name]);
   const active = useRef(true);
   useEffect(() => {
@@ -461,6 +540,7 @@ function ScopedView({
     loadEvents,
     act,
     setView: navigate,
+    deleteAgent: setDeleting,
   };
   const team = model.agents.filter((a) => a.id !== BUILDER);
   return (
@@ -498,6 +578,20 @@ function ScopedView({
           )}
         </div>
       </div>
+      {deleting && (
+        <DeleteAgentDialog
+          agentId={deleting}
+          onClose={() => {
+            setDeleting(undefined);
+            if (
+              view.kind === 'agent' &&
+              view.agentId === deleting &&
+              !model.agents.some((a) => a.id === deleting)
+            )
+              navigate({ kind: 'builder' });
+          }}
+        />
+      )}
     </Ctx.Provider>
   );
 }

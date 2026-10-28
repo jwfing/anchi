@@ -80,7 +80,7 @@ An agent is a YAML file. Fields:
   { type: github-issues, query: 'repo:o/r is:issue is:open label:agent' }, text: ...,
   every?: minutes } where text may use {title}, {url} and {id}. Outside content then reaches
   the agent: tell the user, who may want approvals for its writes.
-- delegates: ids of agents this agent may hand tasks to (optional).
+- delegates: exact inventory ids of agents this agent may hand tasks to (optional). Peer ids use node/agent/generation; copy them exactly. Peer members run with their own machine’s runtime, credentials and approval policy. Do not create an execution wrapper for a discovered peer.
 - maxTasks: how many of its tasks run at the same time (optional, 1-10, default 3); the others
   queue. Omit it unless the user wants another limit; 1 only when the user says the agent's
   tasks must not overlap.
@@ -138,9 +138,9 @@ skills: [code-review, test]
 \`\`\`
 
 A patch may set name, description, runtime, model, effort, prompt ({ mode, text }), skills,
-connectors, workspaces and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
+connectors, delegates, workspaces and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
 the entries to keep. An empty model, effort or description ('') removes it. For any other field
-(triggers, approvals, egress, delegates, image), send a complete anchi-agent block with the
+(triggers, approvals, egress, image), send a complete anchi-agent block with the
 whole agent instead.
 The inventory shows each agent's file when the user's message names its id; otherwise it
 shows a summary, so ask the user to name the agent if you need to see its prompt.`;

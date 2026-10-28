@@ -4,11 +4,21 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- Equal peer daemons discover the complete agent directory through mutually authenticated TLS and delegate directly between machines. Configure **Settings → Peer team** or `anchi team network`, join one trusted member, then select remote recipients in Delegation. Task receipts, results, approvals and pending cancellations survive origin reconnects; every machine keeps its own credentials and execution policy. Requires reachable addresses (for example a VPN), upgraded daemons and fresh tasks; no built-in relay or NAT traversal.
+
+- Delete an agent from its desktop Settings after reviewing its tasks, files and delegation references, typing its id and confirming the machine in a native dialog. Cleanup warnings remain visible after the agent leaves Team, with a way to retry remaining cleanup. Workspaces and audit logs are retained.
+
+- Edit delegation in an agent's desktop Settings or TUI settings panel, including team members running on another node. New grants require desktop native confirmation; the recipient keeps its own approval rules. The CLI adds `anchi agents delegates <id>` with `--allow`, `--revoke`, `--clear` and `--preview`. Update the daemon on the machine being configured to enable these editors.
+
 ### Fixed
 
 - Adding a fresh remote machine in the desktop app offers to install Anchi before connecting. Saved machines without `anchi-bridge` show **Initialize** instead of endlessly retrying; Linux x86_64 servers need no source checkout or preinstalled Node. Installation uses the app's matching release and leaves credentials on their machines.
 
 ### Changed
+
+- The desktop Team list lets you collapse or expand each host's agents. Headers keep the machine's connection state and agent count visible, and the app remembers each host's choice across restarts.
 
 - The website hero focuses on an agent team for core business, access controls and human approval, with one desktop install command. Setup details and download alternatives remain in the guides.
 - The README, setup guide and release-note install command include the desktop app with `--desktop`. The website recommends the same command and explains how to open the GUI; terminal-only installation remains available in the setup guide.

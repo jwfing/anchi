@@ -23,7 +23,7 @@ import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
 import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
 import { TaskTurn } from '../src/renderer/views/Agent.tsx';
-import { settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
+import { DelegationChoices, settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
 import {
   codexLoginHelp,
@@ -58,7 +58,7 @@ describe('bridge', () => {
     ).rejects.toThrow('cancelled');
     expect(calls).toEqual(['builder.proposal']);
   });
-  it('lets the window call what it shows, and nothing that deletes, resets or stops', () => {
+  it('allows the explicit agent deletion flow while blocking task deletion, reset and shutdown', () => {
     expect(checkCall('tasks.create', { agentId: 'dev', text: 'x' }).method).toBe('tasks.create');
     expect(
       checkCall('team.preview', { agentId: 'dev', execution: { server: 'cloud', agent: 'coder' } })
@@ -81,7 +81,6 @@ describe('bridge', () => {
       'team.poll',
       'setup.reset',
       'setup.run',
-      'agents.delete',
       'tasks.delete',
       'agents.allowHost',
       // Only the main process imports a Google client, from a file the user picked.
@@ -92,9 +91,10 @@ describe('bridge', () => {
     ]) {
       expect(() => checkCall(method, {}), String(method)).toThrow(/does not call/);
     }
-    expect([...DESKTOP_METHODS].filter((m) => /delete|reset|shutdown|setup\.run/.test(m))).toEqual(
-      [],
-    );
+    expect([...DESKTOP_METHODS].filter((m) => /delete|reset|shutdown|setup\.run/.test(m))).toEqual([
+      'agents.deletePreview',
+      'agents.delete',
+    ]);
   });
 
   it('takes only plain objects as parameters', () => {
@@ -741,6 +741,7 @@ describe('servers', () => {
         loadEvents: () => {},
         act: async (fn) => fn(),
         setView: () => {},
+        deleteAgent: () => {},
       };
       const out = renderToStaticMarkup(
         <Ctx.Provider value={ctx}>
@@ -846,6 +847,82 @@ describe('getting started', () => {
 });
 
 describe('approval choices', () => {
+  it('requires native confirmation for builder delegation grants too', async () => {
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      if (method === 'builder.proposal')
+        return {
+          agentId: 'lead',
+          kind: 'update',
+          agentYaml: 'runtime: codex\ndelegates: [dev, reviewer]\n',
+        };
+      return { fixed: { delegates: ['dev'] } };
+    };
+    await expect(
+      guardedCall('builder.apply', { proposalId: 'p-1' }, read, async (q) => {
+        expect(q.detail).toContain('delegate tasks to @reviewer');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(sent).toEqual(['builder.proposal', 'agents.settings']);
+  });
+
+  it('shows recipients excluding self and explains when the remote daemon needs updating', () => {
+    const props = {
+      agentId: 'lead',
+      agents: ['lead', 'dev', 'reviewer'],
+      legacy: ['dev'],
+      onChange: () => {},
+    };
+    const html = renderToStaticMarkup(<DelegationChoices {...props} value={['dev', 'gone']} />);
+    expect(html).not.toContain('@lead');
+    expect(html).toContain('@reviewer');
+    expect(html.match(/checked=""/g)).toHaveLength(2);
+    expect(html).toContain('unavailable team member');
+    const old = renderToStaticMarkup(<DelegationChoices {...props} value={undefined} />);
+    expect(old).toContain('Update this machine');
+    expect(old).not.toContain('checkbox');
+  });
+
+  it('refuses new delegation grants when the native confirmation is cancelled', async () => {
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return { current: { delegates: ['dev'], connectors: [], workspaces: [] } };
+    };
+    await expect(
+      guardedCall(
+        'agents.update',
+        {
+          agentId: 'project-manager',
+          patch: { delegates: ['dev', 'pr-approve'] },
+          apply: true,
+        },
+        read,
+        async (q) => {
+          expect(q.detail).toContain('delegate tasks to @pr-approve');
+          return false;
+        },
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(sent).toEqual(['agents.settings']);
+    sent.length = 0;
+    await guardedCall(
+      'agents.update',
+      {
+        agentId: 'project-manager',
+        patch: { delegates: [] },
+        apply: true,
+      },
+      read,
+      async () => {
+        throw new Error('revocation must not ask for more access');
+      },
+    );
+    expect(sent).toEqual(['agents.settings', 'agents.update']);
+  });
+
   const recorder = () => {
     const sent: string[] = [];
     return {
@@ -944,4 +1021,49 @@ describe('approval choices', () => {
     await guardedCall('agents.update', update([]), recorder().read, ask);
     expect(asked).toHaveLength(1);
   });
+});
+
+it('requires native confirmation before trusting a peer or opening its listener', async () => {
+  const sent: string[] = [];
+  const read = async (method: string) => {
+    sent.push(method);
+    return null;
+  };
+  const config = {
+    label: 'local',
+    listen: '127.0.0.1',
+    port: 9847,
+    address: 'tls://127.0.0.1:9847',
+  };
+  await expect(
+    guardedCall('peers.configure', config, read, async (q) => {
+      expect(q.detail).toContain('127.0.0.1:9847');
+      return false;
+    }),
+  ).rejects.toThrow('cancelled');
+  await expect(
+    guardedCall(
+      'peers.admit',
+      {
+        record: {
+          node: 'a'.repeat(32),
+          label: 'newuser',
+          address: config.address,
+          certificate: 'public certificate',
+          revision: 1,
+          agents: [],
+          signature: 'signature',
+        },
+      },
+      read,
+      async (q) => {
+        expect(q.detail).toContain('introduce or revoke');
+        return false;
+      },
+    ),
+  ).rejects.toThrow('cancelled');
+  expect(sent).toEqual([]);
+  expect(() =>
+    checkCall('peers.configure', { ...config, address: 'https://example.com' }),
+  ).toThrow();
 });

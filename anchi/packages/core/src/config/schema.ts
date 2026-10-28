@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { executionSchema } from '@anchi/protocol';
+import { delegateRefSchema, executionSchema } from '@anchi/protocol';
 import { parseCron } from '../cron.ts';
 
 export const idSchema = z
@@ -217,7 +217,7 @@ export const agentLayerSchema = z.strictObject({
   network: z.literal('proxy').optional(),
   sandbox: sandboxSchema.optional(),
   /** Agents this agent may delegate tasks to. */
-  delegates: z.array(idSchema).max(50).optional(),
+  delegates: z.array(delegateRefSchema).max(50).optional(),
   triggers: z.array(triggerSchema).max(20).optional(),
   /**
    * Skill ids in `skills/`, copied into the cell at task start. The bundle's size and file count,
@@ -268,7 +268,7 @@ export const resolvedAgentSchema = z
     image: idSchema.default(BASE_IMAGE),
     network: z.literal('proxy').default('proxy'),
     sandbox: sandboxSchema.default('cell'),
-    delegates: z.array(idSchema).default([]),
+    delegates: z.array(delegateRefSchema).default([]),
     triggers: z.array(triggerSchema).default([]),
     skills: z.array(idSchema).default([]),
     approvals: approvalsSchema.default({}),
