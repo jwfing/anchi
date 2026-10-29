@@ -9,7 +9,6 @@ Open requests and known gaps of the secured agent team that are not planned into
 | R1 | Preview the files an agent changed, through a plugin | Not started; design questions below |
 | R3 | A clean start for a new task | Partly: **^X n** starts a new session; all of an agent's tasks share its work directory |
 | G3 | Live acceptance with real accounts (phase 3 P9) | A Claude Code subscription token is connected on the maintainer's VM, so the Claude acceptance can run; still needed: a Drive sign-in again, an AWS bucket for `aws-chunked` uploads, a live Hermes turn against a real OpenAI-compatible endpoint, and PostHog, Sentry, Firecrawl, Figma and Discord (0.3.1), which have not been exercised against live accounts |
-| G6 | Claude subscription limits | The proxy keeps `anthropic-ratelimit-*` headers, but which ones a Claude subscription returns is not verified against live traffic yet (a Claude token is connected now; run with G3) |
 | G8 | Large high-risk pushes | A streamed push to `main`, or one deleting a branch, is refused rather than held: approving would need the push to be repeated after approval |
 
 ## R1 — File preview through a plugin
@@ -58,3 +57,4 @@ Open requests and known gaps of the secured agent team that are not planned into
 | R8 | Each task's external access, for the user to see: hosts, injections, credentials the cell sent, refusals, held writes, bridge calls | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
 | G2 | Linux workspaces: 9p share mapped to the cell agent with bindfs in the VM; verified on a Linux host (qemu) | [Linux differences](../GETTING_STARTED.md#linux-differences) |
 | R9 | Token use per turn with totals by agent, model, runtime and day; subscription limits read by the proxy (Codex verified) | [Access and usage](../AGENT_TEAM.md#access-and-usage) |
+| G6 | Claude subscription limits: a subscription returns the unified 5-hour and 7-day `anthropic-ratelimit-unified-*` headers, seen in live traffic on 2026-10-29 | [Access and usage](../AGENT_TEAM.md#access-and-usage) |

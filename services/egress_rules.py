@@ -577,6 +577,22 @@ def verify_requests(connector, credential):
     return out
 
 
+# Where Codex's own `/status` reads the plan's limits; the proxy asks it when a runtime has been idle.
+CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
+
+
+def codex_usage_request(credential):
+    """(method, url, headers, body) of the read-only call for Codex's current limits."""
+    rule = next(r for r in RULES if r.name == 'codex')
+    headers = {'user-agent': 'anchi-egress-quota', 'accept': 'application/json', 'originator': 'codex_cli_rs'}
+    return (
+        'GET',
+        CODEX_USAGE_URL,
+        apply(Decision('inject', rule), 'GET', CODEX_USAGE_URL, headers, b'', credential),
+        b'',
+    )
+
+
 # A GitHub login: letters, digits and inner hyphens, at most 39 characters.
 GITHUB_LOGIN = re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?')
 # Characters git, systemd-run's environment expansion and its specifiers would read.

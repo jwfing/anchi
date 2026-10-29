@@ -16,6 +16,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- Codex's subscription limits show on the Usage screen while Codex is idle: when they are missing or more than five minutes old, the egress proxy asks Codex's usage endpoint with the stored login (at most every five minutes). Codex's WebSocket handshake no longer records its turn state as a limit, its `x-codex-*` limit headers are shown as windows like the stream's, and a rate-limit message about another metered limit (such as `codex_other`) no longer replaces Codex's own.
 - A connected runtime with no limits seen yet (for example Codex) now shows "no data yet" on the Usage screen instead of being absent.
 - Subscription limits on the Usage screen survive a proxy or VM restart and an idle runtime: the egress proxy saves the last limits it saw per runtime and loads them at startup.
 

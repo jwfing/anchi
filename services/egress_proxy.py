@@ -17,6 +17,7 @@ import grp
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -88,11 +89,20 @@ CREDENTIAL_ALERTS_MAX = 20
 APPROVALS_PENDING_MAX = 32
 # Rate-limit and usage information that subscription responses carry, by injection rule. Only
 # headers with these prefixes are kept; their values are numbers and times, never credentials.
-QUOTA_HEADERS = {'codex': ('x-codex-',), 'anthropic': ('anthropic-ratelimit-',)}
+# Codex's other x-codex-* headers (turn state, promotions) are not limits and are left out.
+QUOTA_HEADERS = {
+    'codex': ('x-codex-primary-', 'x-codex-secondary-', 'x-codex-credits-', 'x-codex-rate-limit-'),
+    'anthropic': ('anthropic-ratelimit-',),
+}
 QUOTA_MAX_HEADERS = 40
 # Codex sends its plan's windows in the model stream (WebSocket), as one JSON message of this type.
 CODEX_RATE_LIMITS = b'codex.rate_limits'
 QUOTA_MESSAGE_MAX = 16 * 1024
+QUOTA_USAGE_MAX = 64 * 1024
+# Codex limits older than this are fetched again from the trusted side when the daemon asks, at
+# most once per interval and waiting at most QUOTA_REFRESH_WAIT, so an idle runtime still shows them.
+QUOTA_REFRESH = 300
+QUOTA_REFRESH_WAIT = 5
 log = logging.getLogger('anchi-egress')
 
 
@@ -108,8 +118,80 @@ def audit(entry):
         file.write(json.dumps(entry, sort_keys=True) + '\n')
 
 
+def number(value):
+    """A finite JSON number, or None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return value
+
+
+def header_number(value):
+    """A header's integer or decimal value, or None."""
+    for kind in (int, float):
+        try:
+            return number(kind(value))
+        except ValueError:
+            continue
+    return None
+
+
+def codex_header_windows(headers):
+    """Usage windows from Codex's x-codex-primary-* and x-codex-secondary-* response headers."""
+    windows = []
+    for name in ('primary', 'secondary'):
+        used = header_number(headers.get(f'x-codex-{name}-used-percent', ''))
+        if used is None:
+            continue
+        windows.append(
+            {
+                'name': name,
+                'used_percent': used,
+                'window_minutes': header_number(headers.get(f'x-codex-{name}-window-minutes', '')),
+                'reset_at': header_number(headers.get(f'x-codex-{name}-reset-at', '')),
+            }
+        )
+    return windows
+
+
+def codex_usage(status, content):
+    """Plan and windows from Codex's usage endpoint, or None when the answer has none."""
+    if status != 200 or len(content) > QUOTA_USAGE_MAX:
+        return None
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return None
+    limits = data.get('rate_limit') if isinstance(data, dict) else None
+    if not isinstance(limits, dict):
+        return None
+    windows = []
+    for name in ('primary', 'secondary'):
+        w = limits.get(f'{name}_window')
+        used = number(w.get('used_percent')) if isinstance(w, dict) else None
+        if used is None:
+            continue
+        seconds = number(w.get('limit_window_seconds'))
+        windows.append(
+            {
+                'name': name,
+                'used_percent': used,
+                'window_minutes': -(-int(seconds) // 60) if seconds is not None else None,
+                'reset_at': number(w.get('reset_at')),
+            }
+        )
+    if not windows:
+        return None
+    plan = data.get('plan_type')
+    return {
+        'plan': plan[:40] if isinstance(plan, str) else None,
+        'limited': limits.get('limit_reached') is True or limits.get('allowed') is False,
+        'windows': windows,
+    }
+
+
 def codex_windows(content):
-    """Plan and windows from a `codex.rate_limits` message, or None if it is not one."""
+    """Plan and windows from a `codex.rate_limits` message, or None if it is not one, or if it
+    is about another metered limit than Codex's own (such as `codex_other`)."""
     try:
         data = json.loads(content)
     except ValueError:
@@ -117,12 +199,14 @@ def codex_windows(content):
     limits = data.get('rate_limits') if isinstance(data, dict) else None
     if data.get('type') != 'codex.rate_limits' or not isinstance(limits, dict):
         return None
+    metered = data.get('metered_limit_name') or data.get('limit_name') or 'codex'
+    if not isinstance(metered, str) or metered.strip().lower().replace('-', '_') != 'codex':
+        return None
     windows = []
     for name in ('primary', 'secondary'):
         w = limits.get(name)
         if not isinstance(w, dict):
             continue
-        number = lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
         windows.append(
             {
                 'name': name,
@@ -640,6 +724,8 @@ class EgressProxy:
         self.control = None
         # Latest quota headers per runtime rule: {rule: {ts, status, headers}}.
         self.quota = load_quota()
+        # When Codex's limits may be fetched again (monotonic clock).
+        self.quota_refresh_at = 0.0
         # Server connection id → the (host, port) the client asked for, while it is being opened.
         self.requested = {}
         # (fingerprint of the GitHub credential, its identity or None, when to ask again).
@@ -701,7 +787,7 @@ class EgressProxy:
             elif op == 'poll':
                 result = await self.poll(request.get('kind'), request.get('params'))
             elif op == 'quota':
-                result = self.quota
+                result = await self.current_quota()
             elif op == 'list':
                 result = {t: {'agent': c.agent, 'grants': sorted(c.grants)} for t, c in self.registry.cells.items()}
             else:
@@ -1040,9 +1126,50 @@ class EgressProxy:
                 'status': status,
                 'headers': headers,
             }
+            windows = codex_header_windows(headers) if rule == 'codex' else []
+            if windows:
+                self.quota[rule]['windows'] = windows
             self.save_quota()
         elif rule == 'codex':
             log.debug(f'codex response {status} carried no x-codex-* quota headers')
+
+    async def current_quota(self):
+        """The limits as last seen, with Codex's fetched again when missing or stale, so a runtime
+        that has been idle, or whose stream carried no limits, still shows them."""
+        entry = self.quota.get('codex')
+        stale = entry is None or time.time() - entry['ts'] > QUOTA_REFRESH
+        if stale and time.monotonic() >= self.quota_refresh_at:
+            self.quota_refresh_at = time.monotonic() + QUOTA_REFRESH
+            await self.refresh_codex_quota()
+        return self.quota
+
+    async def refresh_codex_quota(self):
+        """Asks Codex's usage endpoint with the stored login: a fixed read-only call from the
+        trusted side, never from a cell. Keeps the last limits when it fails."""
+        loop = asyncio.get_running_loop()
+        try:
+            credential = await loop.run_in_executor(None, self.credentials.get, 'codex')
+        except (LookupError, OSError, ValueError, KeyError):
+            return
+        method, url, headers, body = rules.codex_usage_request(credential)
+        try:
+            status, content = await asyncio.wait_for(
+                loop.run_in_executor(None, self.call, method, url, headers, body), QUOTA_REFRESH_WAIT
+            )
+        except (OSError, asyncio.TimeoutError):
+            status, content = 0, b''
+        audit({'event': 'quota-refresh', 'rule': 'codex', 'status': status})
+        usage = codex_usage(status, content)
+        if usage is None:
+            log.debug(f'codex usage {status} carried no limits')
+            return
+        self.quota['codex'] = {
+            **self.quota.get('codex', {'headers': {}}),
+            'ts': round(time.time(), 3),
+            'status': 200,
+            **usage,
+        }
+        self.save_quota()
 
     def save_quota(self):
         """Keeps the last known limits across restarts and idle periods. Best effort: a failed
