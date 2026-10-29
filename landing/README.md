@@ -55,7 +55,7 @@ to the daemon or executes operations. Without JavaScript, the default session an
 documentation links remain available.
 
 The hero animation is the vertical export from `hero-animation/hero-v.html`
-(`dist/anchi-hero-vertical-{zh,en}-dark.mp4`, 880×1000, 10.6s loop). The matching
+(`dist/anchi-hero-vertical-{zh,en}-dark.mp4`, 880×928, 10.6s loop, no window frame). The matching
 `.jpg` is its first frame, used as the poster. Re-export both from
 `hero-animation/` when the diagram changes (see its README). Each language page
 loads its own video, and its `aria-label` explains the credential flow.

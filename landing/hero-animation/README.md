@@ -1,7 +1,7 @@
 # Anchi hero animation
 
 - `hero.html`: horizontal source, 960 × 420 logical pixels (1920 × 840 at 2×).
-- `hero-v.html`: website source, 440 × 500 logical pixels (880 × 1000 at 2×).
+- `hero-v.html`: website source, 440 × 464 logical pixels (880 × 928 at 2×), drawn on the page background without a window frame.
 - Both use `?lang=zh|en&theme=dark|light` and a 10.6-second loop. Text lives in `T`;
   connector labels live in `SVC` and `ROWS`. Only show implemented connectors.
 - `render(t)` renders a deterministic frame when browser automation disables the playback loop.

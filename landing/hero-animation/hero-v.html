@@ -2,23 +2,22 @@
 <html><head><meta charset="utf-8">
 <style>
 :root{
-  --bg:#10120f; --panel:#141810; --vmbd:#3a4530; --card:#171c13; --cardbd:#2f3a27; --line:#2c3524;
+  --bg:#10120f; --panel:#10120f; --vmbd:#3a4530; --card:#171c13; --cardbd:#2f3a27; --line:#2c3524;
   --fg:#e6e9dd; --dim:#8f9785; --dim2:#b4bca9; --lime:#c0e889; --lime-rgb:192,232,137;
-  --amber:#e4bc78; --amber-rgb:228,188,120; --hub:#1a2214; --hubbd:#4f6340; --row:#12160f; --frame:#3b4730;
+  --amber:#e4bc78; --amber-rgb:228,188,120; --hub:#1a2214; --hubbd:#4f6340; --row:#12160f;
 }
 .light{
-  --bg:#f6f7f2; --panel:#eef1e7; --vmbd:#c9d1bb; --card:#ffffff; --cardbd:#dde3d3; --line:#d3dac7;
+  --bg:#f6f7f2; --panel:#f6f7f2; --vmbd:#c9d1bb; --card:#ffffff; --cardbd:#dde3d3; --line:#d3dac7;
   --fg:#1d2318; --dim:#7a8270; --dim2:#566050; --lime:#5c8a1c; --lime-rgb:92,138,28;
-  --amber:#b7812a; --amber-rgb:183,129,42; --hub:#ffffff; --hubbd:#a9bf8a; --row:#f4f6ef; --frame:#c9d1bb;
+  --amber:#b7812a; --amber-rgb:183,129,42; --hub:#ffffff; --hubbd:#a9bf8a; --row:#f4f6ef;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);font-family:"DejaVu Sans Mono","Noto Sans Mono CJK SC",monospace;color:var(--fg);-webkit-font-smoothing:antialiased}
-#stage{position:relative;width:440px;height:500px;background:var(--bg);overflow:hidden}
+/* No window frame: the diagram sits on the page background beside the hero copy. */
+#stage{position:relative;width:440px;height:464px;background:var(--bg);overflow:hidden}
+#scene{position:absolute;left:0;top:-36px;width:440px;height:500px}
 .a{position:absolute}
 svg{position:absolute;left:0;top:0;overflow:visible}
-#frame{left:0;top:0;width:440px;height:500px;border:1px solid var(--frame);background:var(--panel)}
-#title{left:1px;top:1px;width:438px;height:34px;border-bottom:1px solid var(--frame);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:10px;color:var(--dim)}
-#title .dot{display:inline-block;width:5px;height:5px;background:var(--lime);margin-right:6px;vertical-align:middle}
 #vm{left:14px;top:54px;width:412px;height:318px;border:1px dashed var(--vmbd);border-radius:10px}
 #vmlab{left:26px;top:47px;padding:0 6px;background:var(--panel);font-size:8.5px;letter-spacing:1.5px;color:var(--dim)}
 #hubglow{left:40px;top:100px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,rgba(var(--lime-rgb),.10),rgba(var(--lime-rgb),0) 65%)}
@@ -49,9 +48,7 @@ svg{position:absolute;left:0;top:0;overflow:visible}
 #svclab{left:0;top:474px;width:440px;text-align:center;font-size:8px;letter-spacing:1.5px;color:var(--dim)}
 #chip{left:220px;top:176px;transform:translateX(-50%);white-space:nowrap;font-size:8.5px;padding:3px 9px;border-radius:999px;border:1px solid rgba(var(--amber-rgb),.6);background:var(--panel);color:var(--amber);opacity:0;display:flex;gap:5px;align-items:center}
 </style></head><body>
-<div id="stage">
-  <div id="frame" class="a"></div>
-  <div id="title" class="a"><span><span style="color:var(--lime)">❯</span> anchi / team</span><span><span class="dot"></span>local</span></div>
+<div id="stage"><div id="scene">
   <div id="vm" class="a"></div><div id="vmlab" class="a" data-t="vm"></div>
   <div id="hubglow" class="a"></div>
   <svg id="lines" width="440" height="500"></svg>
@@ -67,7 +64,7 @@ svg{position:absolute;left:0;top:0;overflow:visible}
   <div id="svcs"></div>
   <svg id="fx" width="440" height="500"></svg>
   <div id="chip" class="a"></div>
-</div>
+</div></div>
 <script>
 const q=new URLSearchParams(location.search), LANG=q.get('lang')||'zh';
 if(q.get('theme')==='light')document.body.classList.add('light');
