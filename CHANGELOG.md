@@ -4,6 +4,12 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.4.4 — 2026-10-29
+
+The desktop app takes a quieter palette drawn from classical Chinese colors, with clearer task cards, a docked conversation drawer, one-line Team previews and quiet scrollbars. The Usage screen keeps subscription limits across restarts and refreshes Codex's limits while it is idle, and commits agents make with GitHub are attributed to the linked GitHub account.
+
+Update with `anchi update`, which also updates an installed desktop app, then reopen Anchi. After tasks finish, run `anchi daemon stop` and `anchi setup install` so the VM's egress proxy picks up the limit and commit-author changes; reinstall login startup with `anchi daemon install` if enabled. For each existing remote server, rerun `scripts/remote.sh <target>` from the 0.4.4 checkout, then `anchi --server <saved-server> setup install`. Agents, task history and credentials are retained. Commit attribution has not been exercised with a real GitHub commit, and Codex limits from a live turn's WebSocket stream have not been rechecked; this is a development preview.
+
 ### Changed
 
 - The website hero animation has no window frame or title bar: the diagram sits on the page background beside the hero copy, and its edges fade into the page.
