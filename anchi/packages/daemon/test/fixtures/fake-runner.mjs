@@ -39,13 +39,17 @@ rl.on('line', (line) => {
   const tool = /^call (\S+)(?: (.*))?$/.exec(cmd.input ?? '');
   if (tool) {
     waiting.set(`c${turns}`, cmd.turn);
-    send({
-      type: 'tool.request',
-      turn: cmd.turn,
-      id: `c${turns}`,
-      tool: tool[1],
-      args: tool[2] ? JSON.parse(tool[2]) : {},
-    });
+    setTimeout(
+      () =>
+        send({
+          type: 'tool.request',
+          turn: cmd.turn,
+          id: `c${turns}`,
+          tool: tool[1],
+          args: tool[2] ? JSON.parse(tool[2]) : {},
+        }),
+      Number(process.env.FAKE_TOOL_DELAY_MS ?? 0),
+    );
     return;
   }
   if (mode === 'bad-frame') return process.stdout.write('not json\n');

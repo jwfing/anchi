@@ -51,6 +51,30 @@ const items = (state: ReturnType<typeof initialSettings>) =>
   settingsRows(data, state).filter((r) => r.kind !== 'header');
 
 describe('settings panel', () => {
+  it('edits delegates on this node and team wrappers, and keeps older daemons read-only', () => {
+    const own = {
+      ...data,
+      current: { ...data.current, delegates: ['reviewer'] },
+      inventory: { ...data.inventory, agents: ['dev', 'reviewer', 'pr-approve'] },
+    };
+    for (const fixed of [
+      own.fixed,
+      { ...own.fixed, execution: { server: 'cloud', agent: 'coder' } },
+    ]) {
+      const config = { ...own, fixed };
+      const state = initialSettings(config);
+      const choices = settingsRows(config, state)
+        .filter((r) => r.kind !== 'header')
+        .filter((r) => r.kind === 'delegate');
+      expect(choices.map((r) => r.id)).toEqual(['reviewer', 'pr-approve']);
+      const added = toggleSetting(state, choices[1]!);
+      expect(settingsPatch(config, added)).toEqual({ delegates: ['reviewer', 'pr-approve'] });
+      expect(settingsPatch(config, toggleSetting(state, choices[0]!))).toEqual({ delegates: [] });
+    }
+    expect(settingsRows(data, initialSettings(data)).some((r) => r.kind === 'delegate')).toBe(
+      false,
+    );
+  });
   it('shows the execution location without offering ineffective local access edits', () => {
     const remote = {
       ...data,

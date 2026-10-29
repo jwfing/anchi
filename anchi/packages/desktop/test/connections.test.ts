@@ -115,6 +115,38 @@ describe('desktop machine routing', () => {
     expect(pool.states().find((s) => s.name === 'local')?.status).toBe('connected');
   });
 
+  it('never deletes on a different or reconnected machine after the native dialog', async () => {
+    const { pool, local, cloud } = setup();
+    const read = vi.fn(async () => ({
+      agentId: 'reviewer',
+      exists: true,
+      tasks: 2,
+      delegated: 0,
+      running: 0,
+      delegatedBy: [],
+      delegatedByTemplates: [],
+      triggers: 0,
+      workspaces: [],
+    }));
+    cloud.connection.read = read;
+    await Promise.all([pool.connect('local'), pool.connect('instabox:newuser')]);
+    await expect(
+      pool.call(
+        'instabox:newuser',
+        'agents.delete',
+        { agentId: 'reviewer', confirm: 'reviewer' },
+        async (question) => {
+          expect(question.detail).toContain('newuser (instabox:newuser)');
+          pool.disconnect('instabox:newuser');
+          await pool.connect('instabox:newuser');
+          return true;
+        },
+      ),
+    ).rejects.toThrow(/connection changed/);
+    expect(read).toHaveBeenCalledExactlyOnceWith('agents.deletePreview', { agentId: 'reviewer' });
+    expect(local.connection.read).not.toHaveBeenCalled();
+  });
+
   it('keeps native picker writes pinned and refuses a removed machine', async () => {
     const { pool, local, cloud } = setup();
     await Promise.all([pool.connect('local'), pool.connect('instabox:newuser')]);

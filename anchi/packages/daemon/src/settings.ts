@@ -46,6 +46,7 @@ const patchSchema = z.strictObject({
     })
     .optional(),
   skills: field.skills,
+  delegates: field.delegates,
   connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
   highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
@@ -57,10 +58,11 @@ export const PATCH_FIELDS = Object.keys(patchSchema.shape);
 export function parsePatch(raw: unknown): AgentPatch {
   const parsed = patchSchema.safeParse(raw);
   if (!parsed.success) throw new Error(`invalid settings: ${z.prettifyError(parsed.error)}`);
-  const { skills, connectors, workspaces, highRisk } = parsed.data;
+  const { skills, delegates, connectors, workspaces, highRisk } = parsed.data;
   const unique = (l?: string[]) => !l || new Set(l).size === l.length;
   if (
     !unique(skills) ||
+    !unique(delegates) ||
     !unique(connectors) ||
     !unique(workspaces?.map((w) => w.path)) ||
     !unique(highRisk?.disable)
@@ -78,6 +80,7 @@ const EDITABLE = [
   'effort',
   'prompt',
   'skills',
+  'delegates',
   'connectors',
   'workspaces',
   'highRisk',
@@ -113,6 +116,7 @@ export function settingsView(
       effort: agent.effort ?? '',
       prompt: { mode: agent.prompt?.mode ?? 'append', text: agent.prompt?.text ?? '' },
       skills: agent.skills ?? [],
+      delegates: agent.delegates ?? [],
       connectors: agent.connectors ?? [],
       workspaces: (agent.workspaces ?? []).map((w): WorkspaceSetting => ({
         path: w.path,

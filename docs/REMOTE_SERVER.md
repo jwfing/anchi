@@ -207,3 +207,91 @@ recovery have not been tested live.
 ```bash
 instabox ssh anchi-server -- 'cd ~/anchi && ANCHI_GUEST=local make verify-vm verify-anchi'
 ```
+
+
+## Equal peer teams
+
+A peer team has no designated coordinator. Each daemon owns its agents and task execution,
+exchanges a signed directory with the other members, and delegates straight to the recipient.
+After initial discovery, `newuser` can ask `dora` to work while `local` is disconnected.
+Closing the desktop app does not stop any daemon. An unreachable executor remains unavailable;
+Anchi does not move its task to another machine or replay the turn automatically.
+
+Upgrade every daemon before enrollment. Existing `execution:` members keep the legacy
+coordinator behavior described above; peer discovery does not convert them. Start a fresh task
+after configuring peers to use distributed delegation.
+
+### Connect machines
+
+Each daemon needs a TCP address reachable from every other member, such as a private VPN
+address. An SSH/Instabox connection in Machines gives the desktop owner access; it does not
+create peer reachability. Anchi does not include a relay, tunnel or NAT traversal service.
+Use **Settings → Peer team** on each machine, configure its label, reachable `tls://host:port`,
+listen address and port, then choose one configured machine under **Join with a machine**.
+The app exchanges public identities through your existing owner connections and asks for native
+confirmation on each machine. Credentials and private keys are never exchanged.
+
+Equivalent CLI example, replacing the example addresses with your reachable addresses:
+
+```bash
+anchi team network --label local --listen 0.0.0.0 --port 9847 --address tls://100.64.0.1:9847
+anchi --server newuser team network --label newuser --listen 0.0.0.0 --port 9847 --address tls://100.64.0.2:9847
+anchi --server dora team network --label dora --listen 0.0.0.0 --port 9847 --address tls://100.64.0.3:9847
+anchi team join newuser
+anchi team join dora
+anchi team peers
+```
+
+Enroll only owner-controlled, trusted daemons. Enrollment authorizes a daemon to assign work,
+relay human decisions for its task tree, introduce members and propagate revocations. All nodes
+share that authority. It is not a boundary between mutually distrustful users.
+
+Peer TLS connections trust enrolled certificates only and verify the destination's node name
+and public key. Joining or revoking a member updates certificate trust without restarting the
+other connections; the node identity is independent of its advertised IP address or hostname.
+
+### Assign work and grant delegation
+
+Team shows discovered agents grouped by machine, including the last known directory when a
+machine is offline. A direct desktop connection takes precedence over a discovered copy.
+A discovered agent can receive a task through any connected member; that member retains the
+submission record and mirrors its results. This view contains work submitted through that member,
+not all historical tasks on the executor. Open the machine directly to edit its runtime,
+connectors, skills or agent configuration, or inspect its full history and local audit log.
+
+In an agent's **Delegation** settings, select recipients by their agent and machine labels.
+Local recipients still use `developer`; peer recipients use the exact
+`<node-id>/<agent-id>/<generation>` printed by `anchi team peers`. Discovery does not grant
+delegation. Every hop checks the calling agent's own allowlist and runs with the recipient's
+local access rules. Deleting and recreating an agent changes its generation; an old grant must
+be reviewed again. The builder copies these ids from inventory rather than inventing wrappers.
+
+### Recovery and limits
+
+Each immediate parent persists a dispatch outbox; each executor stores a receipt before starting
+its cell. Repeated dispatch with the same content attaches to the existing task. Changed content
+under the same request and turn is refused. Origin restart resumes polling; executor restart
+fails its interrupted turn. Continue or retry through the originating task, explicitly.
+Cancellation remains pending until the executor acknowledges it, including when requested while
+offline. A cancellation received before dispatch prevents the cell from starting.
+
+Results, bounded transcripts and the descendant task tree propagate back through the parents.
+A disconnected parent sees updates and approvals when it reconnects. Other reachable members
+continue their own work. Approval decisions remain scoped to the authenticated originating node
+and its exact task tree; the executor rechecks the pending policy decision.
+
+There are at most 32 machines, 200 published agents per machine, three delegation levels,
+ten immediate children per task and 60 execution turns in a distributed tree. A task reserves
+up to ten turns for each child (half its remaining range, at least one); those ranges never
+overlap. Unused reservations are not reclaimed, so a branch can exhaust its allowance before
+the whole team uses 60 turns. Start a fresh task when the allowance is exhausted.
+
+Use **Revoke…** or `anchi team revoke <node-id>` to remove a member. Revocation spreads when
+members reconnect; it cannot instantly reach an isolated machine and does not cancel cells
+already running there. A revoked identity cannot rejoin. Revocation takes precedence over old
+directory snapshots. Directory data contains metadata only; vault contents, runtime logins,
+sessions, workspaces and raw audit logs remain on their owning machines.
+
+Peer networking and task recovery are exercised by real loopback TLS connections between test
+daemons with simulated cells. Production VPN routing and model-driven collaboration with real
+accounts require separate live validation.

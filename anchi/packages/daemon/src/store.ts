@@ -2,6 +2,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import {
   executionSchema,
+  peerTaskInfoSchema,
+  type PeerTaskInfo,
   teamOriginSchema,
   type Execution,
   type TeamOrigin,
@@ -132,6 +134,7 @@ export const MAX_RESULT_CHARS = 8000;
 
 function rowToTask(r: Record<string, unknown>): TaskRow {
   return {
+    ...(r.peer ? { peer: peerTaskInfoSchema.parse(JSON.parse(String(r.peer))) } : {}),
     ...(r.execution ? { execution: executionSchema.parse(JSON.parse(String(r.execution))) } : {}),
     ...(r.team_origin
       ? { teamOrigin: teamOriginSchema.parse(JSON.parse(String(r.team_origin))) }
@@ -196,6 +199,7 @@ export class Store {
     const add: [string, string][] = [
       ['execution', 'TEXT'],
       ['team_origin', 'TEXT'],
+      ['peer', 'TEXT'],
       ['parent_id', 'TEXT'],
       ['root_id', 'TEXT'],
       ['depth', 'INTEGER NOT NULL DEFAULT 0'],
@@ -272,6 +276,14 @@ export class Store {
     this.db
       .prepare('UPDATE tasks SET execution = ? WHERE id = ?')
       .run(JSON.stringify(execution), id);
+  }
+
+  setPeer(id: string, info: PeerTaskInfo): void {
+    this.db.prepare('UPDATE tasks SET peer = ? WHERE id = ?').run(JSON.stringify(info), id);
+  }
+
+  setPeerTurns(id: string, turns: number): void {
+    this.db.prepare('UPDATE tasks SET turns = ? WHERE id = ?').run(turns, id);
   }
 
   setTeamOrigin(id: string, origin: TeamOrigin): void {
@@ -606,6 +618,13 @@ export class Store {
           `effect/${id}/`.length,
           `effect/${id}/`,
         );
+      for (const prefix of [`peer/out/${id}`, `peer/budget/${id}`, `peer/shadow/${id}/`])
+        this.teamDeletePrefix(prefix);
+      this.db
+        .prepare(
+          "DELETE FROM team_state WHERE key LIKE 'peer/approval/%' AND json_extract(value, '$.task') = ?",
+        )
+        .run(id);
       this.db.prepare('DELETE FROM audit_rows WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM usage_snapshot WHERE task_id = ?').run(id);
       this.db.prepare('DELETE FROM events WHERE task_id = ?').run(id);

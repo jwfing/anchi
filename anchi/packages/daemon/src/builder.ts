@@ -80,7 +80,7 @@ An agent is a YAML file. Fields:
   { type: github-issues, query: 'repo:o/r is:issue is:open label:agent' }, text: ...,
   every?: minutes } where text may use {title}, {url} and {id}. Outside content then reaches
   the agent: tell the user, who may want approvals for its writes.
-- delegates: ids of agents this agent may hand tasks to (optional).
+- delegates: exact inventory ids of agents this agent may hand tasks to (optional). Peer ids use node/agent/generation; copy them exactly. Peer members run with their own machine’s runtime, credentials and approval policy. Do not create an execution wrapper for a discovered peer.
 - maxTasks: how many of its tasks run at the same time (optional, 1-10, default 3); the others
   queue. Omit it unless the user wants another limit; 1 only when the user says the agent's
   tasks must not overlap.
@@ -138,9 +138,9 @@ skills: [code-review, test]
 \`\`\`
 
 A patch may set name, description, runtime, model, effort, prompt ({ mode, text }), skills,
-connectors, workspaces and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
+connectors, delegates, workspaces and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
 the entries to keep. An empty model, effort or description ('') removes it. For any other field
-(triggers, approvals, egress, delegates, image), send a complete anchi-agent block with the
+(triggers, approvals, egress, image), send a complete anchi-agent block with the
 whole agent instead.
 The inventory shows each agent's file when the user's message names its id; otherwise it
 shows a summary, so ask the user to name the agent if you need to see its prompt.`;
@@ -181,9 +181,6 @@ export function builderAgent(runtime: Runtime = 'codex'): ResolvedAgent {
   return { ...agent, sourceFiles: [] };
 }
 
-const BLOCK =
-  /```anchi-(agent-patch|agent|image) id=([a-z0-9][a-z0-9-]{0,39})[ \t]*\n([\s\S]*?)\n```/g;
-
 export interface ParsedBlocks {
   agent?: { id: string; yaml: string };
   /** Only the fields to change in an existing agent's file. */
@@ -194,8 +191,15 @@ export interface ParsedBlocks {
 /** Finds proposal blocks in builder output. The last agent (or patch) and image block win. */
 export function parseBlocks(text: string): ParsedBlocks {
   const out: ParsedBlocks = {};
-  for (const m of text.matchAll(BLOCK)) {
-    const block = { id: m[2]!, yaml: `${m[3]!.trimEnd()}\n` };
+  const header = /```anchi-(agent-patch|agent|image) id=([a-z0-9][a-z0-9-]{0,39})[ \t]*\n/g;
+  let m: RegExpExecArray | null;
+  while ((m = header.exec(text))) {
+    const start = header.lastIndex;
+    const end = text.indexOf('\n```', start);
+    // An unfinished block cannot hide a later closing fence; do not rescan its body.
+    if (end === -1) break;
+    header.lastIndex = end + 4;
+    const block = { id: m[2]!, yaml: `${text.slice(start, end).trimEnd()}\n` };
     if (m[1] === 'image') out.image = block;
     else {
       delete out.agent;

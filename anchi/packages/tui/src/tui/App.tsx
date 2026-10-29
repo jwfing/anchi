@@ -1153,6 +1153,11 @@ export function App({
   /** Opens the settings panel of an agent, or of a pending builder proposal. */
   const openSettings = (target: { agentId: string } | { proposalId: string; agentId: string }) => {
     const proposalId = 'proposalId' in target ? target.proposalId : undefined;
+    const peer = agents.find((a) => a.id === target.agentId)?.peer;
+    if (!proposalId && peer)
+      return say(
+        `Open ${sanitizeLine(peer.machine)} directly to edit @${peer.agent}; its settings belong to that machine.`,
+      );
     setModal({
       kind: 'settings',
       agentId: target.agentId,
@@ -1182,6 +1187,8 @@ export function App({
 
   /** Asks to delete an agent, listing everything that goes and what stays. */
   const openDelete = (id: string) => {
+    const peer = agents.find((a) => a.id === id)?.peer;
+    if (peer) return say(`Open ${sanitizeLine(peer.machine)} directly to delete @${peer.agent}.`);
     setModal({ kind: 'deleteAgent', agentId: id, preview: null, input: '' });
     void client
       .call('agents.deletePreview', { agentId: id })
@@ -2429,7 +2436,7 @@ export function App({
   const header = detail
     ? `${detail.id} · @${detail.agentId} · ${detail.status}${detail.execution ? ` · on ${detail.execution.server}/@${detail.execution.agent}` : ''}${detail.parentId ? ` · delegated by ${detail.parentId}` : ''}${detail.trigger !== 'user' && detail.trigger !== 'delegation' ? ` · ${detail.trigger}` : ''}`
     : agent
-      ? `@${agent.id} · ${sanitizeLine(agent.name)}  ${agent.execution ? `on ${agent.execution.server}/@${agent.execution.agent}` : `${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}`}${
+      ? `@${agent.peer?.agent ?? agent.id} · ${sanitizeLine(agent.name)}  ${agent.execution ? `on ${agent.execution.server}/@${agent.execution.agent}` : `${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}`}${
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
         }${
           agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
@@ -2875,7 +2882,11 @@ function Sidebar(props: {
     const a = agents.find((x) => x.id === key);
     const glyph = a?.error ? '✗' : running(key) ? spin : a?.queued ? '◇' : '○';
     const color = a?.error ? 'red' : running(key) ? 'yellow' : 'gray';
-    return { glyph, color, text: key };
+    return {
+      glyph,
+      color,
+      text: a?.peer ? `${a.peer.agent} · ${sanitizeLine(a.peer.machine)}` : key,
+    };
   };
   return (
     <Box

@@ -1,3 +1,4 @@
+import type { PeerTaskInfo, PeerDirectory, PeerNetworkConfig, PeerRecord } from './peers.ts';
 import type { RuntimeId } from './cell.ts';
 import type { RuntimeEvent } from './events.ts';
 import type {
@@ -19,6 +20,7 @@ import type {
 export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface TaskRow {
+  peer?: PeerTaskInfo;
   /** Actual execution location, if this task belongs to a remote team member. */
   execution?: Execution;
   /** Trusted coordinator provenance of an execution-node task. */
@@ -77,6 +79,8 @@ export interface StoredEvent {
 export type AgentStatus = 'idle' | 'working' | 'error';
 
 export interface AgentSummary {
+  node?: string;
+  peer?: { node: string; agent: string; machine: string; online: boolean };
   execution?: Execution;
   id: string;
   name: string;
@@ -400,6 +404,8 @@ export interface AgentPatch {
   prompt?: { mode?: 'append' | 'replace'; text?: string };
   skills?: string[];
   connectors?: string[];
+  /** Replaces this agent's delegation allowlist; [] revokes all delegation. */
+  delegates?: string[];
   workspaces?: WorkspaceSetting[];
   /**
    * High-risk operations this agent does without approval, by id (`github-merge`), as in its
@@ -419,6 +425,8 @@ export interface AgentSettingValues {
   prompt: { mode: 'append' | 'replace'; text: string };
   skills: string[];
   connectors: string[];
+  /** Delegation allowlist; absent on daemons that cannot edit it through settings. */
+  delegates?: string[];
   workspaces: WorkspaceSetting[];
   /** High-risk operations this agent does without approval (`highRisk.disable`), by id. */
   highRisk: { disable: string[] };
@@ -433,6 +441,7 @@ export interface FixedSettings {
   promptFile?: string;
   image: string;
   sandbox: string;
+  /** Also retained here for clients predating editable delegation settings. */
   delegates: string[];
   /** One line per trigger. */
   triggers: string[];
@@ -465,6 +474,7 @@ export interface Inventory {
   /** Directories under ~/AnchiWorkspaces (two levels); `shared` once the VM mounts it. */
   workspaces: { shared: boolean | null; dirs: string[] };
   agents: string[];
+  peerAgents?: { id: string; name: string; machine: string; online: boolean }[];
   images: string[];
   /** Ids of the high-risk operations an agent can do without approval (`highRisk.disable`). */
   highRisk: string[];
@@ -677,6 +687,12 @@ export interface DaemonStatus {
 /** Request methods: name → [params, result]. */
 export interface Methods {
   /** Internal execution RPCs. Available on the owner socket, never exposed to a task cell. */
+  /** Owner-only peer enrollment; peer transport never exposes these methods. */
+  'peers.configure': [PeerNetworkConfig, PeerRecord];
+  'peers.identity': [Record<string, never>, PeerRecord];
+  'peers.directory': [Record<string, never>, PeerDirectory];
+  'peers.admit': [{ record: PeerRecord }, null];
+  'peers.remove': [{ node: string }, null];
   'team.describe': [{ agent: string }, TeamDescription];
   'team.run': [TeamRun, null];
   'team.poll': [TeamKey & { afterSeq: number }, TeamSnapshot];

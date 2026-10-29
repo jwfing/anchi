@@ -1,3 +1,4 @@
+import { PeerSettings } from './PeerSettings.tsx';
 import { sanitizeLine } from '@anchi/core/sanitize';
 import {
   CONNECTOR_IDS,
@@ -43,6 +44,7 @@ export function SettingsView() {
         </button>
       </div>
       <ServerCard />
+      {server.status === 'connected' && <PeerSettings key={server.name} />}
       {server.status === 'connected' && status && (
         <>
           <section className="card">

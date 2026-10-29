@@ -195,19 +195,51 @@ packages: [postgresql-client]
 
 ## Agent settings
 
+In the desktop app, select the agent on its machine, open **Settings → Delegation**, and select
+the agents it may assign work to. **Review changes → Apply** saves the allowlist; adding a
+recipient also requires a native confirmation naming the machine. This grants permission to
+delegate tasks, not permission to approve the recipient's writes. Removing every selection
+revokes delegation, including inherited grants. Missing agents and self-delegation are refused.
+
+For example, to let `project-manager` delegate to `pr-approve` on the saved server `newuser`,
+while keeping its other delegates:
+
+```bash
+anchi --server newuser agents delegates project-manager --allow pr-approve --preview
+anchi --server newuser agents delegates project-manager --allow pr-approve --yes
+```
+
+Omit the options to list the current allowlist. Use `--revoke pr-approve` to remove one grant,
+or `--clear` to revoke all. Update the daemon on that machine before using the new editors;
+older daemons show the existing allowlist read-only. A team member with an execution node can
+edit its coordinator allowlist here; the execution profile must also allow those delegates.
+Saving reloads the allowlist without restarting the daemon. Retry a previously refused
+delegation; Anchi does not replay it automatically.
+
 **^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel. It lists the agent's name, description, runtime (marked connected or not), model, effort and prompt, then every installed skill, every connector (marked connected or not), every directory under `~/AnchiWorkspaces` and the high-risk operations of the agent's connectors. **Space** changes the selected row:
 
 - on name, description or model, you type the new value (an empty model means the runtime's default);
 - runtime goes through `codex`, `claude-code` and `hermes`, and effort goes through unset, `low`, `medium`, `high` and `xhigh` (only Codex uses it);
 - the prompt mode switches between `append` and `replace`, and the prompt text opens in `$EDITOR`;
-- skills and connectors are selected or deselected, and a workspace goes off → `ro` → `rw`;
+- skills, connectors and delegation recipients are selected or deselected, and a workspace goes off → `ro` → `rw`;
 - a high-risk operation marked `[x]` is one the agent does without asking you (`highRisk.disable` in its file; see the approvals section below). A row says when `~/.anchi/settings.yaml` already exempts it for every agent, or when the agent's `approvals: {<connector>: ask}` holds it anyway. The review lists each new exemption as a warning.
 
-At the bottom, the panel shows what it cannot change: template, image, sandbox, delegates, approvals, egress and triggers, and whether the agent's X posts and Reddit posts and comments ask, go out without approval, or follow the service's mode. Edit those in the agent file. For an agent that `extends` a template, an inherited value is marked `from template <id>`. Changing an inherited value writes an override into the agent's own file. A prompt that comes from `prompt.file` is read-only in the panel; edit that file instead.
+At the bottom, the panel shows what it cannot change: template, image, sandbox, approvals, egress and triggers, and whether the agent's X posts and Reddit posts and comments ask, go out without approval, or follow the service's mode. Edit those in the agent file. For an agent that `extends` a template, an inherited value is marked `from template <id>`. Changing an inherited value writes an override into the agent's own file. A prompt that comes from `prompt.file` is read-only in the panel; edit that file instead.
 
 **Enter** shows the change to the agent file as a diff, checked like a proposal. Errors block saving, for example `sandbox: codex-workspace-write` with runtime `claude-code`. Warnings, such as a runtime that is not connected yet, do not block. **y** saves the change. Only the fields you changed are written; an emptied model, effort or description removes its key. The rest of the file, comments included, stays as it is. The change applies to the agent's next cell. After a runtime change, a task whose session started on the previous runtime cannot continue — another runtime cannot resume that session — so replies to it are refused; start a new task, or run a failed one again with `anchi retry --fresh`.
 
 ## Delete an agent
+
+In the desktop app, open the agent's **Settings → Delete agent…**. The preview names its
+machine and lists the affected tasks, delegated tasks, triggers, VM files and delegation
+references. Type the exact agent id, choose **Continue to confirmation**, then confirm in the
+native dialog. Cancel leaves the agent unchanged. A disconnected or replaced connection, or
+changed deletion effects while the native dialog is open, requires a new review.
+
+The result stays open after the agent disappears from Team. If the VM could not remove its
+home or another cleanup step failed, the result shows the warning and offers **Review
+remaining cleanup**; this opens another preview and confirmation. The built-in builder cannot
+be deleted. Deletion uses the same daemon operations as the TUI and CLI below.
 
 **D** on the agent in the sidebar, **D** in its settings panel, **^X D** in its chat, or `anchi agents rm <id>`. A dialog lists what goes and what stays; type the agent's id to confirm. Deleting:
 
@@ -221,7 +253,11 @@ Directories of your computer in `~/AnchiWorkspaces` are not touched: they are on
 
 ## Teams, approvals, triggers and skills
 
-A team can span local and remote machines: keep one daemon as its coordinator and add members
+A team can span local and remote machines as equal peers: configure **Settings → Peer team**,
+join one trusted member and select its agents in Delegation. See
+[Equal peer teams](REMOTE_SERVER.md#equal-peer-teams) for reachability, permissions and recovery.
+
+The older coordinator mode remains available: keep one daemon as its coordinator and add members
 with `anchi team add <id> --node <saved-server> --agent <remote-id>` or **Agent builder → Run
 on** in the desktop app. Members still delegate by logical agent id, and their task tree,
 results, usage and approvals appear together. Credentials and execution policy stay on the

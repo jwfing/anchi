@@ -52,8 +52,8 @@ Commands:
   cancel <task>                    Cancel a running or queued task; its work and
                                    transcript are kept
   agents [options]                 List or manage agents
-  team                             Manage team members that execute on other
-                                   nodes
+  team                             Manage peer teams and legacy remote execution
+                                   members
   setup                            Runtime and connector setup
   daemon                           Manage the background daemon
 ```
@@ -342,14 +342,32 @@ Usage: anchi agents [options] [command]
 List or manage agents
 
 Options:
-  --json                  Print the agent array as JSON
+  --json                    Print the agent array as JSON
 
 Commands:
-  create [options] <id>   Review and create a starter agent without a model call
-  rm [options] <id>       Delete an agent with its tasks and its files in the VM
-                          (workspaces are kept)
-  allow-host <id> <host>  Add one host to an agent's egress list (a host its
-                          cells were refused)
+  delegates [options] <id>  List or edit which agents this agent may delegate
+                            work to
+  create [options] <id>     Review and create a starter agent without a model
+                            call
+  rm [options] <id>         Delete an agent with its tasks and its files in the
+                            VM (workspaces are kept)
+  allow-host <id> <host>    Add one host to an agent's egress list (a host its
+                            cells were refused)
+```
+
+#### `anchi agents delegates`
+
+```text
+Usage: anchi agents delegates [options] <id>
+
+List or edit which agents this agent may delegate work to
+
+Options:
+  --allow <agent>   Add one agent to the delegation allowlist
+  --revoke <agent>  Remove one agent from the delegation allowlist
+  --clear           Revoke all delegation, including inherited grants
+  --preview         Review the change without saving
+  -y, --yes         Save the reviewed change without an interactive prompt
 ```
 
 #### `anchi agents create`
@@ -389,12 +407,66 @@ Add one host to an agent's egress list (a host its cells were refused)
 ```text
 Usage: anchi team [options] [command]
 
-Manage team members that execute on other nodes
+Manage peer teams and legacy remote execution members
 
 Commands:
-  nodes               List execution nodes saved on the team coordinator
-  add [options] <id>  Add a team member using an existing agent on an execution
-                      node
+  network [options]        Configure this daemon’s mutually authenticated peer
+                           listener
+  peers [options]          Show the synchronized team directory
+  join [options] <server>  Pair with a configured machine through its owner
+                           connection; discover its team
+  revoke [options] <node>  Revoke a machine identity throughout the reachable
+                           team
+  nodes                    List execution nodes saved on the team coordinator
+  add [options] <id>       Add a team member using an existing agent on an
+                           execution node
+```
+
+#### `anchi team network`
+
+```text
+Usage: anchi team network [options]
+
+Configure this daemon’s mutually authenticated peer listener
+
+Options:
+  --label <label>  Machine name in the team directory
+  --address <url>  tls://host:port reachable from all team machines
+  --listen <host>  Local bind address (default: "0.0.0.0")
+  --port <port>    Local listening port (default: "9847")
+```
+
+#### `anchi team peers`
+
+```text
+Usage: anchi team peers [options]
+
+Show the synchronized team directory
+
+Options:
+  --json      Print nodes and global agent ids as JSON
+```
+
+#### `anchi team join`
+
+```text
+Usage: anchi team join [options] <server>
+
+Pair with a configured machine through its owner connection; discover its team
+
+Options:
+  -y, --yes   Trust the machine and its team without prompting
+```
+
+#### `anchi team revoke`
+
+```text
+Usage: anchi team revoke [options] <node>
+
+Revoke a machine identity throughout the reachable team
+
+Options:
+  -y, --yes   Revoke without prompting
 ```
 
 #### `anchi team nodes`

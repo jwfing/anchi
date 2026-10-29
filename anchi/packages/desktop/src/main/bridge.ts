@@ -1,7 +1,9 @@
+import { peerNetworkConfigSchema, peerRecordSchema, peerNodeSchema } from '@anchi/protocol';
 import { autoPublishWarning } from '@anchi/core/publish';
-import { agentLayerSchema, parseYamlAs } from '@anchi/core';
+import { agentLayerSchema, idSchema, parseYamlAs, sanitizeLine } from '@anchi/core';
 import type {
   AgentPatch,
+  AgentDeletionPreview,
   AgentSettings,
   AgentSummary,
   BuilderProposal,
@@ -14,16 +16,23 @@ import type {
 
 /**
  * The daemon methods the window may call. The renderer draws agent text, so it is treated as
- * the most exposed part of the app: what deletes, resets or stops things stays in the CLI.
+ * the most exposed part of the app: destructive actions require a native confirmation here.
  */
 export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'daemon.status',
+  'peers.configure',
+  'peers.identity',
+  'peers.directory',
+  'peers.admit',
+  'peers.remove',
   'agents.list',
   'agents.settings',
   'agents.createPreview',
   'team.nodes',
   'team.preview',
   'agents.update',
+  'agents.deletePreview',
+  'agents.delete',
   'tasks.create',
   'tasks.list',
   'tasks.search',
@@ -83,8 +92,8 @@ export function checkCall(
   if (typeof method !== 'string' || !DESKTOP_METHODS.has(method as MethodName)) {
     throw new Error(`the desktop app does not call ${String(method).slice(0, 60)}`);
   }
-  if (params === undefined || params === null) return { method: method as MethodName, params: {} };
-  if (typeof params !== 'object' || Array.isArray(params)) {
+  if (params === undefined || params === null) params = {};
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
     throw new Error(`${method}: parameters must be an object`);
   }
   PARAMS[method as MethodName]?.(params);
@@ -104,6 +113,17 @@ export function githubSource(source: unknown): boolean {
 
 /** Parameters the window may not choose, by method. */
 const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
+  'peers.configure': (p) => {
+    peerNetworkConfigSchema.parse(p);
+  },
+  'peers.admit': (p) => {
+    peerRecordSchema.parse((p as { record?: unknown }).record);
+  },
+  'peers.remove': (p) => {
+    peerNodeSchema.parse((p as { node?: unknown }).node);
+  },
+  'agents.deletePreview': (p) => deletionParams(p, false),
+  'agents.delete': (p) => deletionParams(p, true),
   'skills.add': (p) => {
     if (!githubSource((p as { source?: unknown }).source)) {
       throw new Error('skills.add: the window adds skills from https://github.com/ addresses');
@@ -119,6 +139,17 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
     }
   },
 };
+
+function deletionParams(params: object, apply: boolean): void {
+  const p = params as { agentId?: unknown; confirm?: unknown };
+  const id = idSchema.safeParse(p.agentId);
+  if (!id.success || id.data === 'builder') throw new Error('choose an agent that can be deleted');
+  const keys = apply ? ['agentId', 'confirm'] : ['agentId'];
+  if (Object.keys(params).some((key) => !keys.includes(key)))
+    throw new Error('invalid deletion parameters');
+  if (apply && p.confirm !== id.data)
+    throw new Error('type the exact agent id to confirm deletion');
+}
 
 const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
@@ -161,6 +192,9 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
   for (const id of patch.connectors ?? []) {
     if (!current.connectors.includes(id)) out.push(`connector ${id}`);
   }
+  for (const id of patch.delegates ?? []) {
+    if (!current.delegates?.includes(id)) out.push(`delegate tasks to @${id}`);
+  }
   for (const w of patch.workspaces ?? []) {
     const before = current.workspaces.find((c) => c.path === w.path);
     if (!before) out.push(`workspace ${w.path} (${w.mode === 'rw' ? 'read-write' : 'read-only'})`);
@@ -181,13 +215,53 @@ export async function confirmation(
   call: { method: MethodName; params: object },
   read: Read,
 ): Promise<Confirmation | undefined> {
+  if (call.method === 'peers.configure') {
+    const p = peerNetworkConfigSchema.parse(call.params);
+    return {
+      message: 'Enable peer networking on this machine?',
+      detail: `Listen on ${p.listen}:${p.port} and advertise ${p.address}. Only enrolled machines with pinned identities can connect. Use an address reachable by every team machine.`,
+      button: 'Configure networking',
+    };
+  }
+  if (call.method === 'peers.admit') {
+    const p = peerRecordSchema.parse((call.params as { record: unknown }).record);
+    return {
+      message: `Trust ${sanitizeLine(p.label)} as a team machine?`,
+      detail: `Node ${p.node} at ${p.address}. This grants its daemon authority to assign work, relay approvals for its tasks, and introduce or revoke team machines. Only enroll machines you own and trust. Agent delegation still needs an explicit grant.`,
+      button: 'Join team',
+    };
+  }
+  if (call.method === 'peers.remove')
+    return {
+      message: 'Revoke this machine from the team?',
+      detail: `Node ${(call.params as { node: string }).node}. Revocation spreads to reachable members; disconnected members learn it when they reconnect. Running work on the removed machine is not cancelled. This identity cannot rejoin.`,
+      button: 'Revoke machine',
+    };
   if (call.method === 'builder.apply') {
     const proposal = (await read('builder.proposal', call.params)) as BuilderProposal;
-    const { execution } = parseYamlAs(proposal.agentYaml, agentLayerSchema);
-    if (!execution) return undefined;
+    const { execution, delegates = [] } = parseYamlAs(proposal.agentYaml, agentLayerSchema);
+    let delegation = '';
+    if (delegates.length) {
+      const before =
+        proposal.kind === 'create'
+          ? []
+          : ((await read('agents.settings', { agentId: proposal.agentId })) as AgentSettings).fixed
+              .delegates;
+      const added = delegates.filter((id) => !before.includes(id));
+      if (added.length)
+        delegation = `Allow @${proposal.agentId} to delegate tasks to ${added.map((id) => `@${id}`).join(', ')}. Recipients keep their own access and approval rules.`;
+    }
+    if (!execution)
+      return delegation
+        ? {
+            message: `Grant delegation to @${proposal.agentId}?`,
+            detail: delegation,
+            button: 'Grant delegation',
+          }
+        : undefined;
     return {
       message: `Run @${proposal.agentId} on ${execution.server}?`,
-      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors, workspaces and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.`,
+      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors, workspaces and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.${delegation ? `\n\n${delegation}` : ''}`,
       button: 'Use execution node',
     };
   }
@@ -273,6 +347,29 @@ export async function guardedCall(
   confirm: (question: Confirmation) => Promise<boolean>,
 ): Promise<unknown> {
   const call = checkCall(method, params);
+  if (call.method === 'agents.delete') {
+    const p = call.params as { agentId: string; confirm: string };
+    const preview = (await read('agents.deletePreview', {
+      agentId: p.agentId,
+    })) as AgentDeletionPreview;
+    if (preview.agentId !== p.agentId) throw new Error('agent changed; review deletion again');
+    const references = [
+      ...preview.delegatedBy.map((id) => `@${id}`),
+      ...preview.delegatedByTemplates.map((id) => `template ${id}`),
+    ];
+    if (
+      !(await confirm({
+        message: `Delete @${p.agentId}?`,
+        detail: `Permanently delete its agent file, ${preview.tasks} tasks and ${preview.delegated} delegated tasks with their transcripts, ${preview.triggers} triggers, and its VM home, sessions, skills and policy rules.\n\n${preview.running} running or queued tasks will be cancelled.${references.length ? `\nRemove its delegation grants from: ${references.map(sanitizeLine).join(', ')}.` : ''}\n\nWorkspaces and audit logs are kept. This cannot be undone.`,
+        button: 'Delete agent',
+      }))
+    )
+      throw new Error('cancelled');
+    const latest = await read('agents.deletePreview', { agentId: p.agentId });
+    if (JSON.stringify(latest) !== JSON.stringify(preview))
+      throw new Error('Agent or tasks changed during confirmation; review deletion again.');
+    return read(call.method, call.params);
+  }
   const question = await confirmation(call, read);
   if (question && !(await confirm(question))) throw new Error('cancelled');
   return read(call.method, call.params);

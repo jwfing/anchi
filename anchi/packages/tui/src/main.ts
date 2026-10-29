@@ -602,7 +602,158 @@ const agentsCmd = program
   .option('--json', 'Print the agent array as JSON');
 const teamCmd = program
   .command('team')
-  .description('Manage team members that execute on other nodes');
+  .description('Manage peer teams and legacy remote execution members');
+teamCmd
+  .command('network')
+  .description('Configure this daemon’s mutually authenticated peer listener')
+  .requiredOption('--label <label>', 'Machine name in the team directory')
+  .requiredOption('--address <url>', 'tls://host:port reachable from all team machines')
+  .option('--listen <host>', 'Local bind address', '0.0.0.0')
+  .option('--port <port>', 'Local listening port', '9847')
+  .action((opts) =>
+    withClient(async (client) => {
+      const record = await client.call('peers.configure', {
+        label: opts.label,
+        address: opts.address,
+        listen: opts.listen,
+        port: Number(opts.port),
+      });
+      console.log(`${sanitizeLine(record.label)} · ${record.node} · ${record.address}`);
+    }),
+  );
+teamCmd
+  .command('peers')
+  .description('Show the synchronized team directory')
+  .option('--json', 'Print nodes and global agent ids as JSON')
+  .action((opts) =>
+    withClient(async (client) => {
+      const directory = await client.call('peers.directory');
+      if (opts.json) {
+        console.log(JSON.stringify(sanitizeJson(directory), null, 2));
+        return;
+      }
+      if (!directory.configured)
+        console.log('Configure this machine with anchi team network first.');
+      for (const node of directory.nodes) {
+        console.log(
+          `${sanitizeLine(node.label)} · ${node.online ? 'online' : 'offline'} · ${node.node}`,
+        );
+        for (const agent of node.agents)
+          console.log(
+            `  ${node.node}/${agent.id}/${agent.generation}  ${sanitizeLine(agent.name)}`,
+          );
+      }
+    }),
+  );
+teamCmd
+  .command('join <server>')
+  .description('Pair with a configured machine through its owner connection; discover its team')
+  .option('-y, --yes', 'Trust the machine and its team without prompting')
+  .action((name: string, opts: { yes?: boolean }) =>
+    withClient(async (client) => {
+      const target = resolveServer(layout.root, name);
+      const remote =
+        target.kind === 'local' ? await connectOrStart(layout) : await connectRemote(target);
+      try {
+        const own = await client.call('peers.identity');
+        const peer = await remote.call('peers.identity');
+        if (own.node === peer.node) throw new Error('Choose a different machine.');
+        console.log(
+          `Trust ${sanitizeLine(peer.label)} (${peer.node}) at ${peer.address}. Its daemon may assign work, relay its task approvals and change team membership.`,
+        );
+        if (
+          !opts.yes &&
+          (!process.stdin.isTTY ||
+            (await ask('Join this trusted machine and its team? [y/N] ')).toLowerCase() !== 'y')
+        )
+          return;
+        await client.call('peers.admit', { record: peer });
+        await remote.call('peers.admit', { record: own });
+        console.log(
+          'Paired. Direct peer traffic requires the advertised addresses to be reachable.',
+        );
+      } finally {
+        remote.close();
+      }
+    }),
+  );
+teamCmd
+  .command('revoke <node>')
+  .description('Revoke a machine identity throughout the reachable team')
+  .option('-y, --yes', 'Revoke without prompting')
+  .action((node: string, opts: { yes?: boolean }) =>
+    withClient(async (client) => {
+      if (
+        !opts.yes &&
+        (!process.stdin.isTTY ||
+          (
+            await ask(
+              `Permanently revoke ${sanitizeLine(node)}? Running work there is not cancelled. [y/N] `,
+            )
+          ).toLowerCase() !== 'y')
+      )
+        return;
+      await client.call('peers.remove', { node });
+      console.log('Revocation saved; disconnected members learn it when they reconnect.');
+    }),
+  );
+agentsCmd
+  .command('delegates <id>')
+  .description('List or edit which agents this agent may delegate work to')
+  .option('--allow <agent>', 'Add one agent to the delegation allowlist')
+  .option('--revoke <agent>', 'Remove one agent from the delegation allowlist')
+  .option('--clear', 'Revoke all delegation, including inherited grants')
+  .option('--preview', 'Review the change without saving')
+  .option('-y, --yes', 'Save the reviewed change without an interactive prompt')
+  .action(
+    (
+      agentId: string,
+      opts: { allow?: string; revoke?: string; clear?: boolean; preview?: boolean; yes?: boolean },
+    ) =>
+      withClient(async (client) => {
+        const changes = [opts.allow, opts.revoke, opts.clear].filter((v) => v !== undefined).length;
+        if (changes > 1) throw new Error('choose only one of --allow, --revoke or --clear');
+        const settings = await client.call('agents.settings', { agentId });
+        if (!settings.editable) throw new Error(settings.reason ?? 'agent is not editable');
+        if (!changes) {
+          console.log(
+            settings.fixed.delegates.map((id) => `@${sanitizeLine(id)}`).join(', ') ||
+              'no delegation allowed',
+          );
+          return;
+        }
+        const current = settings.current.delegates;
+        if (current === undefined)
+          throw new Error('Update this machine’s daemon to edit delegation with this command.');
+        const delegates = opts.clear
+          ? []
+          : opts.allow !== undefined
+            ? [...new Set([...current, opts.allow])]
+            : current.filter((id) => id !== opts.revoke);
+        const patch = { delegates };
+        const preview = await client.call('agents.update', { agentId, patch });
+        console.log(
+          sanitizeLine(agentId) +
+            ' delegation: ' +
+            delegates.map((id) => '@' + sanitizeLine(id)).join(', '),
+        );
+        console.log(sanitizeLines(preview.diff).join('\n') || 'No change.');
+        for (const warning of preview.warnings) console.log(`Warning: ${sanitizeLine(warning)}`);
+        if (preview.errors.length) throw new Error(preview.errors.map(sanitizeLine).join('; '));
+        if (opts.preview || !preview.diff) return;
+        if (!opts.yes && !process.stdin.isTTY)
+          throw new Error('Review with --preview, then use --yes to save without a terminal');
+        if (
+          !opts.yes &&
+          (await ask(`Save delegation for @${sanitizeLine(agentId)}? [y/N] `))
+            .trim()
+            .toLowerCase() !== 'y'
+        )
+          return;
+        await client.call('agents.update', { agentId, patch, apply: true, base: preview.base });
+        console.log(`Saved delegation for @${sanitizeLine(agentId)}.`);
+      }),
+  );
 teamCmd
   .command('nodes')
   .description('List execution nodes saved on the team coordinator')

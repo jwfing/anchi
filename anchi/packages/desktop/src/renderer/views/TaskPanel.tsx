@@ -34,6 +34,7 @@ export function TaskPanel({
     const pane = transcriptPane.current;
     if (pane) pane.scrollTop = pane.scrollHeight;
   }, [items.length]);
+  const observed = task.peer?.kind === 'mirror' && task.peer.observed;
   const elapsed = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : 0;
 
   return (
@@ -93,10 +94,22 @@ export function TaskPanel({
         {items.map((i) => (
           <TranscriptItem key={i.seq} item={i} />
         ))}
-        {!items.length && <span className="small muted">Loading…</span>}
+        {!items.length && (
+          <span className="small muted">
+            {observed
+              ? 'Open the execution machine for this descendant’s full transcript.'
+              : 'Loading…'}
+          </span>
+        )}
+        {observed && task.result && <p>{sanitizeLine(task.result)}</p>}
       </div>
       <div className="panel-actions">
-        {active ? (
+        {observed ? (
+          <p className="small muted">
+            Observed through its parent. Control this task from the originating parent or execution
+            machine.
+          </p>
+        ) : active ? (
           <button
             type="button"
             className="btn btn-danger"
@@ -144,7 +157,7 @@ export function TaskPanel({
             ? 'Wait for this turn to end to reply'
             : `Reply to ${task.id} · continues its session`
         }
-        disabled={active}
+        disabled={active || observed}
         inputRef={reply}
         onSend={(text) => act(() => call('tasks.send', { taskId: task.id, text }))}
       />
