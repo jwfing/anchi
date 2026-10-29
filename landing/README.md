@@ -33,7 +33,8 @@ when changing content, and keep the alternate-language metadata and sitemap in s
 upper and lower triangles have a 7:3 height ratio, with a clear vertical gap
 between the two halves, and a point of light where the gap crosses the widest
 line, shining out as a four-point star. `dist/favicon.svg` is the desktop app's
-icon (`anchi/packages/desktop/assets/icon.svg`): the same mark on a dark tile.
+icon (`anchi/packages/desktop/assets/icon.svg`): the same mark in celadon on a blue-black
+(黛) tile, the color of the app's rail.
 The hero animations still draw the flat mark, without the light, for the trusted
 gateway. The wordmark is live text so it stays crisp and accessible.
 

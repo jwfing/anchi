@@ -122,6 +122,7 @@ export function agentActivity(
   if (agent.queued) return { tone: 'queued', text: `${agent.queued} queued` };
   const last = agentTasks(model, agent.id).at(-1);
   if (last?.status === 'failed') return { tone: 'error', text: `Failed: ${last.title}` };
-  if (last) return { tone: 'idle', text: `Last: ${last.title}` };
+  // The team list shows it as a quote, which already says it is the latest message.
+  if (last) return { tone: 'idle', text: last.title };
   return { tone: 'idle', text: agent.description ?? 'No tasks yet' };
 }

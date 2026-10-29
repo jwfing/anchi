@@ -186,6 +186,7 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
   'skills.list': () => skills,
   'usage.summary': () => [],
   'usage.quota': () => [],
+  'team.nodes': () => [],
 };
 
 const home = mkdtempSync(join(tmpdir(), 'anchi-demo-'));

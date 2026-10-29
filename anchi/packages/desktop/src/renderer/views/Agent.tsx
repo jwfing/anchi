@@ -6,7 +6,7 @@ import { count, duration, tokens } from '../format.ts';
 import { Markdown } from '../markdown.tsx';
 import { agentTasks } from '../model.ts';
 import { doing, toolSummary, transcript } from '../transcript.ts';
-import { Avatar, Composer, Linked, Splitter, StatusPill, usePanelWidth } from '../ui.tsx';
+import { Avatar, Composer, Icon, Linked, Splitter, StatusPill, usePanelWidth } from '../ui.tsx';
 import { AgentSettingsView } from './AgentSettings.tsx';
 import { ApprovalCard } from './Approvals.tsx';
 import { TaskPanel } from './TaskPanel.tsx';
@@ -203,6 +203,17 @@ export function AgentView({ agentId }: { agentId: string }) {
   );
 }
 
+/**
+ * Whether a click on a task card's body should open the task. Controls inside the card keep their
+ * own action, and a click that ends a text selection is for copying, not for opening.
+ */
+export function bodyClickOpens(
+  target: { closest(selector: string): unknown } | null,
+  selectedText: string,
+): boolean {
+  return !target?.closest('a, button, input, textarea, select, summary') && !selectedText;
+}
+
 export function TaskTurn({
   task,
   selected,
@@ -224,6 +235,9 @@ export function TaskTurn({
   const active = task.status === 'running' || task.status === 'queued';
   const now = doing(items);
   const elapsed = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : 0;
+  const head = useRef<HTMLButtonElement>(null);
+  // A task whose turn has ended opens ready to continue, with the cursor in its reply box.
+  const open = active ? onSelect : onContinue;
 
   return (
     <>
@@ -237,10 +251,11 @@ export function TaskTurn({
       </div>
       <article className={`task-card ${selected ? 'selected' : ''}`}>
         <button
+          ref={head}
           type="button"
           className="task-card-head"
-          onClick={onSelect}
-          aria-label={`${selected ? 'Hide' : 'Open'} task ${task.id}`}
+          onClick={selected ? onSelect : open}
+          aria-label={`${selected ? 'Hide' : active ? 'Open' : 'Continue'} task ${task.id}`}
           aria-expanded={selected}
           aria-controls="task-details"
         >
@@ -256,8 +271,24 @@ export function TaskTurn({
               ? ` · ${tokens(task.inputTokens)} in / ${tokens(task.outputTokens)} out`
               : ''}
           </span>
+          <span className="task-card-open small" aria-hidden="true">
+            {selected ? 'Hide' : active ? 'Details' : 'Continue this task'}
+            <Icon name="chevron" size={14} />
+          </span>
         </button>
-        <div className="task-card-body">
+        {/* The head is the keyboard control; the body only widens the mouse target, and only opens,
+            so reading a result in an open task never closes it. Focus moves to the head first so
+            closing the panel returns focus to this card. */}
+        <div
+          className={`task-card-body ${selected ? '' : 'opens'}`}
+          onClick={(e) => {
+            if (selected || !bodyClickOpens(e.target as Element, String(getSelection() ?? ''))) {
+              return;
+            }
+            head.current?.focus();
+            open();
+          }}
+        >
           {active && progress && progress.kind === 'progress' && (
             <div className="progress">✻ {progress.text.split('\n')[0]}</div>
           )}
@@ -291,11 +322,6 @@ export function TaskTurn({
                 </span>
               ))}
             </div>
-          )}
-          {!active && (
-            <button type="button" className="btn btn-small continue" onClick={onContinue}>
-              Continue this task
-            </button>
           )}
         </div>
         {approvals.map((a) => (

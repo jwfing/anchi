@@ -22,7 +22,7 @@ import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
 import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
-import { TaskTurn } from '../src/renderer/views/Agent.tsx';
+import { bodyClickOpens, TaskTurn } from '../src/renderer/views/Agent.tsx';
 import { DelegationChoices, settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
 import {
@@ -364,6 +364,21 @@ describe('agent conversation', () => {
     expect(turn('failed')).toContain('Continue this task');
     expect(turn('running')).not.toContain('Continue this task');
     expect(turn('queued')).not.toContain('Continue this task');
+  });
+
+  it('shows that a task card opens its conversation', () => {
+    expect(turn('running')).toContain('Details');
+    expect(turn('running')).toContain('task-card-body opens');
+    expect(turn('done')).toContain('Continue task t-1');
+    expect(turn('done')).not.toContain('btn btn-small');
+  });
+
+  it('opens a task from its body, except on its controls or after selecting text', () => {
+    const at = (control: boolean) => ({ closest: () => (control ? {} : null) });
+    expect(bodyClickOpens(at(false), '')).toBe(true);
+    expect(bodyClickOpens(at(true), ''), 'Continue, links, tool calls').toBe(false);
+    expect(bodyClickOpens(at(false), 'copied text')).toBe(false);
+    expect(bodyClickOpens(null, '')).toBe(true);
   });
 
   it('keeps the task panel and the conversation beside it usable while resizing', () => {
