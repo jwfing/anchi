@@ -65,7 +65,7 @@ The script bundles `anchi/packages/desktop` with esbuild and starts Electron. On
 - `ANCHI_SERVER`, else the choice saved by `anchi server <target>`, else `local`.
 - With `local`, it starts the local daemon through `scripts/anchi daemon start` when none is running. Set `ANCHI_CLI` to use another CLI.
 
-The machine button at the bottom of the left rail shows the number of connected machines and opens Settings → Machines. In Settings, select a machine card under **Machines** to configure it. Builder, Approvals and Usage have a styled machine selector; an agent view follows the machine of the selected agent. Team keeps agents from every machine visible; each row and header identifies its machine. Activity previews wrap to at most two lines and truncate without widening the list. When the selected machine is offline, a banner says why and task actions are unavailable. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
+The machine button at the bottom of the left rail shows the number of connected machines and opens Settings → Machines. In Settings, select a machine card under **Machines** to configure it. Builder, Approvals and Usage have a styled machine selector; an agent view follows the machine of the selected agent. Team groups agents under machine headings; each row shows a runtime tag below the agent's name, and the selected agent's header identifies its machine. Activity previews wrap to at most two lines and truncate without widening the list. When the selected machine is offline, a banner says why and task actions are unavailable. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
 
 ## Getting started
 
@@ -88,9 +88,11 @@ Skip for now leaves the guide until it is opened again.
 
 The Team list discovers agents on all connected machines without copying their profiles or granting new delegation permissions. Same-name agents remain separate. Offline machines keep their last known agent list for this desktop session, marked offline.
 
-A working agent's avatar has a rotating accent ring. The ring stops when work finishes or the
-machine disconnects; waiting approvals, queued work and errors keep their own status dots and
-text. The system's reduced-motion preference turns the animation into a static ring.
+A working agent's avatar has a small, pale green dot orbiting it every 2.8 seconds, with no
+ring or glow. Adjacent rows start at different positions to keep a busy team visually quiet.
+The dot stops when work finishes or the machine disconnects; waiting approvals, queued work
+and errors keep their own status dots and text. The system's reduced-motion preference keeps
+the working dot stationary.
 
 Click a host heading in Team to collapse or expand its agents; Enter or Space also toggles a
 focused heading. Its agent count and connection status remain visible when collapsed. Each

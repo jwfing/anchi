@@ -23,7 +23,7 @@ import {
   type FleetAction,
   reduceFleet,
 } from './model.ts';
-import { Avatar, Icon } from './ui.tsx';
+import { Avatar, Icon, runtimeName } from './ui.tsx';
 import { DesktopUpdates } from './updates.tsx';
 import { AgentView } from './views/Agent.tsx';
 import { DeleteAgentDialog } from './views/DeleteAgent.tsx';
@@ -383,14 +383,11 @@ export function TeamList({
                     <span className="strong ellipsis">
                       @{sanitizeLine(agent.peer?.agent ?? agent.id)}
                     </span>
-                    <span className="small muted ellipsis">
-                      {sanitizeLine(
-                        agent.execution
-                          ? `${server.label} → ${agent.execution.server}`
-                          : server.label,
-                      )}
-                      {agent.runtime ? ` · ${agent.runtime}` : ''}
-                    </span>
+                    {agent.runtime && (
+                      <span className="tag tag-off agent-runtime ellipsis">
+                        {runtimeName(agent.runtime)}
+                      </span>
+                    )}
                     <span className={`small agent-preview tone-${activity.tone}`}>
                       {server.status === 'connected'
                         ? sanitizeLine(activity.text)

@@ -11,15 +11,10 @@ import type {
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../App.tsx';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
-import { Icon } from '../ui.tsx';
+import { Icon, runtimeName } from '../ui.tsx';
 import { Diff } from './Builder.tsx';
 import { DeleteAgentAction } from './DeleteAgent.tsx';
 
-const RUNTIME_NAMES: Record<RuntimeId, string> = {
-  codex: 'Codex',
-  'claude-code': 'Claude Code',
-  hermes: 'Hermes',
-};
 const EFFORTS: (Effort | '')[] = ['', 'low', 'medium', 'high', 'xhigh'];
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -131,7 +126,7 @@ export function AgentSettingsView({ agentId }: { agentId: string }) {
                 >
                   {inventory.runtimes.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {RUNTIME_NAMES[r.id] ?? r.id}
+                      {runtimeName(r.id)}
                       {r.connected === false ? ' (not set up)' : ''}
                     </option>
                   ))}

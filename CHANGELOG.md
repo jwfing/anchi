@@ -22,7 +22,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
-- A working agent has a continuously rotating ring around its avatar in Team, replacing its green activity dot. Approval, queued and error indicators remain distinct; reduced-motion preferences keep the ring static.
+- Team rows show a runtime tag below the agent's name; the machine name appears in the host heading instead of repeating on every row.
+
+- A working agent has a small, pale green dot orbiting its avatar in Team every 2.8 seconds. The dot has no ring or glow, and adjacent rows start at different positions. Approval, queued and error indicators remain distinct; reduced-motion preferences keep the working dot stationary.
 
 - The desktop Team list lets you collapse or expand each host's agents. Headers keep the machine's connection state and agent count visible, and the app remembers each host's choice across restarts.
 
