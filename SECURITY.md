@@ -219,7 +219,10 @@ are outside that domain: they cannot enroll peers, choose transport endpoints, a
 identity or make approval decisions. Every delegation hop still requires the source agent's
 allowlist and keeps the destination's local connector and approval policy.
 
-Peers authenticate with mutually pinned public keys over TLS 1.3 before RPC parsing. Signed,
+Peers authenticate over TLS 1.3 before RPC parsing. TLS validates certificates against the
+enrolled peer certificates only, and the client checks the destination's node name. Both ends
+also pin the peer's public key. Enrollment and revocation update the listener's trust store
+without interrupting other peers. Signed,
 versioned agent snapshots carry metadata only. Agent generations prevent a recreated name from
 inheriting an old cross-machine grant. The peer method allowlist excludes owner administration,
 vault access and arbitrary RPC forwarding. Private keys remain on each host with 0600 access;

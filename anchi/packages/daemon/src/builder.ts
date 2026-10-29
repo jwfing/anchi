@@ -181,9 +181,6 @@ export function builderAgent(runtime: Runtime = 'codex'): ResolvedAgent {
   return { ...agent, sourceFiles: [] };
 }
 
-const BLOCK =
-  /```anchi-(agent-patch|agent|image) id=([a-z0-9][a-z0-9-]{0,39})[ \t]*\n([\s\S]*?)\n```/g;
-
 export interface ParsedBlocks {
   agent?: { id: string; yaml: string };
   /** Only the fields to change in an existing agent's file. */
@@ -194,8 +191,15 @@ export interface ParsedBlocks {
 /** Finds proposal blocks in builder output. The last agent (or patch) and image block win. */
 export function parseBlocks(text: string): ParsedBlocks {
   const out: ParsedBlocks = {};
-  for (const m of text.matchAll(BLOCK)) {
-    const block = { id: m[2]!, yaml: `${m[3]!.trimEnd()}\n` };
+  const header = /```anchi-(agent-patch|agent|image) id=([a-z0-9][a-z0-9-]{0,39})[ \t]*\n/g;
+  let m: RegExpExecArray | null;
+  while ((m = header.exec(text))) {
+    const start = header.lastIndex;
+    const end = text.indexOf('\n```', start);
+    // An unfinished block cannot hide a later closing fence; do not rescan its body.
+    if (end === -1) break;
+    header.lastIndex = end + 4;
+    const block = { id: m[2]!, yaml: `${text.slice(start, end).trimEnd()}\n` };
     if (m[1] === 'image') out.image = block;
     else {
       delete out.agent;

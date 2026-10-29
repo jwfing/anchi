@@ -170,6 +170,16 @@ export class PeerNetwork {
       .filter((r) => !this.removed().includes(r.node));
   }
 
+  private serverCredentials() {
+    return {
+      ...this.keys(),
+      ca: this.records()
+        .filter((r) => r.node !== this.node)
+        .map((r) => r.certificate),
+      minVersion: 'TLSv1.3' as const,
+    };
+  }
+
   private catalogBatch(): PeerRecord[] {
     const records = this.records();
     const record = records[this.catalogCursor++ % records.length];
@@ -207,6 +217,7 @@ export class PeerNetwork {
     if (previous && previous.revision >= record.revision) return;
     if (!previous && this.records().length >= 32) throw new Error('PEER_LIMIT');
     this.opts.store.teamPut(`peer/record/${record.node}`, record);
+    this.server?.setSecureContext(this.serverCredentials());
     if (!this.stopped) this.opts.changed?.();
     void this.tick();
   }
@@ -218,6 +229,7 @@ export class PeerNetwork {
     const removed = [...new Set([...this.removed(), node])];
     if (removed.length > 1000) throw new Error('PEER_REMOVAL_LIMIT');
     this.opts.store.teamPut('peer/removed', removed);
+    this.server?.setSecureContext(this.serverCredentials());
     this.links.get(node)?.close();
     this.links.delete(node);
     if (!this.stopped) this.opts.changed?.();
@@ -259,10 +271,9 @@ export class PeerNetwork {
     this.stopped = false;
     this.server = createServer(
       {
-        ...this.keys(),
+        ...this.serverCredentials(),
         requestCert: true,
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.3',
+        rejectUnauthorized: true,
         handshakeTimeout: 5000,
       },
       (socket) => {
@@ -337,7 +348,9 @@ export class PeerNetwork {
         host: url.hostname.replace(/^\[|\]$/g, ''),
         port: Number(url.port),
         ...this.keys(),
-        rejectUnauthorized: false,
+        ca: record.certificate,
+        servername: `anchi-${record.node}`,
+        rejectUnauthorized: true,
         minVersion: 'TLSv1.3',
       });
       this.sockets.add(socket);

@@ -246,6 +246,10 @@ Enroll only owner-controlled, trusted daemons. Enrollment authorizes a daemon to
 relay human decisions for its task tree, introduce members and propagate revocations. All nodes
 share that authority. It is not a boundary between mutually distrustful users.
 
+Peer TLS connections trust enrolled certificates only and verify the destination's node name
+and public key. Joining or revoking a member updates certificate trust without restarting the
+other connections; the node identity is independent of its advertised IP address or hostname.
+
 ### Assign work and grant delegation
 
 Team shows discovered agents grouped by machine, including the last known directory when a

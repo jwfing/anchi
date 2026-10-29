@@ -2605,6 +2605,7 @@ describe('agent settings', () => {
     }
   });
 
+  // Eleven cold CLI processes need an integration-test budget on shared CI runners.
   it('previews delegation through the CLI, requires confirmation and preserves other grants', async () => {
     write('agents/lead.yaml', 'runtime: codex\ndelegates: [dev]\n');
     write('agents/reviewer.yaml', 'runtime: codex\n');
@@ -2623,7 +2624,7 @@ describe('agent settings', () => {
           'lead',
           ...args,
         ],
-        { env: { ...process.env, ANCHI_HOME: root } },
+        { env: { ...process.env, ANCHI_HOME: root }, timeout: 5000 },
       );
     expect((await cli()).stdout).toContain('@dev');
     expect((await cli('--allow', 'reviewer', '--preview')).stdout).toContain('dev, reviewer');
@@ -2636,7 +2637,7 @@ describe('agent settings', () => {
     await expect(cli('--allow', 'lead', '--yes')).rejects.toThrow();
     await cli('--clear', '--yes');
     expect((await cli()).stdout).toContain('no delegation allowed');
-  });
+  }, 30_000);
 
   it('edits delegation only after a valid reviewed patch, including inherited revocation', async () => {
     write('templates/team.yaml', 'runtime: codex\ndelegates: [dev]\n');
