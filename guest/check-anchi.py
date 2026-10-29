@@ -193,6 +193,20 @@ def main():
         check('cells do not share homes or /tmp', ls_b == 'probed', ls_b[:120])
         _, sockets_b = sh('chk-b', 'ls /run/anchi')
         check('a cell sees only its own proxy socket', sockets_b.split() == ['proxy.sock'], sockets_b)
+        _, author_b = sh('chk-b', 'echo "$GIT_AUTHOR_EMAIL $GIT_COMMITTER_EMAIL"')
+        check(
+            'a cell without github authors its commits as its agent',
+            author_b == 'chk-beta@agents.anchi.invalid chk-beta@agents.anchi.invalid',
+            author_b,
+        )
+        # With GitHub the linked account authors commits (synthetic tokens here leave the agent),
+        # and the agent always stays the committer.
+        _, committer_a = sh('chk-a', 'echo "$GIT_COMMITTER_NAME <$GIT_COMMITTER_EMAIL>"')
+        check(
+            'the agent stays the committer in a github cell',
+            committer_a == 'chk-alpha (Anchi agent) <chk-alpha@agents.anchi.invalid>',
+            committer_a,
+        )
         _, ps_b = sh('chk-b', 'ps -eo pid,args --no-headers')
         check(
             'cells do not see each other\'s processes',

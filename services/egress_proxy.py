@@ -14,6 +14,7 @@ Run:  mitmdump -s egress_proxy.py --listen-host 127.0.0.1 --listen-port 18080
 
 import asyncio
 import grp
+import hashlib
 import json
 import logging
 import os
@@ -35,6 +36,10 @@ AUDIT = Path(os.environ.get('ANCHI_EGRESS_AUDIT', '/var/log/anchi-egress/audit.j
 AUDIT_MAX_BYTES = 50 * 1024 * 1024
 AUTH_SOCKET = os.environ.get('ANCHI_EGRESS_AUTH', '/run/secure-auth/token.sock')
 CREDENTIAL_TTL = 60
+# A GitHub identity that could not be read is asked again after this long, not on every cell; a
+# lookup waits at most GITHUB_IDENTITY_WAIT so a slow GitHub never delays a cell's start much.
+GITHUB_IDENTITY_RETRY = 300
+GITHUB_IDENTITY_WAIT = 5
 NAME = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 CONTROL_MAX = 4096
 SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack', 'x', 'reddit')
@@ -637,6 +642,8 @@ class EgressProxy:
         self.quota = load_quota()
         # Server connection id → the (host, port) the client asked for, while it is being opened.
         self.requested = {}
+        # (fingerprint of the GitHub credential, its identity or None, when to ask again).
+        self.github_who = None
 
     # ── lifecycle ────────────────────────────────────────────
 
@@ -681,7 +688,7 @@ class EgressProxy:
                 result = self.approvals.decide(str(request.get('id', '')), request.get('allow') is True)
             elif op == 'register':
                 result = await self.registry.register(request, await self.runtime_rules(request))
-                result['identifiers'] = self.identifiers(self.registry.cells[request['task']].grants)
+                result['identifiers'] = await self.registration_identifiers(request['task'])
             elif op == 'unregister':
                 task = request.get('task')
                 if not isinstance(task, str) or not NAME.fullmatch(task):
@@ -775,6 +782,39 @@ class EgressProxy:
         except (LookupError, OSError, ValueError):
             return ()
         return (rules.hermes_rule(credential['host'], urlsplit(credential['base_url']).path),)
+
+    async def registration_identifiers(self, task):
+        """Identifiers for a registered cell: the non-secret ones, and the linked GitHub account
+        when the cell is granted GitHub, so its commits are attributed to that account."""
+        grants = self.registry.cells[task].grants
+        out = self.identifiers(grants)
+        if 'github' in grants:
+            out.update(await self.github_identity() or {})
+        return out
+
+    async def github_identity(self):
+        """Login, id and name of the account the stored GitHub token belongs to, looked up once per
+        token through the connector's identity call; None when it cannot be read."""
+        loop = asyncio.get_running_loop()
+        try:
+            credential = await loop.run_in_executor(None, self.credentials.get, 'github')
+        except (LookupError, OSError, ValueError):
+            return None
+        key = hashlib.sha256(json.dumps(credential, sort_keys=True, default=str).encode()).hexdigest()
+        known = self.github_who
+        if known and known[0] == key and (known[1] is not None or time.monotonic() < known[2]):
+            return known[1]
+        method, url, headers, body = rules.verify_requests('github', credential)[0]
+        try:
+            status, content = await asyncio.wait_for(
+                loop.run_in_executor(None, self.call, method, url, headers, body), GITHUB_IDENTITY_WAIT
+            )
+        except (OSError, asyncio.TimeoutError):
+            status, content = 0, b''
+        audit({'event': 'identity', 'connector': 'github', 'status': status})
+        identity = rules.github_identity(status, content)
+        self.github_who = (key, identity, time.monotonic() + GITHUB_IDENTITY_RETRY)
+        return identity
 
     def identifiers(self, grants):
         """Non-secret values a cell needs locally, such as the Codex account id."""

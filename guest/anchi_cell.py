@@ -728,7 +728,31 @@ def codex_placeholder(account):
     return json.dumps({'OPENAI_API_KEY': None, 'tokens': tokens, 'last_refresh': now})
 
 
+GITHUB_LOGIN = re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?')
+# A name git and systemd-run's environment expansion read literally (the proxy already checked it).
+GIT_NAME = re.compile(r'[^\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff$%\\<>"\'`]{1,100}')
+
+
+def git_author(agent, connectors, identifiers):
+    """Commits are authored by the GitHub account the connector is linked to, through its noreply
+    address so GitHub attributes them without the account's email; without GitHub, by the agent.
+    The committer stays the agent, so every commit still says an agent made it."""
+    login, uid, name = (identifiers.get(k) for k in ('github_login', 'github_id', 'github_name'))
+    if (
+        'github' in connectors
+        and isinstance(login, str)
+        and GITHUB_LOGIN.fullmatch(login)
+        and type(uid) is int
+        and 0 < uid < 2**53
+        and isinstance(name, str)
+        and GIT_NAME.fullmatch(name)
+    ):
+        return name, f'{uid}+{login}@users.noreply.github.com'
+    return f'{agent} (Anchi agent)', f'{agent}@agents.anchi.invalid'
+
+
 def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
+    author = git_author(agent, connectors, identifiers)
     env = {
         'HOME': '/home/agent',
         'USER': 'agent',
@@ -739,8 +763,8 @@ def cell_environment(task, agent, connectors, identifiers, runtime='codex'):
         'RUSTUP_HOME': '/opt/rustup',
         'ANCHI_TASK': task,
         'ANCHI_AGENT': agent,
-        'GIT_AUTHOR_NAME': f'{agent} (Anchi agent)',
-        'GIT_AUTHOR_EMAIL': f'{agent}@agents.anchi.invalid',
+        'GIT_AUTHOR_NAME': author[0],
+        'GIT_AUTHOR_EMAIL': author[1],
         'GIT_COMMITTER_NAME': f'{agent} (Anchi agent)',
         'GIT_COMMITTER_EMAIL': f'{agent}@agents.anchi.invalid',
         'GIT_TERMINAL_PROMPT': '0',

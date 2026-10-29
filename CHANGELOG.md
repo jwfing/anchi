@@ -6,6 +6,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- Commits an agent makes in a cell with GitHub are authored by the linked GitHub account, through its noreply address, so GitHub attributes them to that account instead of an unknown `agents.anchi.invalid` email. The agent stays the committer. Redeploy the VM services with `anchi setup install` to apply.
+
 - In the desktop Team list, each agent's latest message or state is a one-line quote under its runtime tag instead of one or two loose lines, so rows keep the same height. A long one ends in an ellipsis and shows in full on hover; the quote's rule turns amber for a waiting approval and red for an error. The `Last:` prefix is gone.
 
 - In an agent's desktop conversation, clicking anywhere on a task card opens its details, not only the card's header. The header says what a click does: **Continue this task ›** once the turn has ended, which opens the drawer with the cursor in its reply box and replaces the separate button at the bottom of the card, or **Details ›** while it runs. Buttons and links inside the card keep their own action, and selecting text to copy does not open the task.

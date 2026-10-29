@@ -433,6 +433,38 @@ class DecisionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'VERIFY_UNEXPECTED_RESPONSE'):
             rules.verify_account('github', 200, b'<html>')
 
+    def test_github_identity_keeps_only_bounded_fields_for_commit_authorship(self):
+        """The /user response is external input that ends up on a guest command line."""
+        identity = rules.github_identity
+        self.assertEqual(
+            identity(200, b'{"login":"octo-cat","id":583231,"name":"Mona Lisa","email":"m@x.y","token":"t"}'),
+            {'github_login': 'octo-cat', 'github_id': 583231, 'github_name': 'Mona Lisa'},
+        )
+        # No name, or nothing left of one: the login stands in.
+        self.assertEqual(identity(200, b'{"login":"octo","id":1,"name":null}')['github_name'], 'octo')
+        self.assertEqual(identity(200, b'{"login":"octo","id":1,"name":"$<>"}')['github_name'], 'octo')
+        # Controls, bidi overrides and what git or systemd-run would read are dropped; length is bounded.
+        name = identity(200, '{"login":"o","id":1,"name":"A\\n$HOME \\u202e<b@c> `x` %h\\\\"}'.encode())['github_name']
+        self.assertEqual(name, 'A HOME b@c x h')
+        self.assertEqual(len(identity(200, b'{"login":"o","id":1,"name":"' + b'n' * 500 + b'"}')['github_name']), 100)
+        for status, body in (
+            (401, b'{"login":"octo","id":1}'),
+            (200, b'<html>'),
+            (200, b'[]'),
+            (200, b'{"id":1}'),
+            (200, b'{"login":"octo"}'),
+            (200, b'{"login":"octo","id":true}'),
+            (200, b'{"login":"octo","id":"1"}'),
+            (200, b'{"login":"octo","id":-1}'),
+            (200, b'{"login":"octo","id":9007199254740993}'),
+            (200, b'{"login":"-octo","id":1}'),
+            (200, b'{"login":"oc to","id":1}'),
+            (200, b'{"login":"$(id)","id":1}'),
+            (200, b'{"login":"' + b'a' * 40 + b'","id":1}'),
+            (200, b'\xff\xfe'),
+        ):
+            self.assertIsNone(identity(status, body), body)
+
     def test_rest_connector_verification(self):
         calls = {c: rules.verify_requests(c, FAKE) for c in REST}
         # A PostHog key belongs to the US or the EU cloud: both are tried, US first.
@@ -1833,6 +1865,89 @@ class HermesTests(unittest.TestCase):
                 {'hermes_base_url': 'https://api.together.xyz/v2', 'hermes_model': 'm2'},
             )
             await proxy.registry.unregister('th')
+
+        asyncio.run(scenario())
+
+    def github_proxy(self, responses, credential=GITHUB):
+        """A proxy whose GitHub identity calls answer from `responses` in turn."""
+        calls, current = [], {'credential': dict(credential)}
+
+        def fetch(request):
+            if request.get('connector') == 'github':
+                return dict(current['credential'])
+            raise LookupError('NOT_FOUND')
+
+        def call(method, url, headers, body):
+            calls.append((method, url, headers.get('authorization')))
+            answer = responses.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)),
+            credentials=self.module.Credentials(fetch, clock=lambda: 0.0),
+            call=call,
+        )
+        return proxy, calls, current
+
+    def test_a_github_cell_gets_the_linked_account_once_per_token(self):
+        user = b'{"login":"octo","id":42,"name":"Octo Cat"}'
+        proxy, calls, current = self.github_proxy([(200, user), (200, b'{"login":"other","id":7}')])
+
+        async def scenario():
+            self.assertEqual(
+                await proxy.github_identity(),
+                {'github_login': 'octo', 'github_id': 42, 'github_name': 'Octo Cat'},
+            )
+            await proxy.github_identity()
+            self.assertEqual(calls, [('GET', 'https://api.github.com/user', f'Bearer {GITHUB["token"]}')])
+            # Another token, another account: looked up again.
+            proxy.credentials.invalidate('github')
+            current['credential'] = {**GITHUB, 'token': 'ghp_anotheranotheranother'}
+            self.assertEqual((await proxy.github_identity())['github_login'], 'other')
+            self.assertEqual(len(calls), 2)
+
+        asyncio.run(scenario())
+        audit = Path(self.tmp, 'audit.jsonl').read_text()
+        self.assertIn('"event": "identity"', audit)
+        self.assertNotIn(GITHUB['token'], audit)
+
+    def test_a_github_identity_that_cannot_be_read_leaves_the_agent_identity(self):
+        proxy, calls, _ = self.github_proxy(
+            [OSError('unreachable'), (401, b'{"message":"Bad credentials"}'), (200, b'{"login":"$(x)","id":1}')]
+        )
+        clock = [0.0]
+        self.module.time.monotonic, real = (lambda: clock[0]), self.module.time.monotonic
+        try:
+
+            async def scenario():
+                for _ in range(3):
+                    self.assertIsNone(await proxy.github_identity())
+                    # A failed lookup is not retried on every cell, only after a while.
+                    self.assertIsNone(await proxy.github_identity())
+                    clock[0] += self.module.GITHUB_IDENTITY_RETRY + 1
+
+            asyncio.run(scenario())
+        finally:
+            self.module.time.monotonic = real
+        self.assertEqual(len(calls), 3)
+
+    def test_only_a_cell_granted_github_gets_the_identity(self):
+        proxy, calls, _ = self.github_proxy([(200, b'{"login":"octo","id":42,"name":"Octo"}')])
+
+        async def scenario():
+            plain = {'task': 'tp', 'agent': 'a', 'connectors': [], 'runtime': 'codex'}
+            await proxy.registry.register(plain, ())
+            self.assertNotIn('github_login', await proxy.registration_identifiers('tp'))
+            self.assertEqual(calls, [])
+            granted = {'task': 'tg', 'agent': 'a', 'connectors': ['github'], 'runtime': 'codex'}
+            await proxy.registry.register(granted, ())
+            out = await proxy.registration_identifiers('tg')
+            self.assertEqual((out['github_login'], out['github_id']), ('octo', 42))
+            self.assertNotIn(GITHUB['token'], json.dumps(out))
+            for task in ('tp', 'tg'):
+                await proxy.registry.unregister(task)
 
         asyncio.run(scenario())
 
