@@ -10,6 +10,7 @@ import socket
 import sys
 import shutil
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -1686,6 +1687,174 @@ class RegistryTests(unittest.TestCase):
         limits['rate_limits']['limit_reached'] = True
         message(json.dumps(limits).encode())
         self.assertTrue(proxy.quota['codex']['limited'])
+
+    def test_codex_headers_become_windows_and_other_codex_headers_are_not_limits(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.proxy_with_cell()
+
+        def response(status, headers):
+            proxy.responseheaders(
+                NS(metadata={'anchi-quota': 'codex'}, response=NS(status_code=status, headers=headers))
+            )
+
+        # A WebSocket upgrade carries the turn state, not limits: nothing is recorded.
+        response(101, {'x-codex-turn-state': 'opaque', 'x-codex-promo-message': 'hi'})
+        self.assertNotIn('codex', proxy.quota)
+        response(
+            200,
+            {
+                'x-codex-primary-used-percent': '38.5',
+                'x-codex-primary-window-minutes': '300',
+                'x-codex-primary-reset-at': '1791500157',
+                'x-codex-secondary-used-percent': '70',
+                'x-codex-secondary-window-minutes': 'soon',
+                'x-codex-credits-has-credits': 'true',
+                'x-codex-turn-state': 'opaque',
+            },
+        )
+        entry = proxy.quota['codex']
+        self.assertNotIn('x-codex-turn-state', entry['headers'])
+        self.assertIn('x-codex-credits-has-credits', entry['headers'])
+        self.assertEqual(
+            entry['windows'],
+            [
+                {'name': 'primary', 'used_percent': 38.5, 'window_minutes': 300, 'reset_at': 1791500157},
+                {'name': 'secondary', 'used_percent': 70, 'window_minutes': None, 'reset_at': None},
+            ],
+        )
+
+    def test_codex_messages_of_another_metered_limit_do_not_replace_codex(self):
+        from types import SimpleNamespace as NS
+
+        proxy = self.proxy_with_cell()
+
+        def message(**extra):
+            content = {
+                'type': 'codex.rate_limits',
+                'rate_limits': {'primary': {'used_percent': extra.pop('used'), 'window_minutes': 300}},
+                **extra,
+            }
+            flow = NS(
+                metadata={'anchi-quota': 'codex'},
+                websocket=NS(messages=[NS(from_client=False, content=json.dumps(content).encode())]),
+            )
+            proxy.websocket_message(flow)
+
+        message(used=10)
+        message(used=90, metered_limit_name='codex_other')
+        message(used=91, limit_name='Codex-Other')
+        self.assertEqual(proxy.quota['codex']['windows'][0]['used_percent'], 10)
+        message(used=20, metered_limit_name='codex')
+        self.assertEqual(proxy.quota['codex']['windows'][0]['used_percent'], 20)
+
+    def test_codex_usage_payload_is_read_into_bounded_windows(self):
+        usage = self.module.codex_usage
+        body = {
+            'plan_type': 'pro',
+            'rate_limit': {
+                'allowed': True,
+                'limit_reached': False,
+                'primary_window': {'used_percent': 42, 'limit_window_seconds': 18000, 'reset_at': 1791500157},
+                'secondary_window': {'used_percent': 84, 'limit_window_seconds': 604800, 'reset_at': 'later'},
+            },
+            'credits': {'has_credits': True, 'unlimited': False, 'balance': '5'},
+            'additional_rate_limits': [{'metered_feature': 'codex_other', 'rate_limit': {}}],
+        }
+        self.assertEqual(
+            usage(200, json.dumps(body).encode()),
+            {
+                'plan': 'pro',
+                'limited': False,
+                'windows': [
+                    {'name': 'primary', 'used_percent': 42, 'window_minutes': 300, 'reset_at': 1791500157},
+                    {'name': 'secondary', 'used_percent': 84, 'window_minutes': 10080, 'reset_at': None},
+                ],
+            },
+        )
+        reached = {**body, 'rate_limit': {**body['rate_limit'], 'limit_reached': True}}
+        self.assertTrue(usage(200, json.dumps(reached).encode())['limited'])
+        for status, content in (
+            (401, json.dumps(body).encode()),
+            (200, b'<html>'),
+            (200, b'[]'),
+            (200, b'{"plan_type":"pro"}'),
+            (200, b'{"rate_limit":{"primary_window":{"used_percent":true}}}'),
+            (200, b'x' * (self.module.QUOTA_USAGE_MAX + 1)),
+        ):
+            self.assertIsNone(usage(status, content), content[:40])
+
+    def codex_proxy(self, answers):
+        calls = []
+
+        def fetch(request):
+            if request.get('op') == 'codex_token':
+                return {'access_token': 'real-codex-token', 'account_id': 'acct-1', 'expires_at': time.time() + 3600}
+            raise LookupError('NOT_FOUND')
+
+        def call(method, url, headers, body):
+            calls.append((method, url, headers.get('authorization'), headers.get('chatgpt-account-id')))
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)), credentials=self.module.Credentials(fetch), call=call
+        )
+        return proxy, calls
+
+    def test_stale_codex_limits_are_fetched_from_the_trusted_side_when_asked(self):
+        usage = {
+            'plan_type': 'plus',
+            'rate_limit': {'primary_window': {'used_percent': 5, 'limit_window_seconds': 18000, 'reset_at': 1}},
+        }
+        proxy, calls = self.codex_proxy([(200, json.dumps(usage).encode()), (200, json.dumps(usage).encode())])
+        with patch.object(self.module, 'QUOTA', Path(self.tmp, 'quota.json')):
+            quota = asyncio.run(proxy.current_quota())
+            self.assertEqual(
+                calls, [('GET', 'https://chatgpt.com/backend-api/wham/usage', 'Bearer real-codex-token', 'acct-1')]
+            )
+            self.assertEqual(quota['codex']['windows'][0]['used_percent'], 5)
+            self.assertEqual(quota['codex']['plan'], 'plus')
+            # Fresh limits are not fetched again.
+            asyncio.run(proxy.current_quota())
+            self.assertEqual(len(calls), 1)
+            # Limits seen long ago are, once the retry interval has passed.
+            proxy.quota['codex']['ts'] -= self.module.QUOTA_REFRESH + 1
+            proxy.quota_refresh_at = 0
+            asyncio.run(proxy.current_quota())
+            self.assertEqual(len(calls), 2)
+        saved = Path(self.tmp, 'quota.json').read_text()
+        audit = Path(self.tmp, 'audit.jsonl').read_text()
+        for text in (saved, audit, json.dumps(proxy.quota)):
+            self.assertNotIn('real-codex-token', text)
+        self.assertIn('"event": "quota-refresh"', audit)
+
+    def test_a_failed_codex_refresh_keeps_the_last_limits_and_waits_before_asking_again(self):
+        proxy, calls = self.codex_proxy([OSError('down'), (401, b'{}'), (200, b'<html>')])
+        last = {'ts': time.time() - 10_000, 'status': 200, 'headers': {}, 'windows': [{'name': 'primary'}]}
+        proxy.quota['codex'] = dict(last)
+        with patch.object(self.module, 'QUOTA', Path(self.tmp, 'quota.json')):
+            for _ in range(3):
+                asyncio.run(proxy.current_quota())
+                asyncio.run(proxy.current_quota())
+                proxy.quota_refresh_at = 0
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(proxy.quota['codex'], last)
+
+    def test_without_a_codex_login_nothing_is_fetched(self):
+        def fetch(request):
+            raise LookupError('NOT_FOUND')
+
+        calls = []
+        proxy = self.module.EgressProxy(
+            registry=self.module.Registry(('127.0.0.1', 1)),
+            credentials=self.module.Credentials(fetch),
+            call=lambda *a: calls.append(a),
+        )
+        self.assertEqual(asyncio.run(proxy.current_quota()), {})
+        self.assertEqual(calls, [])
 
     def test_quota_survives_a_restart(self):
         from types import SimpleNamespace as NS
