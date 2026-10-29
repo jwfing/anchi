@@ -724,7 +724,16 @@ export class Daemon {
   /** The subscription limits the egress proxy last saw, by runtime. */
   private async quota(): Promise<QuotaInfo[]> {
     const runtimes: Record<string, string> = { codex: 'codex', anthropic: 'claude-code' };
-    return Object.entries(await this.guest.quota()).map(([rule, q]) => ({
+    const seen = await this.guest.quota();
+    const known = Object.keys(seen).map((rule) => runtimes[rule] ?? rule);
+    // A connected runtime with no data still gets a row, so a missing one is visible.
+    const status = await setupStatus(this.guest, this.vm, this.services).catch(() => undefined);
+    const connected = status?.vm === 'running' && status.vaultUnlocked ? status : undefined;
+    const pending: QuotaInfo[] = (['codex', 'claude-code'] as const)
+      .filter((id) => (id === 'codex' ? connected?.codex.connected : connected?.claude.connected))
+      .filter((id) => !known.includes(id))
+      .map((id) => ({ runtime: id, ts: 0, status: 0, headers: {} }));
+    const info: QuotaInfo[] = Object.entries(seen).map(([rule, q]) => ({
       runtime: runtimes[rule] ?? rule,
       ts: Math.round(q.ts * 1000),
       status: q.status,
@@ -742,6 +751,7 @@ export class Daemon {
           }
         : {}),
     }));
+    return [...info, ...pending];
   }
 
   async inventory(): Promise<Inventory> {
