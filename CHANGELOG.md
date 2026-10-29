@@ -4,6 +4,14 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.4.3 — 2026-10-28
+
+Anchi teams can discover agents and delegate directly between equal peer daemons. The desktop app initializes new remote machines, edits delegation permissions, deletes agents after review and groups agents under collapsible machine headings. Quieter activity dots, runtime tags and release notifications make busy teams easier to follow.
+
+Update with `anchi update`, which also updates an installed desktop app, then reopen Anchi. After tasks finish, run `anchi daemon stop` and `anchi setup install`; reinstall login startup with `anchi daemon install` if enabled. For each existing remote server, rerun `scripts/remote.sh <target>` from the 0.4.3 checkout, then `anchi --server <saved-server> setup install`. Upgrade every daemon before editing delegation or enrolling peers. Agents, task history and credentials are retained.
+
+Peer teams require reachable TLS addresses, explicit enrollment and per-agent delegation grants. Existing `execution:` members retain their coordinator-based behavior; enrollment does not convert them or grant new delegation permissions. Use new tasks after upgrading. See [equal peer teams](https://github.com/jwfing/anchi/blob/v0.4.3/docs/REMOTE_SERVER.md#equal-peer-teams). Real-account validation of peer delegation, reconnect recovery and approvals remains incomplete; this is a development preview.
+
 ### Added
 
 - The desktop app checks for a newer stable release on startup and every six hours. A bottom-right notice links to release notes, copies `anchi update` and can be postponed for 24 hours without interrupting tasks.
