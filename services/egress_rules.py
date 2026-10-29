@@ -11,6 +11,7 @@ import hmac
 import ipaddress
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs
 from xml.sax.saxutils import escape
@@ -574,6 +575,37 @@ def verify_requests(connector, credential):
                 headers['content-type'] = 'application/json'
         out.append((method, url, headers, body))
     return out
+
+
+# A GitHub login: letters, digits and inner hyphens, at most 39 characters.
+GITHUB_LOGIN = re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?')
+# Characters git, systemd-run's environment expansion and its specifiers would read.
+NAME_SPECIAL = frozenset('$%\\<>"\'`')
+
+
+def github_identity(status, body):
+    """Who the GitHub token belongs to, from `GET /user`, for commit authorship; None when the
+    response is not a usable identity. The values become arguments of the guest's cell command,
+    so each is bounded: the login by its pattern, the id as an integer, the name to printable
+    characters git and systemd-run read literally."""
+    if status != 200:
+        return None
+    try:
+        data = json.loads(body.decode('utf-8'))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    login, uid, name = data.get('login'), data.get('id'), data.get('name')
+    if not isinstance(login, str) or not GITHUB_LOGIN.fullmatch(login):
+        return None
+    if type(uid) is not int or not 0 < uid < 2**53:
+        return None
+    clean = ''
+    if isinstance(name, str):
+        kept = (' ' if c in NAME_SPECIAL or unicodedata.category(c)[0] == 'C' else c for c in name[:1000])
+        clean = ' '.join(''.join(kept).split())[:100].strip()
+    return {'github_login': login, 'github_id': uid, 'github_name': clean or login}
 
 
 def verify_account(connector, status, body, url=''):

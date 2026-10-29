@@ -135,6 +135,47 @@ class StartCommandTests(unittest.TestCase):
         self.assertEqual(calls, [('rules',), ('rules',), ('mode', 'x:dev', 'ask'), ('rules',), ('clear', 'x:dev')])
 
 
+class GitIdentityTests(unittest.TestCase):
+    GITHUB = {'github_login': 'octo', 'github_id': 42, 'github_name': 'Octo Cat'}
+
+    def env(self, connectors, identifiers):
+        return anchi_cell.cell_environment('t1', 'dev', connectors, {'claude_kind': 'oauth', **identifiers})
+
+    def test_commits_are_authored_by_the_linked_github_account_and_committed_by_the_agent(self):
+        env = self.env(['github'], self.GITHUB)
+        self.assertEqual(env['GIT_AUTHOR_NAME'], 'Octo Cat')
+        self.assertEqual(env['GIT_AUTHOR_EMAIL'], '42+octo@users.noreply.github.com')
+        self.assertEqual(env['GIT_COMMITTER_NAME'], 'dev (Anchi agent)')
+        self.assertEqual(env['GIT_COMMITTER_EMAIL'], 'dev@agents.anchi.invalid')
+
+    def test_without_the_github_grant_the_agent_authors_its_commits(self):
+        env = self.env([], self.GITHUB)
+        self.assertEqual(env['GIT_AUTHOR_NAME'], 'dev (Anchi agent)')
+        self.assertEqual(env['GIT_AUTHOR_EMAIL'], 'dev@agents.anchi.invalid')
+
+    def test_an_identity_that_could_change_the_command_line_is_not_used(self):
+        """The values become --setenv arguments of systemd-run; the proxy checks them, and so do we."""
+        for bad in (
+            {'github_login': '$(id)'},
+            {'github_login': 'oc to'},
+            {'github_login': 'a' * 40},
+            {'github_id': '42'},
+            {'github_id': True},
+            {'github_id': 0},
+            {'github_name': 'A\nB'},
+            {'github_name': 'x ${HOME}'},
+            {'github_name': 'x %h'},
+            {'github_name': '<x>'},
+            {'github_name': 'a\u202eb'},
+            {'github_name': ''},
+            {'github_name': 'n' * 101},
+            {'github_name': None},
+        ):
+            env = self.env(['github'], {**self.GITHUB, **bad})
+            self.assertEqual(env['GIT_AUTHOR_EMAIL'], 'dev@agents.anchi.invalid', bad)
+            self.assertEqual(env['GIT_AUTHOR_NAME'], 'dev (Anchi agent)', bad)
+
+
 class BaseImageTests(unittest.TestCase):
     def test_downloads_count_as_busy_before_a_build_cell_exists(self):
         import fcntl

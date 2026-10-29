@@ -13,6 +13,8 @@ Enter a token in the desktop app's **Settings → Connectors** (**Connect** on t
 
 Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) (GitHub → Settings → Developer settings → Personal access tokens). Limit it to the repositories the agents work on, with contents, pull requests and issues read/write. For an organization's private repositories, choose the organization as the token's resource owner; the organization may also have to approve the token. `anchi setup connector github --from-gh` imports the token of the `gh` CLI instead, which usually has broader scopes.
 
+Commits made in an agent's cell with GitHub are authored by the account the token belongs to, through its noreply address `<id>+<login>@users.noreply.github.com`, so GitHub links them to that account without revealing its email. The committer remains the agent (`<agent> (Anchi agent) <agent>@agents.anchi.invalid>`), so each commit still shows that an agent made it. The proxy reads the login, id and name once per token with `GET /user`; if GitHub cannot be reached, or the agent has no GitHub, the agent is also the author.
+
 ### AWS
 
 Use a dedicated IAM principal whose policy allows only what agents should do, for example `logs:FilterLogEvents` on specific log groups, and create its access keys in the [IAM console](https://console.aws.amazon.com/iam/). AWS is entered from the CLI or the TUI, not the desktop app: `anchi setup connector aws` asks for the keys and a region, and `anchi setup connector aws --profile <name>` uses a profile on this computer, such as AWS SSO, and refreshes its temporary credentials. See [Agent team](AGENT_TEAM.md) for the profile mode.
