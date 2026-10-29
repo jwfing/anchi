@@ -1,5 +1,19 @@
+import { sanitizeLine } from '@anchi/core/sanitize';
 import type { TaskStatus } from '@anchi/protocol';
 import { type KeyboardEvent, type Ref, useCallback, useState } from 'react';
+
+export function runtimeName(runtime: string): string {
+  switch (runtime) {
+    case 'codex':
+      return 'Codex';
+    case 'claude-code':
+      return 'Claude Code';
+    case 'hermes':
+      return 'Hermes';
+    default:
+      return sanitizeLine(runtime);
+  }
+}
 
 const PATHS = {
   chat: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z',

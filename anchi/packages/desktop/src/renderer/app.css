@@ -569,6 +569,15 @@ h2 {
   white-space: normal;
   line-height: 1.4;
 }
+.agent-row .agent-runtime {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
 .agent-row:hover {
   background: var(--subtle);
 }
@@ -580,23 +589,25 @@ h2 {
   flex: none;
   display: inline-flex;
 }
-.avatar-working::before,
 .avatar-working::after {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -5px;
   border-radius: 50%;
   pointer-events: none;
+  background: radial-gradient(circle at 50% 2px, #79b49e 1.5px, transparent 2px);
+  opacity: 0.9;
+  animation: spin 2.8s linear infinite;
+  animation-delay: var(--activity-delay, 0s);
 }
-.avatar-working::before {
-  border: 2px solid #16805d24;
+.agent-row:nth-child(4n + 2) {
+  --activity-delay: -0.7s;
 }
-.avatar-working::after {
-  border: 2px solid transparent;
-  border-top-color: var(--accent);
-  border-right-color: var(--accent);
-  filter: drop-shadow(0 0 2px #16805d40);
-  animation: spin 1.35s linear infinite;
+.agent-row:nth-child(4n + 3) {
+  --activity-delay: -1.4s;
+}
+.agent-row:nth-child(4n + 4) {
+  --activity-delay: -2.1s;
 }
 .avatar {
   border-radius: 50%;
