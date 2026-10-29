@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AnchiApi, ServerState } from '../shared.ts';
+import type { AnchiApi, ReleaseUpdate, ServerState } from '../shared.ts';
 
 const api: AnchiApi = {
   call: (server, method, params) => ipcRenderer.invoke('anchi:call', server, method, params ?? {}),
@@ -24,6 +24,13 @@ const api: AnchiApi = {
   initializeServer: (target) => ipcRenderer.invoke('anchi:initializeServer', target),
   removeServer: (name) => ipcRenderer.invoke('anchi:removeServer', name),
   openExternal: (url) => ipcRenderer.invoke('anchi:openExternal', url),
+  update: () => ipcRenderer.invoke('anchi:update'),
+  onUpdate(listener) {
+    const handler = (_e: IpcRendererEvent, update: ReleaseUpdate | null) => listener(update);
+    ipcRenderer.on('anchi:update', handler);
+    return () => ipcRenderer.off('anchi:update', handler);
+  },
+  copyUpdateCommand: () => ipcRenderer.invoke('anchi:copyUpdateCommand'),
   addSkillFolder: (server) => ipcRenderer.invoke('anchi:addSkillFolder', server),
   importGoogleClient: (server) => ipcRenderer.invoke('anchi:importGoogleClient', server),
 };

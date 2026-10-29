@@ -17,6 +17,18 @@ It installs the CLI as usual, then the app of the same release, after checking i
 
 `anchi update` then updates the app with the CLI. The app is also a release asset of its own, `anchi-desktop-darwin-arm64.tar.gz` or `anchi-desktop-linux-x64.tar.gz`, with a `.sha256`.
 
+The desktop checks GitHub's latest stable release at startup and every six hours, comparing it
+with the version built into the desktop app (independent of the selected daemon). A newer
+version opens a non-blocking notice in the bottom-right corner with **What's new**, **Copy
+command** (`anchi update`) and **Remind me tomorrow**. Closing it postpones that release for
+24 hours, including across restarts; a newer release can still be announced. Network failures
+and API rate limits stay silent and retry on the next check. The request sends no agent,
+task or account data. The notice does not download or install anything automatically.
+
+Run the copied command in Terminal. After tasks finish, restart Anchi and follow the release
+notes for daemon and VM upgrades; remote machines are updated separately. From a source
+checkout, update and rebuild the checkout instead of using the installer-only `anchi update`.
+
 The app is not signed by a publisher, as the CLI is not; the checksums protect against corruption, not tampering. On macOS a file downloaded by the installer opens as is. An `Anchi.app` downloaded with a browser is quarantined, and macOS refuses to open it: open System Settings → Privacy & Security and choose Open Anyway, or remove the quarantine with `xattr -dr com.apple.quarantine Anchi.app`. On Apple silicon it is signed ad hoc, which only lets it run.
 
 Opened from the Finder, the Dock or a desktop menu, an app gets a minimal `PATH`. The packaged app therefore asks the login shell for its `PATH` at start (`$SHELL -ilc`, for at most five seconds) and adds the installer's directories (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`). With `local`, it starts the daemon with that `anchi`; a remote server is reached with the `ssh` or `instabox` found there.
@@ -75,6 +87,10 @@ Skip for now leaves the guide until it is opened again.
 ## What it does
 
 The Team list discovers agents on all connected machines without copying their profiles or granting new delegation permissions. Same-name agents remain separate. Offline machines keep their last known agent list for this desktop session, marked offline.
+
+A working agent's avatar has a rotating accent ring. The ring stops when work finishes or the
+machine disconnects; waiting approvals, queued work and errors keep their own status dots and
+text. The system's reduced-motion preference turns the animation into a static ring.
 
 Click a host heading in Team to collapse or expand its agents; Enter or Space also toggles a
 focused heading. Its agent count and connection status remain visible when collapsed. Each
