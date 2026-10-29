@@ -6,6 +6,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Fixed
 
+- A connected runtime with no limits seen yet (for example Codex) now shows "no data yet" on the Usage screen instead of being absent.
 - Subscription limits on the Usage screen survive a proxy or VM restart and an idle runtime: the egress proxy saves the last limits it saw per runtime and loads them at startup.
 
 ## 0.4.3 — 2026-10-28

@@ -98,7 +98,7 @@ describe('reports', () => {
       [
         {
           runtime: 'codex',
-          ts: 0,
+          ts: 1,
           status: 200,
           headers: {},
           plan: 'team',
@@ -108,7 +108,7 @@ describe('reports', () => {
             { name: 'secondary', usedPercent: 76, windowMinutes: 10_080, resetAt: null },
           ],
         },
-        { runtime: 'claude-code', ts: 0, status: 200, headers: { 'retry-after': '120' } },
+        { runtime: 'claude-code', ts: 1, status: 200, headers: { 'retry-after': '120' } },
       ],
       1,
       'agent',
@@ -154,6 +154,18 @@ describe('reports', () => {
     );
     expect(usageLines([], [], 0, 'model', 200).map((l) => l.text)).toContain(
       '  No turns recorded in this period.',
+    );
+  });
+  it('lists a connected runtime without limits as no data yet', () => {
+    const lines = usageLines(
+      [],
+      [{ runtime: 'codex', ts: 0, status: 0, headers: {} }],
+      0,
+      'agent',
+      200,
+    );
+    expect(lines.map((l) => l.text)).toContain(
+      'codex  (no data yet: it appears after a turn of this runtime)',
     );
   });
   it("sums up access by agent and flags a credential of the cell's own", () => {

@@ -318,6 +318,13 @@ export function usageLines(
     });
   }
   for (const q of quota ?? []) {
+    if (!q.ts) {
+      lines.push({
+        text: fit(`${q.runtime}  (no data yet: it appears after a turn of this runtime)`),
+        dim: true,
+      });
+      continue;
+    }
     lines.push({
       text: fit(
         `${q.runtime}  (seen ${new Date(q.ts).toLocaleString()}${q.status === 429 || q.limited ? ', rate limited' : ''})`,

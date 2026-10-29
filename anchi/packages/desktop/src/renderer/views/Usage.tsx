@@ -48,9 +48,7 @@ export function UsageView() {
       <h1>Usage</h1>
       <section className="card">
         <h2>Subscription limits</h2>
-        {!quota.length && (
-          <p className="small muted">Nothing seen yet: limits show after a runtime has answered.</p>
-        )}
+        {!quota.length && <p className="small muted">No runtime is connected yet.</p>}
         {quota.map((q) => (
           <div key={q.runtime} className="quota">
             <div className="row between">
@@ -59,7 +57,7 @@ export function UsageView() {
                 {q.plan ? ` · ${sanitizeLine(q.plan)}` : ''}
               </span>
               <span className="small muted">
-                seen {ago(q.ts)}
+                {q.ts ? `seen ${ago(q.ts)}` : 'no data yet'}
                 {q.limited ? ' · limit reached' : ''}
               </span>
             </div>
