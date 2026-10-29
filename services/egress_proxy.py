@@ -50,6 +50,7 @@ APPROVAL_TIMEOUT = 300
 # bounds: a held write keeps its cell's request and body open in the proxy meanwhile.
 APPROVAL_TIMEOUT_MIN, APPROVAL_TIMEOUT_MAX = 60, 12 * 3600
 SETTINGS = Path(os.environ.get('ANCHI_EGRESS_STATE', '/var/lib/anchi-egress')) / 'settings.json'
+QUOTA = SETTINGS.with_name('quota.json')
 
 
 def check_settings(value):
@@ -609,6 +610,21 @@ def peer_uid(sock):
     return struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
 
 
+def load_quota():
+    """The limits saved by the previous run, or nothing when the file is missing or damaged."""
+    try:
+        saved = json.loads(QUOTA.read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(saved, dict):
+        return {}
+    return {
+        rule: entry
+        for rule, entry in saved.items()
+        if rule in QUOTA_HEADERS and isinstance(entry, dict) and isinstance(entry.get('ts'), (int, float))
+    }
+
+
 class EgressProxy:
     def __init__(self, registry=None, credentials=None, call=https_call):
         self.registry = registry or Registry(('127.0.0.1', 18080))
@@ -618,7 +634,7 @@ class EgressProxy:
         self.call = call
         self.control = None
         # Latest quota headers per runtime rule: {rule: {ts, status, headers}}.
-        self.quota = {}
+        self.quota = load_quota()
         # Server connection id → the (host, port) the client asked for, while it is being opened.
         self.requested = {}
 
@@ -984,6 +1000,20 @@ class EgressProxy:
                 'status': status,
                 'headers': headers,
             }
+            self.save_quota()
+        elif rule == 'codex':
+            log.debug(f'codex response {status} carried no x-codex-* quota headers')
+
+    def save_quota(self):
+        """Keeps the last known limits across restarts and idle periods. Best effort: a failed
+        write must not disturb the model stream."""
+        try:
+            QUOTA.parent.mkdir(parents=True, exist_ok=True)
+            temporary = QUOTA.with_suffix('.tmp')
+            temporary.write_text(json.dumps(self.quota))
+            os.replace(temporary, QUOTA)
+        except OSError as exc:
+            log.warning(f'quota not saved: {exc}')
 
     def websocket_message(self, flow):
         """Codex's rate-limit message in the model stream: its plan and usage windows. Only this
@@ -1002,6 +1032,7 @@ class EgressProxy:
                 'status': 200,
                 **windows,
             }
+            self.save_quota()
 
     def alert_credential(self, cell, entry):
         """Tells the daemon at once that a cell sent a credential that is not a placeholder: Anchi's

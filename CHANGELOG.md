@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Fixed
+
+- Subscription limits on the Usage screen survive a proxy or VM restart and an idle runtime: the egress proxy saves the last limits it saw per runtime and loads them at startup.
+
 ## 0.4.3 — 2026-10-28
 
 Anchi teams can discover agents and delegate directly between equal peer daemons. The desktop app initializes new remote machines, edits delegation permissions, deletes agents after review and groups agents under collapsible machine headings. Quieter activity dots, runtime tags and release notifications make busy teams easier to follow.
