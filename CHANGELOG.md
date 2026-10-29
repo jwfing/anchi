@@ -10,7 +10,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 - In an agent's desktop conversation, clicking anywhere on a task card opens its details, not only the card's header. The header says what a click does: **Continue this task ›** once the turn has ended, which opens the drawer with the cursor in its reply box and replaces the separate button at the bottom of the card, or **Details ›** while it runs. Buttons and links inside the card keep their own action, and selecting text to copy does not open the task.
 
-- The desktop app uses a quieter palette drawn from classical Chinese colors: rice-paper backgrounds, ink text, a celadon accent, ochre approvals and muted cinnabar errors. The navigation rail is a soft blue-black (黛), user messages sit on a soft celadon tint, and borders, corners and shadows are lighter. A task's conversation drawer now docks to the window's right edge at full height instead of floating as a card.
+- The desktop app uses a quieter palette drawn from classical Chinese colors: rice-paper backgrounds, ink text, a celadon accent, ochre approvals and muted cinnabar errors. The navigation rail is a soft blue-black (黛), user messages sit on a soft celadon tint, and borders, corners and shadows are lighter. A task's conversation drawer now docks to the window's right edge at full height instead of floating as a card. The app icon and the website's favicon keep their shape in the same colors: a celadon mark on a blue-black tile.
 
 ## 0.4.3 — 2026-10-28
 
