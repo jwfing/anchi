@@ -21,6 +21,7 @@ import { build } from 'esbuild';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
+const { version } = JSON.parse(readFileSync(join(root, '../../package.json'), 'utf8'));
 mkdirSync(join(dist, 'renderer'), { recursive: true });
 
 const electronDir = dirname(createRequire(import.meta.url).resolve('electron/package.json'));
@@ -41,6 +42,7 @@ await build({
   entryPoints: [join(root, 'src/main/main.ts')],
   outfile: join(dist, 'main.cjs'),
   external: ['electron'],
+  define: { ANCHI_DESKTOP_VERSION: JSON.stringify(version) },
 });
 await build({
   ...node,
@@ -76,10 +78,7 @@ for (const file of [
 ]) {
   copyFileSync(join(repository, file), join(dist, 'remote', file.split('/').at(-1)));
 }
-writeFileSync(
-  join(dist, 'remote/version'),
-  JSON.parse(readFileSync(join(root, '../../package.json'), 'utf8')).version,
-);
+writeFileSync(join(dist, 'remote/version'), version);
 
 // macOS names an app in the menu bar and the Dock from its bundle, not from app.setName: give the
 // source run its own copy of Electron.app, called Anchi, with the Anchi icon. Rebuilt only when

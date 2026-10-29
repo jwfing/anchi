@@ -24,6 +24,7 @@ import {
   reduceFleet,
 } from './model.ts';
 import { Avatar, Icon } from './ui.tsx';
+import { DesktopUpdates } from './updates.tsx';
 import { AgentView } from './views/Agent.tsx';
 import { DeleteAgentDialog } from './views/DeleteAgent.tsx';
 import { ApprovalsView } from './views/Approvals.tsx';
@@ -137,11 +138,14 @@ export function App() {
       {connections.map((node) => (
         <MachineSync key={node.name} server={node} dispatch={dispatch} say={say} />
       ))}
-      {flash && (
-        <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
-          {sanitizeLine(flash.text)}
-        </div>
-      )}
+      <div className="notifications">
+        <DesktopUpdates />
+        {flash && (
+          <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
+            {sanitizeLine(flash.text)}
+          </div>
+        )}
+      </div>
       <div className="body">
         <nav className="rail" aria-label="Main">
           <RailButton
@@ -360,6 +364,7 @@ export function TeamList({
             )}
             {agents.map((agent) => {
               const activity = agentActivity(model, agent);
+              const tone = server.status === 'connected' ? activity.tone : 'idle';
               const active = selected === via && view.kind === 'agent' && view.agentId === agent.id;
               return (
                 <button
@@ -370,11 +375,9 @@ export function TeamList({
                   aria-label={`@${agent.peer?.agent ?? agent.id} on ${server.label}`}
                   onClick={() => onSelect(via, agent.id)}
                 >
-                  <span className="avatar-wrap">
+                  <span className={`avatar-wrap ${tone === 'working' ? 'avatar-working' : ''}`}>
                     <Avatar id={agent.peer?.agent ?? agent.id} />
-                    <span
-                      className={`presence presence-${server.status === 'connected' ? activity.tone : 'idle'}`}
-                    />
+                    {tone !== 'working' && <span className={`presence presence-${tone}`} />}
                   </span>
                   <span className="col grow min0">
                     <span className="strong ellipsis">

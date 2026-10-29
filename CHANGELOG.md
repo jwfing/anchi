@@ -6,6 +6,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Added
 
+- The desktop app checks for a newer stable release on startup and every six hours. A bottom-right notice links to release notes, copies `anchi update` and can be postponed for 24 hours without interrupting tasks.
+
 - Equal peer daemons discover the complete agent directory through mutually authenticated TLS and delegate directly between machines. Configure **Settings → Peer team** or `anchi team network`, join one trusted member, then select remote recipients in Delegation. Task receipts, results, approvals and pending cancellations survive origin reconnects; every machine keeps its own credentials and execution policy. Requires reachable addresses (for example a VPN), upgraded daemons and fresh tasks; no built-in relay or NAT traversal.
 
 - Delete an agent from its desktop Settings after reviewing its tasks, files and delegation references, typing its id and confirming the machine in a native dialog. Cleanup warnings remain visible after the agent leaves Team, with a way to retry remaining cleanup. Workspaces and audit logs are retained.
@@ -19,6 +21,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 - Adding a fresh remote machine in the desktop app offers to install Anchi before connecting. Saved machines without `anchi-bridge` show **Initialize** instead of endlessly retrying; Linux x86_64 servers need no source checkout or preinstalled Node. Installation uses the app's matching release and leaves credentials on their machines.
 
 ### Changed
+
+- A working agent has a continuously rotating ring around its avatar in Team, replacing its green activity dot. Approval, queued and error indicators remain distinct; reduced-motion preferences keep the ring static.
 
 - The desktop Team list lets you collapse or expand each host's agents. Headers keep the machine's connection state and agent count visible, and the app remembers each host's choice across restarts.
 

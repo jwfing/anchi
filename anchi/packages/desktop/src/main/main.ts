@@ -18,6 +18,7 @@ import {
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   type IpcMainInvokeEvent,
@@ -29,8 +30,11 @@ import { type Confirmation, externalUrl } from './bridge.ts';
 import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
 import { bootstrapServer, ServerSetup } from './server-setup.ts';
+import { ReleaseUpdates } from './updates.ts';
 import type { ServerState } from '../shared.ts';
 
+// Embedded by the build: the desktop's version is independent of the connected daemon.
+declare const ANCHI_DESKTOP_VERSION: string;
 const layout = homeLayout();
 
 // Run as `electron dist/main.cjs`, the app would be called Electron and share that generic
@@ -41,6 +45,10 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 }
 const icon = join(__dirname, 'icon.png');
 let window: BrowserWindow | undefined;
+const updates = new ReleaseUpdates({
+  currentVersion: ANCHI_DESKTOP_VERSION,
+  changed: (update) => window?.webContents.send('anchi:update', update),
+});
 let selected = 'local';
 const connections = new Connections({
   open: async (target) => {
@@ -271,6 +279,14 @@ ipcMain.handle('anchi:openExternal', async (event, url: unknown) => {
   const href = externalUrl(url);
   if (href) await shell.openExternal(href);
 });
+ipcMain.handle('anchi:update', (event) => {
+  fromApp(event);
+  return updates.available;
+});
+ipcMain.handle('anchi:copyUpdateCommand', (event) => {
+  fromApp(event);
+  clipboard.writeText('anchi update');
+});
 
 function createWindow() {
   window = new BrowserWindow({
@@ -302,6 +318,7 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   app.dock?.setIcon(icon);
   createWindow();
+  updates.start();
   if (app.isPackaged) await adoptLoginPath();
   const saved = listServers(layout.root);
   for (const entry of saved) connections.add(entry);
@@ -324,5 +341,6 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('before-quit', () => {
+  updates.stop();
   connections.close();
 });
