@@ -16,7 +16,7 @@ jobs:
   offline:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [instabox-medium, macos-14]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
