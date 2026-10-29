@@ -4,6 +4,14 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Changed
+
+- In the desktop Team list, each agent's latest message or state is a one-line quote under its runtime tag instead of one or two loose lines, so rows keep the same height. A long one ends in an ellipsis and shows in full on hover; the quote's rule turns amber for a waiting approval and red for an error. The `Last:` prefix is gone.
+
+- In an agent's desktop conversation, clicking anywhere on a task card opens its details, not only the card's header. The header says what a click does: **Continue this task ›** once the turn has ended, which opens the drawer with the cursor in its reply box and replaces the separate button at the bottom of the card, or **Details ›** while it runs. Buttons and links inside the card keep their own action, and selecting text to copy does not open the task.
+
+- The desktop app uses a quieter palette drawn from classical Chinese colors: rice-paper backgrounds, ink text, a celadon accent, ochre approvals and muted cinnabar errors. The navigation rail is a soft blue-black (黛), user messages sit on a soft celadon tint, and borders, corners and shadows are lighter. A task's conversation drawer now docks to the window's right edge at full height instead of floating as a card.
+
 ## 0.4.3 — 2026-10-28
 
 Anchi teams can discover agents and delegate directly between equal peer daemons. The desktop app initializes new remote machines, edits delegation permissions, deletes agents after review and groups agents under collapsible machine headings. Quieter activity dots, runtime tags and release notifications make busy teams easier to follow.

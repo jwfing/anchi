@@ -297,7 +297,7 @@ function createWindow() {
     title: 'Anchi',
     // X11 drops a window icon this large (the 1024 px dock image): give windows a small copy.
     icon: nativeImage.createFromPath(icon).resize({ width: 128 }),
-    backgroundColor: '#F4F5F7',
+    backgroundColor: '#F1EEE6',
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,

@@ -253,7 +253,8 @@ export function Splitter({ width, onResize }: { width: number; onResize: (w: num
 }
 
 export function Avatar({ id, size = 34 }: { id: string; size?: number }) {
-  const tints = ['#EDE7FB', '#DCEBFA', '#E3F2E8', '#FDECDD', '#F1F2F4', '#FBE4EC'];
+  // Soft classical tints: 藕荷, 天青, 竹青, 杏, 月白, 蜜合.
+  const tints = ['#E9DFE3', '#DCE5EA', '#E0E8DC', '#F1E4D3', '#E6E9EA', '#ECE5CF'];
   const hash = [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
   return (
     <span

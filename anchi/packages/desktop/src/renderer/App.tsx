@@ -388,11 +388,20 @@ export function TeamList({
                         {runtimeName(agent.runtime)}
                       </span>
                     )}
-                    <span className={`small agent-preview tone-${activity.tone}`}>
-                      {server.status === 'connected'
-                        ? sanitizeLine(activity.text)
-                        : 'Offline · last known state'}
-                    </span>
+                    {(() => {
+                      const preview =
+                        server.status === 'connected'
+                          ? sanitizeLine(activity.text)
+                          : 'Offline · last known state';
+                      return (
+                        <span
+                          className={`small agent-preview ellipsis tone-${activity.tone}`}
+                          title={preview}
+                        >
+                          {preview}
+                        </span>
+                      );
+                    })()}
                   </span>
                 </button>
               );
