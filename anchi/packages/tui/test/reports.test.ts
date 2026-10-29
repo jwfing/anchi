@@ -130,7 +130,7 @@ describe('reports', () => {
         [
           {
             runtime: 'codex',
-            ts: 0,
+            ts: 1,
             status: 200,
             headers: {},
             windows: [
