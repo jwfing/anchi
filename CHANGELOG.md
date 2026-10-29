@@ -6,6 +6,8 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ### Changed
 
+- Scrollbars in the desktop app are a thin rounded thumb in faint ink on a transparent track, instead of the system's white track and gray thumb. The thumb darkens when the pointer is over the pane and again over the thumb.
+
 - Commits an agent makes in a cell with GitHub are authored by the linked GitHub account, through its noreply address, so GitHub attributes them to that account instead of an unknown `agents.anchi.invalid` email. The agent stays the committer. Redeploy the VM services with `anchi setup install` to apply.
 
 - In the desktop Team list, each agent's latest message or state is a one-line quote under its runtime tag instead of one or two loose lines, so rows keep the same height. A long one ends in an ellipsis and shows in full on hover; the quote's rule turns amber for a waiting approval and red for an error. The `Last:` prefix is gone.
