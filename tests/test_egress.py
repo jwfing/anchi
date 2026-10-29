@@ -1655,6 +1655,26 @@ class RegistryTests(unittest.TestCase):
         message(json.dumps(limits).encode())
         self.assertTrue(proxy.quota['codex']['limited'])
 
+    def test_quota_survives_a_restart(self):
+        from types import SimpleNamespace as NS
+
+        path = Path(self.tmp, 'quota.json')
+        with patch.object(self.module, 'QUOTA', path):
+            proxy = self.proxy_with_cell()
+            proxy.responseheaders(
+                NS(
+                    metadata={'anchi-quota': 'anthropic'},
+                    response=NS(status_code=200, headers={'anthropic-ratelimit-unified-5h-utilization': '0.4'}),
+                )
+            )
+            restarted = self.module.EgressProxy(registry=self.module.Registry(('127.0.0.1', 1)))
+            self.assertEqual(restarted.quota, proxy.quota)
+            self.assertEqual(list(restarted.quota), ['anthropic'])
+            path.write_text(json.dumps({'evil': {'ts': 1}, 'codex': 'x', 'anthropic': {'ts': 'no'}}))
+            self.assertEqual(self.module.load_quota(), {})
+            path.write_text('not json')
+            self.assertEqual(self.module.load_quota(), {})
+
     def test_injected_runtime_requests_are_marked_for_quota(self):
         import time
 

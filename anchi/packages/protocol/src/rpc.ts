@@ -610,6 +610,7 @@ export interface QuotaWindow {
 /** The latest limits of a runtime's subscription, as the egress proxy last saw them. */
 export interface QuotaInfo {
   runtime: string;
+  /** When the proxy last saw limits, in ms; 0 for a connected runtime with no data yet. */
   ts: number;
   status: number;
   /** Rate-limit headers of the responses (Claude Code). */
