@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- The desktop app upgrades a machine to the latest release: **Settings → Machines** shows each machine's Anchi version and, when a newer release exists for a release install, **Upgrade to <version>**. After a system dialog it refuses while tasks run, updates the CLI (and on this computer the app), restarts the daemon, and updates the VM's components. Machines that run Anchi from a source checkout get a note instead. `daemon.status` now reports `version` and `install` (`release` or `source`); daemons older than this release report neither, so upgrade them once by hand. See `docs/DESKTOP.md#upgrade-a-machine-from-the-app`.
+
 ## 0.4.4 — 2026-10-29
 
 The desktop app takes a quieter palette drawn from classical Chinese colors, with clearer task cards, a docked conversation drawer, one-line Team previews and quiet scrollbars. The Usage screen keeps subscription limits across restarts and refreshes Codex's limits while it is idle, and commits agents make with GitHub are attributed to the linked GitHub account.

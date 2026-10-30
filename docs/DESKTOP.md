@@ -26,8 +26,34 @@ and API rate limits stay silent and retry on the next check. The request sends n
 task or account data. The notice does not download or install anything automatically.
 
 Run the copied command in Terminal. After tasks finish, restart Anchi and follow the release
-notes for daemon and VM upgrades; remote machines are updated separately. From a source
-checkout, update and rebuild the checkout instead of using the installer-only `anchi update`.
+notes for daemon and VM upgrades. From a source checkout, update and rebuild the checkout
+instead of using the installer-only `anchi update`.
+
+### Upgrade a machine from the app
+
+**Settings → Machines** shows each connected machine's Anchi version. When the latest release
+is newer and the machine runs an installer-managed release (the desktop's **Initialize** or the
+public installer), its row has **Upgrade to <version>**:
+
+1. The app refuses while the machine has a running task cell or a running or queued task, and
+   says so; nothing is changed.
+2. A system dialog names the machine and the version change. **Upgrade** continues.
+3. The app checks for tasks again, then upgrades:
+   - **This computer:** `anchi update` (the CLI and an installed desktop app), `anchi daemon
+     stop`, and `anchi daemon install` again only if login startup was installed. The app starts
+     the new daemon when it reconnects, then offers to reopen itself.
+   - **A remote machine:** over its SSH connection, a fixed script checks again that no cell runs,
+     runs `anchi update`, points the systemd user service at the new version (`anchi daemon
+     install`) and restarts it.
+4. The app reconnects, requires the new version, and, if the VM's components were installed
+   by the old version, updates them with `setup.prepare` for an already prepared runtime. This
+   can take several minutes; the row says **Upgrading…** until it finishes.
+
+The upgrade installs the latest release, checked with its SHA-256 as `anchi update` does.
+Agents, task history and credentials are kept. A machine running Anchi from a source checkout
+(`scripts/anchi`, `scripts/remote.sh`) gets a note instead of the button: upgrade the checkout,
+and a remote one with `scripts/remote.sh <target>`. Daemons of 0.4.4 and earlier do not report
+their version, so the app offers no upgrade for them; update them once by hand.
 
 The app is not signed by a publisher, as the CLI is not; the checksums protect against corruption, not tampering. On macOS a file downloaded by the installer opens as is. An `Anchi.app` downloaded with a browser is quarantined, and macOS refuses to open it: open System Settings → Privacy & Security and choose Open Anyway, or remove the quarantine with `xattr -dr com.apple.quarantine Anchi.app`. On Apple silicon it is signed ad hoc, which only lets it run.
 

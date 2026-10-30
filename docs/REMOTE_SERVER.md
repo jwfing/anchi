@@ -27,8 +27,13 @@ is cancelled or fails, the saved machine keeps an **Initialize** button. Interru
 installs can be retried with the same app version. Existing configured servers with a damaged
 installation require the source-based repair below; initialization does not restart their tasks.
 
-For source development, other supported architectures or server updates, from a source checkout
-on your computer:
+A machine initialized from the desktop app (or with the public installer) is upgraded from the
+app: **Settings → Machines → Upgrade to <version>**, which refuses while tasks run. See
+[Upgrade a machine from the app](DESKTOP.md#upgrade-a-machine-from-the-app). Machines set up
+with `scripts/remote.sh` run from a copied checkout and are upgraded with it.
+
+For source development, other supported architectures or source-based server updates, from a
+source checkout on your computer:
 
 ```bash
 scripts/remote.sh instabox:anchi-server      # creates the instabox machine when missing (--no-vault)

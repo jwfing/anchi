@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
 import { mergePath, parseShellPath } from '../src/main/env.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
+import type { ServerState } from '../src/shared.ts';
 import { count } from '../src/renderer/format.ts';
 import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../src/renderer/guides.ts';
 import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
@@ -767,6 +768,46 @@ describe('servers', () => {
       expect(out).not.toContain('scripts/remote.sh');
       expect(out).not.toContain('>Disconnect<');
     }
+  });
+
+  it('offers an upgrade only to a release install, and a note to a source checkout', () => {
+    const render = (server: ServerState) =>
+      renderToStaticMarkup(
+        <Ctx.Provider
+          value={{
+            model: EMPTY_MODEL,
+            dispatch: () => {},
+            server,
+            connections: [server],
+            selectServer: () => {},
+            call: async () => {
+              throw new Error('unexpected RPC while rendering');
+            },
+            loadEvents: () => {},
+            act: async (fn) => fn(),
+            setView: () => {},
+            deleteAgent: () => {},
+          }}
+        >
+          <ServerCard />
+        </Ctx.Provider>,
+      );
+    const dora: ServerState = {
+      name: 'instabox:dora',
+      label: 'dora',
+      status: 'connected',
+      version: '0.4.3',
+      install: 'release',
+    };
+    const behind = render({ ...dora, newer: '0.4.4' });
+    expect(behind).toContain('Anchi 0.4.3');
+    expect(behind).toContain('>Upgrade to 0.4.4<');
+    expect(render(dora)).not.toContain('Upgrade to');
+    const source = render({ ...dora, install: 'source', newer: '0.4.4' });
+    expect(source).not.toContain('Upgrade to');
+    expect(source).toContain('scripts/remote.sh instabox:dora');
+    const running = render({ ...dora, upgrading: true });
+    expect(running).toContain('disabled="">Upgrading…');
   });
 });
 

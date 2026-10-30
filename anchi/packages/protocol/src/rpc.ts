@@ -683,6 +683,13 @@ export interface DaemonStatus {
   startedAt: number;
   clients: number;
   cells: number;
+  /** This daemon's Anchi version. Optional for clients connected to an older daemon. */
+  version?: string;
+  /**
+   * `release`: an installer-managed copy that `anchi update` replaces; `source`: a checkout
+   * (scripts/anchi, scripts/remote.sh). Optional for clients connected to an older daemon.
+   */
+  install?: 'release' | 'source';
 }
 
 /** Request methods: name → [params, result]. */
