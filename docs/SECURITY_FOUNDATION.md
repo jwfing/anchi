@@ -66,7 +66,7 @@ The cell has a separate network namespace without external routes. Guest nftable
 | Notion | Public IPs of `api.notion.com` |
 | Slack | Public IPs of `slack.com` |
 | Policy and mapped agent UID 525288 | No IP egress |
-| `anchi-egress` (agent-team proxy) | Any public destination; private, loopback and link-local ranges rejected |
+| `anchi-egress` (agent-team proxy) | Any public destination; private, loopback and link-local ranges rejected, except DNS (port 53) to the resolvers `/etc/resolv.conf` names, reread on each refresh |
 
 Connector destinations come from `services/connectors.py`. Only configured roles are resolved: auth when a Google client is available and a Google sign-in, token or pending revocation exists; a connector when it has a stored credential (by vault file name; nothing is decrypted). Other roles keep empty sets, so their traffic stays rejected. Connecting or disconnecting refreshes the sets at once; a failed or non-public lookup of one host keeps that host's previous addresses until they expire and does not stop the others. Each controlled UID has a final reject covering all other TCP/UDP/DNS/private/host/IPv6 paths. Guest management users/root retain networking and must not be exposed to the agent.
 

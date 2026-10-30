@@ -57,25 +57,34 @@ def nameservers(text):
     return found or [ipaddress.ip_address('127.0.0.1')]
 
 
+def resolver_commands():
+    """Refill the resolver sets from resolv.conf as it is now. A VPN or DHCP client may rewrite it
+    after boot (Tailscale names 100.100.100.100); fixed rules would then refuse every lookup."""
+    try:
+        resolvers = nameservers(RESOLV_CONF.read_text())
+    except OSError:
+        resolvers = nameservers('')
+    commands = []
+    for version in (4, 6):
+        commands.append(f'flush set inet secure_vm resolvers{version}')
+        values = [str(r) for r in resolvers if r.version == version]
+        if values:
+            commands.append(f'add element inet secure_vm resolvers{version} {{ {", ".join(values)} }}')
+    return commands
+
+
 def egress_proxy_rules():
     try:
         uid = pwd.getpwnam(EGRESS_USER).pw_uid
     except KeyError:
         return []
-    try:
-        resolvers = nameservers(RESOLV_CONF.read_text())
-    except OSError:
-        resolvers = nameservers('')
     return [
         # Its own listener, both directions (the cell bridges connect to it in-process), and the
         # resolvers it looks names up with: DNS only, before the private and non-TCP rejects.
         f'  meta skuid {uid} ip daddr 127.0.0.1 tcp dport {EGRESS_LISTEN_PORT} accept',
         f'  meta skuid {uid} ip saddr 127.0.0.1 ip daddr 127.0.0.1 tcp sport {EGRESS_LISTEN_PORT} accept',
-        *(
-            f'  meta skuid {uid} {"ip" if r.version == 4 else "ip6"} daddr {r} '
-            'meta l4proto { tcp, udp } th dport 53 accept'
-            for r in resolvers
-        ),
+        f'  meta skuid {uid} ip daddr @resolvers4 meta l4proto {{ tcp, udp }} th dport 53 accept',
+        f'  meta skuid {uid} ip6 daddr @resolvers6 meta l4proto {{ tcp, udp }} th dport 53 accept',
         f'  meta skuid {uid} ip daddr {{ {PRIVATE_V4} }} counter reject',
         f'  meta skuid {uid} ip6 daddr {{ {PRIVATE_V6} }} counter reject',
         f'  meta skuid {uid} meta l4proto != tcp counter reject',
@@ -96,6 +105,9 @@ def initialize():
     for role in ROLES:
         for version, datatype in ((4, 'ipv4_addr'), (6, 'ipv6_addr')):
             lines.append(f' set {role}{version} {{ type {datatype}; flags timeout; timeout 5m; }}')
+    # Resolvers come from resolv.conf, a root-owned file; refresh keeps the sets in step with it.
+    lines.append(' set resolvers4 { type ipv4_addr; }')
+    lines.append(' set resolvers6 { type ipv6_addr; }')
     lines.append(' chain output { type filter hook output priority -10; policy accept;')
     # A service may have more than one provider: put all allow rules before its reject.
     users = dict.fromkeys(user for user, _ in ROLES.values())
@@ -189,7 +201,8 @@ def refresh():
                     + ', '.join(a + ' timeout 5m' for a in values[version])
                     + ' }'
                 )
-    # One atomic nft transaction of exact, public addresses; nothing broad is ever installed.
+    commands += resolver_commands()
+    # One atomic nft transaction of exact addresses; nothing broad is ever installed.
     nft('\n'.join(commands))
     temporary = TARGETS.with_suffix('.new')
     fd = os.open(temporary, os.O_WRONLY | os.O_TRUNC | os.O_CREAT, 0o644)

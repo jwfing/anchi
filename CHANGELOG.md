@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Fixed
+
+- Task cells no longer lose name resolution when a VPN client such as Tailscale rewrites the VM's or server's `/etc/resolv.conf` after the Anchi services start. The egress proxy's DNS allowlist is reread from `/etc/resolv.conf` every two minutes instead of only at startup, so lookups recover within two minutes. Run `anchi setup install` (and `anchi --server <saved-server> setup install` for remote servers) to apply.
+
 ## 0.4.4 — 2026-10-29
 
 The desktop app takes a quieter palette drawn from classical Chinese colors, with clearer task cards, a docked conversation drawer, one-line Team previews and quiet scrollbars. The Usage screen keeps subscription limits across restarts and refreshes Codex's limits while it is idle, and commits agents make with GitHub are attributed to the linked GitHub account.
