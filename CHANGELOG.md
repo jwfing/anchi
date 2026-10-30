@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Fixed
+
+- `scripts/remote.sh instabox:<machine>` finds an existing machine again with current instabox CLIs, which print JSON when piped; it no longer tries to create the machine a second time and stops with `operation_conflict`.
+
 ## 0.4.4 — 2026-10-29
 
 The desktop app takes a quieter palette drawn from classical Chinese colors, with clearer task cards, a docked conversation drawer, one-line Team previews and quiet scrollbars. The Usage screen keeps subscription limits across restarts and refreshes Codex's limits while it is idle, and commits agents make with GitHub are attributed to the linked GitHub account.
