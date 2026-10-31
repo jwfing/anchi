@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Fixed
+
+- CLI prompts for a secret (`anchi setup connector`, such as the AWS secret access key and session token, or a connector token) show their label again. The label was erased as soon as the prompt appeared, so the AWS setup seemed to skip from the access key id to the region.
+
 ## 0.4.4 — 2026-10-29
 
 The desktop app takes a quieter palette drawn from classical Chinese colors, with clearer task cards, a docked conversation drawer, one-line Team previews and quiet scrollbars. The Usage screen keeps subscription limits across restarts and refreshes Codex's limits while it is idle, and commits agents make with GitHub are attributed to the linked GitHub account.

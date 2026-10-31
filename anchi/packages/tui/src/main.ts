@@ -114,12 +114,13 @@ async function withClient<T>(fn: (c: DaemonClient) => Promise<T>): Promise<T> {
 function askSecret(prompt: string): Promise<string> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const write = (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput;
-    process.stdout.write(prompt);
-    (rl as unknown as { _writeToOutput: (s: string) => void })._writeToOutput = (s: string) => {
-      if (s.includes('\n')) write.call(rl, '\n');
-    };
-    rl.question('', (answer) => {
+    const out = rl as unknown as { _writeToOutput: (s: string) => void };
+    const write = out._writeToOutput.bind(rl);
+    // readline clears the line and redraws prompt + input on refresh: keep the prompt, drop
+    // the input. A prompt written outside readline was erased by that redraw.
+    out._writeToOutput = (s: string) =>
+      write(s.startsWith(prompt) ? prompt : s.includes('\n') ? '\n' : '');
+    rl.question(prompt, (answer) => {
       rl.close();
       resolve(answer.trim());
     });
