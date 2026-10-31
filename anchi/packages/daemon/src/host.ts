@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { cpus as hostCpus, homedir, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -28,6 +28,13 @@ export function appVersion(root = REPO_ROOT): string {
 }
 
 export const APP_VERSION = appVersion();
+
+/** A release bundle carries its manifest and updater; a checkout has neither. */
+export function installKind(root = REPO_ROOT): 'release' | 'source' {
+  return existsSync(join(root, 'manifest.json')) && existsSync(join(root, 'scripts/update.sh'))
+    ? 'release'
+    : 'source';
+}
 
 export const WORKSPACE_MOUNT = '/mnt/anchi-host';
 

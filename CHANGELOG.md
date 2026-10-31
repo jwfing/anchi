@@ -4,6 +4,9 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- The desktop app upgrades a machine to the latest release: **Settings → Machines** shows each machine's Anchi version and, when a newer release exists for a release install, **Upgrade to <version>**. After a system dialog it refuses while tasks run, updates the CLI (and on this computer the app), restarts the daemon, and updates the VM's components. Machines that run Anchi from a source checkout get a note instead. `daemon.status` now reports `version` and `install` (`release` or `source`); daemons older than this release report neither, so upgrade them once by hand. See `docs/DESKTOP.md#upgrade-a-machine-from-the-app`.
 ### Fixed
 
 - `scripts/remote.sh instabox:<machine>` finds an existing machine again with current instabox CLIs, which print JSON when piped; it no longer tries to create the machine a second time and stops with `operation_conflict`.

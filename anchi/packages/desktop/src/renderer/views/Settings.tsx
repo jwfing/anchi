@@ -296,6 +296,7 @@ export function ServerCard() {
                 <span className="strong ellipsis">{sanitizeLine(node.label)}</span>
                 <span className="small muted ellipsis">
                   {sanitizeLine(node.name === 'local' ? 'This computer' : node.name)}
+                  {node.version ? ` · Anchi ${node.version}` : ''}
                 </span>
               </span>
               <span className="machine-status small">
@@ -339,11 +340,21 @@ export function ServerCard() {
                     : 'Disconnect'}
                 </button>
               )}
+              {((node.newer && node.install === 'release') || node.upgrading) && (
+                <button
+                  type="button"
+                  className="btn btn-small btn-primary"
+                  disabled={node.upgrading}
+                  onClick={() => void run(() => window.anchi.upgradeServer(node.name))}
+                >
+                  {node.upgrading ? 'Upgrading…' : `Upgrade to ${node.newer}`}
+                </button>
+              )}
               {saved && saved.name !== 'local' && (
                 <button
                   type="button"
                   className="btn btn-small"
-                  disabled={node.status === 'installing'}
+                  disabled={node.status === 'installing' || node.upgrading}
                   onClick={() =>
                     void run(() => window.anchi.removeServer(saved.name).then(setServers))
                   }
@@ -354,6 +365,19 @@ export function ServerCard() {
             </div>
             {node.error && (
               <p className="small tone-warn machine-error">{sanitizeLine(node.error)}</p>
+            )}
+            {node.upgrading && (
+              <p className="small muted machine-error">
+                Upgrading Anchi, then updating the VM's components. Tasks can start again when it
+                finishes.
+              </p>
+            )}
+            {node.newer && node.install === 'source' && (
+              <p className="small muted machine-error">
+                Anchi {node.newer} is available. This machine runs Anchi from a source checkout:
+                upgrade it from the checkout
+                {node.name === 'local' ? '' : ` (scripts/remote.sh ${sanitizeLine(node.name)})`}.
+              </p>
             )}
           </div>
         );
