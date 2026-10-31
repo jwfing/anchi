@@ -30,7 +30,8 @@ case $target in
     name=${target#instabox:}
     [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$ ]] || usage
     ssh=(instabox ssh "$name" --)
-    if ! instabox ls | awk -v n="$name" 'NR > 1 && $1 == n { found = 1 } END { exit !found }'; then
+    # Ask for JSON: piped, newer instabox CLIs print JSON anyway, which a table parser never matches.
+    if ! instabox ls --json | python3 -c 'import json, sys; sys.exit(sys.argv[1] not in {m["name"] for m in json.load(sys.stdin)})' "$name"; then
       # Its own Anchi vault holds the credentials; the instabox Vault's items stay out of it.
       echo "Creating the instabox machine $name (no timeout: it is a server; pause or stop it with instabox)."
       instabox create --name "$name" --no-vault
