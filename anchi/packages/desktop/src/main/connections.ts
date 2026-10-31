@@ -1,10 +1,12 @@
 import { bridgeMissing, type SavedServer } from '@anchi/daemon/client';
-import type { Notifications } from '@anchi/protocol';
+import type { DaemonStatus, Notifications } from '@anchi/protocol';
 import type { ServerState } from '../shared.ts';
 import { guardedCall, NOTIFICATIONS, type Confirmation, type Read } from './bridge.ts';
 
 export interface Connection {
   read: Read;
+  /** What the daemon said about itself when the connection opened (absent for older daemons). */
+  daemon?: Partial<DaemonStatus>;
   on(name: keyof Notifications, listener: (params: unknown) => void): void;
   onClose(listener: () => void): void;
   close(): void;
@@ -98,7 +100,18 @@ export class Connections {
       });
     }
     client.onClose(() => failed('connection to the daemon closed', 3000));
-    entry.state = { ...entry.state, status: 'connected' };
+    // Version and install kind decide whether the app offers an upgrade; an older daemon omits them.
+    const daemon = client.daemon;
+    entry.state = {
+      ...entry.state,
+      status: 'connected',
+      ...(typeof daemon?.version === 'string' && /^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(daemon.version)
+        ? { version: daemon.version }
+        : {}),
+      ...(daemon?.install === 'release' || daemon?.install === 'source'
+        ? { install: daemon.install }
+        : {}),
+    };
     this.publish();
   }
 

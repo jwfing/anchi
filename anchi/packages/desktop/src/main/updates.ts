@@ -11,8 +11,8 @@ function versionParts(version: string): number[] | undefined {
   return parts.every(Number.isSafeInteger) ? parts : undefined;
 }
 
-/** Only a newer stable tag can produce a notice; release-provided links are never used. */
-export function releaseUpdate(currentVersion: string, release: unknown): ReleaseUpdate | null {
+/** The version of a stable release document, or null for a draft, prerelease or odd tag. */
+export function stableVersion(release: unknown): string | null {
   if (
     typeof release !== 'object' ||
     release === null ||
@@ -26,11 +26,22 @@ export function releaseUpdate(currentVersion: string, release: unknown): Release
   )
     return null;
   const version = release.tag_name.slice(1);
-  const current = versionParts(currentVersion);
-  const latest = versionParts(version);
-  if (!current || !latest) return null;
-  const difference = latest.findIndex((part, i) => part !== current[i]);
-  if (difference === -1 || latest[difference]! < current[difference]!) return null;
+  return versionParts(version) ? version : null;
+}
+
+/** -1, 0 or 1; undefined when either is not a plain x.y.z version. */
+export function compareVersions(a: string, b: string): number | undefined {
+  const left = versionParts(a);
+  const right = versionParts(b);
+  if (!left || !right) return undefined;
+  const difference = left.findIndex((part, i) => part !== right[i]);
+  return difference === -1 ? 0 : left[difference]! > right[difference]! ? 1 : -1;
+}
+
+/** Only a newer stable tag can produce a notice; release-provided links are never used. */
+export function releaseUpdate(currentVersion: string, release: unknown): ReleaseUpdate | null {
+  const version = stableVersion(release);
+  if (!version || compareVersions(version, currentVersion) !== 1) return null;
   return {
     currentVersion,
     version,
@@ -68,6 +79,8 @@ async function fetchRelease(currentVersion: string, fetcher: typeof fetch): Prom
 /** Desktop-only polling: no daemon, account or agent data participates in this request. */
 export class ReleaseUpdates {
   available: ReleaseUpdate | null = null;
+  /** The latest stable release, newer than this app or not; a machine can be older than both. */
+  latest: string | null = null;
   private timer?: NodeJS.Timeout;
   private pending?: Promise<void>;
 
@@ -84,6 +97,7 @@ export class ReleaseUpdates {
     this.pending = (async () => {
       try {
         const release = await fetchRelease(this.opts.currentVersion, this.opts.fetcher ?? fetch);
+        this.latest = stableVersion(release);
         this.available = releaseUpdate(this.opts.currentVersion, release);
         this.opts.changed(this.available);
       } catch {

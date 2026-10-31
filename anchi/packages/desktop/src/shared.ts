@@ -8,6 +8,12 @@ export interface ServerState {
   label: string;
   status: 'connecting' | 'connected' | 'error' | 'disconnected' | 'needs-setup' | 'installing';
   error?: string;
+  /** The connected daemon's Anchi version and how it was installed (older daemons say neither). */
+  version?: string;
+  install?: 'release' | 'source';
+  /** The latest release, when it is newer than this machine's daemon. */
+  newer?: string;
+  upgrading?: boolean;
 }
 
 export interface ReleaseUpdate {
@@ -31,6 +37,8 @@ export interface AnchiApi {
   servers(): Promise<SavedServer[]>;
   addServer(name: string, target: string): Promise<{ saved: SavedServer; probe: ProbeResult }>;
   initializeServer(target: string): Promise<boolean>;
+  /** Upgrades an idle machine's release install to the latest release, after a native dialog. */
+  upgradeServer(target: string): Promise<boolean>;
   removeServer(name: string): Promise<SavedServer[]>;
   openExternal(url: string): Promise<void>;
   update(): Promise<ReleaseUpdate | null>;

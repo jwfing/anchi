@@ -31,6 +31,8 @@ import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
 import { bootstrapServer, ServerSetup } from './server-setup.ts';
 import { ReleaseUpdates } from './updates.ts';
+import { LOCAL_UPGRADE, REMOTE_UPGRADE, runScript, ServerUpgrade } from './upgrade.ts';
+import type { DaemonStatus } from '@anchi/protocol';
 import type { ServerState } from '../shared.ts';
 
 // Embedded by the build: the desktop's version is independent of the connected daemon.
@@ -47,13 +49,19 @@ const icon = join(__dirname, 'icon.png');
 let window: BrowserWindow | undefined;
 const updates = new ReleaseUpdates({
   currentVersion: ANCHI_DESKTOP_VERSION,
-  changed: (update) => window?.webContents.send('anchi:update', update),
+  changed: (update) => {
+    window?.webContents.send('anchi:update', update);
+    publishConnections();
+  },
 });
 let selected = 'local';
 const connections = new Connections({
   open: async (target) => {
     const client = await open(resolveServer(layout.root, target));
+    const daemon = (await client.call('daemon.status').catch(() => undefined)) as
+      DaemonStatus | undefined;
     return {
+      daemon,
       read: (method, params) => client.call(method, params),
       on: (name, listener) => {
         client.on(name, listener);
@@ -64,8 +72,66 @@ const connections = new Connections({
       close: () => client.close(),
     };
   },
-  changed: (states) => window?.webContents.send('anchi:connections', states),
+  changed: () => publishConnections(),
   notify: (server, name, params) => window?.webContents.send('anchi:notify', server, name, params),
+});
+
+/** Connection states with what the app adds: an upgrade it can offer, one in progress. */
+function machineStates(): ServerState[] {
+  return connections.states().map((state) => {
+    const newer = serverUpgrade.newer(state);
+    return {
+      ...state,
+      ...(newer ? { newer } : {}),
+      ...(serverUpgrade.busy(state.name) ? { upgrading: true } : {}),
+    };
+  });
+}
+
+function publishConnections() {
+  window?.webContents.send('anchi:connections', machineStates());
+}
+
+const serverUpgrade = new ServerUpgrade({
+  state: (target) => connections.states().find((s) => s.name === target),
+  latest: () => updates.latest,
+  lease: (target) => connections.lease(target),
+  pin: (target) => connections.pin(target),
+  confirm,
+  run: async (target) => {
+    if (target === 'local') {
+      await runScript(
+        'sh',
+        ['-c', LOCAL_UPGRADE, 'sh', process.env.ANCHI_CLI ?? 'anchi'],
+        'Upgrade',
+      );
+      return;
+    }
+    const server = resolveServer(layout.root, target);
+    if (server.kind !== 'remote') throw new Error('unknown machine');
+    const [command, ...args] = server.ssh;
+    if (!command) throw new Error('missing SSH command');
+    await runScript(command, [...args, REMOTE_UPGRADE], 'Remote upgrade');
+  },
+  reconnect: async (target) => {
+    connections.disconnect(target);
+    await connections.connect(target);
+  },
+  wait: (target, ready) =>
+    new Promise((resolve, reject) => {
+      const started = Date.now();
+      const poll = setInterval(() => {
+        const state = connections.states().find((s) => s.name === target);
+        if (state && ready(state)) {
+          clearInterval(poll);
+          resolve(state);
+        } else if (Date.now() - started > 180_000) {
+          clearInterval(poll);
+          reject(new Error('the upgraded daemon did not come back within three minutes'));
+        }
+      }, 1000);
+    }),
+  changed: () => publishConnections(),
 });
 
 const serverSetup = new ServerSetup({
@@ -216,7 +282,7 @@ ipcMain.handle('anchi:server', (event) => {
 });
 ipcMain.handle('anchi:connections', (event) => {
   fromApp(event);
-  return connections.states();
+  return machineStates();
 });
 ipcMain.handle('anchi:connectServer', async (event, target: unknown, connected: unknown) => {
   fromApp(event);
@@ -227,6 +293,7 @@ ipcMain.handle('anchi:connectServer', async (event, target: unknown, connected: 
   )
     throw new Error('unknown machine');
   if (serverSetup.busy(target)) throw new Error('initialization is already running');
+  if (serverUpgrade.busy(target)) throw new Error('an upgrade is running');
   if (connected) await connections.connect(target);
   else connections.disconnect(target);
 });
@@ -265,10 +332,34 @@ ipcMain.handle('anchi:initializeServer', (event, target: unknown) => {
   fromApp(event);
   return initializeServer(target);
 });
+ipcMain.handle('anchi:upgradeServer', async (event, target: unknown) => {
+  fromApp(event);
+  if (typeof target === 'string' && serverSetup.busy(target))
+    throw new Error('initialization is already running');
+  const upgraded = await serverUpgrade.upgrade(target);
+  // `anchi update` replaced the installed app too; this window still runs the old one.
+  if (upgraded && target === 'local' && app.isPackaged) {
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      message: 'Reopen Anchi to use the new version',
+      detail: 'The daemon and the VM are upgraded. The app you are using is still the old one.',
+      buttons: ['Later', 'Reopen now'],
+      defaultId: 1,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (response === 1) {
+      app.relaunch();
+      app.exit(0);
+    }
+  }
+  return upgraded;
+});
 ipcMain.handle('anchi:removeServer', async (event, name: unknown) => {
   fromApp(event);
   const saved = listServers(layout.root).find((s) => s.name === name);
   if (saved && serverSetup.busy(saved.target)) throw new Error('initialization is already running');
+  if (saved && serverUpgrade.busy(saved.target)) throw new Error('an upgrade is running');
   const gone = removeServer(layout.root, String(name ?? ''));
   connections.remove(gone.target);
   if (selected === gone.target) selected = 'local';

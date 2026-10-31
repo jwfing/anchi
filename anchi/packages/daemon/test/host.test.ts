@@ -1,9 +1,15 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { homeLayout } from '@anchi/core';
 import { describe, expect, it } from 'vitest';
-import { appVersion, IN_GUEST_SETUP_STEPS, SetupRunner, workspaceSteps } from '../src/host.ts';
+import {
+  appVersion,
+  IN_GUEST_SETUP_STEPS,
+  installKind,
+  SetupRunner,
+  workspaceSteps,
+} from '../src/host.ts';
 import { launchdPlist, systemdUnit } from '../src/launch.ts';
 import { notifyCommand } from '../src/notify.ts';
 import { hostReadiness, limaMinimum, parseLimaVersion, versionAtLeast } from '../src/setup.ts';
@@ -61,6 +67,17 @@ describe('host integration', () => {
     writeFileSync(join(dir, 'manifest.json'), '{"version":"9.9.9","target":"test"}');
     expect(appVersion(dir)).toBe('9.9.9');
     expect(appVersion(join(dir, 'nothing'))).toBe('unknown');
+  });
+
+  it('calls only a bundle with its manifest and updater a release install', () => {
+    // This checkout runs from source, so the desktop app never offers to upgrade it.
+    expect(installKind()).toBe('source');
+    const dir = mkdtempSync(join(tmpdir(), 'anchi-install-'));
+    writeFileSync(join(dir, 'manifest.json'), '{"version":"9.9.9","target":"test"}');
+    expect(installKind(dir)).toBe('source');
+    mkdirSync(join(dir, 'scripts'));
+    writeFileSync(join(dir, 'scripts/update.sh'), '');
+    expect(installKind(dir)).toBe('release');
   });
 
   it('passes agent text to notifiers as flattened arguments', () => {

@@ -72,6 +72,7 @@ import {
   hostOutput,
   hostResources,
   IN_GUEST_SETUP_STEPS,
+  installKind,
   migrateLegacyVm,
   readHostConnectors,
   RESET_STEPS,
@@ -253,6 +254,7 @@ export class Daemon {
   private server?: Server;
   private watchers: FSWatcher[] = [];
   private clients = new Map<string, Peer>();
+  private readonly install = installKind();
   private startedAt = Date.now();
   private log: (msg: string) => void;
   private setup: SetupRunner;
@@ -1052,6 +1054,8 @@ export class Daemon {
       startedAt: this.startedAt,
       clients: this.clients.size,
       cells: this.hub.cellCount(),
+      version: APP_VERSION,
+      install: this.install,
     }),
     'daemon.shutdown': () => {
       setTimeout(() => void this.stop().then(() => process.exit(0)), 50);

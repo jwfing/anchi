@@ -22,6 +22,7 @@ const api: AnchiApi = {
   servers: () => ipcRenderer.invoke('anchi:servers'),
   addServer: (name, target) => ipcRenderer.invoke('anchi:addServer', name, target),
   initializeServer: (target) => ipcRenderer.invoke('anchi:initializeServer', target),
+  upgradeServer: (target) => ipcRenderer.invoke('anchi:upgradeServer', target),
   removeServer: (name) => ipcRenderer.invoke('anchi:removeServer', name),
   openExternal: (url) => ipcRenderer.invoke('anchi:openExternal', url),
   update: () => ipcRenderer.invoke('anchi:update'),
