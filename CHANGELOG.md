@@ -4,11 +4,19 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+## 0.4.5 — 2026-10-30
+
+The desktop app can upgrade a machine to the latest release from **Settings → Machines**, refusing while tasks run. Task cells keep name resolution when a VPN such as Tailscale changes the DNS resolver, the CLI's hidden secret prompts show their labels again, and `scripts/remote.sh` reuses an existing instabox machine.
+
+Update with `anchi update`, which also updates an installed desktop app, then reopen Anchi. After tasks finish, run `anchi daemon stop` and `anchi setup install` so the VM's egress rules follow resolver changes; reinstall login startup with `anchi daemon install` if enabled. For each existing remote server, rerun `scripts/remote.sh <target>` from the 0.4.5 checkout, then `anchi --server <saved-server> setup install`. Daemons before 0.4.5 do not report their version, so the app offers upgrades only from this release on. Agents, task history and credentials are retained. The upgrade button has not been exercised end to end against a published newer release, and the resolver refresh has not been checked live with Tailscale on a VM; this is a development preview.
+
 ### Added
 
 - The desktop app upgrades a machine to the latest release: **Settings → Machines** shows each machine's Anchi version and, when a newer release exists for a release install, **Upgrade to <version>**. After a system dialog it refuses while tasks run, updates the CLI (and on this computer the app), restarts the daemon, and updates the VM's components. Machines that run Anchi from a source checkout get a note instead. `daemon.status` now reports `version` and `install` (`release` or `source`); daemons older than this release report neither, so upgrade them once by hand. See `docs/DESKTOP.md#upgrade-a-machine-from-the-app`.
+
 ### Fixed
 
+- CLI prompts for a secret (`anchi setup connector`, such as the AWS secret access key and session token, or a connector token) show their label again. The label was erased as soon as the prompt appeared, so the AWS setup seemed to skip from the access key id to the region.
 - `scripts/remote.sh instabox:<machine>` finds an existing machine again with current instabox CLIs, which print JSON when piped; it no longer tries to create the machine a second time and stops with `operation_conflict`.
 - Task cells no longer lose name resolution when a VPN client such as Tailscale rewrites the VM's or server's `/etc/resolv.conf` after the Anchi services start. The egress proxy's DNS allowlist is reread from `/etc/resolv.conf` every two minutes instead of only at startup, so lookups recover within two minutes. Run `anchi setup install` (and `anchi --server <saved-server> setup install` for remote servers) to apply.
 

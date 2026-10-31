@@ -77,7 +77,7 @@ the parent terminal's environment.
   `curl -fsSL https://anchi.elseward.xyz/install.sh | sh`. Run `anchi` to open the TUI.
   Re-run the installer with `sh -s -- --desktop` to add the GUI later.
 - Install a specific release with
-  `curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION=v0.4.4 sh -s -- --desktop`.
+  `curl -fsSL https://anchi.elseward.xyz/install.sh | ANCHI_VERSION=v0.4.5 sh -s -- --desktop`.
 - `ANCHI_INSTALL_ROOT` overrides the default `~/.local/share/anchi`.
 - `ANCHI_BIN_DIR` overrides the command directory. By default the installer prefers a writable
   `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` already on PATH, falling back to
