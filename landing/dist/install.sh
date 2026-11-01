@@ -220,12 +220,17 @@ main() {
       ;;
   esac
   printf '\nFirst use: follow Getting started in the TUI to prepare your environment.\n'
-  if ! command -v limactl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-    case "$target" in
-      darwin-*) printf 'VM prerequisites: brew install lima python\n' ;;
-      *) printf 'VM prerequisites: Lima, Python 3.11+, QEMU and access to /dev/kvm.\n' ;;
-    esac
-  fi
+  # Lima is not checked: setup downloads the pinned release when none new enough is installed.
+  case "$target" in
+    darwin-*)
+      command -v python3 >/dev/null 2>&1 || printf 'VM prerequisite: brew install python\n'
+      ;;
+    *)
+      if ! command -v python3 >/dev/null 2>&1 || ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        printf 'VM prerequisites: Python 3.11+, QEMU and access to /dev/kvm.\n'
+      fi
+      ;;
+  esac
   printf 'To update, run anchi update (or rerun this installer). After tasks finish, run anchi daemon stop.\nIf login startup is enabled, also rerun anchi daemon install.\n'
   printf '\nRun: anchi\n'
 }

@@ -29,6 +29,7 @@ cp "$stage/node-v$SECURE_NODE_VERSION-$target/bin/node" "$root/runtime/node"
 cp "$stage/node-v$SECURE_NODE_VERSION-$target/LICENSE" "$root/runtime/LICENSE"
 node anchi/scripts/bundle-release.mjs "$root"
 cp -R guest services systemd lima "$root/"
+cp host-tools.env "$root/"
 if [[ -n ${ANCHI_PREBUILT_MANIFEST:-} ]]; then
   python3 - "$ANCHI_PREBUILT_MANIFEST" "$root" "$version" "$target" <<'PY'
 import importlib.util, json, sys

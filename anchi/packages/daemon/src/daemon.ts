@@ -100,9 +100,11 @@ import {
   CONNECTOR_IDS,
   connectorStatuses,
   readHostCodexLogin,
+  limaMinimum,
   prepareEnvironment,
   setupStatus,
 } from './setup.ts';
+import { activateLima, ensureLima } from './lima.ts';
 import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
 import { HostLogins, type ClaudeLogin } from './host-logins.ts';
 import { ACCOUNT, SERVICE_IDS, ServiceSetup } from './services.ts';
@@ -160,6 +162,11 @@ export interface DaemonOptions {
    * Off unless set: only the real daemon may stop and rename the machine's VM.
    */
   migrateVm?: boolean;
+  /**
+   * Download the pinned Lima into the Anchi home when none of the required version is on PATH
+   * (src/lima.ts). Off unless set: tests never download.
+   */
+  manageLima?: boolean;
   /** Keep runtime access tokens in step with host logins (default true). */
   hostLoginSync?: boolean;
   /** Host credential readers; tests use temporary files and a fake Keychain. */
@@ -562,6 +569,14 @@ export class Daemon {
       opts.setupSteps ?? (inGuest ? IN_GUEST_SETUP_STEPS : SETUP_STEPS),
       undefined,
       opts.resetSteps ?? (inGuest ? null : RESET_STEPS),
+      undefined,
+      opts.manageLima && !inGuest
+        ? async (action, onLine) => {
+            // Deleting the VM needs no download: without any Lima there is no VM.
+            if (action === 'reset') activateLima(opts.layout.root, limaMinimum());
+            else await ensureLima(opts.layout.root, limaMinimum(), onLine);
+          }
+        : undefined,
     );
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
       this.hub.origin(id),
@@ -1512,6 +1527,9 @@ export class Daemon {
     }
     if (existsSync(layout.socketFile)) rmSync(layout.socketFile);
 
+    // A Lima downloaded by an earlier run comes first on PATH for everything that follows.
+    if (this.opts.manageLima && this.vm.placement === 'lima')
+      activateLima(layout.root, limaMinimum());
     // In the background: restarting a running VM takes longer than clients wait for the socket.
     const migration =
       this.opts.migrateVm && this.vm.placement === 'lima'
