@@ -53,7 +53,7 @@ fi
 mkdir -p "$root/skills"
 cp -R skills/anchi "$root/skills/"
 mkdir -p "$root/scripts"
-cp scripts/up.sh scripts/install-anchi.sh scripts/vault.py scripts/vm-name.sh scripts/vm-size.sh "$root/scripts/"
+cp scripts/up.sh scripts/install-anchi.sh scripts/vault.mjs scripts/vm-name.sh scripts/vm-size.sh "$root/scripts/"
 cp landing/dist/install.sh "$root/scripts/update.sh"
 # Exclude Python caches even when packaging a developer's checkout.
 find "$root" -type d -name __pycache__ -exec rm -rf {} +

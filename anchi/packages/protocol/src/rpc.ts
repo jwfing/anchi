@@ -145,7 +145,7 @@ export interface ConnectorStatus {
  * Setup steps the daemon runs for the user, each a fixed host command from the checkout:
  * `vm-start` starts the existing VM; `install` creates or updates the VM, installs the trusted
  * services and the agent team, and builds the base image; `vault-init` and `vault-unlock` use
- * the host-held vault key (read by `scripts/vault.py`, never by the daemon).
+ * the host-held vault key (read by `scripts/vault.mjs` in its own process, never by the daemon).
  */
 export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock' | 'workspaces';
 export const SETUP_ACTIONS: readonly SetupAction[] = [
@@ -765,6 +765,27 @@ export interface Methods {
   'setup.prepare': [{ runtime: RuntimeId; confirm: true; vmSize?: VmSize }, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
+  /**
+   * Starts a ChatGPT sign-in for Codex that needs no terminal: the daemon runs its pinned Codex
+   * CLI with a login home of its own and returns the page and one-time code for the user to
+   * enter in any browser. `codexSignIn` reports the end; the access token is then imported as
+   * with `setup.importCodex`, and the daemon keeps it refreshed. A new call replaces a pending one.
+   */
+  'setup.codexSignIn': [Record<string, never>, { verificationUrl: string; userCode: string }];
+  /** Ends a pending `setup.codexSignIn`; nothing happens when none is pending. */
+  'setup.codexSignInCancel': [Record<string, never>, { ok: true }];
+  /**
+   * Signs in to Claude without a terminal: the daemon runs its pinned Claude Code as
+   * `claude setup-token` in a pseudo-terminal and returns the page to open. On the daemon's own
+   * computer the page finishes by itself (`codeRequired: false`); for a daemon elsewhere (a remote
+   * server) the page shows a code to send with `setup.claudeSignInCode`. `claudeSignIn` reports
+   * the end; the one-year subscription token goes to the vault, which must be unlocked first.
+   */
+  'setup.claudeSignIn': [Record<string, never>, { url: string; codeRequired: boolean }];
+  /** The code Claude's sign-in page showed, for the pending `setup.claudeSignIn`. */
+  'setup.claudeSignInCode': [{ code: string }, { ok: true }];
+  /** Ends a pending `setup.claudeSignIn`; nothing happens when none is pending. */
+  'setup.claudeSignInCancel': [Record<string, never>, { ok: true }];
   /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */
   'setup.importClaude': [{ token: string }, ClaudeAccountStatus];
   /** Stores Hermes's OpenAI-compatible endpoint (base URL, API key, default model) in the vault. */
@@ -861,6 +882,13 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
+  /**
+   * A `setup.codexSignIn` ended: `done` once Codex has the login (`imported` when the vault took
+   * the access token now; otherwise it is imported once the vault is ready), else `failed`.
+   */
+  codexSignIn: { state: 'done' | 'failed'; imported?: boolean; message?: string };
+  /** A `setup.claudeSignIn` ended: `done` once the vault has the token, else `failed`. */
+  claudeSignIn: { state: 'done' | 'failed'; message?: string };
   /** A Google, X or Reddit sign-in finished. */
   oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
   /** One line of `setup.reset` output (host command output; sanitize for display). */

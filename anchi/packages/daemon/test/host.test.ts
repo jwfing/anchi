@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,7 @@ import {
   appVersion,
   IN_GUEST_SETUP_STEPS,
   installKind,
+  SETUP_STEPS,
   SetupRunner,
   workspaceSteps,
 } from '../src/host.ts';
@@ -127,7 +129,23 @@ describe('host integration', () => {
     expect(linux.slice(-3)).toEqual([
       'limactl start --tty=false anchi-vm',
       'bash scripts/install-anchi.sh',
-      'python3 scripts/vault.py unlock',
+      `/bin/sh -c ulimit -c 0 && exec "$0" "$@" ${process.execPath} scripts/vault.mjs unlock`,
     ]);
+  });
+
+  it("runs the vault key's process on this Node with core dumps off, without Python", () => {
+    for (const steps of [SETUP_STEPS, IN_GUEST_SETUP_STEPS]) {
+      for (const action of ['vault-init', 'vault-unlock'] as const) {
+        const [step] = steps[action]!;
+        expect(step!.slice(3)).toEqual([process.execPath, 'scripts/vault.mjs', action.slice(6)]);
+      }
+    }
+    expect(JSON.stringify([SETUP_STEPS, IN_GUEST_SETUP_STEPS])).not.toMatch(/python|vault\.py/);
+    // The wrapper really turns core dumps off for what it runs.
+    const [sh, flag, script] = SETUP_STEPS['vault-unlock']![0]!;
+    const out = spawnSync(sh!, [flag!, script!, '/bin/sh', '-c', 'ulimit -c'], {
+      encoding: 'utf8',
+    });
+    expect(out.stdout.trim()).toBe('0');
   });
 });

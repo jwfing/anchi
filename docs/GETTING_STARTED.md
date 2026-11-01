@@ -32,14 +32,23 @@ Git, Node and pnpm are not required. It does not need sudo or modify your vault,
 
 ### macOS
 
-1. Install Python with [Homebrew](https://brew.sh):
+Nothing needs to be installed first: preparing the environment downloads the Lima Anchi pins
+(see [Lima](#lima)), and the host needs no Python.
+
+1. Install the app:
 
    ```bash
-   brew install python
+   curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
    ```
 
-   You do not need to install Lima: preparing the environment downloads the Lima Anchi pins
-   (see [Lima](#lima)). A Lima 2.2.0 or newer already on PATH is used instead.
+2. If the installer says your bin directory is missing from PATH, open a new terminal or run
+   the `export PATH=…` line it prints.
+3. Open `~/Applications/Anchi.app` and follow [guided desktop setup](#guided-setup-in-the-desktop-app).
+
+### Linux
+
+1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
+   Anchi downloads [Lima](#lima) itself, and the host needs no Python.
 2. Install the app:
 
    ```bash
@@ -48,22 +57,7 @@ Git, Node and pnpm are not required. It does not need sudo or modify your vault,
 
 3. If the installer says your bin directory is missing from PATH, open a new terminal or run
    the `export PATH=…` line it prints.
-4. Open `~/Applications/Anchi.app` and follow [guided desktop setup](#guided-setup-in-the-desktop-app).
-
-### Linux
-
-1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Python 3.11+ (`python3 --version`); most distributions ship it. Anchi downloads
-   [Lima](#lima) itself.
-3. Install the app:
-
-   ```bash
-   curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
-   ```
-
-4. If the installer says your bin directory is missing from PATH, open a new terminal or run
-   the `export PATH=…` line it prints.
-5. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
+4. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
    [guided desktop setup](#guided-setup-in-the-desktop-app). Ubuntu 23.10 and later need the
    [desktop sandbox profile](DESKTOP.md#linux-sandbox).
 
@@ -95,11 +89,12 @@ cell runner from the checkout.
 1. Install the prerequisites:
 
    ```bash
-   brew install git node pnpm python
+   brew install git node pnpm
    ```
 
    Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Anchi
-   downloads [Lima](#lima) itself.
+   downloads [Lima](#lima) itself. Python 3.11+ is needed only for the
+   [development checks](#development-checks).
 2. Clone the repository and install the workspace dependencies:
 
    ```bash
@@ -120,8 +115,9 @@ cell runner from the checkout.
 ### Linux
 
 1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Git, Python 3.11+ and Node 22+ with your package manager or a version manager such
-   as nvm or mise. `.nvmrc` names the Node version CI uses.
+2. Install Git and Node 22+ with your package manager or a version manager such as nvm or
+   mise. `.nvmrc` names the Node version CI uses. Python 3.11+ is needed only for the
+   [development checks](#development-checks).
 3. Install pnpm. Node 25 and newer no longer bundle corepack, so install pnpm directly with one of:
 
    ```bash
@@ -313,10 +309,17 @@ picks one). Teams with setup and a first task complete open on **Team overview**
    The master key is `~/.config/anchi/vault.key`. Back it up; a replacement key cannot
    decrypt stored accounts.
 3. **Connect a runtime.** These operations are also available in **Runtimes**.
-   - Codex: install its CLI and run `codex login` on this machine, then `anchi setup codex`.
-     Anchi reads `~/.codex/auth.json`; Codex must store its login in that file, not in a
-     keyring.
-   - Claude Code: sign in locally for automatic import, or run `claude setup-token`, then
+   - Codex: `anchi setup codex --sign-in` (or **g** in Runtimes, **Sign in with ChatGPT** in the
+     desktop app) prints a page and a one-time code: open the page in any browser, sign in to
+     ChatGPT and enter the code. Anchi downloads the Codex CLI it pins for this, keeps the login in
+     `~/.anchi/codex` and refreshes it; the Codex CLI does not need to be installed. Alternatively,
+     with the Codex CLI installed and `codex login` run on this machine, `anchi setup codex`
+     imports `~/.codex/auth.json`; Codex must store its login in that file, not in a keyring.
+   - Claude Code: `anchi setup claude --sign-in` (or **C** in Runtimes, **Sign in with Claude**
+     in the desktop app) opens Claude's sign-in page; once you sign in, Anchi stores a one-year
+     subscription token. It downloads the Claude Code it pins for this; Claude Code does not need
+     to be installed. For a remote server, the page shows a code to paste back. Alternatively,
+     sign in to Claude Code locally for automatic import, or run `claude setup-token`, then
      `anchi setup claude` and paste the token.
    - Hermes: `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` and
      paste the endpoint's API key (or **h** in Runtimes). Any OpenAI-compatible API works; the key

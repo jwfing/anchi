@@ -2279,6 +2279,77 @@ describe('usability workflows', () => {
     runtimes.unmount();
   });
 
+  it('signs in to ChatGPT with g: shows the page and code until the daemon says it ended', async () => {
+    const { client, calls, emit } = fakeClient(
+      {},
+      {
+        'setup.codexSignIn': () => ({
+          verificationUrl: 'https://auth.openai.com/codex/device',
+          userCode: 'ABCD-EFGHI',
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialView="runtimes"
+        initialAgents={[agent('dev')]}
+        initialTasks={[]}
+      />,
+    );
+    await frameWith(ui, 'Runtimes');
+    ui.stdin.write('g');
+    const frame = await frameWith(ui, 'ABCD-EFGHI');
+    expect(frame).toContain('https://auth.openai.com/codex/device');
+    expect(calls.filter(([m]) => m === 'setup.codexSignIn')).toHaveLength(1);
+    emit('codexSignIn', { state: 'done', imported: true });
+    expect(await frameWith(ui, 'Codex connected')).not.toContain('ABCD-EFGHI');
+    // Confirming the modal cancels a pending sign-in.
+    ui.stdin.write('g');
+    await frameWith(ui, 'ABCD-EFGHI');
+    ui.stdin.write('y');
+    await tick();
+    expect(calls.some(([m]) => m === 'setup.codexSignInCancel')).toBe(true);
+    ui.unmount();
+  });
+
+  it('signs in to Claude with C: waits on this computer, takes the code for a server', async () => {
+    let codeRequired = false;
+    const { client, calls, emit } = fakeClient(
+      {},
+      {
+        'setup.claudeSignIn': () => ({
+          url: 'https://claude.com/cai/oauth/authorize?code=true',
+          codeRequired,
+        }),
+      },
+    );
+    const ui = render(
+      <App
+        client={client}
+        initialView="runtimes"
+        initialAgents={[agent('dev')]}
+        initialTasks={[]}
+      />,
+    );
+    await frameWith(ui, 'Runtimes');
+    ui.stdin.write('C');
+    expect(await frameWith(ui, 'closes by itself')).toContain('claude.com/cai/oauth/authorize');
+    emit('claudeSignIn', { state: 'done' });
+    expect(await frameWith(ui, 'Claude Code connected')).not.toContain('closes by itself');
+    codeRequired = true;
+    ui.stdin.write('C');
+    await frameWith(ui, 'paste the code the page shows');
+    ui.stdin.write('PASTED#CODE-1');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls.find(([m]) => m === 'setup.claudeSignInCode')?.[1]).toEqual({
+      code: 'PASTED#CODE-1',
+    });
+    ui.unmount();
+  });
+
   it('lists every runtime at the runtime step and goes on with any of them', async () => {
     const { client } = fakeClient(
       {},

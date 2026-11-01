@@ -501,8 +501,8 @@ Runtime and connector setup
 Commands:
   prepare [options]                               Prepare the environment, credential storage and one runtime; resume completed steps
   status [options]                                VM, vault, runtimes, connectors and services at a glance
-  codex [options]                                 Import the Codex login from ~/.codex/auth.json into the VM vault
-  claude                                          Store a `claude setup-token` token or an Anthropic API key in the VM vault
+  codex [options]                                 Import the Codex login from ~/.codex/auth.json into the VM vault, or sign in to ChatGPT without the Codex CLI (--sign-in)
+  claude [options]                                Store a `claude setup-token` token or an Anthropic API key in the VM vault, or sign in to Claude in a browser (--sign-in)
   hermes [options]                                Store Hermes's OpenAI-compatible endpoint, API key and default model in the VM vault
   workspaces [options]                            Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)
   vm                                              Start the VM
@@ -549,10 +549,13 @@ Options:
 ```text
 Usage: anchi setup codex [options]
 
-Import the Codex login from ~/.codex/auth.json into the VM vault
+Import the Codex login from ~/.codex/auth.json into the VM vault, or sign in to
+ChatGPT without the Codex CLI (--sign-in)
 
 Options:
   -y, --yes   do not ask for confirmation
+  --sign-in   sign in in any browser with a one-time code; Anchi keeps the login
+              refreshed
 ```
 
 #### `anchi setup claude`
@@ -560,7 +563,11 @@ Options:
 ```text
 Usage: anchi setup claude [options]
 
-Store a `claude setup-token` token or an Anthropic API key in the VM vault
+Store a `claude setup-token` token or an Anthropic API key in the VM vault, or
+sign in to Claude in a browser (--sign-in)
+
+Options:
+  --sign-in   sign in in a browser; Anchi creates and stores a one-year token
 ```
 
 #### `anchi setup hermes`

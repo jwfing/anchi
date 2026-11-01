@@ -6,13 +6,13 @@ These trusted services keep credentials, authorization and provider networking o
 
 A separate `secure-auth` UID owns OAuth client configuration, access/refresh tokens, temporary PKCE state, connector tokens and the Codex and Claude Code runtime tokens. `/var/lib/secure-auth/*.json.enc` uses AES-256-GCM with random twelve-byte nonces and the logical filename as AAD, preventing credential-file substitution. Directory mode is 0700; files are 0600 with atomic replacement and fsync.
 
-The 32-byte master key is `~/.config/anchi/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled. Restart requires unlocking again. A daemon on a [remote server](REMOTE_SERVER.md), where the key file sits on the same machine as the vault, unlocks it itself when it starts.
+The 32-byte master key is `~/.config/anchi/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled; on the host, `scripts/vault.mjs` reads the key in a short process of its own, started with `ulimit -c 0`, so the key is never in the long-running daemon's memory. Restart requires unlocking again. A daemon on a [remote server](REMOTE_SERVER.md), where the key file sits on the same machine as the vault, unlocks it itself when it starts.
 
 ```bash
 anchi setup vault init     # Create once; reuses an existing key
 anchi setup vault unlock
-python3 scripts/vault.py status
-python3 scripts/vault.py lock
+node scripts/vault.mjs status
+node scripts/vault.mjs lock
 ```
 
 Plaintext migration encrypts, decrypts to verify, then removes the old file, with no plaintext fallback. A wrong key cannot replace an already-unlocked correct one. Protect a separate key backup; losing it requires reauthorization.

@@ -4,9 +4,15 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- Codex can be connected without installing or logging in to the Codex CLI. **Sign in with ChatGPT** on the desktop Codex card, `anchi setup codex --sign-in`, or **g** in the TUI's Runtimes shows a one-time code and opens the sign-in page; enter the code in any browser. The daemon downloads the Codex CLI pinned in `host-tools.env` (SHA-256 checked), keeps the login in `~/.anchi/codex` with its refresh token on the host, imports the access token into the vault and refreshes it before it expires. On a remote server the sign-in runs there and the code shows on your computer. See `docs/GETTING_STARTED.md`.
+- Claude Code can be connected by signing in to Claude in a browser, without installing Claude Code or copying a token. **Sign in with Claude** on the desktop Claude card, `anchi setup claude --sign-in`, or **C** in the TUI's Runtimes opens Claude's sign-in page; on your computer it finishes by itself, and for a remote server you paste the code the page shows. The daemon runs the Claude Code pinned in `host-tools.env` (downloaded from the npm registry, SHA-256 checked) as `claude setup-token` in a pseudo-terminal and stores the one-year subscription token in the vault; the token is never logged. Prepare the environment first: the vault must be unlocked.
+
 ### Changed
 
 - Lima no longer has to be installed first. When preparing the environment (or `anchi setup install`) finds no Lima 2.2.0 or newer on PATH, Anchi downloads the Lima release pinned in `host-tools.env` for Apple Silicon macOS or Linux x86_64, checks its SHA-256 before extracting anything, installs it into `~/.anchi/lima/<version>` and uses it for the VM. An installed Lima of the required version is used as before. On macOS the remaining prerequisite is `brew install python`. See `docs/GETTING_STARTED.md#lima`.
+- The host no longer needs Python. The vault key is read and sent to the VM by `scripts/vault.mjs`, which replaces `scripts/vault.py` and runs on Anchi's own Node in a short process of its own with core dumps off, so the key is still never in the daemon's memory. The check for running task cells before an install parses the cell list inside the VM. With Lima downloaded too, Apple Silicon macOS needs nothing installed before Anchi; Linux needs QEMU and KVM access. Use `node scripts/vault.mjs status` or `lock` where you used `python3 scripts/vault.py`.
 
 ## 0.4.5 — 2026-10-30
 

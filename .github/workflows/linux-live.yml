@@ -75,7 +75,7 @@ jobs:
         # The token is well-formed but belongs to no account; the agent-team checks never call
         # a model, and the proxy never forwards it anywhere they reach.
         run: |
-          python3 scripts/vault.py init
+          node scripts/vault.mjs init
           limactl shell "$ANCHI_INSTALL_VM" -- sudo anchi-image build codex base
           python3 - <<'PY' | limactl shell "$ANCHI_INSTALL_VM" -- sudo /usr/bin/python3 /opt/secure-vm/services/codex_admin.py import-token
           import base64, json, time

@@ -1,7 +1,7 @@
 #!/bin/bash
 # The Lima VM's name and the vault key's place on the host, and their move from the names used
 # before 0.3 (`secure-vm`, ~/.config/secure-vm/vault.key). Host scripts source it; the daemon and
-# vault.py run `bash scripts/vm-name.sh migrate` before they use the VM.
+# vault.mjs run `bash scripts/vm-name.sh migrate` before they use the VM.
 ANCHI_VM_DEFAULT=anchi-vm
 ANCHI_LEGACY_VM=secure-vm
 ANCHI_VAULT_KEY=${HOME}/.config/anchi/vault.key
@@ -22,20 +22,20 @@ anchi_vm_name() {
 
 # The Anchi version of this checkout or release, which the VM records in installed.json.
 anchi_runtime_version() {
-  python3 - <<'PY'
-import json
-for name in ('anchi/package.json', 'manifest.json'):
-    try:
-        print(json.load(open(name))['version'])
-        break
-    except (OSError, KeyError, ValueError):
-        pass
-else:
-    print('unknown')
-PY
+  local name version
+  for name in anchi/package.json manifest.json; do
+    [[ -f $name ]] || continue
+    # The first "version" key: the package's own in package.json, the only one in manifest.json.
+    version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$name" | head -n 1)
+    if [[ -n $version ]]; then
+      echo "$version"
+      return
+    fi
+  done
+  echo unknown
 }
 
-# One migration at a time: the daemon at start, scripts/up.sh and vault.py each ask for one, and
+# One migration at a time: the daemon at start, scripts/up.sh and vault.mjs each ask for one, and
 # two renames (or a rename next to a `limactl start`) would fight over the same VM. A second
 # caller waits for the first, after which it finds nothing left to move. Fails rather than
 # proceeding when the wait runs out, so no caller creates a second, empty VM meanwhile.
@@ -139,7 +139,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
       status=0
       migrate_legacy_vm || status=$?
       if ((status == 2)) && [[ -f $ANCHI_VAULT_KEY ]]; then
-        ANCHI_VM_MIGRATING=1 python3 "$(dirname "$0")/vault.py" unlock >/dev/null && echo 'Vault unlocked.' >&2
+        ANCHI_VM_MIGRATING=1 "${ANCHI_NODE:-node}" "$(dirname "$0")/vault.mjs" unlock >/dev/null && echo 'Vault unlocked.' >&2
       elif ((status != 0 && status != 2)); then
         exit "$status"
       fi

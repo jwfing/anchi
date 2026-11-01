@@ -21,7 +21,7 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `services/auth.py`, `x_auth.py`, `reddit_auth.py`, `vault.py`, `policy.py`, `server.py` and `*_admin.py` | Vault, credential service, policy service and their administration |
 | `guest/` | VM bring-up (`bootstrap.sh`), service and agent-team installers, live checks; `cell.env` owns UID and version pins, `arch.sh` maps architecture |
 | `systemd/`, `lima/` | Service identities, sockets, resource limits and the outer VM |
-| `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.py`) and explicit live checks |
+| `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.mjs`) and explicit live checks |
 | `tests/` | Offline tests of the trusted services |
 | `poc/` | Phase 0 spikes and their recorded results |
 | `landing/` | Static landing page, not part of the product |
