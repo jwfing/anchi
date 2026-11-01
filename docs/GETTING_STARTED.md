@@ -32,14 +32,23 @@ Git, Node and pnpm are not required. It does not need sudo or modify your vault,
 
 ### macOS
 
-1. Install Python with [Homebrew](https://brew.sh):
+Nothing needs to be installed first: preparing the environment downloads the Lima Anchi pins
+(see [Lima](#lima)), and the host needs no Python.
+
+1. Install the app:
 
    ```bash
-   brew install python
+   curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
    ```
 
-   You do not need to install Lima: preparing the environment downloads the Lima Anchi pins
-   (see [Lima](#lima)). A Lima 2.2.0 or newer already on PATH is used instead.
+2. If the installer says your bin directory is missing from PATH, open a new terminal or run
+   the `export PATH=…` line it prints.
+3. Open `~/Applications/Anchi.app` and follow [guided desktop setup](#guided-setup-in-the-desktop-app).
+
+### Linux
+
+1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
+   Anchi downloads [Lima](#lima) itself, and the host needs no Python.
 2. Install the app:
 
    ```bash
@@ -48,22 +57,7 @@ Git, Node and pnpm are not required. It does not need sudo or modify your vault,
 
 3. If the installer says your bin directory is missing from PATH, open a new terminal or run
    the `export PATH=…` line it prints.
-4. Open `~/Applications/Anchi.app` and follow [guided desktop setup](#guided-setup-in-the-desktop-app).
-
-### Linux
-
-1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Python 3.11+ (`python3 --version`); most distributions ship it. Anchi downloads
-   [Lima](#lima) itself.
-3. Install the app:
-
-   ```bash
-   curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
-   ```
-
-4. If the installer says your bin directory is missing from PATH, open a new terminal or run
-   the `export PATH=…` line it prints.
-5. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
+4. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
    [guided desktop setup](#guided-setup-in-the-desktop-app). Ubuntu 23.10 and later need the
    [desktop sandbox profile](DESKTOP.md#linux-sandbox).
 
@@ -95,11 +89,12 @@ cell runner from the checkout.
 1. Install the prerequisites:
 
    ```bash
-   brew install git node pnpm python
+   brew install git node pnpm
    ```
 
    Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Anchi
-   downloads [Lima](#lima) itself.
+   downloads [Lima](#lima) itself. Python 3.11+ is needed only for the
+   [development checks](#development-checks).
 2. Clone the repository and install the workspace dependencies:
 
    ```bash
@@ -120,8 +115,9 @@ cell runner from the checkout.
 ### Linux
 
 1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Git, Python 3.11+ and Node 22+ with your package manager or a version manager such
-   as nvm or mise. `.nvmrc` names the Node version CI uses.
+2. Install Git and Node 22+ with your package manager or a version manager such as nvm or
+   mise. `.nvmrc` names the Node version CI uses. Python 3.11+ is needed only for the
+   [development checks](#development-checks).
 3. Install pnpm. Node 25 and newer no longer bundle corepack, so install pnpm directly with one of:
 
    ```bash

@@ -124,10 +124,10 @@ export function hostReadiness(
     };
   }
   // Where Anchi has a pinned Lima, setup downloads it when PATH has none new enough (lima.ts).
+  // The host needs no Python: the vault key goes in with scripts/vault.mjs on this Node, and
+  // everything else in Python runs in the guest.
   const downloadable = pin !== null;
-  const missing = [...(downloadable ? [] : ['limactl']), 'python3'].filter(
-    (name) => !executable(name),
-  );
+  const missing = downloadable || executable('limactl') ? [] : ['limactl'];
   // An older Lima fails only at `limactl start`, deep in the installation log; say it here.
   const minimum = limaMinimum();
   const found = downloadable || missing.includes('limactl') ? null : limaVersion();
@@ -145,10 +145,8 @@ export function hostReadiness(
     missing,
     installHint:
       process.platform === 'darwin'
-        ? downloadable
-          ? 'brew install python'
-          : 'brew install lima python (brew upgrade lima for a newer Lima)'
-        : `Install ${downloadable ? '' : `Lima ${minimum}+ (https://lima-vm.io), `}Python 3.11+ and QEMU. Ubuntu/Debian: sudo apt-get install python3 qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.`,
+        ? 'brew install lima (brew upgrade lima for a newer Lima)'
+        : `Install ${downloadable ? '' : `Lima ${minimum}+ (https://lima-vm.io) and `}QEMU. Ubuntu/Debian: sudo apt-get install qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.`,
   };
 }
 

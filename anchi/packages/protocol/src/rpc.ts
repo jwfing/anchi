@@ -145,7 +145,7 @@ export interface ConnectorStatus {
  * Setup steps the daemon runs for the user, each a fixed host command from the checkout:
  * `vm-start` starts the existing VM; `install` creates or updates the VM, installs the trusted
  * services and the agent team, and builds the base image; `vault-init` and `vault-unlock` use
- * the host-held vault key (read by `scripts/vault.py`, never by the daemon).
+ * the host-held vault key (read by `scripts/vault.mjs` in its own process, never by the daemon).
  */
 export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock' | 'workspaces';
 export const SETUP_ACTIONS: readonly SetupAction[] = [
