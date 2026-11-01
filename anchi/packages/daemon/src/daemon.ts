@@ -106,6 +106,7 @@ import {
 } from './setup.ts';
 import { activateLima, ensureLima } from './lima.ts';
 import { CodexSignIn, SIGN_IN_CANCELLED } from './codex-sign-in.ts';
+import { ClaudeSignIn, SIGN_IN_CANCELLED as CLAUDE_SIGN_IN_CANCELLED } from './claude-sign-in.ts';
 import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
 import { HostLogins, type ClaudeLogin } from './host-logins.ts';
 import { ACCOUNT, SERVICE_IDS, ServiceSetup } from './services.ts';
@@ -174,6 +175,8 @@ export interface DaemonOptions {
   hostLogins?: HostLogins;
   /** The ChatGPT sign-in without a terminal; tests give one with a fake Codex. */
   codexSignIn?: CodexSignIn;
+  /** The Claude Code that signs in to Claude; the pinned download by default (tests: a fake). */
+  claudeBinary?: () => Promise<string>;
   /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
   workspaceRoot?: string;
   /** Where GitHub skills are fetched from; tests replace it. */
@@ -277,6 +280,7 @@ export class Daemon {
   private stopping = false;
   private hostLogins: HostLogins;
   private codexSignIn: CodexSignIn;
+  private claudeSignIn: ClaudeSignIn;
   private hostLoginSync?: Promise<void>;
   private codexImporting = false;
 
@@ -590,6 +594,18 @@ export class Daemon {
       new CodexSignIn({ home: opts.layout.root, log: (line) => this.log(line) });
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
     this.vm = opts.vm ?? vmTransport();
+    this.claudeSignIn = new ClaudeSignIn({
+      home: opts.layout.root,
+      log: (line) => this.log(line),
+      // A Lima daemon shares the user's computer; a daemon in the guest is a remote server.
+      browserHere: this.vm.placement === 'lima',
+      store: async (token) => {
+        await this.guest.importClaude(token);
+        this.log('claude sign-in imported');
+        void this.refreshSetup();
+      },
+      binary: opts.claudeBinary,
+    });
     this.guest = opts.guest ?? new Guest(this.vm);
     this.store = new Store(opts.layout.dbFile);
     this.workspaceRoot = opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces');
@@ -1280,6 +1296,32 @@ export class Daemon {
         this.preparing = undefined;
       }
     },
+    'setup.claudeSignIn': async (params) => {
+      z.strictObject({}).parse(params ?? {});
+      // The token exists once, in the sign-in's output: without a vault to take it, it is lost.
+      if (!(await this.guest.vaultStatus().catch(() => ({ unlocked: false }))).unlocked) {
+        throw new Error('Prepare the environment first: the vault that keeps the token is locked.');
+      }
+      const { url, codeRequired, done } = await this.claudeSignIn.start();
+      void done.then(
+        () => this.broadcast('claudeSignIn', { state: 'done' }),
+        (err: Error) => {
+          if (err.message.startsWith(CLAUDE_SIGN_IN_CANCELLED)) return;
+          this.broadcast('claudeSignIn', { state: 'failed', message: err.message.slice(0, 300) });
+        },
+      );
+      return { url, codeRequired };
+    },
+    'setup.claudeSignInCode': async (params) => {
+      const { code } = z.strictObject({ code: z.string().max(500) }).parse(params);
+      this.claudeSignIn.submitCode(code.trim());
+      return { ok: true as const };
+    },
+    'setup.claudeSignInCancel': async (params) => {
+      z.strictObject({}).parse(params ?? {});
+      await this.claudeSignIn.cancel();
+      return { ok: true as const };
+    },
     'setup.importClaude': async ({ token }) => {
       await this.hostLoginSync;
       await this.guest.importClaude(str(token, 'token', 500).trim());
@@ -1713,6 +1755,7 @@ export class Daemon {
     await this.peerTasks.stop();
     clearTimeout(this.hostLoginDebounce);
     await this.codexSignIn.cancel();
+    await this.claudeSignIn.cancel();
     await this.hostLoginSync;
     await this.hub.shutdown();
     this.approvals.stop();

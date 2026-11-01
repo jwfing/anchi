@@ -315,7 +315,11 @@ picks one). Teams with setup and a first task complete open on **Team overview**
      `~/.anchi/codex` and refreshes it; the Codex CLI does not need to be installed. Alternatively,
      with the Codex CLI installed and `codex login` run on this machine, `anchi setup codex`
      imports `~/.codex/auth.json`; Codex must store its login in that file, not in a keyring.
-   - Claude Code: sign in locally for automatic import, or run `claude setup-token`, then
+   - Claude Code: `anchi setup claude --sign-in` (or **C** in Runtimes, **Sign in with Claude**
+     in the desktop app) opens Claude's sign-in page; once you sign in, Anchi stores a one-year
+     subscription token. It downloads the Claude Code it pins for this; Claude Code does not need
+     to be installed. For a remote server, the page shows a code to paste back. Alternatively,
+     sign in to Claude Code locally for automatic import, or run `claude setup-token`, then
      `anchi setup claude` and paste the token.
    - Hermes: `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` and
      paste the endpoint's API key (or **h** in Runtimes). Any OpenAI-compatible API works; the key

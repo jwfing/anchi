@@ -92,6 +92,8 @@ const BUILDER = 'builder';
 const STARTER_RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
 /** The title of the modal that shows a ChatGPT sign-in's code until it ends. */
 const CODEX_SIGN_IN = 'Sign in to ChatGPT';
+/** The title of the modal that shows a Claude sign-in's page (and takes its code) until it ends. */
+const CLAUDE_SIGN_IN = 'Sign in to Claude';
 const HOME = ['welcome', 'team', 'approvals'] as const;
 const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
 type ConfigItem = (typeof CONFIG)[number] | (typeof HOME)[number];
@@ -609,6 +611,17 @@ export function App({
             : imported
               ? 'Codex connected; Anchi keeps the login refreshed'
               : 'Signed in; Codex connects once the environment is prepared',
+        );
+        refreshSetup();
+      }),
+      client.on('claudeSignIn', ({ state, message }) => {
+        setModal((m) =>
+          (m?.kind === 'confirm' || m?.kind === 'text') && m.title === CLAUDE_SIGN_IN ? null : m,
+        );
+        say(
+          state === 'failed'
+            ? `Claude sign-in: ${message ?? 'did not finish'}`
+            : 'Claude Code connected (subscription token, valid for a year)',
         );
         refreshSetup();
       }),
@@ -1709,6 +1722,32 @@ export function App({
             }),
           )
           .catch((err: unknown) => reportProblem(err));
+      case 'setup:claudeSignIn':
+        return void client
+          .call('setup.claudeSignIn')
+          .then(({ url, codeRequired }) =>
+            setModal(
+              codeRequired
+                ? {
+                    kind: 'text',
+                    title: CLAUDE_SIGN_IN,
+                    label: `Open ${sanitizeLine(url)} in any browser and sign in to Claude, then paste the code the page shows.`,
+                    input: '',
+                    submit: async (code) => {
+                      await client.call('setup.claudeSignInCode', { code: code.trim() });
+                    },
+                  }
+                : {
+                    kind: 'confirm',
+                    title: CLAUDE_SIGN_IN,
+                    body:
+                      `Open ${sanitizeLine(url)} in a browser on this computer and sign in to Claude. ` +
+                      'This closes by itself when you are done. Confirm to cancel the sign-in.',
+                    action: () => client.call('setup.claudeSignInCancel'),
+                  },
+            ),
+          )
+          .catch((err: unknown) => reportProblem(err));
       case 'setup:claude':
         return setModal({ kind: 'secret', connector: 'claude', index: 0, values: {}, input: '' });
       case 'setup:hermes':
@@ -2486,7 +2525,8 @@ export function App({
           ['welcome:next', 'continue'],
           ['setup:codexSignIn', 'ChatGPT'],
           ['setup:codex', 'Codex login'],
-          ['setup:claude', 'Claude'],
+          ['setup:claudeSignIn', 'Claude sign-in'],
+          ['setup:claude', 'Claude token'],
           ['setup:hermes', 'Hermes'],
           ['setup:logs', 'logs'],
         ]
@@ -2572,7 +2612,8 @@ export function App({
                             ['setup:workspaces', 'workspaces'],
                             ['setup:codexSignIn', 'ChatGPT'],
                             ['setup:codex', 'Codex login'],
-                            ['setup:claude', 'Claude'],
+                            ['setup:claudeSignIn', 'Claude sign-in'],
+                            ['setup:claude', 'Claude token'],
                             ['setup:hermes', 'Hermes'],
                           ];
   const status = pending.length

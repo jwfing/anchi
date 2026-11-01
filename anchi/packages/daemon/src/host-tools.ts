@@ -37,9 +37,22 @@ export function readHostTools(root = REPO_ROOT): Record<string, string> {
 }
 
 /** The two hosts Anchi provides tools for, with each tool's name for them. */
-export const HOST_TARGETS: Record<string, { key: string; lima: string; codex: string }> = {
-  'darwin-arm64': { key: 'DARWIN_ARM64', lima: 'Darwin-arm64', codex: 'aarch64-apple-darwin' },
-  'linux-x64': { key: 'LINUX_X64', lima: 'Linux-x86_64', codex: 'x86_64-unknown-linux-musl' },
+export const HOST_TARGETS: Record<
+  string,
+  { key: string; lima: string; codex: string; claude: string }
+> = {
+  'darwin-arm64': {
+    key: 'DARWIN_ARM64',
+    lima: 'Darwin-arm64',
+    codex: 'aarch64-apple-darwin',
+    claude: 'darwin-arm64',
+  },
+  'linux-x64': {
+    key: 'LINUX_X64',
+    lima: 'Linux-x86_64',
+    codex: 'x86_64-unknown-linux-musl',
+    claude: 'linux-x64',
+  },
 };
 
 export interface Pin {

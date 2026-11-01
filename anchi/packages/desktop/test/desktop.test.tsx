@@ -431,10 +431,15 @@ describe('settings', () => {
     const out = html(<Runtimes status={status} server="local" onChange={() => undefined} />);
     expect(out.match(/>Connected</g)).toHaveLength(1);
     expect(out.match(/>Not set up</g)).toHaveLength(2);
-    expect(out.match(/>Set up</g)).toHaveLength(2);
+    expect(out.match(/>Set up</g)).toHaveLength(1);
     // Codex signs in to ChatGPT in the browser; importing a Codex CLI login is the other way.
     expect(out).toContain('>Sign in again with ChatGPT<');
     expect(out).toContain('>Import Codex login<');
+    // Claude signs in in the browser too; pasting a token or API key is the other way.
+    expect(out).toMatch(
+      /class="btn btn-small runtime-action btn-primary"[^>]*>Sign in with Claude</,
+    );
+    expect(out).toContain('>Paste a token or API key<');
     const fresh = html(
       <Runtimes
         status={{ ...status, codex: { ...status.codex!, connected: false } } as SetupStatus}

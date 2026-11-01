@@ -136,6 +136,10 @@ export const ACTIONS = {
     contexts: ['runtimes', 'welcome'],
   },
   'setup:claude': { title: 'Connect Claude Code', contexts: ['runtimes', 'welcome'] },
+  'setup:claudeSignIn': {
+    title: 'Sign in to Claude in a browser (Anchi creates and stores a one-year token)',
+    contexts: ['runtimes', 'welcome'],
+  },
   'setup:hermes': {
     title: "Set Hermes's model endpoint (OpenAI-compatible)",
     contexts: ['runtimes', 'welcome'],
@@ -234,6 +238,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     i: 'setup:codex',
     g: 'setup:codexSignIn',
     c: 'setup:claude',
+    C: 'setup:claudeSignIn',
     h: 'setup:hermes',
     r: 'setup:refresh',
   },
@@ -301,6 +306,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     i: 'setup:codex',
     g: 'setup:codexSignIn',
     c: 'setup:claude',
+    C: 'setup:claudeSignIn',
     h: 'setup:hermes',
     r: 'setup:refresh',
   },
