@@ -110,7 +110,7 @@ describe('Claude sign-in without a terminal', { timeout: 20_000 }, () => {
       '-q',
       '-e',
       '-c',
-      `'/o'\\''k/claude' setup-token`,
+      `'/o'\\''k/claude' setup-token; sleep 1; kill -TERM $PPID`,
       '/dev/null',
     ]);
   });

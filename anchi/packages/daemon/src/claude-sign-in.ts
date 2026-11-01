@@ -144,7 +144,16 @@ export function ptyCommand(
   const script =
     platform === 'darwin'
       ? ['/usr/bin/script', '-q', '/dev/null', binary, 'setup-token']
-      : ['script', '-q', '-e', '-c', `'${binary.replace(/'/g, `'\\''`)}' setup-token`, '/dev/null'];
+      : // util-linux `script` waits for stdin to close after the command ends; the command's
+        // shell ends it instead, a second later so the last output (the token) is relayed.
+        [
+          'script',
+          '-q',
+          '-e',
+          '-c',
+          `'${binary.replace(/'/g, `'\\''`)}' setup-token; sleep 1; kill -TERM $PPID`,
+          '/dev/null',
+        ];
   return { command: '/bin/bash', args: ['-c', 'exec "$0" "$@" < <(exec cat)', ...script] };
 }
 
