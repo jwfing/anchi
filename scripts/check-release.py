@@ -151,6 +151,10 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
         f"#!{sys.executable}\n"
         "import json, pathlib, sys\n"
         "args = sys.argv[1:]\n"
+        # A Lima new enough for the VM template, so setup uses this one and downloads none.
+        "if args == ['--version']:\n"
+        "    print('limactl version 2.2.0')\n"
+        "    sys.exit(0)\n"
         "if args[0] == 'copy':\n"
         "    for source in args[1:-1]:\n"
         "        if source != '-r' and not pathlib.Path(source).exists():\n"
