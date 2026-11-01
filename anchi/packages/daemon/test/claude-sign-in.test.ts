@@ -82,6 +82,9 @@ describe('Claude sign-in without a terminal', { timeout: 20_000 }, () => {
     const raw = `\x1b[2K✓ done\r\nYour OAuth token (valid for 1 year):\r\n\r\n${TOKEN.slice(0, 50)}\r\n${TOKEN.slice(50)}\r\n\r\nStore this token securely.`;
     expect(tokenFrom(raw)).toBe(TOKEN);
     expect(tokenFrom(raw.replace(TOKEN.slice(50), 'x'))).toBeUndefined();
+    // As Claude Code 2.1 draws it: line breaks are cursor movements, which leave no newline.
+    const drawn = `✓ Long-lived authentication token created successfully!\x1b[1B\x1b[2GYour OAuth token (valid for 1 year):\x1b[2B\x1b[2G${TOKEN.slice(0, 79)}\x1b[1C${TOKEN.slice(79)}\x1b[2B\x1b[2GStore this token securely.`;
+    expect(tokenFrom(drawn)).toBe(TOKEN);
     expect(tokenFrom('valid for 1 year):\nsk-ant-api03-abc\nStore this token')).toBeUndefined();
     expect(codePageFrom(`open ${LOCAL} or ${PASTE}`)).toBe(PASTE);
     expect(codePageFrom(LOCAL)).toBeUndefined();
