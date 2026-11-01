@@ -138,7 +138,13 @@ valid local subscription logins are imported automatically. Codex reads `~/.code
 `.credentials.json` in `CLAUDE_CONFIG_DIR` (default `~/.claude`). Reads are bounded and reject
 non-regular or symlinked credential files. Only access tokens, Codex's account id and Claude's
 expiry enter the vault, over stdin. Refresh tokens stay on the host, where the CLIs refresh
-them. Discovery reports only installation/login state; errors and logs contain no token data.
+them. A ChatGPT sign-in made in Anchi (`setup.codexSignIn`) works the same way with a login home
+of Anchi's own: the daemon runs the Codex CLI pinned in `host-tools.env` (SHA-256 checked before
+extraction) as `codex app-server` with `CODEX_HOME=~/.anchi/codex`, accepts a device-code page
+only on `https://auth.openai.com/`, imports the access token from that home's `auth.json`, and asks
+Codex to refresh it when less than three days remain. The refresh token stays in that 0700
+directory on the host; that sign-in takes precedence over `~/.codex` and is kept regardless of
+`codexAutoImport`. Discovery reports only installation/login state; errors and logs contain no token data.
 `codexAutoImport: false` and `claudeAutoImport: false` disable each automatic import. A stored
 Codex account is not switched automatically; manually supplied Claude tokens/API keys are not
 overwritten. The trusted auth service refuses expired host Claude tokens just as it does Codex tokens.

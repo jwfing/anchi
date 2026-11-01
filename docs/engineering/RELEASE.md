@@ -84,6 +84,7 @@ Public preview binaries and checksum-verified updates are available. A completed
 | mitmproxy, botocore in the egress service | `guest/cell.env` | Reinstall with `scripts/install-anchi.sh`; run `tests/test_egress.py` and `make verify-anchi` |
 | Codex and Claude Agent SDKs, other workspace packages | `anchi/pnpm-lock.yaml` | Choose versions older than pnpm's minimum release age; keep the SDK and the CLI in the image on matching versions |
 | Lima Anchi downloads on hosts without one | `host-tools.env` | Change `ANCHI_LIMA_VERSION` and both SHA-256 values together, from Lima's published `SHA256SUMS`; keep `minimumLimaVersion` in `lima/anchi-vm.yaml` at or below it; run `anchi setup install` on a host without Lima |
+| Codex CLI the daemon signs in to ChatGPT with | `host-tools.env` (`ANCHI_HOST_CODEX_*`) | Use the `rust-v<version>` release's `codex-aarch64-apple-darwin.tar.gz` and `codex-x86_64-unknown-linux-musl.tar.gz` digests; check that `codex app-server` still offers `account/login/start` with `chatgptDeviceCode` and `account/read` with `refreshToken`; sign in once with `anchi setup codex --sign-in` |
 | Lima for Linux CI | `.github/workflows/linux-live.yml` | Change version and SHA-256 together; compare with Lima's published `SHA256SUMS` |
 
 Only SHA-256 is checked; publisher signatures (Lima GPG, Codex sigstore) are not verified.

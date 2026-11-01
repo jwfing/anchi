@@ -131,6 +131,10 @@ export const ACTIONS = {
     contexts: ['runtimes', 'welcome'],
   },
   'setup:codex': { title: 'Import the Codex login', contexts: ['runtimes', 'welcome'] },
+  'setup:codexSignIn': {
+    title: 'Sign in to ChatGPT for Codex in any browser (no Codex CLI needed)',
+    contexts: ['runtimes', 'welcome'],
+  },
   'setup:claude': { title: 'Connect Claude Code', contexts: ['runtimes', 'welcome'] },
   'setup:hermes': {
     title: "Set Hermes's model endpoint (OpenAI-compatible)",
@@ -228,6 +232,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     down: 'scroll:down',
     enter: 'welcome:next',
     i: 'setup:codex',
+    g: 'setup:codexSignIn',
     c: 'setup:claude',
     h: 'setup:hermes',
     r: 'setup:refresh',
@@ -294,6 +299,7 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     V: 'setup:init',
     W: 'setup:workspaces',
     i: 'setup:codex',
+    g: 'setup:codexSignIn',
     c: 'setup:claude',
     h: 'setup:hermes',
     r: 'setup:refresh',

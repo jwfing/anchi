@@ -1432,6 +1432,13 @@ h2 {
 .drawer p {
   margin: 0;
 }
+/* The device code the user types in the browser: large enough to read across a room. */
+.user-code {
+  font-size: 1.4em;
+  letter-spacing: 0.08em;
+  user-select: all;
+}
+
 .runtime-action,
 .drawer-save {
   align-self: flex-start;

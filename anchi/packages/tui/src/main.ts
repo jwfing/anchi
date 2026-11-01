@@ -32,7 +32,14 @@ import {
   uninstallAutostart,
   REPO_ROOT,
 } from '@anchi/daemon';
-import type { ConnectorId, ConnectorSecret, SetupAction, TaskRow, VmSize } from '@anchi/protocol';
+import type {
+  ConnectorId,
+  ConnectorSecret,
+  Notifications,
+  SetupAction,
+  TaskRow,
+  VmSize,
+} from '@anchi/protocol';
 import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
 import type { RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
@@ -988,10 +995,41 @@ setup
 
 setup
   .command('codex')
-  .description('Import the Codex login from ~/.codex/auth.json into the VM vault')
+  .description(
+    'Import the Codex login from ~/.codex/auth.json into the VM vault, or sign in to ChatGPT without the Codex CLI (--sign-in)',
+  )
   .option('-y, --yes', 'do not ask for confirmation')
-  .action((opts: { yes?: boolean }) =>
+  .option(
+    '--sign-in',
+    'sign in in any browser with a one-time code; Anchi keeps the login refreshed',
+  )
+  .action((opts: { yes?: boolean; signIn?: boolean }) =>
     withClient(async (client) => {
+      if (opts.signIn) {
+        // Subscribe first: the notification may come as soon as the user is quick.
+        const ended = new Promise<Notifications['codexSignIn']>((resolve) => {
+          const off = client.on('codexSignIn', (n) => {
+            off();
+            resolve(n);
+          });
+        });
+        const { verificationUrl, userCode } = await client.call('setup.codexSignIn');
+        console.log(
+          `Open ${sanitizeLine(verificationUrl)} in a browser, sign in to ChatGPT and enter the code ${sanitizeLine(userCode)}`,
+        );
+        console.log('Waiting for the sign-in (the code expires in 15 minutes; Ctrl+C cancels)…');
+        const cancel = () =>
+          void client.call('setup.codexSignInCancel').finally(() => process.exit(130));
+        process.once('SIGINT', cancel);
+        const end = await ended;
+        process.off('SIGINT', cancel);
+        if (end.state === 'failed') fail(sanitizeLine(end.message ?? 'the sign-in did not finish'));
+        return console.log(
+          end.imported
+            ? 'Codex connected; Anchi keeps the login refreshed'
+            : 'Signed in; Codex is connected once the environment is prepared',
+        );
+      }
       if (!opts.yes) {
         const answer = await ask(
           'Read the access token and account id from ~/.codex/auth.json and store them in the VM vault? [y/N] ',

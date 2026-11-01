@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Added
+
+- Codex can be connected without installing or logging in to the Codex CLI. **Sign in with ChatGPT** on the desktop Codex card, `anchi setup codex --sign-in`, or **g** in the TUI's Runtimes shows a one-time code and opens the sign-in page; enter the code in any browser. The daemon downloads the Codex CLI pinned in `host-tools.env` (SHA-256 checked), keeps the login in `~/.anchi/codex` with its refresh token on the host, imports the access token into the vault and refreshes it before it expires. On a remote server the sign-in runs there and the code shows on your computer. See `docs/GETTING_STARTED.md`.
+
 ### Changed
 
 - Lima no longer has to be installed first. When preparing the environment (or `anchi setup install`) finds no Lima 2.2.0 or newer on PATH, Anchi downloads the Lima release pinned in `host-tools.env` for Apple Silicon macOS or Linux x86_64, checks its SHA-256 before extracting anything, installs it into `~/.anchi/lima/<version>` and uses it for the VM. An installed Lima of the required version is used as before. On macOS the remaining prerequisite is `brew install python`. See `docs/GETTING_STARTED.md#lima`.

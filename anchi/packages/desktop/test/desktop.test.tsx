@@ -431,8 +431,20 @@ describe('settings', () => {
     const out = html(<Runtimes status={status} server="local" onChange={() => undefined} />);
     expect(out.match(/>Connected</g)).toHaveLength(1);
     expect(out.match(/>Not set up</g)).toHaveLength(2);
-    expect(out.match(/>Replace</g)).toHaveLength(1);
     expect(out.match(/>Set up</g)).toHaveLength(2);
+    // Codex signs in to ChatGPT in the browser; importing a Codex CLI login is the other way.
+    expect(out).toContain('>Sign in again with ChatGPT<');
+    expect(out).toContain('>Import Codex login<');
+    const fresh = html(
+      <Runtimes
+        status={{ ...status, codex: { ...status.codex!, connected: false } } as SetupStatus}
+        server="instabox:anchi-dora"
+        onChange={() => undefined}
+      />,
+    );
+    expect(fresh).toMatch(
+      /class="btn btn-small runtime-action btn-primary"[^>]*>Sign in with ChatGPT</,
+    );
   });
 
   it('connects Slack and Notion with a token and the others through a browser sign-in', () => {
