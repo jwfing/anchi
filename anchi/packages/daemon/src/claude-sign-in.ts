@@ -108,11 +108,12 @@ export function screenText(raw: string): string {
 
 /**
  * The token `setup-token` printed, which the terminal may have wrapped over several lines, or
- * undefined. Only a well-formed subscription token is returned.
+ * undefined. Only a well-formed subscription token is returned. Claude Code draws its line breaks
+ * with cursor movements, so once those are removed the token may run into the text around it.
  */
 export function tokenFrom(raw: string): string | undefined {
   const text = screenText(raw);
-  const m = /valid for 1 year\):\s*\n([\s\S]*?)\n\s*\n?\s*Store this token/.exec(text);
+  const m = /valid for 1 year\):([\s\S]*?)Store this token/.exec(text);
   const token = m ? m[1]!.replace(/\s+/g, '') : '';
   return TOKEN.test(token) ? token : undefined;
 }
