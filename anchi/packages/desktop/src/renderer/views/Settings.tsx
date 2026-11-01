@@ -664,7 +664,7 @@ const RUNTIMES: Record<
         placeholder: 'from claude setup-token, or an Anthropic API key',
       },
     ],
-    note: 'Stored in the vault on the server, never shown again.',
+    note: 'Or paste a token from claude setup-token, or an API key. Stored in the vault on the server, never shown again.',
     save: (call, v) => call('setup.importClaude', { token: v.token! }),
   },
   hermes: {
@@ -746,6 +746,7 @@ export function Runtimes({
               </div>
               <span className="small muted">{sanitizeLine(detail)}</span>
               {id === 'codex' && <CodexSignIn server={server} connected={ok} onDone={onChange} />}
+              {id === 'claude' && <ClaudeSignIn server={server} connected={ok} onDone={onChange} />}
               <button
                 type="button"
                 className="btn btn-small runtime-action"
@@ -763,9 +764,11 @@ export function Runtimes({
                   ? 'Cancel'
                   : id === 'codex'
                     ? 'Import Codex login'
-                    : ok
-                      ? 'Replace'
-                      : 'Set up'}
+                    : id === 'claude'
+                      ? 'Paste a token or API key'
+                      : ok
+                        ? 'Replace'
+                        : 'Set up'}
               </button>
               {!rt.fields && <span className="small muted">{rt.note}</span>}
               {rt.fields && open === id && (
@@ -865,6 +868,108 @@ function CodexSignIn({
         onClick={() => void start()}
       >
         {connected ? 'Sign in again with ChatGPT' : 'Sign in with ChatGPT'}
+      </button>
+      {failed && <span className="small tone-error">{failed}</span>}
+    </>
+  );
+}
+
+/**
+ * Claude sign-in without a terminal: the daemon runs `claude setup-token` and returns the page.
+ * On this computer the page finishes by itself; for a remote server it shows a code to paste
+ * here. The daemon's `claudeSignIn` notification ends the wait.
+ */
+function ClaudeSignIn({
+  server,
+  connected,
+  onDone,
+}: {
+  server: string;
+  connected: boolean;
+  onDone: () => void;
+}) {
+  const { act, call } = useApp();
+  const [page, setPage] = useState<{ url: string; codeRequired: boolean }>();
+  const [code, setCode] = useState('');
+  const [failed, setFailed] = useState<string>();
+  useEffect(
+    () =>
+      window.anchi.onNotify((origin, name, params) => {
+        if (origin !== server || name !== 'claudeSignIn') return;
+        const p = params as Notifications['claudeSignIn'];
+        setPage(undefined);
+        setCode('');
+        if (p.state === 'done') {
+          setFailed(undefined);
+          onDone();
+        } else setFailed(sanitizeLine(p.message ?? 'The sign-in did not finish.'));
+      }),
+    [server, onDone],
+  );
+  const start = async () => {
+    setFailed(undefined);
+    const started = await act(() => call('setup.claudeSignIn'));
+    if (!started) return;
+    setPage(started);
+    void window.anchi.openExternal(started.url);
+  };
+  if (page) {
+    return (
+      <form
+        className="col gap"
+        aria-live="polite"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act(() => call('setup.claudeSignInCode', { code: code.trim() }));
+        }}
+      >
+        <span className="small">
+          {page.codeRequired
+            ? 'Sign in to Claude in the browser page that opened, then paste the code it shows:'
+            : 'Sign in to Claude in the browser page that opened. Anchi finishes by itself; if the page shows a code instead, paste it here:'}
+        </span>
+        <label className="field">
+          <span className="sr-only">Code from the Claude page</span>
+          <input
+            value={code}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="Code from the page"
+            onChange={(e) => setCode(e.target.value)}
+          />
+        </label>
+        <div className="row gap wrap">
+          <button type="submit" className="btn btn-small btn-primary" disabled={!code.trim()}>
+            Send code
+          </button>
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => void window.anchi.openExternal(page.url)}
+          >
+            Open the page again
+          </button>
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() =>
+              void act(() => call('setup.claudeSignInCancel')).then(() => setPage(undefined))
+            }
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className={`btn btn-small runtime-action ${connected ? '' : 'btn-primary'}`}
+        onClick={() => void start()}
+      >
+        {connected ? 'Sign in again with Claude' : 'Sign in with Claude'}
       </button>
       {failed && <span className="small tone-error">{failed}</span>}
     </>

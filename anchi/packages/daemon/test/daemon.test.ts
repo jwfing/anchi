@@ -16,6 +16,7 @@ import * as setupModule from '../src/setup.ts';
 import { HostLogins } from '../src/host-logins.ts';
 import { CodexSignIn } from '../src/codex-sign-in.ts';
 import { fakeCodex } from './fake-codex.ts';
+import { fakeClaude, LOCAL, TOKEN } from './fake-claude.ts';
 import { ServiceSetup } from '../src/services.ts';
 import { connectorSchema, HIGH_RISK_IDS, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
@@ -1677,6 +1678,32 @@ describe('daemon tasks', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(heard).toEqual([]);
     expect(codexSignIn.signedIn()).toBe(false);
+  });
+
+  it('signs in to Claude only into an unlocked vault, and stores the token it printed', async () => {
+    const fake = fakeClaude('auto');
+    const { client } = await start(60_000, undefined, undefined, {
+      claudeBinary: async () => fake.binary,
+    });
+    await expect(client.call('setup.claudeSignIn')).rejects.toThrow(
+      /Prepare the environment first/,
+    );
+    expect(transport.claudeImports).toEqual([]);
+    transport.vaultUnlocked = true;
+    const ended = new Promise((resolve) => client.on('claudeSignIn', resolve));
+    // This daemon runs beside the browser (Lima): the localhost page finishes by itself.
+    expect(await client.call('setup.claudeSignIn')).toEqual({ url: LOCAL, codeRequired: false });
+    expect(await ended).toEqual({ state: 'done' });
+    expect(transport.claudeImports).toEqual([{ token: TOKEN }]);
+    // A code with nothing waiting for it, a malformed one and unknown fields are refused.
+    await expect(client.call('setup.claudeSignInCode', { code: 'ABCDEFGH#1' })).rejects.toThrow(
+      /no sign-in is waiting/,
+    );
+    const untyped = client.call.bind(client) as (m: string, p: unknown) => Promise<unknown>;
+    await expect(untyped('setup.claudeSignInCode', { code: 'x', more: 1 })).rejects.toThrow();
+    await expect(untyped('setup.claudeSignIn', { extra: 1 })).rejects.toThrow();
+    expect(await client.call('setup.claudeSignInCancel')).toEqual({ ok: true });
+    expect(logs.join('\n')).not.toContain(TOKEN);
   });
 
   it('reports a ChatGPT sign-in that failed and imports nothing', async () => {

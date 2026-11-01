@@ -1071,9 +1071,36 @@ function runSetup(
 
 setup
   .command('claude')
-  .description('Store a `claude setup-token` token or an Anthropic API key in the VM vault')
-  .action(() =>
+  .description(
+    'Store a `claude setup-token` token or an Anthropic API key in the VM vault, or sign in to Claude in a browser (--sign-in)',
+  )
+  .option('--sign-in', 'sign in in a browser; Anchi creates and stores a one-year token')
+  .action((opts: { signIn?: boolean }) =>
     withClient(async (client) => {
+      if (opts.signIn) {
+        const ended = new Promise<Notifications['claudeSignIn']>((resolve) => {
+          const off = client.on('claudeSignIn', (n) => {
+            off();
+            resolve(n);
+          });
+        });
+        const { url, codeRequired } = await client.call('setup.claudeSignIn');
+        console.log(`Open this page in a browser and sign in to Claude:\n${sanitizeLine(url)}`);
+        const cancel = () =>
+          void client.call('setup.claudeSignInCancel').finally(() => process.exit(130));
+        process.once('SIGINT', cancel);
+        if (codeRequired) {
+          // The page shows a code once the sign-in is done; the server's Claude Code needs it.
+          const code = await ask('Code the page shows: ');
+          await client.call('setup.claudeSignInCode', { code });
+        } else {
+          console.log('Waiting for the sign-in (Ctrl+C cancels)…');
+        }
+        const end = await ended;
+        process.off('SIGINT', cancel);
+        if (end.state === 'failed') fail(sanitizeLine(end.message ?? 'the sign-in did not finish'));
+        return console.log('Claude Code connected (subscription token, valid for a year)');
+      }
       const token = process.stdin.isTTY
         ? await askSecret('Claude Code token (from `claude setup-token`) or API key: ')
         : await readStdin();

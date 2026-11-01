@@ -7,6 +7,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 ### Added
 
 - Codex can be connected without installing or logging in to the Codex CLI. **Sign in with ChatGPT** on the desktop Codex card, `anchi setup codex --sign-in`, or **g** in the TUI's Runtimes shows a one-time code and opens the sign-in page; enter the code in any browser. The daemon downloads the Codex CLI pinned in `host-tools.env` (SHA-256 checked), keeps the login in `~/.anchi/codex` with its refresh token on the host, imports the access token into the vault and refreshes it before it expires. On a remote server the sign-in runs there and the code shows on your computer. See `docs/GETTING_STARTED.md`.
+- Claude Code can be connected by signing in to Claude in a browser, without installing Claude Code or copying a token. **Sign in with Claude** on the desktop Claude card, `anchi setup claude --sign-in`, or **C** in the TUI's Runtimes opens Claude's sign-in page; on your computer it finishes by itself, and for a remote server you paste the code the page shows. The daemon runs the Claude Code pinned in `host-tools.env` (downloaded from the npm registry, SHA-256 checked) as `claude setup-token` in a pseudo-terminal and stores the one-year subscription token in the vault; the token is never logged. Prepare the environment first: the vault must be unlocked.
 
 ### Changed
 

@@ -144,7 +144,13 @@ extraction) as `codex app-server` with `CODEX_HOME=~/.anchi/codex`, accepts a de
 only on `https://auth.openai.com/`, imports the access token from that home's `auth.json`, and asks
 Codex to refresh it when less than three days remain. The refresh token stays in that 0700
 directory on the host; that sign-in takes precedence over `~/.codex` and is kept regardless of
-`codexAutoImport`. Discovery reports only installation/login state; errors and logs contain no token data.
+`codexAutoImport`. A Claude sign-in made in Anchi (`setup.claudeSignIn`, allowed only while the
+vault is unlocked) runs the Claude Code pinned in `host-tools.env` (the npm registry's native
+package, SHA-256 checked, downloaded on the user's computer) as `claude setup-token` in a
+pseudo-terminal, with a fresh private `CLAUDE_CONFIG_DIR` under `~/.anchi/run` that is deleted
+when the sign-in ends. The one-year token is read from that terminal output in memory, must match
+`sk-ant-oat01-…`, goes to the vault over stdin like a pasted token, and is never logged. Only pages
+on `claude.com` or `claude.ai` are offered, and a pasted code must look like one. Discovery reports only installation/login state; errors and logs contain no token data.
 `codexAutoImport: false` and `claudeAutoImport: false` disable each automatic import. A stored
 Codex account is not switched automatically; manually supplied Claude tokens/API keys are not
 overwritten. The trusted auth service refuses expired host Claude tokens just as it does Codex tokens.

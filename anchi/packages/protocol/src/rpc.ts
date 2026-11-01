@@ -774,6 +774,18 @@ export interface Methods {
   'setup.codexSignIn': [Record<string, never>, { verificationUrl: string; userCode: string }];
   /** Ends a pending `setup.codexSignIn`; nothing happens when none is pending. */
   'setup.codexSignInCancel': [Record<string, never>, { ok: true }];
+  /**
+   * Signs in to Claude without a terminal: the daemon runs its pinned Claude Code as
+   * `claude setup-token` in a pseudo-terminal and returns the page to open. On the daemon's own
+   * computer the page finishes by itself (`codeRequired: false`); for a daemon elsewhere (a remote
+   * server) the page shows a code to send with `setup.claudeSignInCode`. `claudeSignIn` reports
+   * the end; the one-year subscription token goes to the vault, which must be unlocked first.
+   */
+  'setup.claudeSignIn': [Record<string, never>, { url: string; codeRequired: boolean }];
+  /** The code Claude's sign-in page showed, for the pending `setup.claudeSignIn`. */
+  'setup.claudeSignInCode': [{ code: string }, { ok: true }];
+  /** Ends a pending `setup.claudeSignIn`; nothing happens when none is pending. */
+  'setup.claudeSignInCancel': [Record<string, never>, { ok: true }];
   /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */
   'setup.importClaude': [{ token: string }, ClaudeAccountStatus];
   /** Stores Hermes's OpenAI-compatible endpoint (base URL, API key, default model) in the vault. */
@@ -875,6 +887,8 @@ export interface Notifications {
    * the access token now; otherwise it is imported once the vault is ready), else `failed`.
    */
   codexSignIn: { state: 'done' | 'failed'; imported?: boolean; message?: string };
+  /** A `setup.claudeSignIn` ended: `done` once the vault has the token, else `failed`. */
+  claudeSignIn: { state: 'done' | 'failed'; message?: string };
   /** A Google, X or Reddit sign-in finished. */
   oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
   /** One line of `setup.reset` output (host command output; sanitize for display). */
