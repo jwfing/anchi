@@ -90,6 +90,8 @@ import {
 export const SIDEBAR_WIDTH = 28;
 const BUILDER = 'builder';
 const STARTER_RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
+/** The title of the modal that shows a ChatGPT sign-in's code until it ends. */
+const CODEX_SIGN_IN = 'Sign in to ChatGPT';
 const HOME = ['welcome', 'team', 'approvals'] as const;
 const CONFIG = ['runtimes', 'skills', 'connectors', 'usage', 'access'] as const;
 type ConfigItem = (typeof CONFIG)[number] | (typeof HOME)[number];
@@ -599,6 +601,17 @@ export function App({
         approvalsNotified.current = true;
         setApprovals(next);
       }),
+      client.on('codexSignIn', ({ state, imported, message }) => {
+        setModal((m) => (m?.kind === 'confirm' && m.title === CODEX_SIGN_IN ? null : m));
+        say(
+          state === 'failed'
+            ? `ChatGPT sign-in: ${message ?? 'did not finish'}`
+            : imported
+              ? 'Codex connected; Anchi keeps the login refreshed'
+              : 'Signed in; Codex connects once the environment is prepared',
+        );
+        refreshSetup();
+      }),
       client.on('oauth', ({ id, account, ok, error }) => {
         const which = account && account !== DEFAULT_ACCOUNT ? `${id} (${account})` : id;
         say(ok ? `${which} connected` : `${which}: ${error ?? 'sign-in failed'}`);
@@ -1038,7 +1051,7 @@ export function App({
       // Existing host logins are imported by the daemon as soon as the vault is ready.
       if (!runtimeReady(status, runtime)) {
         if (runtime === 'codex' && status.hostLogins?.codex.state !== 'ready') {
-          say('Run codex login on this computer, then press i to use that login.');
+          say('Press g to sign in to ChatGPT, or run codex login and press i to use that login.');
         } else
           run(
             runtime === 'codex'
@@ -1681,6 +1694,21 @@ export function App({
             'VM vault. The refresh token stays on this computer. Cells never receive the token.',
           action: () => client.call('setup.importCodex'),
         });
+      case 'setup:codexSignIn':
+        return void client
+          .call('setup.codexSignIn')
+          .then(({ verificationUrl, userCode }) =>
+            setModal({
+              kind: 'confirm',
+              title: CODEX_SIGN_IN,
+              body:
+                `Open ${sanitizeLine(verificationUrl)} in any browser, sign in to ChatGPT and enter the code ` +
+                `${sanitizeLine(userCode)}. This closes by itself when you are done; the code expires in ` +
+                '15 minutes. Confirm to cancel the sign-in.',
+              action: () => client.call('setup.codexSignInCancel'),
+            }),
+          )
+          .catch((err: unknown) => reportProblem(err));
       case 'setup:claude':
         return setModal({ kind: 'secret', connector: 'claude', index: 0, values: {}, input: '' });
       case 'setup:hermes':
@@ -2456,7 +2484,8 @@ export function App({
     context === 'welcome'
       ? [
           ['welcome:next', 'continue'],
-          ['setup:codex', 'Codex'],
+          ['setup:codexSignIn', 'ChatGPT'],
+          ['setup:codex', 'Codex login'],
           ['setup:claude', 'Claude'],
           ['setup:hermes', 'Hermes'],
           ['setup:logs', 'logs'],
@@ -2541,7 +2570,8 @@ export function App({
                             ['setup:install', 'install'],
                             ['setup:unlock', 'unlock'],
                             ['setup:workspaces', 'workspaces'],
-                            ['setup:codex', 'Codex'],
+                            ['setup:codexSignIn', 'ChatGPT'],
+                            ['setup:codex', 'Codex login'],
                             ['setup:claude', 'Claude'],
                             ['setup:hermes', 'Hermes'],
                           ];

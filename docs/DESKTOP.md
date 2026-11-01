@@ -105,7 +105,7 @@ The window opens Getting started for each server it has not finished the guide f
 
 1. **Where Anchi runs:** this computer or a saved remote server (see Settings → Machines). When the server in use cannot be reached, the button says so instead of waiting. On a remote server the guide starts at the next stage.
 2. **Prepare the environment:** lists missing host tools with the command that installs them; otherwise Prepare runs `setup.prepare` for the suggested runtime (start or install the VM, its services and the runtime image, unlock the vault) and shows its output. A system dialog asks first and says to back up the vault key.
-3. **Connect a runtime:** the runtime cards of Settings. Codex imports the login of the machine the daemon runs on; when it has none, the card names what to run there (`codex login`, or on a remote server `instabox ssh <machine>` or `ssh <host>` followed by `codex login --device-auth`).
+3. **Connect a runtime:** the runtime cards of Settings. For Codex, **Sign in with ChatGPT** opens the sign-in page in your browser and shows a one-time code to enter there; the daemon on the selected machine, local or remote, keeps that login and refreshes it, with no Codex CLI to install. **Import Codex login** instead imports the login of the machine the daemon runs on; when it has none, the card names what to run there (`codex login`, or on a remote server `instabox ssh <machine>` or `ssh <host>` followed by `codex login --device-auth`).
 4. **Meet your first agent:** creates `@dev` (no connectors, no workspaces) on the suggested runtime, then offers three starter tasks; choosing one opens the agent's conversation.
 
 Skip for now leaves the guide until it is opened again.

@@ -765,6 +765,15 @@ export interface Methods {
   'setup.prepare': [{ runtime: RuntimeId; confirm: true; vmSize?: VmSize }, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
+  /**
+   * Starts a ChatGPT sign-in for Codex that needs no terminal: the daemon runs its pinned Codex
+   * CLI with a login home of its own and returns the page and one-time code for the user to
+   * enter in any browser. `codexSignIn` reports the end; the access token is then imported as
+   * with `setup.importCodex`, and the daemon keeps it refreshed. A new call replaces a pending one.
+   */
+  'setup.codexSignIn': [Record<string, never>, { verificationUrl: string; userCode: string }];
+  /** Ends a pending `setup.codexSignIn`; nothing happens when none is pending. */
+  'setup.codexSignInCancel': [Record<string, never>, { ok: true }];
   /** Stores a `claude setup-token` token or an Anthropic API key in the vault. */
   'setup.importClaude': [{ token: string }, ClaudeAccountStatus];
   /** Stores Hermes's OpenAI-compatible endpoint (base URL, API key, default model) in the vault. */
@@ -861,6 +870,11 @@ export interface Notifications {
   proposal: { proposal: BuilderProposal };
   /** One line of a running setup step's output (host command output; sanitize for display). */
   setup: { action: SetupAction; line: string };
+  /**
+   * A `setup.codexSignIn` ended: `done` once Codex has the login (`imported` when the vault took
+   * the access token now; otherwise it is imported once the vault is ready), else `failed`.
+   */
+  codexSignIn: { state: 'done' | 'failed'; imported?: boolean; message?: string };
   /** A Google, X or Reddit sign-in finished. */
   oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
   /** One line of `setup.reset` output (host command output; sanitize for display). */

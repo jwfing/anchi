@@ -105,6 +105,7 @@ import {
   setupStatus,
 } from './setup.ts';
 import { activateLima, ensureLima } from './lima.ts';
+import { CodexSignIn, SIGN_IN_CANCELLED } from './codex-sign-in.ts';
 import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
 import { HostLogins, type ClaudeLogin } from './host-logins.ts';
 import { ACCOUNT, SERVICE_IDS, ServiceSetup } from './services.ts';
@@ -171,6 +172,8 @@ export interface DaemonOptions {
   hostLoginSync?: boolean;
   /** Host credential readers; tests use temporary files and a fake Keychain. */
   hostLogins?: HostLogins;
+  /** The ChatGPT sign-in without a terminal; tests give one with a fake Codex. */
+  codexSignIn?: CodexSignIn;
   /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
   workspaceRoot?: string;
   /** Where GitHub skills are fetched from; tests replace it. */
@@ -273,6 +276,7 @@ export class Daemon {
   private hostLoginDebounce?: NodeJS.Timeout;
   private stopping = false;
   private hostLogins: HostLogins;
+  private codexSignIn: CodexSignIn;
   private hostLoginSync?: Promise<void>;
   private codexImporting = false;
 
@@ -282,8 +286,11 @@ export class Daemon {
    * access token and the account id are imported, as `setup codex` does; the refresh token
    * stays on the Mac.
    */
-  async syncCodex(file = this.hostLogins.codexFile): Promise<boolean> {
-    if (this.settings().codexAutoImport === false || this.codexImporting) return false;
+  async syncCodex(file = this.hostLogins.codexFile, signedIn = false): Promise<boolean> {
+    // `codexAutoImport` is about the user's own Codex CLI; a sign-in in Anchi is always kept.
+    if ((!signedIn && this.settings().codexAutoImport === false) || this.codexImporting) {
+      return false;
+    }
     let login: { accessToken: string; accountId: string };
     try {
       login = readHostCodexLogin(file);
@@ -341,8 +348,38 @@ export class Daemon {
       status.guestOutdated
     )
       return;
-    if (found.codex) await this.syncCodex();
+    // A sign-in in Anchi takes the place of the user's own Codex login.
+    if (this.codexSignIn.signedIn()) await this.syncSignedInCodex();
+    else if (found.codex) await this.syncCodex();
     if (found.claude) await this.syncClaude(found.claude);
+  }
+
+  /** Refreshes Anchi's own ChatGPT sign-in when it is due, then imports its access token. */
+  private async syncSignedInCodex(): Promise<void> {
+    let expiry: number | null = null;
+    try {
+      expiry = jwtExpiry(readHostCodexLogin(this.codexSignIn.authFile).accessToken);
+    } catch {
+      // Expired or unreadable: refreshing is the way back.
+    }
+    await this.codexSignIn
+      .refreshIfDue(expiry)
+      .catch((err: Error) => this.log(`codex sign-in refresh failed: ${err.message}`));
+    await this.syncCodex(this.codexSignIn.authFile, true);
+  }
+
+  /** Imports a sign-in that just finished; false when the vault cannot take it yet. */
+  private async importSignedInCodex(): Promise<boolean> {
+    try {
+      const login = readHostCodexLogin(this.codexSignIn.authFile);
+      await this.guest.importCodex(login.accessToken, login.accountId);
+      this.log('codex sign-in imported');
+      void this.refreshSetup();
+      return true;
+    } catch {
+      // The VM or vault is not ready: syncHostLogins imports it once it is.
+      return false;
+    }
   }
 
   private async syncClaude(login: ClaudeLogin): Promise<void> {
@@ -548,6 +585,9 @@ export class Daemon {
 
   constructor(private opts: DaemonOptions) {
     this.hostLogins = opts.hostLogins ?? new HostLogins();
+    this.codexSignIn =
+      opts.codexSignIn ??
+      new CodexSignIn({ home: opts.layout.root, log: (line) => this.log(line) });
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
     this.vm = opts.vm ?? vmTransport();
     this.guest = opts.guest ?? new Guest(this.vm);
@@ -1255,6 +1295,28 @@ export class Daemon {
       void this.refreshSetup();
       return hermesStatus(this.guest);
     },
+    'setup.codexSignIn': async (params) => {
+      z.strictObject({}).parse(params ?? {});
+      const { verificationUrl, userCode, done } = await this.codexSignIn.start();
+      void done.then(
+        async () =>
+          this.broadcast('codexSignIn', {
+            state: 'done',
+            imported: await this.importSignedInCodex(),
+          }),
+        (err: Error) => {
+          // A cancelled or replaced sign-in ends silently: the client asked for it.
+          if (err.message.startsWith(SIGN_IN_CANCELLED)) return;
+          this.broadcast('codexSignIn', { state: 'failed', message: err.message.slice(0, 300) });
+        },
+      );
+      return { verificationUrl, userCode };
+    },
+    'setup.codexSignInCancel': async (params) => {
+      z.strictObject({}).parse(params ?? {});
+      await this.codexSignIn.cancel();
+      return { ok: true as const };
+    },
     'setup.importCodex': async () => {
       await this.hostLoginSync;
       const login = readHostCodexLogin(this.hostLogins.codexFile);
@@ -1650,6 +1712,7 @@ export class Daemon {
     await this.peers.stop();
     await this.peerTasks.stop();
     clearTimeout(this.hostLoginDebounce);
+    await this.codexSignIn.cancel();
     await this.hostLoginSync;
     await this.hub.shutdown();
     this.approvals.stop();

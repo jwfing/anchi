@@ -3,6 +3,7 @@ import { sanitizeLine } from '@anchi/core/sanitize';
 import {
   CONNECTOR_IDS,
   type ConnectorId,
+  type Notifications,
   type ServiceConnectorId,
   type ServiceConnectorStatus,
   type SetupStatus,
@@ -647,7 +648,7 @@ const RUNTIMES: Record<
 > = {
   codex: {
     name: 'Codex',
-    note: 'Imports the ChatGPT login of the server machine. Run codex login there first.',
+    note: "Or import the server machine's own Codex login (codex login).",
     save: (call, _, server) =>
       call('setup.importCodex').catch((err: unknown) => {
         throw new Error(codexLoginHelp(message(err), server) ?? message(err));
@@ -744,6 +745,7 @@ export function Runtimes({
                 </span>
               </div>
               <span className="small muted">{sanitizeLine(detail)}</span>
+              {id === 'codex' && <CodexSignIn server={server} connected={ok} onDone={onChange} />}
               <button
                 type="button"
                 className="btn btn-small runtime-action"
@@ -757,7 +759,13 @@ export function Runtimes({
                   );
                 }}
               >
-                {open === id ? 'Cancel' : ok ? 'Replace' : 'Set up'}
+                {open === id
+                  ? 'Cancel'
+                  : id === 'codex'
+                    ? 'Import Codex login'
+                    : ok
+                      ? 'Replace'
+                      : 'Set up'}
               </button>
               {!rt.fields && <span className="small muted">{rt.note}</span>}
               {rt.fields && open === id && (
@@ -778,6 +786,88 @@ export function Runtimes({
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * ChatGPT sign-in for Codex without a terminal: the daemon (on whichever machine) starts a
+ * device-code login and returns a page and code; the user finishes in any browser, and the
+ * daemon's `codexSignIn` notification ends the wait.
+ */
+function CodexSignIn({
+  server,
+  connected,
+  onDone,
+}: {
+  server: string;
+  connected: boolean;
+  onDone: () => void;
+}) {
+  const { act, call } = useApp();
+  const [code, setCode] = useState<{ verificationUrl: string; userCode: string }>();
+  const [failed, setFailed] = useState<string>();
+  useEffect(
+    () =>
+      window.anchi.onNotify((origin, name, params) => {
+        if (origin !== server || name !== 'codexSignIn') return;
+        const p = params as Notifications['codexSignIn'];
+        setCode(undefined);
+        if (p.state === 'done') {
+          setFailed(undefined);
+          onDone();
+        } else setFailed(sanitizeLine(p.message ?? 'The sign-in did not finish.'));
+      }),
+    [server, onDone],
+  );
+  const start = async () => {
+    setFailed(undefined);
+    const started = await act(() => call('setup.codexSignIn'));
+    if (!started) return;
+    setCode(started);
+    void window.anchi.openExternal(started.verificationUrl);
+  };
+  if (code) {
+    return (
+      <div className="col gap" aria-live="polite">
+        <span className="small">
+          In the browser page that opened, sign in to ChatGPT and enter this code:
+        </span>
+        <span className="mono strong user-code">{sanitizeLine(code.userCode)}</span>
+        <div className="row gap wrap">
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => void window.anchi.openExternal(code.verificationUrl)}
+          >
+            Open the page again
+          </button>
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() =>
+              void act(() => call('setup.codexSignInCancel')).then(() => setCode(undefined))
+            }
+          >
+            Cancel
+          </button>
+        </div>
+        <span className="small muted">
+          Waiting for the browser… The code expires in 15 minutes.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className={`btn btn-small runtime-action ${connected ? '' : 'btn-primary'}`}
+        onClick={() => void start()}
+      >
+        {connected ? 'Sign in again with ChatGPT' : 'Sign in with ChatGPT'}
+      </button>
+      {failed && <span className="small tone-error">{failed}</span>}
+    </>
   );
 }
 

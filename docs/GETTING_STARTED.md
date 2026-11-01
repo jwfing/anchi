@@ -309,9 +309,12 @@ picks one). Teams with setup and a first task complete open on **Team overview**
    The master key is `~/.config/anchi/vault.key`. Back it up; a replacement key cannot
    decrypt stored accounts.
 3. **Connect a runtime.** These operations are also available in **Runtimes**.
-   - Codex: install its CLI and run `codex login` on this machine, then `anchi setup codex`.
-     Anchi reads `~/.codex/auth.json`; Codex must store its login in that file, not in a
-     keyring.
+   - Codex: `anchi setup codex --sign-in` (or **g** in Runtimes, **Sign in with ChatGPT** in the
+     desktop app) prints a page and a one-time code: open the page in any browser, sign in to
+     ChatGPT and enter the code. Anchi downloads the Codex CLI it pins for this, keeps the login in
+     `~/.anchi/codex` and refreshes it; the Codex CLI does not need to be installed. Alternatively,
+     with the Codex CLI installed and `codex login` run on this machine, `anchi setup codex`
+     imports `~/.codex/auth.json`; Codex must store its login in that file, not in a keyring.
    - Claude Code: sign in locally for automatic import, or run `claude setup-token`, then
      `anchi setup claude` and paste the token.
    - Hermes: `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` and

@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as setupModule from '../src/setup.ts';
 import { HostLogins } from '../src/host-logins.ts';
+import { CodexSignIn } from '../src/codex-sign-in.ts';
+import { fakeCodex } from './fake-codex.ts';
 import { ServiceSetup } from '../src/services.ts';
 import { connectorSchema, HIGH_RISK_IDS, homeLayout } from '@anchi/core';
 import { CLIENT_MAX_FRAME_BYTES, MAX_EVENT_TEXT } from '@anchi/protocol';
@@ -1628,6 +1630,70 @@ describe('daemon tasks', () => {
     write('settings.yaml', 'codexAutoImport: true\n');
     expect(await daemon.syncCodex(login)).toBe(true);
     expect(transport.codexImports).toHaveLength(2);
+  });
+
+  it('signs in to ChatGPT through its own Codex and imports the login, even with auto-import off', async () => {
+    const exp = Math.floor(Date.now() / 1000) + 10 * 24 * 3600;
+    const access = `h.${Buffer.from(JSON.stringify({ exp, 'https://api.openai.com/auth': { chatgpt_account_id: 'acct' } })).toString('base64url')}.${'s'.repeat(80)}`;
+    const fake = fakeCodex(
+      'ok',
+      JSON.stringify({ tokens: { access_token: access, account_id: 'acct', refresh_token: 'r' } }),
+    );
+    const codexSignIn = new CodexSignIn({
+      home: fake.home,
+      log: () => {},
+      binary: async () => fake.binary,
+    });
+    write('settings.yaml', 'codexAutoImport: false\n');
+    const { daemon, client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const ended = new Promise((resolve) => client.on('codexSignIn', resolve));
+    expect(await client.call('setup.codexSignIn')).toEqual({
+      verificationUrl: 'https://auth.openai.com/codex/device',
+      userCode: 'ABCD-EFGHI',
+    });
+    expect(await ended).toEqual({ state: 'done', imported: true });
+    expect(transport.codexImports).toEqual([{ access_token: access, account_id: 'acct' }]);
+    // The periodic sync keeps it: the setting is about the user's own Codex CLI.
+    expect(await daemon.syncCodex(codexSignIn.authFile, true)).toBe(false); // same token
+    // Unknown fields are refused.
+    const untyped = client.call.bind(client) as (m: string, p: unknown) => Promise<unknown>;
+    await expect(untyped('setup.codexSignIn', { extra: 1 })).rejects.toThrow();
+    expect(await client.call('setup.codexSignInCancel')).toEqual({ ok: true });
+  });
+
+  it('says nothing about a ChatGPT sign-in that was replaced or cancelled', async () => {
+    const fake = fakeCodex('silent');
+    const codexSignIn = new CodexSignIn({
+      home: fake.home,
+      log: () => {},
+      binary: async () => fake.binary,
+    });
+    const { client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const heard: unknown[] = [];
+    client.on('codexSignIn', (n) => heard.push(n));
+    await client.call('setup.codexSignIn');
+    await client.call('setup.codexSignIn'); // replaces the first
+    await client.call('setup.codexSignInCancel');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(heard).toEqual([]);
+    expect(codexSignIn.signedIn()).toBe(false);
+  });
+
+  it('reports a ChatGPT sign-in that failed and imports nothing', async () => {
+    const fake = fakeCodex('fail');
+    const codexSignIn = new CodexSignIn({
+      home: fake.home,
+      log: () => {},
+      binary: async () => fake.binary,
+    });
+    const { client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const ended = new Promise((resolve) => client.on('codexSignIn', resolve));
+    await client.call('setup.codexSignIn');
+    expect(await ended).toEqual({
+      state: 'failed',
+      message: 'CODEX_SIGN_IN_FAILED: denied in the browser',
+    });
+    expect(transport.codexImports).toEqual([]);
   });
 
   it('discovers host logins but refuses imports before the vault is ready or when disabled', async () => {
