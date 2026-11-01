@@ -83,6 +83,7 @@ Public preview binaries and checksum-verified updates are available. A completed
 | Node, Codex, Claude Code in cells | `guest/cell.env` | Download the exact artifact for both architectures, recompute SHA-256, rebuild the base image (`anchi-image build codex base`) and run `make verify-anchi` and a live turn per runtime |
 | mitmproxy, botocore in the egress service | `guest/cell.env` | Reinstall with `scripts/install-anchi.sh`; run `tests/test_egress.py` and `make verify-anchi` |
 | Codex and Claude Agent SDKs, other workspace packages | `anchi/pnpm-lock.yaml` | Choose versions older than pnpm's minimum release age; keep the SDK and the CLI in the image on matching versions |
+| Lima Anchi downloads on hosts without one | `host-tools.env` | Change `ANCHI_LIMA_VERSION` and both SHA-256 values together, from Lima's published `SHA256SUMS`; keep `minimumLimaVersion` in `lima/anchi-vm.yaml` at or below it; run `anchi setup install` on a host without Lima |
 | Lima for Linux CI | `.github/workflows/linux-live.yml` | Change version and SHA-256 together; compare with Lima's published `SHA256SUMS` |
 
 Only SHA-256 is checked; publisher signatures (Lima GPG, Codex sigstore) are not verified.

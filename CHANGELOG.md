@@ -4,6 +4,10 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 
 ## Unreleased
 
+### Changed
+
+- Lima no longer has to be installed first. When preparing the environment (or `anchi setup install`) finds no Lima 2.2.0 or newer on PATH, Anchi downloads the Lima release pinned in `host-tools.env` for Apple Silicon macOS or Linux x86_64, checks its SHA-256 before extracting anything, installs it into `~/.anchi/lima/<version>` and uses it for the VM. An installed Lima of the required version is used as before. On macOS the remaining prerequisite is `brew install python`. See `docs/GETTING_STARTED.md#lima`.
+
 ## 0.4.5 — 2026-10-30
 
 The desktop app can upgrade a machine to the latest release from **Settings → Machines**, refusing while tasks run. Task cells keep name resolution when a VPN such as Tailscale changes the DNS resolver, the CLI's hidden secret prompts show their labels again, and `scripts/remote.sh` reuses an existing instabox machine.

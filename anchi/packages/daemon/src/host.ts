@@ -188,6 +188,11 @@ export class SetupRunner {
     private resetSteps: string[][] | null = RESET_STEPS,
     /** How long one command may run (tests shorten it). */
     private stepTimeoutMs = STEP_TIMEOUT_MS,
+    /** Runs before the commands of a step, with its output going to the same lines. */
+    private before?: (
+      action: SetupAction | 'reset',
+      onLine: (line: string) => void,
+    ) => Promise<void>,
   ) {}
 
   /** `env` is added to the steps' environment (the size of a VM `install` creates). */
@@ -210,6 +215,7 @@ export class SetupRunner {
     }
     this.running = action;
     try {
+      await this.before?.(action, onLine);
       for (const [cmd, ...args] of steps) {
         onLine(`$ ${[cmd, ...args].join(' ')}`);
         const { code, last, timedOut } = await runLines(

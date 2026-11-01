@@ -32,13 +32,14 @@ Git, Node and pnpm are not required. It does not need sudo or modify your vault,
 
 ### macOS
 
-1. Install the VM prerequisites with [Homebrew](https://brew.sh):
+1. Install Python with [Homebrew](https://brew.sh):
 
    ```bash
-   brew install lima python
+   brew install python
    ```
 
-   Anchi needs Lima 2.2.0 or newer (`limactl --version`).
+   You do not need to install Lima: preparing the environment downloads the Lima Anchi pins
+   (see [Lima](#lima)). A Lima 2.2.0 or newer already on PATH is used instead.
 2. Install the app:
 
    ```bash
@@ -52,17 +53,17 @@ Git, Node and pnpm are not required. It does not need sudo or modify your vault,
 ### Linux
 
 1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Lima. Follow [Install Lima on Linux](#install-lima-on-linux).
-3. Install Python 3.11+ (`python3 --version`); most distributions ship it.
-4. Install the app:
+2. Install Python 3.11+ (`python3 --version`); most distributions ship it. Anchi downloads
+   [Lima](#lima) itself.
+3. Install the app:
 
    ```bash
    curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
    ```
 
-5. If the installer says your bin directory is missing from PATH, open a new terminal or run
+4. If the installer says your bin directory is missing from PATH, open a new terminal or run
    the `export PATH=…` line it prints.
-6. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
+5. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
    [guided desktop setup](#guided-setup-in-the-desktop-app). Ubuntu 23.10 and later need the
    [desktop sandbox profile](DESKTOP.md#linux-sandbox).
 
@@ -94,11 +95,11 @@ cell runner from the checkout.
 1. Install the prerequisites:
 
    ```bash
-   brew install git node pnpm lima python
+   brew install git node pnpm python
    ```
 
-   Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Lima must
-   be 2.2.0 or newer (`limactl --version`).
+   Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Anchi
+   downloads [Lima](#lima) itself.
 2. Clone the repository and install the workspace dependencies:
 
    ```bash
@@ -119,10 +120,9 @@ cell runner from the checkout.
 ### Linux
 
 1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Lima. Follow [Install Lima on Linux](#install-lima-on-linux).
-3. Install Git, Python 3.11+ and Node 22+ with your package manager or a version manager such
+2. Install Git, Python 3.11+ and Node 22+ with your package manager or a version manager such
    as nvm or mise. `.nvmrc` names the Node version CI uses.
-4. Install pnpm. Node 25 and newer no longer bundle corepack, so install pnpm directly with one of:
+3. Install pnpm. Node 25 and newer no longer bundle corepack, so install pnpm directly with one of:
 
    ```bash
    npm install -g pnpm                # any Node install
@@ -131,7 +131,7 @@ cell runner from the checkout.
    ```
 
    `anchi/package.json` names the pnpm version the project pins in `packageManager`.
-5. Clone the repository and install the workspace dependencies:
+4. Clone the repository and install the workspace dependencies:
 
    ```bash
    git clone https://github.com/jwfing/anchi.git
@@ -141,13 +141,13 @@ cell runner from the checkout.
 
    If `scripts/anchi` later fails with `Cannot find module …/node_modules/tsx/dist/loader.mjs`,
    this step has not run.
-6. Check that the launcher starts:
+5. Check that the launcher starts:
 
    ```bash
    scripts/anchi --help
    ```
 
-7. Continue with [Set up the VM and your first agent](#set-up-the-vm-and-your-first-agent),
+6. Continue with [Set up the VM and your first agent](#set-up-the-vm-and-your-first-agent),
    running `scripts/anchi` from the checkout.
 
 ### Development checks
@@ -199,11 +199,18 @@ The host needs x86_64 CPU virtualization and a readable and writable `/dev/kvm`.
 
 `anchi setup install` stops early if `/dev/kvm` or QEMU is missing.
 
-### Install Lima on Linux
+## Lima
 
-Install Lima from its [release page](https://github.com/lima-vm/lima/releases) and verify the
-archive against the release's `SHA256SUMS`. CI pins version 2.2.0
-(`.github/workflows/linux-live.yml`). Without sudo, into `~/.local`:
+Anchi runs its VM with [Lima](https://lima-vm.io) 2.2.0 or newer. When preparing the
+environment (or `anchi setup install`) finds none on PATH, or only an older one, it downloads
+the Lima release pinned in `host-tools.env` for Apple Silicon macOS or Linux x86_64, checks the
+archive's SHA-256 before extracting anything, and installs it into `~/.anchi/lima/<version>`.
+The daemon then puts that directory first on PATH for the commands it runs. A Lima of the
+required version that is already installed, for example with Homebrew, is used as it is. The
+VM itself stays in `~/.lima/anchi-vm` either way.
+
+To install Lima yourself instead, for example to use it outside Anchi, verify the archive against
+the release's `SHA256SUMS`. On Linux, without sudo, into `~/.local`:
 
 ```bash
 VER=2.2.0
@@ -408,7 +415,8 @@ are deleted locally only; revoke them at the provider if you no longer want them
 - **Installation failed:** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; workspaces and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
 - **Prebuilt layer download or verification failed:** retry preparation after checking the network and disk space. A checksum or compatibility failure never extracts the archive. Reinstall the matching app release if it persists; source installations use local builds.
 - **"The VM runs but could not be asked":** a guest command failed (shown with the message in Getting started, Runtimes and `anchi setup status`); the rest of the status is unknown, not reset. Press **r** to try again; if it keeps failing, `anchi setup install` reinstalls the guest components, keeping agents and credentials.
-- **Lima too old:** Getting started and `anchi setup status` list `Lima 2.2.0+ (found …)` under what is missing, and `anchi setup install` stops before creating the VM. macOS: `brew upgrade lima`; Linux: [Install Lima on Linux](#install-lima-on-linux).
+- **Lima download failed:** the setup log names the URL and the error (`LIMA_DOWNLOAD_FAILED`, or `LIMA_CHECKSUM_MISMATCH` when the archive is not the pinned one, which is then never extracted). Check the network and retry, or [install Lima yourself](#lima).
+- **Lima too old:** with an older Lima on PATH, setup downloads the pinned one and uses it instead. On a computer Anchi has no Lima for, Getting started and `anchi setup status` list `Lima 2.2.0+ (found …)` under what is missing.
 - **Installation refused because tasks are running:** installing restarts the egress proxy, which would end them. Wait for them (`anchi tasks`) or cancel them, then run it again; `ANCHI_FORCE_RESTART=1` installs anyway. `make verify-anchi` refuses for the same reason (`ANCHI_CHECK_WITH_TASKS=1` runs it beside them, leaving their cells alone).
 - **Interrupted installation:** run it again. Installer-marked incomplete root filesystems are kept as `rootfs-incomplete-*` before rebuilding; unmarked ones are never modified automatically.
 - **Stopped VM:** `anchi setup vm`, then `anchi setup vault unlock`.

@@ -13,6 +13,7 @@ import type {
 } from '@anchi/protocol';
 import type { Guest, VmTransport } from './guest.ts';
 import { APP_VERSION, defaultVmSize, hostResources, REPO_ROOT, VAULT_KEY } from './host.ts';
+import { limaPin, type LimaPin } from './lima.ts';
 import type { ServiceSetup } from './services.ts';
 
 export { CONNECTOR_IDS };
@@ -79,8 +80,11 @@ export function parseLimaVersion(output: string): string | null {
   return /(\d+\.\d+\.\d+)/.exec(output)?.[1] ?? null;
 }
 
-let limaVersionCache: { at: number; version: string | null } | undefined;
-/** The installed Lima's version, asked at most once a minute; null when it cannot say. */
+let limaVersionCache: { at: number; version: string } | undefined;
+/**
+ * The installed Lima's version, asked at most once a minute; null when it cannot say, which is
+ * not remembered: a Lima the daemon has just downloaded answers on the next status.
+ */
 function limaVersion(): string | null {
   if (limaVersionCache && Date.now() - limaVersionCache.at < 60_000) {
     return limaVersionCache.version;
@@ -93,12 +97,14 @@ function limaVersion(): string | null {
   } catch {
     // Not installed or not answering: `missing` already names limactl.
   }
-  limaVersionCache = { at: Date.now(), version };
+  if (version) limaVersionCache = { at: Date.now(), version };
   return version;
 }
 
 export function hostReadiness(
   placement: VmTransport['placement'] = 'lima',
+  /** Null where Anchi has no Lima of its own for this computer. */
+  pin: LimaPin | null = limaPin() ?? null,
 ): NonNullable<SetupStatus['host']> {
   const executable = (name: string) =>
     (process.env.PATH ?? '').split(':').some((dir) => {
@@ -117,10 +123,14 @@ export function hostReadiness(
       installHint: 'This server needs Python 3.11+ and passwordless sudo for its login user.',
     };
   }
-  const missing = ['limactl', 'python3'].filter((name) => !executable(name));
+  // Where Anchi has a pinned Lima, setup downloads it when PATH has none new enough (lima.ts).
+  const downloadable = pin !== null;
+  const missing = [...(downloadable ? [] : ['limactl']), 'python3'].filter(
+    (name) => !executable(name),
+  );
   // An older Lima fails only at `limactl start`, deep in the installation log; say it here.
   const minimum = limaMinimum();
-  const found = missing.includes('limactl') ? null : limaVersion();
+  const found = downloadable || missing.includes('limactl') ? null : limaVersion();
   if (found && !versionAtLeast(found, minimum)) missing.push(`Lima ${minimum}+ (found ${found})`);
   if (process.platform === 'linux') {
     if (!executable('qemu-system-x86_64')) missing.push('qemu-system-x86_64');
@@ -135,8 +145,10 @@ export function hostReadiness(
     missing,
     installHint:
       process.platform === 'darwin'
-        ? 'brew install lima python (brew upgrade lima for a newer Lima)'
-        : `Install Lima ${minimum}+ (https://lima-vm.io), Python 3.11+ and QEMU. Ubuntu/Debian: sudo apt-get install python3 qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.`,
+        ? downloadable
+          ? 'brew install python'
+          : 'brew install lima python (brew upgrade lima for a newer Lima)'
+        : `Install ${downloadable ? '' : `Lima ${minimum}+ (https://lima-vm.io), `}Python 3.11+ and QEMU. Ubuntu/Debian: sudo apt-get install python3 qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.`,
   };
 }
 

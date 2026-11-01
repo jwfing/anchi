@@ -40,8 +40,8 @@ For a single local task that does not need these controls, your existing runtime
 
 | Host | Status | Prerequisites |
 |---|---|---|
-| macOS on Apple Silicon | Supported | Lima and Python: `brew install lima python` |
-| Linux x86_64, glibc (Ubuntu 22.04+ / Debian 12+) | Experimental | Lima, Python 3.11+, QEMU and KVM access; [Linux setup](docs/GETTING_STARTED.md#linux-prerequisites) |
+| macOS on Apple Silicon | Supported | Python: `brew install python` (Anchi downloads Lima itself) |
+| Linux x86_64, glibc (Ubuntu 22.04+ / Debian 12+) | Experimental | Python 3.11+, QEMU and KVM access; [Linux setup](docs/GETTING_STARTED.md#linux-prerequisites) |
 | Intel Mac, Windows, other architectures | Unsupported | — |
 
 Install the desktop app and its command-line tools:
