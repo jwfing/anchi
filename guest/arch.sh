@@ -53,14 +53,16 @@ guest_copy() {
 refuse_if_tasks_running() {
   local vm=$1 running
   [[ ${ANCHI_FORCE_RESTART:-} == 1 ]] && return 0
-  running=$(guest_root "$vm" anchi-cell list 2>/dev/null | python3 -c '
-import json, sys
+  # Parsed by the guest's Python: the host needs none.
+  running=$(guest_root "$vm" /usr/bin/python3 -c '
+import json, subprocess
+out = subprocess.run(["anchi-cell", "list"], capture_output=True, text=True).stdout
 try:
-    cells = json.load(sys.stdin).get("cells", [])
+    cells = json.loads(out).get("cells", [])
 except ValueError:
     cells = []
 print(" ".join(c["task"] for c in cells if c.get("active") and not c["task"].startswith("chk-")))
-' || true)
+' 2>/dev/null || true)
   if [[ -n $running ]]; then
     echo "Task cells are live in the VM: $running" >&2
     echo "Installing restarts the egress proxy, which cuts them off the network. A cell stays up for 10 minutes" >&2

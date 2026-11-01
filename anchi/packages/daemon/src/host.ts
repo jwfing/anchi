@@ -41,7 +41,7 @@ export const WORKSPACE_MOUNT = '/mnt/anchi-host';
 /** The Lima VM (`secure-vm` before 0.3; scripts/vm-name.sh renames it). */
 export const VM_NAME = 'anchi-vm';
 
-/** The vault's master key on this computer; vault.py sends it to the VM over stdin. */
+/** The vault's master key on this computer; scripts/vault.mjs sends it to the VM over stdin. */
 export const VAULT_KEY = join(homedir(), '.config/anchi/vault.key');
 
 /**
@@ -68,7 +68,7 @@ export function workspaceSteps(platform: NodeJS.Platform = process.platform): st
     ],
     ['limactl', 'start', '--tty=false', VM_NAME],
     ...(linux ? [['bash', 'scripts/install-anchi.sh']] : []),
-    ['python3', 'scripts/vault.py', 'unlock'],
+    VAULT_UNLOCK,
   ];
 }
 
@@ -99,6 +99,22 @@ export function vmSizeEnv(size: VmSize, host: VmSize): Record<string, string> {
   return { ANCHI_VM_CPUS: String(cpus), ANCHI_VM_MEMORY_GIB: String(memoryGiB) };
 }
 
+/**
+ * scripts/vault.mjs in its own short process with this daemon's Node, so the master key is never
+ * in the daemon's memory, and with core dumps off, so it is never written to disk either.
+ */
+function vaultStep(action: 'init' | 'unlock'): string[] {
+  return [
+    '/bin/sh',
+    '-c',
+    'ulimit -c 0 && exec "$0" "$@"',
+    process.execPath,
+    'scripts/vault.mjs',
+    action,
+  ];
+}
+const VAULT_UNLOCK = vaultStep('unlock');
+
 /** Fixed host commands per setup step, run from the checkout in order. */
 export const SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
   // Mounts ~/AnchiWorkspaces into the VM once; restarts the VM, which locks the vault, so it is
@@ -110,9 +126,9 @@ export const SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
     ['bash', 'scripts/install-anchi.sh'],
     ['limactl', 'shell', VM_NAME, '--', 'sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
   ],
-  // vault.py reads the master key from ~/.config/anchi and sends it to the VM over stdin.
-  'vault-init': [['python3', 'scripts/vault.py', 'init']],
-  'vault-unlock': [['python3', 'scripts/vault.py', 'unlock']],
+  // vault.mjs reads the master key from ~/.config/anchi and sends it to the VM over stdin.
+  'vault-init': [vaultStep('init')],
+  'vault-unlock': [VAULT_UNLOCK],
 };
 
 /**
@@ -125,8 +141,8 @@ export const IN_GUEST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
     ['bash', 'scripts/install-anchi.sh'],
     ['sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
   ],
-  'vault-init': [['python3', 'scripts/vault.py', 'init']],
-  'vault-unlock': [['python3', 'scripts/vault.py', 'unlock']],
+  'vault-init': [vaultStep('init')],
+  'vault-unlock': [VAULT_UNLOCK],
 };
 
 /**
@@ -153,6 +169,7 @@ export function migrateLegacyVm(log: (line: string) => void, cwd = REPO_ROOT): P
     const child = spawn('bash', ['scripts/vm-name.sh', 'migrate'], {
       cwd,
       stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, ANCHI_NODE: process.execPath },
       detached: true,
     });
     const timer = setTimeout(() => {
@@ -257,7 +274,8 @@ function runLines(
     const child = spawn(cmd, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      // vm-name.sh unlocks the vault after a migration with the same Node as vaultStep.
+      env: { ...process.env, ANCHI_NODE: process.execPath, ...env },
     });
     let last = '';
     let timedOut = false;

@@ -7,6 +7,7 @@ Follows the Keep a Changelog structure. The version comes from `anchi/package.js
 ### Changed
 
 - Lima no longer has to be installed first. When preparing the environment (or `anchi setup install`) finds no Lima 2.2.0 or newer on PATH, Anchi downloads the Lima release pinned in `host-tools.env` for Apple Silicon macOS or Linux x86_64, checks its SHA-256 before extracting anything, installs it into `~/.anchi/lima/<version>` and uses it for the VM. An installed Lima of the required version is used as before. On macOS the remaining prerequisite is `brew install python`. See `docs/GETTING_STARTED.md#lima`.
+- The host no longer needs Python. The vault key is read and sent to the VM by `scripts/vault.mjs`, which replaces `scripts/vault.py` and runs on Anchi's own Node in a short process of its own with core dumps off, so the key is still never in the daemon's memory. The check for running task cells before an install parses the cell list inside the VM. With Lima downloaded too, Apple Silicon macOS needs nothing installed before Anchi; Linux needs QEMU and KVM access. Use `node scripts/vault.mjs status` or `lock` where you used `python3 scripts/vault.py`.
 
 ## 0.4.5 — 2026-10-30
 

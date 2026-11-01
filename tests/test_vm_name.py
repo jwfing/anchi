@@ -12,7 +12,8 @@ SCRIPT = ROOT / 'scripts/vm-name.sh'
 
 # Records each call; `list` prints the instances in $FAKE_VMS ("name status" per line), and
 # stop/rename/start update them. Subcommands named in $FAKE_FAIL fail instead, like a Lima that
-# cannot reach the VM. `shell … anchi-cell list` reports no cells.
+# cannot reach the VM. `shell <vm> -- sudo -n <command>` runs the command here, as the guest
+# would, where the fake anchi-cell lists the cells in $FAKE_CELLS (none by default).
 FAKE_LIMACTL = r"""#!/bin/bash
 echo "$*" >>"$FAKE_LOG"
 case " ${FAKE_FAIL:-} " in
@@ -23,9 +24,10 @@ case $1 in
   stop) sed -i.bak "s/^$2 .*/$2 Stopped/" "$FAKE_VMS" ;;
   rename) [[ ${FAKE_RENAME_NOOP:-} == 1 ]] || sed -i.bak "s/^$2 /$3 /" "$FAKE_VMS" ;;
   start) sed -i.bak "s/^$3 .*/$3 Running/" "$FAKE_VMS" ;;
-  shell) echo '{"cells": []}' ;;
+  shell) shift 5; exec "$@" ;;
 esac
 """
+FAKE_ANCHI_CELL = '#!/bin/sh\nif [ -n "$FAKE_CELLS" ]; then printf %s "$FAKE_CELLS"; else echo \'{"cells": []}\'; fi\n'
 
 
 class VmNameTests(unittest.TestCase):
@@ -38,12 +40,11 @@ class VmNameTests(unittest.TestCase):
         bin_dir.mkdir()
         (bin_dir / 'limactl').write_text(FAKE_LIMACTL)
         (bin_dir / 'limactl').chmod(0o755)
-        # vault.py stands in for the real one: it must not reach a VM either.
-        python = subprocess.run(['sh', '-c', 'command -v python3'], capture_output=True, text=True).stdout.strip()
-        (bin_dir / 'python3').write_text(
-            f'#!/bin/sh\ncase $1 in *vault.py) echo "vault $*" >>"$FAKE_LOG"; exit 0 ;; esac\nexec {python} "$@"\n'
-        )
-        (bin_dir / 'python3').chmod(0o755)
+        (bin_dir / 'anchi-cell').write_text(FAKE_ANCHI_CELL)
+        (bin_dir / 'anchi-cell').chmod(0o755)
+        # The Node that runs vault.mjs stands in for the real one: it must not reach a VM either.
+        (bin_dir / 'node').write_text('#!/bin/sh\necho "vault $*" >>"$FAKE_LOG"\n')
+        (bin_dir / 'node').chmod(0o755)
         self.vms = self.tmp / 'vms'
         self.log = self.tmp / 'log'
         self.log.write_text('')
@@ -83,7 +84,7 @@ class VmNameTests(unittest.TestCase):
                 'stop secure-vm',
                 'rename secure-vm anchi-vm',
                 'start --tty=false anchi-vm',
-                f'vault {ROOT}/scripts/vault.py unlock',
+                f'vault {ROOT}/scripts/vault.mjs unlock',
             ],
         )
         new_key = self.home / '.config/anchi/vault.key'
@@ -169,16 +170,13 @@ class VmNameTests(unittest.TestCase):
 
     def test_refuses_while_task_cells_run(self):
         self.vms.write_text('secure-vm Running\n')
-        fake = self.tmp / 'bin/limactl'
-        fake.write_text(
-            fake.read_text().replace(
-                """shell) echo '{"cells": []}' ;;""",
-                """shell) echo '{"cells": [{"task": "t-1", "active": true}]}' ;;""",
-            )
+        result = self.run_script(
+            'migrate',
+            PATH=f'{self.tmp / "bin"}:{os.environ["PATH"]}',
+            FAKE_CELLS='{"cells": [{"task": "t-1", "active": true}, {"task": "chk-x", "active": true}]}',
         )
-        result = self.run_script('migrate', PATH=f'{self.tmp / "bin"}:{os.environ["PATH"]}')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('t-1', result.stderr)
+        self.assertIn('live in the VM: t-1\n', result.stderr)
         self.assertEqual(self.vms.read_text(), 'secure-vm Running\n')
 
 
