@@ -30,12 +30,12 @@ jobs:
           docker run --rm --privileged \
             -v "$PWD:/src:ro" -v "$PWD/artifacts/prebuilt:/output" \
             debian:bookworm bash /src/scripts/build-prebuilt.sh
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: anchi-images-${{ matrix.arch }}
           path: artifacts/prebuilt/*.tar.gz
           if-no-files-found: error
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: anchi-manifest-${{ matrix.arch }}
           path: artifacts/prebuilt/prebuilt-*.json
@@ -95,7 +95,7 @@ jobs:
           xvfb-run -a python scripts/check-desktop-release.py \
             artifacts/releases/anchi-${{ matrix.target }}.tar.gz \
             artifacts/releases/anchi-desktop-${{ matrix.target }}.tar.gz
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: anchi-${{ matrix.target }}
           path: artifacts/releases/*
