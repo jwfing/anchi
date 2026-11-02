@@ -71,7 +71,7 @@ jobs:
       - name: Check release tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
         run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./anchi/package.json').version")"
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: anchi-manifest-${{ matrix.arch }}
           path: artifacts/prebuilt
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Prepare version-specific release notes
         run: python3 scripts/release-notes.py "$GITHUB_REF_NAME" > release-notes.md
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: anchi-*
           path: release
