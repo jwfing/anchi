@@ -1239,7 +1239,8 @@ export function App({
           return rest;
         });
         // Refresh the agent list to update chat list after deletion
-        setAgents(agents.filter(agent => agent.id !== id));
+        // Use a function to get the latest agents state instead of closure
+        setAgents(prevAgents => prevAgents.filter(agent => agent.id !== id));
         say(
           `@${id} deleted with ${r.deletedTasks} task${r.deletedTasks === 1 ? '' : 's'}` +
             (r.editedAgents.length || r.editedTemplates.length
