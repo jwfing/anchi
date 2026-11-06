@@ -1,0 +1,22 @@
+diff --git a/packages/tui/src/tui/App.tsx b/packages/tui/src/tui/App.tsx
+index 3c9f1e2..a8b4d67 100644
+--- a/packages/tui/src/tui/App.tsx
++++ b/packages/tui/src/tui/App.tsx
+@@ -1230,6 +1230,15 @@ export function App() {
+   const deleteAgent = (id: string) => {
+     client.call('deleteAgent', { id }, (err, res) => {
+       if (err) return setModal({ kind: 'error', message: err.message });
++      
++      // Refresh the agent list and chat data after deletion
++      // This ensures the chat list is updated to reflect the removal
++      const newAgents = agents.filter(agent => agent.id !== id);
++      setAgents(newAgents);
++      
++      // If we were viewing this agent's chats, switch to a different view
++      if (selectedAgentId === id) {
++        setSelectedAgentId(null);
++      }
++
+       setModal(null);
+     });
+   };
