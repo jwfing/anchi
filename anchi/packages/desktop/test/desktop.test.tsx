@@ -22,7 +22,6 @@ import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
-import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
 import {
   auditHosts,
   composerMode,
@@ -555,13 +554,6 @@ describe('agent conversation', () => {
       { host: 'api.github.com', note: '9 requests · 7 with your account', refused: false },
       { host: 'evil.example', note: '2 requests · 2 refused', refused: true },
     ]);
-  });
-
-  it('keeps the task panel and the conversation beside it usable while resizing', () => {
-    expect(clampWidth(700, 560, 600)).toBe(700);
-    expect(clampWidth(2000, 560, 600)).toBe(560 + 600 - PANEL_WIDTH.main);
-    expect(clampWidth(100, 560, 600)).toBe(PANEL_WIDTH.min);
-    expect(clampWidth(900, 560, 200)).toBe(400);
   });
 });
 

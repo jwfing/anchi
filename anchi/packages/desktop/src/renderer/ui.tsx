@@ -1,6 +1,6 @@
 import { sanitizeLine } from '@anchi/core/sanitize';
 import type { TaskStatus } from '@anchi/protocol';
-import { type KeyboardEvent, type Ref, useCallback, useState } from 'react';
+import { type KeyboardEvent, type Ref, useState } from 'react';
 
 export function runtimeName(runtime: string): string {
   switch (runtime) {
@@ -208,86 +208,6 @@ export function Composer({
         </button>
       </label>
     </div>
-  );
-}
-
-/** Bounds of the task panel: the conversation beside it keeps at least `main` pixels. */
-export const PANEL_WIDTH = { min: 320, main: 360, initial: 560 };
-const PANEL_KEY = 'anchi.taskPanelWidth';
-
-/** The panel width `want`, given its width `now` and the conversation's width beside it. */
-export function clampWidth(want: number, now: number, mainWidth: number) {
-  const max = now + mainWidth - PANEL_WIDTH.main;
-  return Math.round(Math.max(PANEL_WIDTH.min, Math.min(want, max)));
-}
-
-/** The task panel's width, remembered in this window's storage when it allows it. */
-export function usePanelWidth(): [number, (width: number) => void] {
-  const [width, setWidth] = useState(() => {
-    try {
-      const saved = Number(localStorage.getItem(PANEL_KEY));
-      return saved >= PANEL_WIDTH.min ? saved : PANEL_WIDTH.initial;
-    } catch {
-      return PANEL_WIDTH.initial;
-    }
-  });
-  const save = useCallback((next: number) => {
-    setWidth(next);
-    try {
-      localStorage.setItem(PANEL_KEY, String(next));
-    } catch {
-      // Storage refused: the width lasts until the window closes.
-    }
-  }, []);
-  return [width, save];
-}
-
-/**
- * The drawer's left edge. Resizing leaves part of the task list visible for switching tasks;
- * a double-click restores the default.
- */
-export function Splitter({ width, onResize }: { width: number; onResize: (w: number) => void }) {
-  const drawerWidth = (el: HTMLElement) => el.parentElement?.getBoundingClientRect().width ?? width;
-  const mainWidth = (el: HTMLElement) =>
-    (el.parentElement?.parentElement?.getBoundingClientRect().width ?? width) - drawerWidth(el);
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize task details"
-      aria-valuenow={width}
-      aria-valuemin={PANEL_WIDTH.min}
-      tabIndex={0}
-      className="splitter"
-      title="Drag to resize · double-click to reset"
-      onPointerDown={(e) => {
-        e.preventDefault();
-        const el = e.currentTarget;
-        const [x, start, main] = [e.clientX, drawerWidth(el), mainWidth(el)];
-        el.setPointerCapture(e.pointerId);
-        const move = (m: PointerEvent) => onResize(clampWidth(start + x - m.clientX, start, main));
-        const up = () => {
-          el.removeEventListener('pointermove', move);
-          el.removeEventListener('pointerup', up);
-          el.removeEventListener('pointercancel', up);
-        };
-        el.addEventListener('pointermove', move);
-        el.addEventListener('pointerup', up);
-        el.addEventListener('pointercancel', up);
-      }}
-      onKeyDown={(e) => {
-        const step = e.key === 'ArrowLeft' ? 24 : e.key === 'ArrowRight' ? -24 : 0;
-        if (!step) return;
-        e.preventDefault();
-        const now = drawerWidth(e.currentTarget);
-        onResize(clampWidth(now + step, now, mainWidth(e.currentTarget)));
-      }}
-      onDoubleClick={(e) =>
-        onResize(
-          clampWidth(PANEL_WIDTH.initial, drawerWidth(e.currentTarget), mainWidth(e.currentTarget)),
-        )
-      }
-    />
   );
 }
 
