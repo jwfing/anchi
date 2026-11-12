@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homeLayout, sanitizeLine } from '@anchi/core';
 import {
+  autostartFile,
   addServer,
   chosenServer,
   connectRemote,
@@ -373,6 +375,51 @@ ipcMain.handle('anchi:openExternal', async (event, url: unknown) => {
 ipcMain.handle('anchi:update', (event) => {
   fromApp(event);
   return updates.available;
+});
+/**
+ * Whether the daemon starts at login on this computer, and switching it. The CLI installs or
+ * removes the login item, as `anchi daemon install` does; the window only asks for on or off,
+ * and either way is confirmed here, because removing it stops a daemon that login started.
+ */
+ipcMain.handle('anchi:loginStartup', (event) => {
+  fromApp(event);
+  return process.platform !== 'win32' && existsSync(autostartFile());
+});
+ipcMain.handle('anchi:setLoginStartup', async (event, on: unknown) => {
+  fromApp(event);
+  if (typeof on !== 'boolean') throw new Error('choose on or off');
+  if (process.platform === 'win32') throw new Error('Windows has no local Anchi server');
+  const question: Confirmation = on
+    ? {
+        message: 'Start Anchi’s background service when you log in?',
+        detail:
+          'Anchi adds a login item for its daemon on this computer (launchd on macOS, a systemd user unit on Linux), so agents and schedules work without opening this app.',
+        button: 'Start at login',
+      }
+    : {
+        message: 'Stop starting Anchi’s background service at login?',
+        detail:
+          'The login item is removed. If login started the service that runs now, it stops with it: running tasks end, and this app starts the service again when it reconnects.',
+        button: 'Remove the login item',
+      };
+  if (!(await confirm(question))) return existsSync(autostartFile());
+  const cli = process.env.ANCHI_CLI ?? 'anchi';
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(cli, ['--server', 'local', 'daemon', on ? 'install' : 'uninstall'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (d: Buffer) => {
+      stderr = (stderr + d.toString('utf8')).slice(-2000);
+    });
+    child.on('error', () => reject(new Error(`${cli} not found`)));
+    child.on('close', (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(sanitizeLine(stderr.trim() || `${cli} daemon exited with ${code}`))),
+    );
+  });
+  return existsSync(autostartFile());
 });
 ipcMain.handle('anchi:copyUpdateCommand', (event) => {
   fromApp(event);

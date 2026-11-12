@@ -9,6 +9,17 @@ export function vaultLocked(s: SetupStatus): boolean {
   );
 }
 
+/**
+ * Says when a machine's VM exists but agents cannot run in it: it is stopped (a stopped VM
+ * cannot say what is installed in it, so `installed` is not asked), or its parts were installed
+ * by another version of Anchi. A machine that was never set up is neither.
+ */
+export function roomDown(s: SetupStatus): 'stopped' | 'outdated' | undefined {
+  if (s.vm === 'stopped') return 'stopped';
+  if (s.vm === 'running' && s.installed && s.guestOutdated) return 'outdated';
+  return undefined;
+}
+
 /** Sent when the vault was unlocked here, so every view that showed it locked asks again. */
 const UNLOCKED = 'anchi:vault-unlocked';
 

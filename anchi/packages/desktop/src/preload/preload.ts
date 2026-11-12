@@ -32,6 +32,8 @@ const api: AnchiApi = {
     return () => ipcRenderer.off('anchi:update', handler);
   },
   copyUpdateCommand: () => ipcRenderer.invoke('anchi:copyUpdateCommand'),
+  loginStartup: () => ipcRenderer.invoke('anchi:loginStartup'),
+  setLoginStartup: (on) => ipcRenderer.invoke('anchi:setLoginStartup', on),
   addSkillFolder: (server) => ipcRenderer.invoke('anchi:addSkillFolder', server),
   importGoogleClient: (server) => ipcRenderer.invoke('anchi:importGoogleClient', server),
 };

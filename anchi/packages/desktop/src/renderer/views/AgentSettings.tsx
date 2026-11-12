@@ -46,6 +46,7 @@ export function AgentSettingsView({
   const [settings, setSettings] = useState<AgentSettings>();
   const [draft, setDraft] = useState<AgentSettingValues>();
   const [review, setReview] = useState<AgentUpdate>();
+  const [host, setHost] = useState('');
 
   const load = useCallback(() => {
     void act(() => call('agents.settings', { agentId })).then((s) => {
@@ -344,6 +345,64 @@ export function AgentSettingsView({
             </section>
 
             <section className="card">
+              <h2>Websites it may reach</h2>
+              {fixed.egress === null ? (
+                <p className="small muted">
+                  Any public website. To limit it to a list, set{' '}
+                  <span className="mono">egress</span> in the agent file; hosts can then be added
+                  here.
+                </p>
+              ) : (
+                <>
+                  <p className="small muted">
+                    Only these. Everything else is refused at the gatekeeper and shown in the task’s
+                    record. Removing a host is done in the agent file.
+                  </p>
+                  <div className="chips">
+                    {fixed.egress.map((h) => (
+                      <span key={h} className="chip chip-off mono">
+                        {sanitizeLine(h)}
+                      </span>
+                    ))}
+                    {!fixed.egress.length && <span className="small muted">None yet.</span>}
+                  </div>
+                  <form
+                    className="row gap"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const value = host.trim();
+                      if (!value) return;
+                      void act(
+                        () => call('agents.allowHost', { agentId, host: value }),
+                        `${value} allowed`,
+                      ).then((done) => {
+                        if (!done) return;
+                        setHost('');
+                        load();
+                      });
+                    }}
+                  >
+                    <label className="field grow">
+                      <span className="sr-only">Host to allow</span>
+                      <input
+                        value={host}
+                        placeholder="registry.npmjs.org"
+                        spellCheck={false}
+                        onChange={(e) => setHost(e.target.value)}
+                      />
+                    </label>
+                    <button type="submit" className="btn" disabled={!host.trim() || changed}>
+                      Allow this host…
+                    </button>
+                  </form>
+                  {changed && (
+                    <span className="small muted">Save or discard the other changes first.</span>
+                  )}
+                </>
+              )}
+            </section>
+
+            <section className="card">
               <h2>
                 Set in the agent file <span className="small muted normal">· read-only here</span>
               </h2>
@@ -351,12 +410,6 @@ export function AgentSettingsView({
                 <dt>Schedules</dt>
                 <dd>
                   {fixed.triggers.length ? fixed.triggers.map(sanitizeLine).join(' · ') : 'none'}
-                </dd>
-                <dt>Websites</dt>
-                <dd>
-                  {fixed.egress === null
-                    ? 'any public website'
-                    : fixed.egress.map(sanitizeLine).join(', ') || 'none'}
                 </dd>
                 <dt>Asks first</dt>
                 <dd>

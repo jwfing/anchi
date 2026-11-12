@@ -266,6 +266,52 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
     scan: 'clean (12 files)',
     rows: [],
   }),
+  'access.summary': () => ({
+    since: now - 7 * 86_400_000,
+    tasks: 12,
+    agents: [
+      {
+        agent: 'developer',
+        tasks: 7,
+        requests: 164,
+        injected: { github: 41 },
+        credentialsOther: 0,
+        refused: 2,
+        held: 3,
+        hosts: 4,
+        services: 0,
+      },
+      {
+        agent: 'reviewer',
+        tasks: 5,
+        requests: 58,
+        injected: { github: 30 },
+        credentialsOther: 0,
+        refused: 0,
+        held: 0,
+        hosts: 2,
+        services: 0,
+      },
+    ],
+    hosts: [
+      {
+        host: 'api.github.com',
+        requests: 120,
+        agents: ['developer', 'reviewer'],
+        decisions: { inject: 71 } as Record<string, number>,
+      },
+      {
+        host: 'registry.npmjs.org',
+        requests: 88,
+        agents: ['developer'],
+        decisions: { pass: 88 } as Record<string, number>,
+      },
+    ],
+    services: [],
+    credentials: [],
+    refused: [],
+    partial: false,
+  }),
   'agents.createPreview': (p: { agentId: string }) => ({
     id: 'p-demo',
     agentId: p.agentId,
@@ -303,7 +349,7 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
       delegates: ['reviewer'],
       triggers: [],
       approvals: { github: 'ask' },
-      egress: null,
+      egress: ['github.com', 'registry.npmjs.org'],
     },
     inventory: {
       skills: [

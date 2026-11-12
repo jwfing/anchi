@@ -2,7 +2,7 @@ import type { AgentSummary, TaskRow } from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar, TeamList } from '../src/renderer/App.tsx';
-import { machineCall } from '../src/renderer/api.ts';
+import { machineCall, message } from '../src/renderer/api.ts';
 import { EMPTY_MODEL, reduceFleet, type Fleet } from '../src/renderer/model.ts';
 import { attention, attentionCount } from '../src/renderer/views/NeedsYou.tsx';
 import { startChecklist } from '../src/renderer/views/Starting.tsx';
@@ -371,12 +371,50 @@ describe('secure room notices', () => {
     expect(kinds({ vm: 'stopped', installed: true, vaultUnlocked: false })).toEqual([
       'room:stopped',
     ]);
+    // A stopped VM cannot report what is installed in it.
+    expect(kinds({ vm: 'stopped', installed: false, vaultUnlocked: false })).toEqual([
+      'room:stopped',
+    ]);
     expect(
       kinds({ vm: 'running', installed: true, guestOutdated: true, vaultUnlocked: false }),
     ).toEqual(['room:outdated']);
   });
 
+  it('says in the sidebar that the secure room is stopped, not that agents are protected', () => {
+    const out = renderToStaticMarkup(
+      <Sidebar
+        fleet={{
+          local: {
+            ...EMPTY_MODEL,
+            agents: [agent],
+            setup: { vm: 'stopped', installed: false, vaultUnlocked: false } as never,
+          },
+        }}
+        connections={[local]}
+        selected="local"
+        view={{ kind: 'inbox' }}
+        waiting={1}
+        setView={() => {}}
+        onSelect={() => {}}
+        onBuilder={() => {}}
+      />,
+    );
+    expect(out).toContain('>Secure room stopped<');
+    expect(out).not.toContain('>Protected<');
+  });
+
   it('leaves a machine that was never set up to the guide', () => {
     expect(kinds({ vm: 'missing', installed: false, vaultUnlocked: false })).toEqual([]);
   });
+});
+
+it('says the secure room is not running instead of passing on a command to run', () => {
+  const raw =
+    'Error invoking remote method \'anchi:call\': Error: GUEST_UNAVAILABLE: level=fatal msg="instance `anchi-vm` is stopped, run `limactl start anchi-vm`"';
+  expect(message(new Error(raw))).toBe(
+    'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.',
+  );
+  expect(message(new Error("Error invoking remote method 'anchi:call': Error: cancelled"))).toBe(
+    'cancelled',
+  );
 });

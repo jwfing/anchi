@@ -34,7 +34,7 @@ import { StartingView } from './views/Starting.tsx';
 import { onboarded, setOnboarded, WelcomeView } from './views/Welcome.tsx';
 import { welcomeStep } from '@anchi/core/welcome';
 import { UsageView } from './views/Usage.tsx';
-import { onVaultUnlocked, vaultLocked } from './vault.tsx';
+import { onVaultUnlocked, roomDown, vaultLocked } from './vault.tsx';
 
 export const BUILDER = 'builder';
 
@@ -353,9 +353,12 @@ function Protection({
   // A locked vault or a stopped secure room: agents there cannot work until it is seen to.
   const locked = connected.filter((s) => {
     const setup = fleet[s.name]?.setup;
-    return setup?.installed && (vaultLocked(setup) || setup.vm !== 'running');
+    return setup && (vaultLocked(setup) || roomDown(setup));
   });
-  const stopped = locked.some((s) => fleet[s.name]?.setup?.vm !== 'running');
+  const stopped = locked.some((s) => {
+    const setup = fleet[s.name]?.setup;
+    return setup && roomDown(setup);
+  });
   const agents = connected.reduce(
     (n, s) => n + (fleet[s.name]?.agents ?? []).filter((a) => a.id !== BUILDER && !a.peer).length,
     0,
@@ -645,7 +648,12 @@ function ScopedView({
     ])
       .then(([status, agents, tasks]) => {
         if (!current) return;
-        if (welcomeStep(status, agents, tasks) === 'done') setOnboarded(server.name);
+        // Someone whose agents already finished work is not new: a stopped secure room or a
+        // locked vault is theirs to fix from Needs you, not a reason to start the guide again.
+        const used =
+          agents.some((a) => a.id !== BUILDER) &&
+          tasks.some((t) => t.agentId !== BUILDER && t.status === 'done');
+        if (used || welcomeStep(status, agents, tasks) === 'done') setOnboarded(server.name);
         else setView({ kind: 'welcome' });
       })
       .catch(() => {});
@@ -672,7 +680,8 @@ function ScopedView({
         {connections.length > 1 &&
           view.kind !== 'settings' &&
           view.kind !== 'agent' &&
-          view.kind !== 'inbox' && (
+          view.kind !== 'inbox' &&
+          view.kind !== 'welcome' && (
             <div className="machine-toolbar">
               <MachinePicker />
               <span className="small muted">Tasks belong to the selected machine</span>

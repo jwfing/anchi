@@ -11,7 +11,8 @@ import type { Notifications, SetupStatus } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { BUILDER, useApp } from '../App.tsx';
 import { accountName, Icon } from '../ui.tsx';
-import { Runtimes, ServerCard } from './Settings.tsx';
+import { message } from '../api.ts';
+import { CodexSignIn, Runtimes, ServerCard } from './Settings.tsx';
 
 /**
  * Whether this window finished or skipped the guide for a server: a server switched to later may
@@ -63,6 +64,7 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
   const [status, setStatus] = useState<SetupStatus>();
   const [machines, setMachines] = useState(false);
   const [details, setDetails] = useState(false);
+  const [failed, setFailed] = useState('');
   const [lines, setLines] = useState<string[]>([]);
   const [preparing, setPreparing] = useState(false);
 
@@ -101,11 +103,15 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
   const prepare = async () => {
     if (!status) return;
     setPreparing(true);
+    setFailed('');
     setLines([]);
-    await act(
-      () => call('setup.prepare', { runtime: suggestedRuntime(status), confirm: true }),
-      'environment ready',
-    );
+    try {
+      await call('setup.prepare', { runtime: suggestedRuntime(status), confirm: true });
+    } catch (err) {
+      // Declining the system dialog is not a failure to explain.
+      const text = message(err);
+      if (text !== 'cancelled') setFailed(sanitizeLine(text));
+    }
     setPreparing(false);
     refresh();
   };
@@ -251,6 +257,21 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
                       <span />
                     </div>
                   )}
+                  {failed && !preparing && (
+                    <div className="thread-recover" role="alert">
+                      <span className="small grow">
+                        Setting up stopped: {failed} What already finished is kept; setting up again
+                        continues from there.
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={() => void prepare()}
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  )}
                 </>
               )
             )}
@@ -276,9 +297,20 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
             <h3>{at > 1 ? 'An AI account is connected' : 'Sign in to an AI account'}</h3>
             <span className="small muted">
               {at < 1
-                ? 'Available as soon as the secure room is ready.'
+                ? preparing || status?.preparing
+                  ? 'Claude and other providers are available as soon as the secure room is ready.'
+                  : 'Available as soon as the secure room is ready.'
                 : 'Agents think with an account you already have: ChatGPT, Claude, or any OpenAI-compatible provider. One is enough.'}
             </span>
+            {at === 0 && status && (preparing || status.preparing) && (
+              <div className="col gap-s">
+                <span className="small">
+                  While the secure room is being set up, you can already sign in to ChatGPT. Anchi
+                  stores the login in the vault as soon as it exists.
+                </span>
+                <CodexSignIn server={server.name} connected={false} onDone={refresh} />
+              </div>
+            )}
             {at === 1 && status && (
               <>
                 <Runtimes status={status} server={server.name} onChange={refresh} />
@@ -303,7 +335,7 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
             <h3>
               {at > 2
                 ? 'You are set up'
-                : agents.length
+                : at === 2 && agents.length
                   ? `Give ${agents[0]!.id} a first task`
                   : 'Meet your first agent'}
             </h3>

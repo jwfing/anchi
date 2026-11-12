@@ -1,6 +1,6 @@
 import { sanitizeLine } from '@anchi/core/sanitize';
 import type { TaskStatus } from '@anchi/protocol';
-import { type KeyboardEvent, type Ref, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, type Ref, useState } from 'react';
 
 export function runtimeName(runtime: string): string {
   switch (runtime) {
@@ -207,6 +207,43 @@ export function Composer({
           <Icon name="send" size={16} />
         </button>
       </label>
+    </div>
+  );
+}
+
+/**
+ * A dialog over the window for one thing to fill in. Escape, the close button or a click
+ * outside closes it; what it holds is lost, as for the form that used to open under a row.
+ */
+export function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      <section className="modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="row between">
+          <h2>{title}</h2>
+          <button type="button" className="btn drawer-close" aria-label="Close" onClick={onClose}>
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+        {children}
+      </section>
     </div>
   );
 }

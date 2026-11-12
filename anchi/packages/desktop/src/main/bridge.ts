@@ -35,6 +35,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'team.nodes',
   'team.preview',
   'agents.update',
+  'agents.allowHost',
   'agents.deletePreview',
   'agents.delete',
   'tasks.create',
@@ -76,6 +77,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'skills.update',
   'skills.remove',
   'usage.summary',
+  'access.summary',
   'usage.quota',
   'services.setMode',
   'services.setToken',
@@ -147,6 +149,14 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
     const profile = (p as { profile?: unknown }).profile;
     if (typeof profile !== 'string' || !/^[A-Za-z0-9_.@-]{1,64}$/.test(profile)) {
       throw new Error('enter the name of an AWS profile');
+    }
+  },
+  'agents.allowHost': (p) => {
+    const { agentId, host } = p as { agentId?: unknown; host?: unknown };
+    idSchema.parse(agentId);
+    // One host name; the daemon checks it again and refuses wildcards.
+    if (typeof host !== 'string' || !/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/i.test(host.trim())) {
+      throw new Error('give one host name, such as registry.npmjs.org');
     }
   },
   'tasks.delete': (p) => {
@@ -352,6 +362,14 @@ export async function confirmation(
         `This starts or installs the Anchi VM on the server, its services and the ${runtime} runtime image, then unlocks the vault. The first install takes several minutes.\n\n` +
         'The vault key (~/.config/anchi/vault.key on the server) is the only way to read the credentials you store. Back it up once it exists.',
       button: 'Prepare',
+    };
+  }
+  if (call.method === 'agents.allowHost') {
+    const { agentId, host } = call.params as { agentId: string; host: string };
+    return {
+      message: `Let @${agentId} reach ${host.trim().toLowerCase()}?`,
+      detail: `The host is added to the websites @${agentId} may reach. Its tasks can then send it anything they hold, including the contents of shared folders. Only add a host you trust.`,
+      button: 'Allow this host',
     };
   }
   if (call.method === 'connectors.importGh') {

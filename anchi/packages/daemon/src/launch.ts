@@ -137,6 +137,11 @@ WantedBy=default.target
 }
 
 /** Runs the daemon at login: launchd on macOS, a systemd user unit on Linux. */
+/** The file that starts the daemon at login, whether or not it exists. */
+export function autostartFile(): string {
+  return process.platform === 'darwin' ? plistPath() : unitPath();
+}
+
 export function installAutostart(layout: HomeLayout): string {
   if (process.platform === 'darwin') return installLaunchd(layout);
   if (process.platform !== 'linux') throw new Error('autostart needs macOS or Linux');

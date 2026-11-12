@@ -20,3 +20,4 @@ export {
   serverName,
   type ServerTarget,
 } from './remote.ts';
+export { autostartFile } from './launch.ts';

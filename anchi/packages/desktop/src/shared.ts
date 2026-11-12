@@ -45,6 +45,10 @@ export interface AnchiApi {
   onUpdate(listener: (update: ReleaseUpdate | null) => void): () => void;
   /** Copies the fixed local upgrade command, never arbitrary renderer-provided text. */
   copyUpdateCommand(): Promise<void>;
+  /** Whether the local daemon starts at login. */
+  loginStartup(): Promise<boolean>;
+  /** Installs or removes the login item after a native dialog; returns the resulting state. */
+  setLoginStartup(on: boolean): Promise<boolean>;
   /** Picks a folder on this computer and adds the skills in it; null when cancelled. */
   addSkillFolder(server: string): Promise<SkillAddResult | null>;
   /** Picks a Google OAuth client JSON on this computer and imports it; false when cancelled. */

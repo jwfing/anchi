@@ -67,7 +67,7 @@ export function startChecklist(
             ? 'Checking…'
             : room === 'wait'
               ? 'Waiting'
-              : setup?.installed
+              : setup?.vm === 'stopped'
                 ? 'Stopped'
                 : 'Not set up',
     },

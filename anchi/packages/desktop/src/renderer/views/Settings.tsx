@@ -1,6 +1,7 @@
 import { PeerSettings } from './PeerSettings.tsx';
 import { sanitizeLine } from '@anchi/core/sanitize';
 import {
+  type AccessSummary,
   CONNECTOR_IDS,
   type ConnectorId,
   type Notifications,
@@ -20,7 +21,7 @@ import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { message, type Call } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
 import { count } from '../format.ts';
-import { Icon } from '../ui.tsx';
+import { Icon, Modal } from '../ui.tsx';
 import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../guides.ts';
 import { onVaultUnlocked, vaultLocked, VaultLockedCard } from '../vault.tsx';
 
@@ -191,6 +192,18 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
     onChange();
   };
   const [typed, setTyped] = useState('');
+  const [startup, setStartup] = useState<boolean>();
+  useEffect(() => {
+    if (server.name !== 'local') return;
+    let current = true;
+    void window.anchi
+      .loginStartup()
+      .then((on) => current && setStartup(on))
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [server.name]);
   const reset = async () => {
     setBusy(true);
     setLines([]);
@@ -265,13 +278,43 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
         )}
       </section>
       <section className="card">
-        <h2>Background service</h2>
+        <div className="row between">
+          <h2>Background service</h2>
+          <span className="tag tag-ok">Running</span>
+        </div>
         <p className="small muted">
           Keeps agents and schedules working when this window is closed. Anchi starts it when the
-          app opens. To start it at login, or to stop it, use{' '}
-          <span className="mono">anchi daemon</span> in a terminal.
+          app opens.
         </p>
+        {server.name === 'local' ? (
+          <div className="row gap">
+            <span className="grow">Start when I log in</span>
+            <span className="small muted">
+              {startup === undefined ? '' : startup ? 'On' : 'Off'}
+            </span>
+            <button
+              type="button"
+              className="btn btn-small"
+              role="switch"
+              aria-checked={!!startup}
+              disabled={startup === undefined}
+              onClick={() =>
+                void act(() => window.anchi.setLoginStartup(!startup)).then(
+                  (now) => now !== undefined && setStartup(now),
+                )
+              }
+            >
+              {startup ? 'Turn off' : 'Turn on'}
+            </button>
+          </div>
+        ) : (
+          <p className="small muted">
+            On a remote machine it starts with the machine. Stopping it is done there, with{' '}
+            <span className="mono">anchi daemon stop</span>.
+          </p>
+        )}
       </section>
+      <AccessReport />
       <section className="card card-danger">
         <h2>Reset Anchi on {where}</h2>
         <p className="small">
@@ -303,6 +346,91 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
         </form>
       </section>
     </>
+  );
+}
+
+/** What agents reached over the last week, from the audit rows the daemon has. */
+function AccessReport() {
+  const { act, call } = useApp();
+  const [report, setReport] = useState<AccessSummary>();
+  const load = () =>
+    void act(() => call('access.summary', { since: Date.now() - 7 * 86_400_000 })).then(
+      (r) => r && setReport(r),
+    );
+  return (
+    <section className="card">
+      <div className="row between">
+        <h2>What agents reached</h2>
+        <button type="button" className="btn btn-small" onClick={load}>
+          {report ? 'Refresh' : 'Open the report for the last 7 days'}
+        </button>
+      </div>
+      <p className="small muted">
+        Recorded by the gatekeeper outside the cells: which agent sent how many requests, and what
+        was refused or held.
+      </p>
+      {report && (
+        <>
+          {report.partial && (
+            <div className="banner banner-warn">
+              Some running tasks could not be read; their requests are missing here.
+            </div>
+          )}
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Tasks</th>
+                <th>Requests</th>
+                <th>Websites</th>
+                <th>Refused</th>
+                <th>Held</th>
+                <th>Own credentials</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.agents.map((a) => (
+                <tr key={a.agent}>
+                  <td>@{sanitizeLine(a.agent)}</td>
+                  <td>{a.tasks}</td>
+                  <td>{a.requests}</td>
+                  <td>{a.hosts}</td>
+                  <td className={a.refused ? 'tone-warn' : ''}>{a.refused}</td>
+                  <td>{a.held}</td>
+                  <td className={a.credentialsOther ? 'tone-warn' : ''}>{a.credentialsOther}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!report.agents.length && <p className="small muted">No task ran in this period.</p>}
+          {report.hosts.length > 0 && (
+            <dl className="facts">
+              <dt>Most requested</dt>
+              <dd>
+                {report.hosts
+                  .slice(0, 8)
+                  .map((h) => `${sanitizeLine(h.host)} (${h.requests})`)
+                  .join(' · ')}
+              </dd>
+              {report.refused.length > 0 && (
+                <>
+                  <dt>Last refused</dt>
+                  <dd>
+                    {report.refused
+                      .slice(0, 5)
+                      .map(
+                        (r) =>
+                          `@${sanitizeLine(r.agent)} → ${sanitizeLine(r.host)} (${sanitizeLine(r.reason || r.decision)})`,
+                      )
+                      .join(' · ')}
+                  </dd>
+                </>
+              )}
+            </dl>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1068,7 +1196,7 @@ export function Runtimes({
  * device-code login and returns a page and code; the user finishes in any browser, and the
  * daemon's `codexSignIn` notification ends the wait.
  */
-function CodexSignIn({
+export function CodexSignIn({
   server,
   connected,
   onDone,
@@ -1431,36 +1559,41 @@ function ProxyConnectors({
               )}
             </div>
             {id === 'aws' && editing === 'aws' && (
-              <SecretForm
-                id="connect-aws"
-                fields={[{ key: 'profile', label: 'Profile name', placeholder: 'dev-readonly' }]}
-                note={
-                  <>
-                    A profile of the AWS command line on this machine, such as an SSO profile. Anchi
-                    keeps its temporary credentials renewed. Agents with the AWS connection can do
-                    what the profile’s role allows: choose a narrow one. <GuideLink id="aws" />
-                  </>
-                }
-                submit={async (v) => {
-                  await call('connectors.awsProfile', { profile: v.profile! });
-                  setEditing(undefined);
-                  onChange();
-                }}
-                onCancel={() => close(id)}
-              />
+              <Modal title={'Connect AWS through a profile'} onClose={() => close(id)}>
+                <SecretForm
+                  id="connect-aws"
+                  fields={[{ key: 'profile', label: 'Profile name', placeholder: 'dev-readonly' }]}
+                  note={
+                    <>
+                      A profile of the AWS command line on this machine, such as an SSO profile.
+                      Anchi keeps its temporary credentials renewed. Agents with the AWS connection
+                      can do what the profile’s role allows: choose a narrow one.{' '}
+                      <GuideLink id="aws" />
+                    </>
+                  }
+                  submit={async (v) => {
+                    await call('connectors.awsProfile', { profile: v.profile! });
+                    setEditing(undefined);
+                    onChange();
+                  }}
+                  onCancel={() => close(id)}
+                />
+              </Modal>
             )}
             {tokenId && editing === tokenId && (
-              <SecretForm
-                id={`connect-${id}`}
-                fields={[{ key: 'token', label: `${id} token`, secret: true }]}
-                note={<TokenNote id={id} />}
-                submit={async (v) => {
-                  await call('connectors.set', { id: tokenId, token: v.token! });
-                  setEditing(undefined);
-                  onChange();
-                }}
-                onCancel={() => close(id)}
-              />
+              <Modal title={`Connect ${connectorName(id)}`} onClose={() => close(id)}>
+                <SecretForm
+                  id={`connect-${id}`}
+                  fields={[{ key: 'token', label: `${id} token`, secret: true }]}
+                  note={<TokenNote id={id} />}
+                  submit={async (v) => {
+                    await call('connectors.set', { id: tokenId, token: v.token! });
+                    setEditing(undefined);
+                    onChange();
+                  }}
+                  onCancel={() => close(id)}
+                />
+              </Modal>
             )}
           </div>
         );
@@ -1633,27 +1766,34 @@ export function Services({
                 </div>
               ))}
             {editing === s.id && needsOAuthApp(s.id, status) && (
-              <OAuthAppForm
-                id={s.id}
-                done={() => {
-                  setEditing(undefined);
-                  onChange();
-                }}
-                onCancel={() => close(s.id)}
-              />
+              <Modal
+                title={`${connectorName(s.id)} needs an app of your own`}
+                onClose={() => close(s.id)}
+              >
+                <OAuthAppForm
+                  id={s.id}
+                  done={() => {
+                    setEditing(undefined);
+                    onChange();
+                  }}
+                  onCancel={() => close(s.id)}
+                />
+              </Modal>
             )}
             {tokenLabel && editing === s.id && (
-              <SecretForm
-                id={`connect-${s.id}`}
-                fields={[{ key: 'token', label: tokenLabel, secret: true }]}
-                note={<TokenNote id={s.id} />}
-                submit={async (v) => {
-                  await call('services.setToken', { id: s.id, token: v.token! });
-                  setEditing(undefined);
-                  onChange();
-                }}
-                onCancel={() => close(s.id)}
-              />
+              <Modal title={`Connect ${connectorName(s.id)}`} onClose={() => close(s.id)}>
+                <SecretForm
+                  id={`connect-${s.id}`}
+                  fields={[{ key: 'token', label: tokenLabel, secret: true }]}
+                  note={<TokenNote id={s.id} />}
+                  submit={async (v) => {
+                    await call('services.setToken', { id: s.id, token: v.token! });
+                    setEditing(undefined);
+                    onChange();
+                  }}
+                  onCancel={() => close(s.id)}
+                />
+              </Modal>
             )}
           </div>
         );

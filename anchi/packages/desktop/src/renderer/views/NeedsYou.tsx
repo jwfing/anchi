@@ -6,7 +6,7 @@ import { useApp } from '../App.tsx';
 import { machineCall, message } from '../api.ts';
 import type { Fleet } from '../model.ts';
 import { Icon, type IconName } from '../ui.tsx';
-import { vaultLocked, vaultUnlocked } from '../vault.tsx';
+import { roomDown, vaultLocked, vaultUnlocked } from '../vault.tsx';
 import { ApprovalCard } from './Approvals.tsx';
 
 /** Something other than a held write that waits for the user, on a machine or in the app. */
@@ -42,13 +42,11 @@ export function attention(
     const setup = fleet[server.name]?.setup;
     if (server.status === 'error' || server.status === 'needs-setup') {
       notices.push({ kind: 'connection', server });
-    } else if (server.status === 'connected' && setup?.installed) {
+    } else if (server.status === 'connected' && setup) {
       // A machine never set up belongs to Getting started, not here.
-      if (setup.vm !== 'running' || setup.guestOutdated) {
-        notices.push({ kind: 'room', server, outdated: setup.vm === 'running' });
-      } else if (vaultLocked(setup)) {
-        notices.push({ kind: 'vault', server });
-      }
+      const down = roomDown(setup);
+      if (down) notices.push({ kind: 'room', server, outdated: down === 'outdated' });
+      else if (vaultLocked(setup)) notices.push({ kind: 'vault', server });
     }
     if (server.newer && server.install === 'release' && !server.upgrading) {
       notices.push({ kind: 'upgrade', server, version: server.newer });

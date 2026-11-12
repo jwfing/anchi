@@ -34,8 +34,13 @@ export async function allEvents(call: Call, taskId: string) {
 
 /** Electron prefixes errors from the main process; the daemon's own message is what matters. */
 export function message(err: unknown): string {
-  return String((err as Error)?.message ?? err).replace(
+  const text = String((err as Error)?.message ?? err).replace(
     /^Error invoking remote method '[^']+': (Error: )?/,
     '',
   );
+  // The daemon passes on what the VM tool printed, which tells the reader to run a command.
+  if (text.startsWith('GUEST_UNAVAILABLE')) {
+    return 'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.';
+  }
+  return text;
 }

@@ -88,7 +88,6 @@ describe('bridge', () => {
       'team.approve',
       'team.poll',
       'setup.run',
-      'agents.allowHost',
       // Only the main process imports a Google client, from a file the user picked.
       'services.googleClient',
       'services.removeGoogleClient',
@@ -218,6 +217,40 @@ describe('bridge', () => {
     expect(sent, 'cancelled: no credential was read').toEqual([]);
     await guardedCall('connectors.importGh', {}, read, async () => true);
     expect(sent).toEqual(['connectors.importGh']);
+  });
+
+  it('lets an agent reach a new host only after a dialog that says what that allows', async () => {
+    for (const host of ['', '*.example.com', 'a b', 'https://x.io', 'x'.repeat(260), 7]) {
+      expect(
+        () => checkCall('agents.allowHost', { agentId: 'dev', host }),
+        String(host).slice(0, 20),
+      ).toThrow(/one host name/);
+    }
+    expect(() => checkCall('agents.allowHost', { agentId: '../x', host: 'x.io' })).toThrow();
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return { egress: ['github.com', 'x.io'] };
+    };
+    await expect(
+      guardedCall(
+        'agents.allowHost',
+        { agentId: 'dev', host: ' Registry.NPMJS.org ' },
+        read,
+        async (q) => {
+          expect(q.message).toBe('Let @dev reach registry.npmjs.org?');
+          expect(q.detail).toContain('including the contents of shared folders');
+          return false;
+        },
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'cancelled: the agent file was not changed').toEqual([]);
+    await guardedCall('agents.allowHost', { agentId: 'dev', host: 'x.io' }, read, async () => true);
+    expect(sent).toEqual(['agents.allowHost']);
+    // Reading what agents reached changes nothing and needs no dialog.
+    await guardedCall('access.summary', {}, read, async () => {
+      throw new Error('asked for a read');
+    });
   });
 
   it('takes only plain objects as parameters', () => {
