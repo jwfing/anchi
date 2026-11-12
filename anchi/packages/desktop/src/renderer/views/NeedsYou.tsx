@@ -12,6 +12,8 @@ import { ApprovalCard } from './Approvals.tsx';
 /** Something other than a held write that waits for the user, on a machine or in the app. */
 export type Notice =
   | { kind: 'vault'; server: ServerState }
+  /** The VM is stopped, or its parts were installed by another version of Anchi. */
+  | { kind: 'room'; server: ServerState; outdated: boolean }
   | { kind: 'connection'; server: ServerState }
   | { kind: 'upgrade'; server: ServerState; version: string }
   | { kind: 'update'; update: ReleaseUpdate };
@@ -40,8 +42,13 @@ export function attention(
     const setup = fleet[server.name]?.setup;
     if (server.status === 'error' || server.status === 'needs-setup') {
       notices.push({ kind: 'connection', server });
-    } else if (server.status === 'connected' && setup && vaultLocked(setup)) {
-      notices.push({ kind: 'vault', server });
+    } else if (server.status === 'connected' && setup?.installed) {
+      // A machine never set up belongs to Getting started, not here.
+      if (setup.vm !== 'running' || setup.guestOutdated) {
+        notices.push({ kind: 'room', server, outdated: setup.vm === 'running' });
+      } else if (vaultLocked(setup)) {
+        notices.push({ kind: 'vault', server });
+      }
     }
     if (server.newer && server.install === 'release' && !server.upgrading) {
       notices.push({ kind: 'upgrade', server, version: server.newer });
@@ -149,27 +156,41 @@ function NoticeCard({ notice: n, onPostpone }: { notice: Notice; onPostpone: () 
   let detail: string;
   let actions: React.ReactNode;
   switch (n.kind) {
-    case 'vault': {
+    case 'vault':
+    case 'room': {
+      const room = n.kind === 'room';
       icon = 'lock';
-      title = `The vault on ${where(n.server)} is locked`;
-      detail =
-        'Agents there cannot use your accounts until it is unlocked. Nothing was lost: a restart locks it.';
-      const unlock = async () => {
+      title = !room
+        ? `The vault on ${where(n.server)} is locked`
+        : n.outdated
+          ? `The secure room on ${where(n.server)} needs an update`
+          : `The secure room on ${where(n.server)} is stopped`;
+      detail = !room
+        ? 'Agents there cannot use your accounts until it is unlocked. Nothing was lost: a restart locks it.'
+        : n.outdated
+          ? 'It was set up by another version of Anchi. Updating keeps agents, history and accounts.'
+          : 'It stops when the machine restarts. Agents cannot start a task until it runs again.';
+      // Starting, updating and unlocking are one operation, confirmed in a system dialog.
+      const prepare = async () => {
         setBusy(true);
         const call = machineCall(n.server.name);
-        const done = await act(async () => {
-          const status = await call('setup.status');
-          return call('setup.prepare', {
-            runtime: status.preparedRuntimes?.[0] ?? 'codex',
-            confirm: true,
-          });
-        }, 'Vault unlocked');
+        const done = await act(
+          async () => {
+            const status = await call('setup.status');
+            return call('setup.prepare', {
+              runtime: status.preparedRuntimes?.[0] ?? 'codex',
+              confirm: true,
+            });
+          },
+          room ? 'Secure room ready' : 'Vault unlocked',
+        );
         setBusy(false);
         if (done) vaultUnlocked();
       };
+      const verb = !room ? 'Unlock' : n.outdated ? 'Update' : 'Start';
       actions = (
-        <button type="button" className="btn" disabled={busy} onClick={() => void unlock()}>
-          {busy ? 'Unlocking…' : 'Unlock'}
+        <button type="button" className="btn" disabled={busy} onClick={() => void prepare()}>
+          {busy ? 'Working…' : verb}
         </button>
       );
       break;

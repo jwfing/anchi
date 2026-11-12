@@ -5,6 +5,7 @@ import { Sidebar, TeamList } from '../src/renderer/App.tsx';
 import { machineCall } from '../src/renderer/api.ts';
 import { EMPTY_MODEL, reduceFleet, type Fleet } from '../src/renderer/model.ts';
 import { attention, attentionCount } from '../src/renderer/views/NeedsYou.tsx';
+import { startChecklist } from '../src/renderer/views/Starting.tsx';
 
 const agent: AgentSummary = {
   id: 'dev',
@@ -311,5 +312,71 @@ describe('needs you', () => {
     expect(out).toContain('>Vault locked<');
     expect(out).not.toContain('>Protected<');
     expect(out).toContain('aria-label="Needs you, 1 waiting" aria-current="page"');
+  });
+});
+
+describe('starting', () => {
+  const ready = { vm: 'running', installed: true, vaultUnlocked: true } as never;
+  const states = (...args: Parameters<typeof startChecklist>) =>
+    startChecklist(...args).map((c) => `${c.id}:${c.state}`);
+
+  it('waits for everything below the part that is not up yet', () => {
+    expect(states({ status: 'connecting' }, undefined, 0)).toEqual([
+      'service:now',
+      'room:wait',
+      'vault:wait',
+      'agents:wait',
+    ]);
+    expect(states({ status: 'connected' }, undefined, 2)).toEqual([
+      'service:done',
+      'room:now',
+      'vault:wait',
+      'agents:done',
+    ]);
+    expect(states({ status: 'connected' }, ready, 2)).toEqual([
+      'service:done',
+      'room:done',
+      'vault:done',
+      'agents:done',
+    ]);
+  });
+
+  it('says which part failed: the service, a stopped secure room, or a locked vault', () => {
+    expect(states({ status: 'error' }, ready, 2)[0]).toBe('service:fail');
+    expect(startChecklist({ status: 'needs-setup' }, undefined, 0)[0]!.status).toBe(
+      'Not installed',
+    );
+    const stopped = { vm: 'stopped', installed: true, vaultUnlocked: true } as never;
+    expect(states({ status: 'connected' }, stopped, 1).slice(1, 3)).toEqual([
+      'room:fail',
+      'vault:wait',
+    ]);
+    expect(startChecklist({ status: 'connected' }, stopped, 1)[1]!.status).toBe('Stopped');
+    const locked = { vm: 'running', installed: true, vaultUnlocked: false } as never;
+    expect(states({ status: 'connected' }, locked, 1).slice(1, 3)).toEqual([
+      'room:done',
+      'vault:fail',
+    ]);
+  });
+});
+
+describe('secure room notices', () => {
+  const local = { name: 'local', label: 'local', status: 'connected' as const };
+  const kinds = (setup: object) =>
+    attention({ local: { ...EMPTY_MODEL, setup: setup as never } }, [local], null).notices.map(
+      (n) => (n.kind === 'room' ? `room:${n.outdated ? 'outdated' : 'stopped'}` : n.kind),
+    );
+
+  it('asks to start a stopped secure room or update an outdated one, before the vault', () => {
+    expect(kinds({ vm: 'stopped', installed: true, vaultUnlocked: false })).toEqual([
+      'room:stopped',
+    ]);
+    expect(
+      kinds({ vm: 'running', installed: true, guestOutdated: true, vaultUnlocked: false }),
+    ).toEqual(['room:outdated']);
+  });
+
+  it('leaves a machine that was never set up to the guide', () => {
+    expect(kinds({ vm: 'missing', installed: false, vaultUnlocked: false })).toEqual([]);
   });
 });

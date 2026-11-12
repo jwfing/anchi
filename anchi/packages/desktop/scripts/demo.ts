@@ -342,7 +342,10 @@ const server = createServer((socket) => {
     return (answer as (p: unknown) => unknown)(params);
   });
 });
-await new Promise<void>((ready) => server.listen(join(home, 'run', 'daemon.sock'), ready));
+// ANCHI_DEMO_DOWN leaves no daemon to connect to, to look at the window while one is missing.
+if (!process.env.ANCHI_DEMO_DOWN) {
+  await new Promise<void>((ready) => server.listen(join(home, 'run', 'daemon.sock'), ready));
+}
 
 const shot = join(home, 'desktop.png');
 const steps = join(home, 'steps.json');

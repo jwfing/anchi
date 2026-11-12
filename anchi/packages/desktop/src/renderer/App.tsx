@@ -30,6 +30,7 @@ import { DeleteAgentDialog } from './views/DeleteAgent.tsx';
 import { attention, attentionCount, NeedsYouView } from './views/NeedsYou.tsx';
 import { BuilderView } from './views/Builder.tsx';
 import { type SettingsSection, SettingsView } from './views/Settings.tsx';
+import { StartingView } from './views/Starting.tsx';
 import { onboarded, setOnboarded, WelcomeView } from './views/Welcome.tsx';
 import { welcomeStep } from '@anchi/core/welcome';
 import { UsageView } from './views/Usage.tsx';
@@ -145,19 +146,21 @@ export function App() {
         )}
       </div>
       <div className="body">
-        <Sidebar
-          fleet={fleet}
-          connections={connections}
-          selected={server.name}
-          view={view}
-          waiting={waiting}
-          setView={setView}
-          onSelect={openAgent}
-          onBuilder={(name) => {
-            selectServer(name);
-            setView({ kind: 'builder' });
-          }}
-        />
+        {view.kind !== 'welcome' && (
+          <Sidebar
+            fleet={fleet}
+            connections={connections}
+            selected={server.name}
+            view={view}
+            waiting={waiting}
+            setView={setView}
+            onSelect={openAgent}
+            onBuilder={(name) => {
+              selectServer(name);
+              setView({ kind: 'builder' });
+            }}
+          />
+        )}
         <ScopedView
           key={`${server.name}:${server.status}`}
           server={server}
@@ -347,10 +350,12 @@ function Protection({
 }) {
   const connected = connections.filter((s) => s.status === 'connected');
   const only = connections.length === 1 ? connections[0] : undefined;
+  // A locked vault or a stopped secure room: agents there cannot work until it is seen to.
   const locked = connected.filter((s) => {
     const setup = fleet[s.name]?.setup;
-    return setup && vaultLocked(setup);
+    return setup?.installed && (vaultLocked(setup) || setup.vm !== 'running');
   });
+  const stopped = locked.some((s) => fleet[s.name]?.setup?.vm !== 'running');
   const agents = connected.reduce(
     (n, s) => n + (fleet[s.name]?.agents ?? []).filter((a) => a.id !== BUILDER && !a.peer).length,
     0,
@@ -362,9 +367,17 @@ function Protection({
     : `${connected.length}/${connections.length} machines`;
   const state = only ? only.status : connected.length ? 'connected' : 'error';
   const ok = state === 'connected' && !locked.length;
-  const title = ok ? 'Protected' : locked.length ? 'Vault locked' : 'Not connected';
+  const title = ok
+    ? 'Protected'
+    : locked.length
+      ? stopped
+        ? 'Secure room stopped'
+        : 'Vault locked'
+      : 'Not connected';
   const detail = locked.length
-    ? 'Agents cannot use your accounts'
+    ? stopped
+      ? 'Agents cannot start tasks'
+      : 'Agents cannot use your accounts'
     : state === 'connected'
       ? `${place} · ${agents} ${agents === 1 ? 'agent' : 'agents'} sealed`
       : `${place} · ${only ? only.status : 'none connected'}`;
@@ -665,7 +678,9 @@ function ScopedView({
               <span className="small muted">Tasks belong to the selected machine</span>
             </div>
           )}
-        <ConnectionBanner onOpen={() => setView({ kind: 'settings', section: 'machines' })} />
+        {(view.kind === 'settings' || view.kind === 'inbox') && (
+          <ConnectionBanner onOpen={() => setView({ kind: 'settings', section: 'machines' })} />
+        )}
         <div className="machine-body">
           {view.kind === 'settings' ? (
             <SettingsView section={view.section} />
@@ -683,10 +698,7 @@ function ScopedView({
               }
             />
           ) : server.status !== 'connected' ? (
-            <main className="main empty">
-              {sanitizeLine(server.label)} is {server.status}. Connect it in Settings to open tasks
-              and make changes.
-            </main>
+            <StartingView />
           ) : (
             <>
               {view.kind === 'agent' && <AgentView key={view.agentId} agentId={view.agentId} />}

@@ -10,7 +10,7 @@ import {
 import type { Notifications, SetupStatus } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { BUILDER, useApp } from '../App.tsx';
-import { Icon } from '../ui.tsx';
+import { accountName, Icon } from '../ui.tsx';
 import { Runtimes, ServerCard } from './Settings.tsx';
 
 /**
@@ -61,8 +61,8 @@ const STARTERS = [
 export function WelcomeView({ onFinish }: { onFinish: () => void }) {
   const { model, server, act, setView, call } = useApp();
   const [status, setStatus] = useState<SetupStatus>();
-  // A remote server in use was chosen on purpose: start at preparing it.
-  const [machineChosen, setMachineChosen] = useState(server.name !== 'local');
+  const [machines, setMachines] = useState(false);
+  const [details, setDetails] = useState(false);
   const [lines, setLines] = useState<string[]>([]);
   const [preparing, setPreparing] = useState(false);
 
@@ -92,9 +92,11 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
 
   const agents = model.agents.filter((a) => a.id !== BUILDER);
   const step = status ? welcomeStep(status, model.agents, Object.values(model.tasks)) : undefined;
-  const stage: Stage | 'done' =
-    !machineChosen || server.status !== 'connected' || !step ? 'machine' : stageFor(step);
-  const index = stage === 'done' ? STAGES.length : STAGES.findIndex((s) => s.id === stage);
+  const stage: Stage | 'done' = server.status !== 'connected' || !step ? 'machine' : stageFor(step);
+  // The three cards: the secure room (with where it runs), an AI account, the first agent.
+  const at = stage === 'done' ? 3 : stage === 'start' ? 2 : stage === 'runtime' ? 1 : 0;
+  const state = (n: number) => (n < at ? 'done' : n === at ? 'now' : 'later');
+  const where = server.name === 'local' ? 'this computer' : sanitizeLine(server.label);
 
   const prepare = async () => {
     if (!status) return;
@@ -127,160 +129,269 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
     setView({ kind: 'agent', agentId: agent.id });
   };
 
+  const mark = (n: number) => (
+    <span className={`step-mark step-${state(n)}`}>
+      {state(n) === 'done' ? <Icon name="check" size={14} /> : n + 1}
+    </span>
+  );
+  const finish = () => {
+    setOnboarded(server.name);
+    onFinish();
+  };
+
   return (
-    <main className="main page scroll welcome">
-      <div className="row between">
-        <h1>Getting started</h1>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            setOnboarded(server.name);
-            onFinish();
-          }}
-        >
-          {stage === 'done' ? 'Go to your team' : 'Skip for now'}
-        </button>
-      </div>
-      <ol className="stepper">
-        {STAGES.map((s, i) => (
-          <li
-            key={s.id}
-            className={i < index ? 'step-done' : i === index ? 'step-now' : 'step-later'}
-            aria-current={i === index ? 'step' : undefined}
-          >
-            <span className="step-mark">{i < index ? <Icon name="check" size={14} /> : i + 1}</span>
-            {s.title}
-          </li>
-        ))}
-      </ol>
-
-      {stage === 'machine' && (
-        <>
-          <p className="muted">
-            Anchi keeps its agents, credentials and task cells on a server. Start with this
-            computer; you can add a remote server now or later.
-          </p>
-          <ServerCard />
-          <button
-            type="button"
-            className="btn btn-primary runtime-action"
-            disabled={server.status !== 'connected'}
-            onClick={() => setMachineChosen(true)}
-          >
-            {server.status === 'connected'
-              ? `Continue with ${server.name}`
-              : server.status === 'error'
-                ? `${server.name} is not available: use another server above`
-                : `Waiting for ${server.name}…`}
+    <main className="main welcome">
+      <aside className="welcome-promise">
+        <div className="col gap-m">
+          <h1>Agents that work for you, inside a sealed room.</h1>
+          <Promise
+            icon="key"
+            title="Your accounts stay in a vault"
+            text="Agents use GitHub or Gmail through Anchi. They never see the password or the token."
+          />
+          <Promise
+            icon="lock"
+            title="Every task runs in its own sealed cell"
+            text="It cannot read your files unless you share a folder with it."
+          />
+          <Promise
+            icon="shield"
+            title="Risky actions wait for you"
+            text="Sending, posting and merging ask first. You approve or deny in one click."
+          />
+        </div>
+        <span className="small muted">
+          Runs on {where}.{' '}
+          <button type="button" className="link" onClick={() => setMachines(!machines)}>
+            {machines ? 'Hide machines' : 'Use another machine'}
           </button>
-        </>
-      )}
+        </span>
+      </aside>
+      <div className="welcome-steps scroll">
+        <div className="row between">
+          <div className="col gap-s">
+            <h2 className="welcome-title">Three steps to your first agent</h2>
+            <span className="muted">Nothing here needs a terminal.</span>
+          </div>
+          <button type="button" className="btn" onClick={finish}>
+            {stage === 'done' ? 'Go to your agents' : 'Skip for now'}
+          </button>
+        </div>
 
-      {stage === 'prepare' && status && (
-        <section className="card">
-          <h2>Prepare {server.name === 'local' ? 'this computer' : server.name}</h2>
-          {status.host?.missing.length ? (
-            <>
-              <p>Anchi needs {status.host.missing.join(', ')} first.</p>
-              <pre className="mono small">{status.host.installHint}</pre>
-              <button type="button" className="btn runtime-action" onClick={refresh}>
-                Check again
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="small muted">
-                {nextSetupAction(status) === 'vm-start'
-                  ? 'The Anchi VM is stopped. Preparing starts it.'
-                  : nextSetupAction(status) === 'install'
-                    ? server.name === 'local'
-                      ? 'Preparing installs the Anchi VM, its services and a runtime image. The first time takes several minutes.'
-                      : 'Preparing installs the Anchi services, the vault and a runtime image on the server. The first time takes several minutes.'
-                    : 'Preparing unlocks the vault that holds your credentials.'}
-              </p>
-              <button
-                type="button"
-                className="btn btn-primary runtime-action"
-                disabled={preparing || !!status.preparing}
-                onClick={() => void prepare()}
-              >
-                {preparing || status.preparing ? 'Preparing…' : 'Prepare'}
-              </button>
-              {(preparing || status.preparing || lines.length > 0) && (
-                <pre className="setup-log mono small" aria-live="polite">
-                  {lines.slice(-12).join('\n') || 'Starting…'}
-                </pre>
+        {(machines || server.status !== 'connected') && (
+          <section className="card">
+            <h3>Where Anchi runs</h3>
+            <p className="small muted">
+              Anchi keeps its agents, accounts and task cells on one machine. Start with this
+              computer; a remote server can be added now or later.
+            </p>
+            <ServerCard />
+          </section>
+        )}
+
+        <section
+          className={`step-card step-card-${state(0)}`}
+          aria-current={at === 0 ? 'step' : undefined}
+        >
+          {mark(0)}
+          <div className="col grow gap-s min0">
+            <div className="row between">
+              <h3>{at > 0 ? 'The secure room is ready' : 'Set up the secure room'}</h3>
+              {lines.length > 0 && (
+                <button type="button" className="link small" onClick={() => setDetails(!details)}>
+                  {details ? 'Hide details' : 'Show details'}
+                </button>
               )}
-            </>
-          )}
-        </section>
-      )}
-
-      {stage === 'runtime' && status && (
-        <>
-          <p className="muted">
-            Agents run on Codex (a ChatGPT login), Claude Code (a Claude subscription token or API
-            key) or Hermes (any OpenAI-compatible endpoint). One is enough to start.
-          </p>
-          <Runtimes status={status} server={server.name} onChange={refresh} />
-          {runtimeReady(status) && (
-            <button type="button" className="btn btn-primary runtime-action" onClick={refresh}>
-              Continue
-            </button>
-          )}
-        </>
-      )}
-
-      {stage === 'start' && status && (
-        <section className="card">
-          {agents.length ? (
-            <>
-              <h2>Give @{agents[0]!.id} a first task</h2>
-              <p className="small muted">
-                Each runs in its own cell and shows up in the agent's conversation.
-              </p>
-              <div className="starters">
-                {STARTERS.map((s) => (
-                  <button
-                    type="button"
-                    key={s.label}
-                    className="starter"
-                    onClick={() => void giveTask(s.text)}
-                  >
-                    <span className="strong">{s.label}</span>
-                    <span className="small muted">{s.text.split('\n')[0]}</span>
+            </div>
+            {server.status !== 'connected' ? (
+              <span className="small muted">
+                {server.status === 'error'
+                  ? `Anchi cannot reach ${where}. Choose a machine above.`
+                  : `Starting Anchi on ${where}…`}
+              </span>
+            ) : at > 0 ? (
+              <span className="small muted">
+                The sealed space agents run in, and the vault that holds your accounts, on {where}.
+              </span>
+            ) : status?.host?.missing.length ? (
+              <>
+                <span>Anchi needs {status.host.missing.join(', ')} first.</span>
+                <pre className="mono small">{status.host.installHint}</pre>
+                <div className="row">
+                  <button type="button" className="btn" onClick={refresh}>
+                    Check again
                   </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <h2>Create a starter agent</h2>
-              <p className="small muted">
-                @dev runs on {suggestedRuntime(status)} with no connectors and no access to your
-                files. Change it later in its Settings tab, or describe other agents to the builder.
-              </p>
-              <button
-                type="button"
-                className="btn btn-primary runtime-action"
-                onClick={() => void startAgent()}
-              >
-                Create @dev
-              </button>
-            </>
-          )}
+                </div>
+              </>
+            ) : (
+              status && (
+                <>
+                  <span className="small muted">
+                    {nextSetupAction(status) === 'vm-start'
+                      ? 'The secure room is stopped. Setting up starts it.'
+                      : nextSetupAction(status) === 'install'
+                        ? `Installs the sealed space agents run in, the vault and the gatekeeper on ${where}. The first time takes several minutes.`
+                        : 'Unlocks the vault that holds your accounts.'}
+                  </span>
+                  <div className="row gap">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={preparing || !!status.preparing}
+                      onClick={() => void prepare()}
+                    >
+                      {preparing || status.preparing ? 'Setting up…' : 'Set up'}
+                    </button>
+                    <span className="small muted">
+                      Anchi asks once before it installs anything.
+                    </span>
+                  </div>
+                  {(preparing || status.preparing) && (
+                    <div className="progress-bar" role="progressbar" aria-label="Setting up">
+                      <span />
+                    </div>
+                  )}
+                </>
+              )
+            )}
+            {details && lines.length > 0 && (
+              <pre className="setup-log mono small" aria-live="polite">
+                {lines.slice(-12).join('\n')}
+              </pre>
+            )}
+            {(preparing || status?.preparing) && !details && lines.length > 0 && (
+              <span className="small muted ellipsis" aria-live="polite">
+                {lines.at(-1)}
+              </span>
+            )}
+          </div>
         </section>
-      )}
 
-      {stage === 'done' && (
-        <section className="card">
-          <h2>You are set up</h2>
-          <p className="small muted">
-            Your team is ready. Describe new agents to the builder, or give an agent a task.
-          </p>
+        <section
+          className={`step-card step-card-${state(1)}`}
+          aria-current={at === 1 ? 'step' : undefined}
+        >
+          {mark(1)}
+          <div className="col grow gap-s min0">
+            <h3>{at > 1 ? 'An AI account is connected' : 'Sign in to an AI account'}</h3>
+            <span className="small muted">
+              {at < 1
+                ? 'Available as soon as the secure room is ready.'
+                : 'Agents think with an account you already have: ChatGPT, Claude, or any OpenAI-compatible provider. One is enough.'}
+            </span>
+            {at === 1 && status && (
+              <>
+                <Runtimes status={status} server={server.name} onChange={refresh} />
+                {runtimeReady(status) && (
+                  <div className="row">
+                    <button type="button" className="btn btn-primary" onClick={refresh}>
+                      Continue
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </section>
-      )}
+
+        <section
+          className={`step-card step-card-${state(2)}`}
+          aria-current={at === 2 ? 'step' : undefined}
+        >
+          {mark(2)}
+          <div className="col grow gap-s min0">
+            <h3>
+              {at > 2
+                ? 'You are set up'
+                : agents.length
+                  ? `Give ${agents[0]!.id} a first task`
+                  : 'Meet your first agent'}
+            </h3>
+            {at < 2 && (
+              <span className="small muted">
+                Pick a ready-made agent and give it a first task. No folder or account is shared.
+              </span>
+            )}
+            {at === 2 &&
+              status &&
+              (agents.length ? (
+                <>
+                  <span className="small muted">
+                    Each runs in its own cell and shows up in the agent's conversation.
+                  </span>
+                  <div className="starters">
+                    {STARTERS.map((s) => (
+                      <button
+                        type="button"
+                        key={s.label}
+                        className="starter"
+                        onClick={() => void giveTask(s.text)}
+                      >
+                        <span className="strong">{s.label}</span>
+                        <span className="small muted">{s.text.split('\n')[0]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="small muted">
+                    @dev thinks with {accountName(suggestedRuntime(status))}, with no connections
+                    and no access to your files. Change it later, or describe other agents under New
+                    agent.
+                  </span>
+                  <div className="row">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void startAgent()}
+                    >
+                      Create @dev
+                    </button>
+                  </div>
+                </>
+              ))}
+            {at > 2 && (
+              <span className="small muted">
+                Your agents are ready. Describe new ones under New agent, or give one a task.
+              </span>
+            )}
+          </div>
+        </section>
+
+        <div className="recovery">
+          <Icon name="key" size={18} />
+          <span className="col grow gap-xs">
+            <span className="strong">Keep a copy of your recovery key</span>
+            <span className="small">
+              <span className="mono">~/.config/anchi/vault.key</span> on {where} is the only way to
+              read the accounts you connect. Back it up once the secure room is set up.
+            </span>
+          </span>
+        </div>
+      </div>
     </main>
+  );
+}
+
+function Promise({
+  icon,
+  title,
+  text,
+}: {
+  icon: 'key' | 'lock' | 'shield';
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="row gap top">
+      <span className="template-icon promise-icon">
+        <Icon name={icon} size={18} />
+      </span>
+      <span className="col gap-xs">
+        <span className="strong">{title}</span>
+        <span className="small muted">{text}</span>
+      </span>
+    </div>
   );
 }

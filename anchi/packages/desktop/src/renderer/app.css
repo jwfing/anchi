@@ -1595,51 +1595,140 @@ h2 {
   max-width: 280px;
 }
 
+/* Getting started: the promise on the left, three steps on the right. */
 .welcome {
-  max-width: 980px;
-}
-.stepper {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.stepper li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
+  flex-direction: row;
   background: var(--surface);
-  font-size: 13px;
+}
+.welcome-promise {
+  width: 440px;
+  flex: none;
+  padding: 44px 40px 28px;
+  background: var(--ground);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+}
+.welcome-promise h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  line-height: 1.25;
+}
+.promise-icon {
+  flex: none;
+  margin: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.welcome-steps {
+  flex: 1;
+  min-width: 0;
+  padding: 40px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.welcome-steps > * {
+  flex: none;
+}
+.welcome-title {
+  margin: 0;
+  font-size: 22px;
+}
+.welcome-steps .card p {
+  margin: 0;
+}
+.step-card {
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.step-card-now {
+  background: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.step-card-later {
+  color: var(--muted);
 }
 .step-mark {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
+  flex: none;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--subtle);
+  border: 1px solid var(--line-strong);
   font-weight: 600;
+  font-size: 13px;
 }
-.step-now {
-  border-color: var(--accent) !important;
-  font-weight: 600;
+.step-mark.step-now {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
 }
-.step-now .step-mark {
+.step-mark.step-done {
   background: var(--accent);
-  color: var(--surface);
+  border-color: var(--accent);
+  color: #fff;
 }
-.step-done .step-mark {
-  background: var(--accent-soft);
-  color: var(--accent);
+.step-card .accounts .grid3 {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
-.step-later {
-  color: var(--muted);
+.progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+/* How long setting up takes is not known: the bar moves, it does not fill. */
+.progress-bar span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  animation: slide 1.6s ease-in-out infinite alternate;
+}
+@keyframes slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(186%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar span {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+.recovery {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--approval-line);
+  border-radius: 12px;
+  background: var(--approval-soft);
+  color: var(--approval);
+}
+.recovery .small {
+  color: var(--ink-2);
+}
+@media (max-width: 1100px) {
+  .welcome-promise {
+    display: none;
+  }
 }
 .setup-log {
   margin: 0;
@@ -2358,4 +2447,75 @@ h3 {
   font-size: 13px;
   color: var(--muted);
   padding: 6px 0;
+}
+
+/* While a machine is not up: what is starting, in order. */
+.starting {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.starting-col {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+.starting-col h1 {
+  margin: 0;
+  font-size: 24px;
+  text-align: center;
+}
+.checklist {
+  align-self: stretch;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+}
+.check + .check {
+  border-top: 1px solid var(--line);
+}
+.check-mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.check-done .check-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check-fail .check-mark {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.check-now .check-mark {
+  border-color: transparent;
+}
+.check-wait .strong {
+  color: var(--muted);
+}
+.check-status {
+  color: var(--muted);
+  font-weight: 500;
+}
+.check-done .check-status {
+  color: var(--accent);
+}
+.check-fail .check-status {
+  color: var(--danger);
 }
