@@ -3,7 +3,7 @@
 //   node --import ./anchi/node_modules/tsx/dist/loader.mjs anchi/packages/desktop/scripts/demo.ts
 // writes docs/assets/desktop.png and landing/dist/desktop.png.
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -169,8 +169,29 @@ const status: SetupStatus = {
     { id: 'github', connected: true, account: 'example' },
     { id: 'aws', connected: true, account: '123456789012', profile: 'example' },
   ],
-  services: [],
-  googleClient: false,
+  services: [
+    {
+      id: 'gmail',
+      connected: true,
+      mode: 'ask',
+      account: 'ana@example.com',
+      accounts: [],
+      reauthRequired: false,
+      revocationPending: false,
+    },
+    ...(['drive', 'notion', 'slack', 'x', 'reddit'] as const).map((id) => ({
+      id,
+      connected: false,
+      mode: 'ask' as const,
+      account: null,
+      accounts: [],
+      reauthRequired: false,
+      revocationPending: false,
+    })),
+  ],
+  googleClient: true,
+  xClient: false,
+  redditClient: false,
   workspaces: false,
 };
 const skills: SkillInfo[] = [];
@@ -202,20 +223,25 @@ await new Promise<void>((ready) => server.listen(join(home, 'run', 'daemon.sock'
 
 const shot = join(home, 'desktop.png');
 const steps = join(home, 'steps.json');
+// ANCHI_DEMO_STEPS names a steps file for drive.mjs to run against the stand-in daemon instead of
+// the documented screenshot, to look at other views; nothing in the repository is written then.
+const custom = process.env.ANCHI_DEMO_STEPS;
 writeFileSync(
   steps,
-  JSON.stringify([
-    { size: [1440, 900, 2] },
-    { waitFor: '.sidebar' },
-    { wait: 1500 },
-    { clickText: '@developer' },
-    { waitFor: '.task-card-head' },
-    { wait: 800 },
-    { eval: "[...document.querySelectorAll('.task-card-head')].at(-1).click()" },
-    { waitFor: '.panel .t-message' },
-    { wait: 800 },
-    { shot },
-  ]),
+  custom
+    ? readFileSync(custom, 'utf8')
+    : JSON.stringify([
+        { size: [1440, 900, 2] },
+        { waitFor: '.sidebar' },
+        { wait: 1500 },
+        { clickText: '@developer' },
+        { waitFor: '.task-card-head' },
+        { wait: 800 },
+        { eval: "[...document.querySelectorAll('.task-card-head')].at(-1).click()" },
+        { waitFor: '.panel .t-message' },
+        { wait: 800 },
+        { shot },
+      ]),
 );
 // Asynchronous, so this process keeps answering the app while drive.mjs runs it.
 const code = await new Promise<number | null>((done) =>
@@ -226,6 +252,7 @@ const code = await new Promise<number | null>((done) =>
 );
 server.close();
 if (code !== 0) throw new Error(`drive.mjs exited with ${code}`);
+if (custom) process.exit(0);
 for (const out of ['docs/assets/desktop.png', 'landing/dist/desktop.png']) {
   copyFileSync(shot, join(repo, out));
   console.log(out);

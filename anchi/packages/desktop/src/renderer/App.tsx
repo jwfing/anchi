@@ -29,7 +29,7 @@ import { AgentView } from './views/Agent.tsx';
 import { DeleteAgentDialog } from './views/DeleteAgent.tsx';
 import { ApprovalsView } from './views/Approvals.tsx';
 import { BuilderView } from './views/Builder.tsx';
-import { SettingsView } from './views/Settings.tsx';
+import { type SettingsSection, SettingsView } from './views/Settings.tsx';
 import { onboarded, setOnboarded, WelcomeView } from './views/Welcome.tsx';
 import { welcomeStep } from '@anchi/core/welcome';
 import { UsageView } from './views/Usage.tsx';
@@ -42,7 +42,7 @@ export type View =
   | { kind: 'builder' }
   | { kind: 'approvals' }
   | { kind: 'usage' }
-  | { kind: 'settings' }
+  | { kind: 'settings'; section?: SettingsSection }
   | { kind: 'welcome' };
 
 export interface AppContext {
@@ -308,7 +308,7 @@ export function Sidebar({
             ? `${only.label} is ${only.status}. Open settings`
             : `${connected} of ${connections.length} machines connected. Open settings`
         }
-        onClick={() => setView({ kind: 'settings' })}
+        onClick={() => setView({ kind: 'settings', section: 'machines' })}
       >
         <span className={`dot dot-${only ? only.status : connected ? 'connected' : 'error'}`} />
         <span className="small muted ellipsis">
@@ -606,11 +606,11 @@ function ScopedView({
             <span className="small muted">Tasks belong to the selected machine</span>
           </div>
         )}
-        <ConnectionBanner onOpen={() => setView({ kind: 'settings' })} />
+        <ConnectionBanner onOpen={() => setView({ kind: 'settings', section: 'machines' })} />
         {server.status === 'connected' && <VaultBanner />}
         <div className="machine-body">
           {view.kind === 'settings' ? (
-            <SettingsView />
+            <SettingsView section={view.section} />
           ) : view.kind === 'welcome' ? (
             <WelcomeView
               onFinish={() =>
@@ -685,7 +685,7 @@ function ConnectionBanner({ onOpen }: { onOpen: () => void }) {
           : `Not connected to ${sanitizeLine(server.label)}${server.error ? `: ${sanitizeLine(server.error)}` : ''}`}
       </span>
       <button type="button" className="btn btn-small" onClick={onOpen}>
-        Server settings
+        Machines
       </button>
     </div>
   );

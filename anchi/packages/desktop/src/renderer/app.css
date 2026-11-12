@@ -1808,3 +1808,65 @@ h2 {
   min-width: 220px;
   margin: 0;
 }
+
+/* Settings: its sections beside the page of the one that is open. */
+.settings {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.settings-nav {
+  width: 220px;
+  flex: none;
+  padding: 24px 10px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav h1 {
+  margin: 0 0 10px;
+  padding: 0 10px;
+  font-size: 18px;
+}
+.settings-page {
+  max-width: 980px;
+}
+.settings-page h1 {
+  margin: 0;
+}
+.settings-page p {
+  margin: 0;
+}
+.row.top {
+  align-items: flex-start;
+}
+.gap-s {
+  gap: 6px;
+}
+.banner-ok {
+  background: var(--accent-soft);
+  color: var(--ink-2);
+}
+.accounts .runtime {
+  background: var(--surface);
+}
+.connections {
+  padding: 6px 20px;
+}
+.connections .connector-group + .connector-group {
+  border-top: 1px solid var(--line-soft);
+}
+.more > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.more > summary::-webkit-details-marker {
+  display: none;
+}
+.more[open] > summary .team-chevron {
+  transform: rotate(90deg);
+}

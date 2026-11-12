@@ -14,7 +14,8 @@ import {
   type TokenConnectorId,
 } from '@anchi/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useApp } from '../App.tsx';
+import { MachinePicker, useApp } from '../App.tsx';
+import type { ReleaseUpdate } from '../../shared.ts';
 import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { message, type Call } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
@@ -23,8 +24,39 @@ import { Icon } from '../ui.tsx';
 import { guideUrl, needsOAuthApp, TOKEN_SOURCE } from '../guides.ts';
 import { onVaultUnlocked, vaultLocked, VaultLockedCard } from '../vault.tsx';
 
-export function SettingsView() {
-  const { act, server, setView, call } = useApp();
+/** The sections of Settings, in the order of its navigation. */
+export const SETTINGS_SECTIONS = [
+  { id: 'accounts', label: 'AI accounts', icon: 'sparkle' },
+  { id: 'connections', label: 'Connections', icon: 'link' },
+  { id: 'skills', label: 'Skills', icon: 'book' },
+  { id: 'machines', label: 'Machines', icon: 'server' },
+  { id: 'security', label: 'Security & recovery', icon: 'key' },
+  { id: 'about', label: 'About & updates', icon: 'info' },
+] as const;
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
+
+const SECTION_INTRO: Record<SettingsSection, string> = {
+  accounts: 'The accounts your agents think with. One is enough.',
+  connections:
+    'Accounts your agents can act through. The credentials stay in the vault and Anchi makes the call for the agent.',
+  skills:
+    "Instructions agents can load. Assign them in an agent's Advanced tab. A GitHub skill stays at the commit it was added at until you update it.",
+  machines:
+    'Where your agents run. Most people only need this computer. Each machine keeps its own accounts and vault.',
+  security: 'The parts that keep agents sealed, and how to get back in if something breaks.',
+  about: 'The version of Anchi on this computer and on the selected machine.',
+};
+
+/** Sections whose content belongs to the selected machine; the others are about the app. */
+const MACHINE_SCOPED: readonly SettingsSection[] = [
+  'accounts',
+  'connections',
+  'skills',
+  'security',
+];
+
+export function SettingsView({ section = 'accounts' }: { section?: SettingsSection }) {
+  const { act, server, connections, setView, call } = useApp();
   const [status, setStatus] = useState<SetupStatus>();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const refresh = useCallback(() => {
@@ -35,59 +67,261 @@ export function SettingsView() {
     if (server.status === 'connected') refresh();
   }, [server.status, server.name, refresh]);
   useEffect(() => onVaultUnlocked(refresh), [refresh]);
+  const title = SETTINGS_SECTIONS.find((s) => s.id === section)!.label;
+  const connected = server.status === 'connected';
+  const locked = !!status && vaultLocked(status);
 
   return (
-    <main className="main page scroll">
-      <div className="row between">
-        <h1>Settings · {sanitizeLine(server.label)}</h1>
-        <button type="button" className="btn" onClick={() => setView({ kind: 'welcome' })}>
-          Getting started
-        </button>
-      </div>
-      <ServerCard />
-      {server.status === 'connected' && <PeerSettings key={server.name} />}
-      {server.status === 'connected' && status && (
-        <>
-          <section className="card">
-            <h2>Environment</h2>
-            <dl className="facts">
-              <dt>Guest</dt>
-              <dd>
-                {status.vm}
-                {status.vmSize?.current
-                  ? ` · ${status.vmSize.current.cpus} CPUs · ${status.vmSize.current.memoryGiB} GiB`
-                  : ''}
-              </dd>
-              <dt>Vault</dt>
-              <dd className={status.vaultUnlocked ? 'tone-ok strong' : 'tone-warn strong'}>
-                {status.vaultUnlocked ? 'unlocked' : 'locked'}
-              </dd>
-              <dt>Version</dt>
-              <dd>
-                app {status.appVersion ?? '?'} · guest {status.guestVersion ?? '?'}
-                {status.guestOutdated ? ' · outdated: run anchi setup install' : ''}
-              </dd>
-              <dt>Workspaces</dt>
-              <dd>{status.workspaces ? 'shared' : 'not shared'}</dd>
-            </dl>
-          </section>
-          {vaultLocked(status) ? (
+    <div className="settings">
+      <nav className="settings-nav" aria-label="Settings">
+        <h1>Settings</h1>
+        {SETTINGS_SECTIONS.map((s) => (
+          <button
+            type="button"
+            key={s.id}
+            className={`side-button ${s.id === section ? 'active' : ''}`}
+            aria-current={s.id === section ? 'page' : undefined}
+            onClick={() => setView({ kind: 'settings', section: s.id })}
+          >
+            <Icon name={s.icon} size={17} />
+            <span className="grow ellipsis">{s.label}</span>
+          </button>
+        ))}
+      </nav>
+      <main className="main page scroll settings-page">
+        <div className="row between top">
+          <div className="col gap-s grow">
+            <h1>{title}</h1>
+            <p className="muted">{SECTION_INTRO[section]}</p>
+          </div>
+          {connections.length > 1 && MACHINE_SCOPED.includes(section) && <MachinePicker />}
+        </div>
+        {MACHINE_SCOPED.includes(section) && !connected && (
+          <div className="banner banner-warn">
+            {sanitizeLine(server.label)} is {server.status}. Connect it under Machines to change
+            these settings.
+          </div>
+        )}
+        {section === 'accounts' &&
+          connected &&
+          status &&
+          (locked ? (
             <VaultLockedCard status={status} onUnlocked={refresh} />
           ) : (
-            <>
-              <Runtimes status={status} server={server.name} onChange={refresh} />
-              <div className="grid2">
-                <ProxyConnectors status={status} onChange={refresh} />
-                <Services status={status} onChange={refresh} />
-              </div>
-            </>
-          )}
-        </>
+            <Runtimes status={status} server={server.name} onChange={refresh} />
+          ))}
+        {section === 'connections' &&
+          connected &&
+          status &&
+          (locked ? (
+            <VaultLockedCard status={status} onUnlocked={refresh} />
+          ) : (
+            <Connections status={status} onChange={refresh} />
+          ))}
+        {section === 'skills' && connected && (
+          <Skills skills={skills} local={server.name === 'local'} onChange={refresh} />
+        )}
+        {section === 'machines' && (
+          <>
+            <ServerCard />
+            {connected && (
+              <details className="card more">
+                <summary>
+                  <Icon name="chevron" size={14} className="team-chevron" />
+                  <span className="col grow">
+                    <span className="strong">Link machines into a team</span>
+                    <span className="small muted">
+                      Let agents on different machines hand work to each other
+                    </span>
+                  </span>
+                </summary>
+                <PeerSettings key={server.name} />
+              </details>
+            )}
+          </>
+        )}
+        {section === 'security' && connected && status && (
+          <Security status={status} onChange={refresh} />
+        )}
+        {section === 'about' && <About status={connected ? status : undefined} />}
+      </main>
+    </div>
+  );
+}
+
+/** Proxy connectors and service connectors are one thing to the user: accounts agents act through. */
+export function Connections({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
+  return (
+    <>
+      <section className="card connections">
+        <ProxyConnectors status={status} onChange={onChange} bare />
+        <Services status={status} onChange={onChange} bare />
+      </section>
+      <div className="banner banner-ok">
+        Connecting an account does not give it to any agent. You choose per agent, under Access.
+      </div>
+    </>
+  );
+}
+
+/** The vault, the environment that seals agents, and the way back when a part of it is broken. */
+export function Security({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
+  const { act, call, server } = useApp();
+  const [lines, setLines] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const where = server.name === 'local' ? 'this computer' : sanitizeLine(server.label);
+  useEffect(
+    () =>
+      window.anchi.onNotify((origin, name, params) => {
+        if (origin !== server.name || name !== 'setup') return;
+        const { line } = params as Notifications['setup'];
+        setLines((l) => [...l.slice(-200), sanitizeLine(line)]);
+      }),
+    [server.name],
+  );
+  const repair = async () => {
+    setBusy(true);
+    setLines([]);
+    await act(
+      () =>
+        call('setup.prepare', { runtime: status.preparedRuntimes?.[0] ?? 'codex', confirm: true }),
+      'Environment checked',
+    );
+    setBusy(false);
+    onChange();
+  };
+  const running = status.vm === 'running' && status.installed;
+  return (
+    <>
+      {vaultLocked(status) ? (
+        <VaultLockedCard status={status} onUnlocked={onChange} />
+      ) : (
+        <section className="card">
+          <div className="row between">
+            <h2>Vault</h2>
+            <span className={`tag ${status.vaultUnlocked ? 'tag-ok' : 'tag-off'}`}>
+              {status.vaultUnlocked ? 'Unlocked' : 'Not ready'}
+            </span>
+          </div>
+          <p className="small muted">Holds every account you connected, encrypted.</p>
+          <dl className="facts">
+            <dt>Recovery key</dt>
+            <dd>
+              <span className="mono">~/.config/anchi/vault.key</span> on {where}. It is the only way
+              to read the stored accounts: keep a copy somewhere safe.
+            </dd>
+          </dl>
+        </section>
       )}
-      {server.status === 'connected' && (
-        <Skills skills={skills} local={server.name === 'local'} onChange={refresh} />
-      )}
-    </main>
+      <section className="card">
+        <div className="row between">
+          <h2>Secure room</h2>
+          <span className={`tag ${running ? 'tag-ok' : 'tag-off'}`}>
+            {running ? 'Running' : sanitizeLine(status.vm)}
+          </span>
+        </div>
+        <p className="small muted">The sealed virtual computer agents run in, on {where}.</p>
+        <dl className="facts">
+          <dt>Size</dt>
+          <dd>
+            {status.vmSize?.current
+              ? `${status.vmSize.current.cpus} CPUs · ${status.vmSize.current.memoryGiB} GiB`
+              : 'not reported'}
+          </dd>
+          <dt>Version</dt>
+          <dd>
+            app {status.appVersion ?? '?'} · secure room {status.guestVersion ?? '?'}
+            {status.guestOutdated ? ' · needs an update: use Check & repair' : ''}
+          </dd>
+          <dt>Shared folders</dt>
+          <dd>{status.workspaces ? 'available' : 'not available on this machine'}</dd>
+        </dl>
+        <div className="row gap">
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || !!status.preparing}
+            onClick={() => void repair()}
+          >
+            {busy || status.preparing ? 'Checking…' : 'Check & repair'}
+          </button>
+          <span className="small muted">
+            Starts what is stopped, updates what is outdated and unlocks the vault. Asks first.
+          </span>
+        </div>
+        {(busy || lines.length > 0) && (
+          <pre className="setup-log mono small" aria-live="polite">
+            {lines.slice(-12).join('\n') || 'Starting…'}
+          </pre>
+        )}
+      </section>
+      <section className="card">
+        <h2>Background service</h2>
+        <p className="small muted">
+          Keeps agents and schedules working when this window is closed. Anchi starts it when the
+          app opens. To start it at login, or to stop it, use{' '}
+          <span className="mono">anchi daemon</span> in a terminal.
+        </p>
+      </section>
+    </>
+  );
+}
+
+function About({ status }: { status?: SetupStatus }) {
+  const { server, setView } = useApp();
+  const [update, setUpdate] = useState<ReleaseUpdate | null>(null);
+  useEffect(() => {
+    let current = true;
+    void window.anchi
+      .update()
+      .then((u) => current && setUpdate(u))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, []);
+  return (
+    <>
+      <section className="card">
+        <h2>Anchi</h2>
+        <dl className="facts">
+          <dt>This app</dt>
+          <dd>
+            {update
+              ? `${update.currentVersion} · ${update.version} is available`
+              : 'up to date, or not checked yet'}
+          </dd>
+          <dt>{sanitizeLine(server.label)}</dt>
+          <dd>
+            {server.version ? `Anchi ${sanitizeLine(server.version)}` : 'version not reported'}
+            {status?.guestVersion ? ` · secure room ${sanitizeLine(status.guestVersion)}` : ''}
+          </dd>
+        </dl>
+        {update && (
+          <div className="row gap">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void window.anchi.openExternal(update.url)}
+            >
+              What’s new
+            </button>
+            <span className="small muted">Upgrade a machine under Machines.</span>
+          </div>
+        )}
+      </section>
+      <section className="card">
+        <h2>Getting started</h2>
+        <p className="small muted">
+          Open the guide again to prepare a machine, connect an AI account or create a first agent.
+        </p>
+        <div className="row">
+          <button type="button" className="btn" onClick={() => setView({ kind: 'welcome' })}>
+            Open the guide
+          </button>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -113,11 +347,6 @@ export function Skills({
   };
   return (
     <section className="card">
-      <h2>Skills</h2>
-      <p className="small muted">
-        Instructions agents can load. Assign them in an agent's Settings tab. A GitHub skill stays
-        at the commit it was added at until you update it.
-      </p>
       <form
         className="row gap wrap"
         onSubmit={(e) => {
@@ -273,10 +502,9 @@ export function ServerCard() {
   }, [server.name, connections.length]);
   return (
     <section className="card">
-      <h2>Machines</h2>
       <p className="small muted">
-        Select a machine to manage its runtimes, connectors, services and skills. Your other
-        machines stay connected.
+        Select a machine to manage its AI accounts, connections and skills. Your other machines stay
+        connected.
       </p>
       {connections.map((node) => {
         const active = node.name === server.name;
@@ -418,7 +646,7 @@ function AddServer({
   onCancel: () => void;
   onAdded: (result: { saved: SavedServer; probe: ProbeResult }) => void;
 }) {
-  const [provider, setProvider] = useState<Provider>('instabox');
+  const [provider, setProvider] = useState<Provider>('ssh');
   const [name, setName] = useState('');
   const [where, setWhere] = useState('');
   const [error, setError] = useState('');
@@ -440,22 +668,11 @@ function AddServer({
           .finally(() => setBusy(false));
       }}
     >
-      <div className="segmented" role="group" aria-label="Provider">
-        <button
-          type="button"
-          aria-pressed={provider === 'instabox'}
-          onClick={() => setProvider('instabox')}
-        >
-          instabox (recommended)
-        </button>
-        <button type="button" aria-pressed={provider === 'ssh'} onClick={() => setProvider('ssh')}>
-          Any SSH host
-        </button>
-      </div>
+      <h2>{provider === 'ssh' ? 'Add a machine over SSH' : 'Add an instabox box'}</h2>
       <p className="small muted">
-        {provider === 'instabox'
-          ? 'An instabox machine you are signed in to with the instabox CLI.'
-          : 'A Linux VM from any provider that ssh on this computer reaches with a key (no password prompt), as in ~/.ssh/config.'}
+        {provider === 'ssh'
+          ? 'Any Linux server that ssh on this computer already reaches with a key (no password prompt), as in ~/.ssh/config. Anchi uses your SSH keys and stores no password.'
+          : 'A box you are signed in to with the instabox command line.'}
       </p>
       <div className="grid2">
         <label className="field">
@@ -487,10 +704,21 @@ function AddServer({
           className="btn btn-primary"
           disabled={busy || !name.trim() || !where.trim()}
         >
-          {busy ? 'Connecting and preparing…' : 'Save'}
+          {busy ? 'Checking…' : 'Check and save'}
         </button>
         <button type="button" className="btn" onClick={onCancel}>
           Cancel
+        </button>
+        <span className="grow" />
+        <button
+          type="button"
+          className="link small"
+          onClick={() => {
+            setProvider(provider === 'ssh' ? 'instabox' : 'ssh');
+            setWhere('');
+          }}
+        >
+          {provider === 'ssh' ? 'Other ways: add an instabox box' : 'Add over SSH instead'}
         </button>
       </div>
     </form>
@@ -641,6 +869,8 @@ const RUNTIMES: Record<
   RuntimeId,
   {
     name: string;
+    /** What the user calls the account behind the runtime. */
+    account: string;
     fields?: Field[];
     note: string;
     save: (call: Call, v: Record<string, string>, server: string) => Promise<unknown>;
@@ -648,6 +878,7 @@ const RUNTIMES: Record<
 > = {
   codex: {
     name: 'Codex',
+    account: 'ChatGPT',
     note: "Or import the server machine's own Codex login (codex login).",
     save: (call, _, server) =>
       call('setup.importCodex').catch((err: unknown) => {
@@ -656,6 +887,7 @@ const RUNTIMES: Record<
   },
   claude: {
     name: 'Claude Code',
+    account: 'Claude',
     fields: [
       {
         key: 'token',
@@ -669,6 +901,7 @@ const RUNTIMES: Record<
   },
   hermes: {
     name: 'Hermes',
+    account: 'Other provider',
     fields: [
       { key: 'baseUrl', label: 'Base URL', placeholder: 'https://openrouter.ai/api/v1' },
       { key: 'model', label: 'Model', placeholder: "the endpoint's model id" },
@@ -728,10 +961,7 @@ export function Runtimes({
     buttons.current.get(id)?.focus();
   };
   return (
-    <section className="card">
-      <h2>
-        Runtimes <span className="small muted normal">· on {server}</span>
-      </h2>
+    <section className="accounts">
       <div className="grid3">
         {(Object.keys(RUNTIMES) as RuntimeId[]).map((id) => {
           const rt = RUNTIMES[id];
@@ -739,7 +969,9 @@ export function Runtimes({
           return (
             <div key={id} className="runtime">
               <div className="row between">
-                <span className="strong">{rt.name}</span>
+                <span className="strong">
+                  {rt.account} <span className="small muted normal">· {rt.name}</span>
+                </span>
                 <span className={`tag ${ok ? 'tag-ok' : 'tag-off'}`}>
                   {ok ? 'Connected' : 'Not set up'}
                 </span>
@@ -1078,7 +1310,16 @@ function OAuthAppForm({
   );
 }
 
-function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
+function ProxyConnectors({
+  status,
+  onChange,
+  bare,
+}: {
+  status: SetupStatus;
+  onChange: () => void;
+  /** Inside another card: no card and no heading of its own. */
+  bare?: boolean;
+}) {
   const { act, call } = useApp();
   const [editing, setEditing] = useState<TokenConnectorId | undefined>();
   const buttons = useRef(new Map<string, HTMLButtonElement>());
@@ -1088,10 +1329,7 @@ function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: 
     buttons.current.get(id)?.focus();
   };
   return (
-    <section className="card">
-      <h2>
-        Connectors <span className="small muted normal">· the proxy adds the credential</span>
-      </h2>
+    <Group bare={bare} title="Connectors" note="the proxy adds the credential">
       {CONNECTOR_IDS.map((id: ConnectorId) => {
         const c = byId.get(id);
         const tokenId = (TOKEN_CONNECTOR_IDS as readonly string[]).includes(id)
@@ -1134,7 +1372,7 @@ function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: 
                   {editing === tokenId ? 'Cancel' : 'Connect'}
                 </button>
               ) : (
-                <span className="small muted">anchi setup connector aws</span>
+                <span className="small muted">set up with anchi setup connector aws</span>
               )}
             </div>
             {tokenId && editing === tokenId && (
@@ -1153,7 +1391,7 @@ function ProxyConnectors({ status, onChange }: { status: SetupStatus; onChange: 
           </div>
         );
       })}
-    </section>
+    </Group>
   );
 }
 
@@ -1190,7 +1428,15 @@ const TOKEN_LABEL: Partial<Record<ServiceConnectorId, string>> = {
   slack: 'Slack bot token (xoxb-…)',
 };
 
-export function Services({ status, onChange }: { status: SetupStatus; onChange: () => void }) {
+export function Services({
+  status,
+  onChange,
+  bare,
+}: {
+  status: SetupStatus;
+  onChange: () => void;
+  bare?: boolean;
+}) {
   const { act, call } = useApp();
   const [editing, setEditing] = useState<ServiceConnectorId | undefined>();
   const buttons = useRef(new Map<string, HTMLButtonElement>());
@@ -1219,10 +1465,7 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
     );
   };
   return (
-    <section className="card">
-      <h2>
-        Services <span className="small muted normal">· act for agents, writes auto or ask</span>
-      </h2>
+    <Group bare={bare} title="Services" note="act for agents, writes auto or ask">
       {status.services.map((s) => {
         const tokenLabel = TOKEN_LABEL[s.id];
         const targets = disconnectable(s);
@@ -1289,7 +1532,7 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
                     )
                   }
                 >
-                  auto
+                  Allow
                 </button>
                 <button
                   type="button"
@@ -1301,7 +1544,7 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
                     )
                   }
                 >
-                  ask
+                  Ask first
                 </button>
               </div>
             </div>
@@ -1341,6 +1584,29 @@ export function Services({ status, onChange }: { status: SetupStatus; onChange: 
           </div>
         );
       })}
+    </Group>
+  );
+}
+
+/** A card with its heading, or only its rows when another card holds them. */
+function Group({
+  bare,
+  title,
+  note,
+  children,
+}: {
+  bare?: boolean;
+  title: string;
+  note: string;
+  children: React.ReactNode;
+}) {
+  if (bare) return <>{children}</>;
+  return (
+    <section className="card">
+      <h2>
+        {title} <span className="small muted normal">· {note}</span>
+      </h2>
+      {children}
     </section>
   );
 }
