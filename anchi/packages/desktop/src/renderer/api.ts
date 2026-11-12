@@ -42,5 +42,8 @@ export function message(err: unknown): string {
   if (text.startsWith('GUEST_UNAVAILABLE')) {
     return 'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.';
   }
+  if (text.includes('PEER_NETWORK_NOT_CONFIGURED')) {
+    return 'This machine has no team address yet. Save one under Settings → Machines → Link machines into a team.';
+  }
   return text;
 }

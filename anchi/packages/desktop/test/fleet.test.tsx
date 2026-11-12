@@ -418,6 +418,11 @@ it('says the secure room is not running instead of passing on a command to run',
   expect(message(new Error(raw))).toBe(
     'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.',
   );
+  expect(
+    message(
+      new Error("Error invoking remote method 'anchi:call': Error: PEER_NETWORK_NOT_CONFIGURED"),
+    ),
+  ).toContain('has no team address yet');
   expect(message(new Error("Error invoking remote method 'anchi:call': Error: cancelled"))).toBe(
     'cancelled',
   );

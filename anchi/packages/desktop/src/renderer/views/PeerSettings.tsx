@@ -126,7 +126,14 @@ export function PeerSettings() {
                   void run(async () => {
                     const other = machineCall(target);
                     const own = await call('peers.identity');
-                    const remote = await other('peers.identity');
+                    // The other machine needs an address of its own before it has an identity.
+                    const remote = await other('peers.identity').catch((err: unknown) => {
+                      if (!message(err).includes('PEER_NETWORK_NOT_CONFIGURED')) throw err;
+                      const name = connections.find((c) => c.name === target)?.label ?? target;
+                      throw new Error(
+                        `${sanitizeLine(name)} has no team address yet. Select it above, save its address here, then join.`,
+                      );
+                    });
                     await call('peers.admit', { record: remote });
                     await other('peers.admit', { record: own });
                   });
@@ -135,7 +142,7 @@ export function PeerSettings() {
                 <label className="field grow">
                   Join with a machine
                   <select value={target} onChange={(e) => setTarget(e.target.value)} required>
-                    <option value="">Choose a configured machine</option>
+                    <option value="">Choose a machine that has an address</option>
                     {connections
                       .filter((c) => c.name !== server.name && c.status === 'connected')
                       .map((c) => (
@@ -150,8 +157,8 @@ export function PeerSettings() {
                 </button>
               </form>
               <p className="small muted">
-                Configure networking on both machines first. Join one trusted member to discover the
-                others. Then grant recipients in each agent’s Delegation settings.
+                Save an address on both machines first. Join one trusted member to discover the
+                others. Then choose teammates under each agent’s Access tab.
               </p>
               {directory.nodes.map((n) => (
                 <div className="row gap" key={n.node}>
