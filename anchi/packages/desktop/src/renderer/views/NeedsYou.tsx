@@ -1,7 +1,7 @@
 import { sanitizeLine } from '@anchi/core/sanitize';
 import type { Approval } from '@anchi/protocol';
 import { useMemo, useState } from 'react';
-import type { ReleaseUpdate, ServerState } from '../../shared.ts';
+import type { ReleaseUpdate, ServerState } from '../api.ts';
 import { useApp } from '../App.tsx';
 import { machineCall, message } from '../api.ts';
 import type { Fleet } from '../model.ts';

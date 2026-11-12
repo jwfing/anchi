@@ -15,7 +15,7 @@ import {
 } from '@anchi/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MachinePicker, useApp } from '../App.tsx';
-import type { ReleaseUpdate } from '../../shared.ts';
+import type { ReleaseUpdate } from '../api.ts';
 import type { ProbeResult, SavedServer } from '@anchi/daemon/client';
 import { message, type Call } from '../api.ts';
 import { ConnectorLogo, connectorName } from '../logos.tsx';
@@ -173,7 +173,7 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
   useEffect(
     () =>
       window.anchi.onNotify((origin, name, params) => {
-        if (origin !== server.name || name !== 'setup') return;
+        if (origin !== server.name || (name !== 'setup' && name !== 'reset')) return;
         const { line } = params as Notifications['setup'];
         setLines((l) => [...l.slice(-200), sanitizeLine(line)]);
       }),
@@ -189,6 +189,15 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
     );
     setBusy(false);
     onChange();
+  };
+  const [typed, setTyped] = useState('');
+  const reset = async () => {
+    setBusy(true);
+    setLines([]);
+    const done = await act(() => call('setup.reset', { confirm: typed }), 'Anchi was reset');
+    setBusy(false);
+    setTyped('');
+    if (done) onChange();
   };
   const running = status.vm === 'running' && status.installed;
   return (
@@ -262,6 +271,36 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
           app opens. To start it at login, or to stop it, use{' '}
           <span className="mono">anchi daemon</span> in a terminal.
         </p>
+      </section>
+      <section className="card card-danger">
+        <h2>Reset Anchi on {where}</h2>
+        <p className="small">
+          Deletes the secure room with everything in it: every AI account and connection must be
+          connected again. Agent files, task history and the recovery key are kept, and shared
+          folders on disk are not touched. Refused while a task runs.
+        </p>
+        <form
+          className="row gap wrap"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (typed === 'reset' && !busy) void reset();
+          }}
+        >
+          <label className="field">
+            <span className="sr-only">Type reset to confirm</span>
+            <input
+              value={typed}
+              placeholder="Type reset to confirm"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          </label>
+          <button type="submit" className="btn btn-danger" disabled={typed !== 'reset' || busy}>
+            Reset…
+          </button>
+          <span className="small muted">Anchi asks once more in a system dialog.</span>
+        </form>
       </section>
     </>
   );
@@ -597,8 +636,8 @@ export function ServerCard() {
             )}
             {node.upgrading && (
               <p className="small muted machine-error">
-                Upgrading Anchi, then updating the VM's components. Tasks can start again when it
-                finishes.
+                Upgrading Anchi, then updating the secure room’s parts. Tasks can start again when
+                it finishes.
               </p>
             )}
             {node.newer && node.install === 'source' && (
@@ -1321,7 +1360,7 @@ function ProxyConnectors({
   bare?: boolean;
 }) {
   const { act, call } = useApp();
-  const [editing, setEditing] = useState<TokenConnectorId | undefined>();
+  const [editing, setEditing] = useState<ConnectorId | undefined>();
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const byId = new Map(status.connectors.map((c) => [c.id, c]));
   const close = (id: string) => {
@@ -1360,21 +1399,56 @@ function ProxyConnectors({
                 >
                   Disconnect
                 </button>
-              ) : tokenId ? (
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  ref={(el) => void (el ? buttons.current.set(id, el) : buttons.current.delete(id))}
-                  aria-expanded={editing === tokenId}
-                  aria-controls={`connect-${id}`}
-                  onClick={() => setEditing(editing === tokenId ? undefined : tokenId)}
-                >
-                  {editing === tokenId ? 'Cancel' : 'Connect'}
-                </button>
               ) : (
-                <span className="small muted">set up with anchi setup connector aws</span>
+                <>
+                  {id === 'github' && (
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      title="Uses the login of the gh command line on this machine"
+                      onClick={() =>
+                        void act(() => call('connectors.importGh'), 'GitHub connected').then(
+                          (done) => done && onChange(),
+                        )
+                      }
+                    >
+                      Use the gh login
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    ref={(el) =>
+                      void (el ? buttons.current.set(id, el) : buttons.current.delete(id))
+                    }
+                    aria-expanded={editing === id}
+                    aria-controls={`connect-${id}`}
+                    onClick={() => setEditing(editing === id ? undefined : id)}
+                  >
+                    {editing === id ? 'Cancel' : tokenId ? 'Connect' : 'Use an AWS profile'}
+                  </button>
+                </>
               )}
             </div>
+            {id === 'aws' && editing === 'aws' && (
+              <SecretForm
+                id="connect-aws"
+                fields={[{ key: 'profile', label: 'Profile name', placeholder: 'dev-readonly' }]}
+                note={
+                  <>
+                    A profile of the AWS command line on this machine, such as an SSO profile. Anchi
+                    keeps its temporary credentials renewed. Agents with the AWS connection can do
+                    what the profile’s role allows: choose a narrow one. <GuideLink id="aws" />
+                  </>
+                }
+                submit={async (v) => {
+                  await call('connectors.awsProfile', { profile: v.profile! });
+                  setEditing(undefined);
+                  onChange();
+                }}
+                onCancel={() => close(id)}
+              />
+            )}
             {tokenId && editing === tokenId && (
               <SecretForm
                 id={`connect-${id}`}

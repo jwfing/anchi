@@ -1,6 +1,6 @@
 import { sanitizeLine } from '@anchi/core/sanitize';
 import type { SetupStatus } from '@anchi/protocol';
-import type { ServerState } from '../../shared.ts';
+import type { ServerState } from '../api.ts';
 import { useApp } from '../App.tsx';
 import { count } from '../format.ts';
 import { Icon } from '../ui.tsx';

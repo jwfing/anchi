@@ -1,6 +1,9 @@
 import type { MethodName, Params, Result } from '@anchi/protocol';
 import type { AnchiApi } from '../shared.ts';
 
+// The views take the window's types from here, one level up, not from outside the renderer.
+export type { ReleaseUpdate, ServerState } from '../shared.ts';
+
 declare global {
   interface Window {
     anchi: AnchiApi;

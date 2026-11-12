@@ -48,7 +48,7 @@ export function UsageView() {
       <h1>Usage</h1>
       <section className="card">
         <h2>Subscription limits</h2>
-        {!quota.length && <p className="small muted">No runtime is connected yet.</p>}
+        {!quota.length && <p className="small muted">No AI account is connected yet.</p>}
         {quota.map((q) => (
           <div key={q.runtime} className="quota">
             <div className="row between">
@@ -109,7 +109,7 @@ export function UsageView() {
           <div className="segmented" role="group" aria-label="Group by">
             {GROUPS.map((g) => (
               <button type="button" key={g} aria-pressed={g === group} onClick={() => setGroup(g)}>
-                {g}
+                {g === 'runtime' ? 'account' : g}
               </button>
             ))}
           </div>

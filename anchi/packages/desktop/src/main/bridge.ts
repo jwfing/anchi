@@ -9,6 +9,7 @@ import type {
   BuilderProposal,
   MethodName,
   Notifications,
+  ResetPreview,
   RuntimeId,
   ServiceConnectorId,
   SetupStatus,
@@ -57,7 +58,11 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'setup.importClaude',
   'setup.importHermes',
   'setup.prepare',
+  'setup.resetPreview',
+  'setup.reset',
   'connectors.set',
+  'connectors.importGh',
+  'connectors.awsProfile',
   'connectors.remove',
   'builder.proposal',
   'builder.apply',
@@ -90,6 +95,7 @@ export const NOTIFICATIONS: readonly (keyof Notifications)[] = [
   'oauth',
   'codexSignIn',
   'claudeSignIn',
+  'reset',
   'tasksDeleted',
   'approvals',
   'setup',
@@ -132,6 +138,16 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
   },
   'peers.remove': (p) => {
     peerNodeSchema.parse((p as { node?: unknown }).node);
+  },
+  'setup.reset': (p) => {
+    // The word is typed by the user; anything else never reaches the dialog.
+    if ((p as { confirm?: unknown }).confirm !== 'reset') throw new Error('type reset to confirm');
+  },
+  'connectors.awsProfile': (p) => {
+    const profile = (p as { profile?: unknown }).profile;
+    if (typeof profile !== 'string' || !/^[A-Za-z0-9_.@-]{1,64}$/.test(profile)) {
+      throw new Error('enter the name of an AWS profile');
+    }
   },
   'tasks.delete': (p) => {
     const id = (p as { taskId?: unknown }).taskId;
@@ -338,6 +354,23 @@ export async function confirmation(
       button: 'Prepare',
     };
   }
+  if (call.method === 'connectors.importGh') {
+    return {
+      message: 'Use the GitHub login of the gh command line?',
+      detail:
+        'Anchi reads the token of the gh CLI on the server (gh auth token) and stores it in the vault. It carries every scope of that login, so agents with the GitHub connection can act with all of them; a fine-grained token pasted instead is narrower.',
+      button: 'Use this login',
+    };
+  }
+  if (call.method === 'connectors.awsProfile') {
+    const { profile } = call.params as { profile: string };
+    return {
+      message: `Connect AWS through the profile ${profile}?`,
+      detail:
+        'Anchi exports temporary credentials of this profile with the AWS CLI on the server, stores them in the vault and renews them before they expire. Agents with the AWS connection can do whatever the profile’s role allows: choose a profile with a narrow role.',
+      button: 'Connect AWS',
+    };
+  }
   if (call.method === 'tasks.delete') {
     // The window names only an id; what is deleted is read from the daemon and shown here.
     const { taskId } = call.params as { taskId: string };
@@ -399,6 +432,26 @@ export async function guardedCall(
     const latest = await read('agents.deletePreview', { agentId: p.agentId });
     if (JSON.stringify(latest) !== JSON.stringify(preview))
       throw new Error('Agent or tasks changed during confirmation; review deletion again.');
+    return read(call.method, call.params);
+  }
+  if (call.method === 'setup.reset') {
+    const preview = (await read('setup.resetPreview', {})) as ResetPreview;
+    if (preview.busy) {
+      throw new Error(
+        `${preview.busy} task${preview.busy === 1 ? ' is' : 's are'} running or queued; cancel them or wait first`,
+      );
+    }
+    if (
+      !(await confirm({
+        message: 'Reset Anchi on this machine?',
+        detail: `Deletes the Anchi VM with everything in it: the vault’s contents (every AI account and connection must be connected again), the installed components and the agents’ files in the VM.${preview.cells ? ` ${preview.cells} idle task cell${preview.cells === 1 ? ' is' : 's are'} closed first.` : ''}\n\nKept: the vault key (${sanitizeLine(preview.vaultKey)}) and ${sanitizeLine(preview.home)} with the agent files and task history. Shared folders on disk are not touched.\n\nThis cannot be undone.`,
+        button: 'Reset',
+      }))
+    )
+      throw new Error('cancelled');
+    // A task started while the dialog was open would be lost with the VM.
+    const latest = (await read('setup.resetPreview', {})) as ResetPreview;
+    if (latest.busy) throw new Error('A task started during confirmation; review the reset again.');
     return read(call.method, call.params);
   }
   const question = await confirmation(call, read);

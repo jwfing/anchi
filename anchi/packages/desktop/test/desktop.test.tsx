@@ -67,7 +67,7 @@ describe('bridge', () => {
     ).rejects.toThrow('cancelled');
     expect(calls).toEqual(['builder.proposal']);
   });
-  it('allows the explicit deletion flows while blocking reset, single setup steps and shutdown', () => {
+  it('allows the explicit deletion and reset flows while blocking single setup steps and shutdown', () => {
     expect(checkCall('tasks.create', { agentId: 'dev', text: 'x' }).method).toBe('tasks.create');
     expect(
       checkCall('team.preview', { agentId: 'dev', execution: { server: 'cloud', agent: 'coder' } })
@@ -88,7 +88,6 @@ describe('bridge', () => {
       'team.cancel',
       'team.approve',
       'team.poll',
-      'setup.reset',
       'setup.run',
       'agents.allowHost',
       // Only the main process imports a Google client, from a file the user picked.
@@ -103,7 +102,17 @@ describe('bridge', () => {
       'agents.deletePreview',
       'agents.delete',
       'tasks.delete',
+      'setup.resetPreview',
+      'setup.reset',
     ]);
+    // The word that resets is typed by the user and checked before anything is asked or sent.
+    expect(() => checkCall('setup.reset', {})).toThrow(/type reset/);
+    expect(() => checkCall('setup.reset', { confirm: 'Reset' })).toThrow(/type reset/);
+    for (const profile of ['', 'a b', '../x', 'x'.repeat(65), 7]) {
+      expect(() => checkCall('connectors.awsProfile', { profile }), String(profile)).toThrow(
+        /AWS profile/,
+      );
+    }
     expect(() => checkCall('tasks.delete', {})).toThrow(/choose a task/);
     expect(() => checkCall('tasks.delete', { taskId: ['t-1'] })).toThrow(/choose a task/);
   });
@@ -143,6 +152,73 @@ describe('bridge', () => {
     await expect(
       guardedCall('tasks.delete', { taskId: 't-gone' }, read, async () => true),
     ).rejects.toThrow('task not found');
+  });
+
+  it('resets only when no task runs, after a dialog that says what is deleted and kept', async () => {
+    const preview = { vm: 'running', busy: 0, cells: 2, home: '/h/.anchi', vaultKey: '/h/key' };
+    const sent: string[] = [];
+    const reader = (states: object[]) => async (method: string) => {
+      sent.push(method);
+      return method === 'setup.resetPreview' ? states.shift() : { vm: 'missing' };
+    };
+    await expect(
+      guardedCall(
+        'setup.reset',
+        { confirm: 'reset' },
+        reader([{ ...preview, busy: 1 }]),
+        async () => {
+          throw new Error('asked while a task runs');
+        },
+      ),
+    ).rejects.toThrow('1 task is running or queued');
+    await expect(
+      guardedCall('setup.reset', { confirm: 'reset' }, reader([preview]), async (q) => {
+        expect(q.detail).toContain('every AI account and connection must be connected again');
+        expect(q.detail).toContain('2 idle task cells are closed first');
+        expect(q.detail).toContain('Kept: the vault key (/h/key) and /h/.anchi');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    await expect(
+      guardedCall(
+        'setup.reset',
+        { confirm: 'reset' },
+        reader([preview, { ...preview, busy: 1 }]),
+        async () => true,
+      ),
+    ).rejects.toThrow('A task started during confirmation');
+    expect(sent, 'refused every time: the reset was never sent').not.toContain('setup.reset');
+    await guardedCall(
+      'setup.reset',
+      { confirm: 'reset' },
+      reader([preview, preview]),
+      async () => true,
+    );
+    expect(sent.at(-1)).toBe('setup.reset');
+  });
+
+  it('imports the gh login or an AWS profile only after a dialog that says what agents get', async () => {
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return { id: 'github', connected: true };
+    };
+    await expect(
+      guardedCall('connectors.importGh', {}, read, async (q) => {
+        expect(q.detail).toContain('every scope of that login');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    await expect(
+      guardedCall('connectors.awsProfile', { profile: 'dev-readonly' }, read, async (q) => {
+        expect(q.message).toBe('Connect AWS through the profile dev-readonly?');
+        expect(q.detail).toContain('whatever the profile’s role allows');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'cancelled: no credential was read').toEqual([]);
+    await guardedCall('connectors.importGh', {}, read, async () => true);
+    expect(sent).toEqual(['connectors.importGh']);
   });
 
   it('takes only plain objects as parameters', () => {
@@ -1028,9 +1104,9 @@ describe('getting started', () => {
     ).rejects.toThrow('cancelled');
     expect(asked).toContain('vault.key');
     expect(sent, 'refused: only the status was read').toEqual(['setup.status']);
-    for (const method of ['setup.run', 'setup.reset']) {
-      expect(() => checkCall(method, {})).toThrow(/does not call/);
-    }
+    // Single setup steps stay out of reach; a reset needs its typed word and its own dialog.
+    expect(() => checkCall('setup.run', {})).toThrow(/does not call/);
+    expect(() => checkCall('setup.reset', {})).toThrow(/type reset to confirm/);
   });
 
   it('asks to unlock, not to install, when unlocking is all preparing does', async () => {

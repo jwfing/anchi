@@ -559,7 +559,7 @@ function Workspaces({
       ))}
       {unused.length > 0 && (
         <label className="field">
-          <span className="sr-only">Add a workspace</span>
+          <span className="sr-only">Share a folder</span>
           <select
             value=""
             onChange={(e) =>
