@@ -192,8 +192,8 @@ with tempfile.TemporaryDirectory(prefix="anchi-desktop-release-", dir="/tmp") as
     steps.write_text(
         json.dumps(
             [
-                {"waitFor": ".rail-dot.dot-connected"},
-                {"eval": "document.querySelector('.rail-dot').className"},
+                {"waitFor": ".side-status .dot-connected"},
+                {"eval": "document.querySelector('.side-status .dot').className"},
             ]
         )
     )

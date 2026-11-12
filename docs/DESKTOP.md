@@ -91,7 +91,7 @@ The script bundles `anchi/packages/desktop` with esbuild and starts Electron. On
 - `ANCHI_SERVER`, else the choice saved by `anchi server <target>`, else `local`.
 - With `local`, it starts the local daemon through `scripts/anchi daemon start` when none is running. Set `ANCHI_CLI` to use another CLI.
 
-The machine button at the bottom of the left rail shows the number of connected machines and opens Settings → Machines. In Settings, select a machine card under **Machines** to configure it. Builder, Approvals and Usage have a styled machine selector; an agent view follows the machine of the selected agent. Team groups agents under machine headings; each row shows a runtime tag below the agent's name, and the selected agent's header identifies its machine. Below the tag, the agent's state or its latest task title is shown as a one-line quote, so every row has the same height; a longer one is cut with an ellipsis and shown in full on hover. The quote's rule is amber while an approval waits and red after an error. When the selected machine is offline, a banner says why and task actions are unavailable. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
+One sidebar holds Approvals, New agent, the agents, Usage and Settings, and stays in every view. The status row above Usage names the machine and its connection state, or counts the connected machines when there are several, and opens Settings. In Settings, select a machine card under **Machines** to configure it. With more than one machine, Builder, Approvals and Usage have a styled machine selector and Team groups agents under machine headings; with one machine and no discovered peer, the selector and the headings are left out and the agents are listed directly. An agent view follows the machine of the selected agent. Each row shows a runtime tag below the agent's name, and the selected agent's header identifies its machine. Below the tag, the agent's state or its latest task title is shown as a one-line quote, so every row has the same height; a longer one is cut with an ellipsis and shown in full on hover. The quote's rule is amber while an approval waits and red after an error. When the selected machine is offline, a banner says why and task actions are unavailable. The app keeps its window state, such as the task panel's width, in its own profile: `~/Library/Application Support/Anchi Desktop` on macOS, `~/.config/Anchi Desktop` on Linux. macOS takes an app's name in the menu bar, the Dock and Activity Monitor from its bundle, so on macOS `build.mjs` keeps a copy of Electron.app as `dist/Anchi.app` (name, bundle id `dev.anchi.desktop`, executable and icon changed, signed ad hoc) and `scripts/anchi-desktop` starts that. The copy is made again only when Electron or the icon changes.
 
 ## Getting started
 
@@ -120,7 +120,7 @@ The dot stops when work finishes or the machine disconnects; waiting approvals, 
 and errors keep their own status dots and text. The system's reduced-motion preference keeps
 the working dot stationary.
 
-Click a host heading in Team to collapse or expand its agents; Enter or Space also toggles a
+When Team shows host headings, click one to collapse or expand its agents; Enter or Space also toggles a
 focused heading. Its agent count and connection status remain visible when collapsed. Each
 host starts expanded and remembers your choice across navigation and app restarts, keyed by
 its connection target. Collapsing a host keeps its connection, running tasks and the open
@@ -146,7 +146,7 @@ managed on the execution node. Node aliases must be saved on the coordinator. Se
 
 Saved machines connect automatically when the app opens and retry independently after connection failures. A missing bridge waits for **Initialize** instead of retrying. **Disconnect** closes only that desktop connection for the rest of the session (until **Connect** or reopening the app); it does not stop the daemon or its tasks. Removing a saved machine closes its connection and removes its rows. The selected machine is remembered as the CLI server choice.
 
-Approvals and Usage show the selected machine's records. The rail approval count includes all machines; use the machine selector to review another machine. Coordinator approvals and usage already include delegated work, so execution-node records are not summed into them.
+Approvals and Usage show the selected machine's records. The sidebar's approval count includes all machines; use the machine selector to review another machine. Coordinator approvals and usage already include delegated work, so execution-node records are not summed into them.
 
 The app does not:
 

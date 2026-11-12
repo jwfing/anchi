@@ -206,7 +206,7 @@ writeFileSync(
   steps,
   JSON.stringify([
     { size: [1440, 900, 2] },
-    { waitFor: '.agents' },
+    { waitFor: '.sidebar' },
     { wait: 1500 },
     { clickText: '@developer' },
     { waitFor: '.task-card-head' },

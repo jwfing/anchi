@@ -1,7 +1,7 @@
 import type { AgentSummary, TaskRow } from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TeamList } from '../src/renderer/App.tsx';
+import { Sidebar, TeamList } from '../src/renderer/App.tsx';
 import { machineCall } from '../src/renderer/api.ts';
 import { EMPTY_MODEL, reduceFleet, type Fleet } from '../src/renderer/model.ts';
 
@@ -153,4 +153,79 @@ it('discovers a third machine through one connection and deduplicates directly c
   expect(out).toContain('TEAM · 3');
   expect(out.match(/aria-label="@dev on dora"/g)).toHaveLength(1);
   expect(out.match(/aria-label="@dev on newuser"/g)).toHaveLength(1);
+});
+
+describe('one sidebar', () => {
+  const local = { name: 'local', label: 'local', status: 'connected' as const };
+  const remote = { name: 'instabox:newuser', label: 'newuser', status: 'error' as const };
+  const sidebar = (connections: (typeof local | typeof remote)[], approvals = 0) =>
+    renderToStaticMarkup(
+      <Sidebar
+        fleet={Object.fromEntries(
+          connections.map((c) => [c.name, { ...EMPTY_MODEL, agents: [agent] }]),
+        )}
+        connections={connections}
+        selected="local"
+        view={{ kind: 'usage' }}
+        approvals={approvals}
+        setView={() => {}}
+        onSelect={() => {}}
+        onBuilder={() => {}}
+      />,
+    );
+
+  it('lists the agents of a single machine without a machine heading', () => {
+    const out = sidebar([local]);
+    expect(out).toContain('TEAM · 1');
+    expect(out).toContain('aria-label="@dev on local"');
+    expect(out).not.toContain('team-host');
+    expect(out).not.toContain('Agents on local');
+    expect(out).toContain('This computer · connected');
+    expect(out).toContain('aria-label="local is connected. Open settings"');
+  });
+
+  it('groups agents by machine and counts connections once there are several', () => {
+    const out = sidebar([local, remote], 2);
+    expect(out.match(/class="team-host"/g)).toHaveLength(2);
+    expect(out).toContain('Agents on newuser');
+    expect(out).toContain('1/2 machines connected');
+    expect(out).not.toContain('This computer ·');
+    expect(out).toContain('aria-label="Approvals, 2 waiting"');
+  });
+
+  it('keeps a machine heading for a peer discovered through the only connection', () => {
+    const node = 'd'.repeat(32);
+    const out = renderToStaticMarkup(
+      <TeamList
+        fleet={{
+          local: {
+            ...EMPTY_MODEL,
+            agents: [
+              agent,
+              {
+                ...agent,
+                id: `${node}/dev/${'c'.repeat(16)}`,
+                peer: { node, agent: 'dev', machine: 'dora', online: false },
+              },
+            ],
+          },
+        }}
+        connections={[local]}
+        selected="local"
+        view={{ kind: 'builder' }}
+        onSelect={() => {}}
+        onBuilder={() => {}}
+      />,
+    );
+    expect(out.match(/class="team-host"/g)).toHaveLength(2);
+    expect(out).toContain('Agents on dora');
+  });
+
+  it('marks the open view and shows the state of a machine that is not connected', () => {
+    const out = sidebar([{ ...local, status: 'error' as const }]);
+    expect(out).toContain('aria-label="Usage" aria-current="page"');
+    expect(out).toContain('dot dot-error');
+    expect(out).toContain('This computer · error');
+    expect(out).toContain('Offline · last known state');
+  });
 });
