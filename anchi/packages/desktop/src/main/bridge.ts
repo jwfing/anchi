@@ -9,6 +9,7 @@ import type {
   BuilderProposal,
   MethodName,
   Notifications,
+  PeerDirectory,
   ResetPreview,
   RuntimeId,
   ServiceConnectorId,
@@ -449,6 +450,34 @@ export async function confirmation(
   return undefined;
 }
 
+/**
+ * What stays of a machine in its team when this app forgets it: every member keeps the team's
+ * directory, so forgetting a machine here does not take it out. Empty when the machine is in no
+ * team, or cannot say.
+ */
+export function teamRemainder(directory: PeerDirectory | undefined, name: string): string {
+  // An older daemon, or one without a peer listener, may answer with something else.
+  const nodes = Array.isArray(directory?.nodes) ? directory.nodes : [];
+  const others = nodes.filter((n) => n.node !== directory?.self);
+  if (!others.length) return '';
+  const labels = others.map((n) => sanitizeLine(n.label).slice(0, 40)).join(', ');
+  return `${name} is in a team with ${labels}. Forgetting it here does not take it out of that team: ${others.length === 1 ? 'that machine goes' : 'those machines go'} on listing its agents, as offline once it is gone. To take it out, revoke it first (Settings → Machines → Link machines into a team).`;
+}
+
+/** The question before the desktop forgets a saved machine. */
+export function forgetQuestion(
+  saved: { name: string; target: string },
+  directory: PeerDirectory | undefined,
+): Confirmation {
+  const name = sanitizeLine(saved.name);
+  const team = teamRemainder(directory, name);
+  return {
+    message: `Forget ${name}?`,
+    detail: `This app stops connecting to ${name} (${sanitizeLine(saved.target)}). Anchi on that machine keeps running with its agents, tasks and accounts; nothing there is deleted.${team ? `\n\n${team}` : ''}`,
+    button: 'Forget machine',
+  };
+}
+
 /** Checks a call from the window, asks what needs asking, then sends it. */
 export async function guardedCall(
   method: unknown,
@@ -490,7 +519,7 @@ export async function guardedCall(
     if (
       !(await confirm({
         message: 'Reset Anchi on this machine?',
-        detail: `Deletes the Anchi VM with everything in it: the vault’s contents (every AI account and connection must be connected again), the installed components and the agents’ files in the VM.${preview.cells ? ` ${preview.cells} idle task cell${preview.cells === 1 ? ' is' : 's are'} closed first.` : ''}\n\nKept: the vault key (${sanitizeLine(preview.vaultKey)}) and ${sanitizeLine(preview.home)} with the agent files and task history. Shared folders on disk are not touched.\n\nThis cannot be undone.`,
+        detail: `Deletes the Anchi VM with everything in it: the vault’s contents (every AI account and connection must be connected again), the installed components and the agents’ files in the VM.${preview.cells ? ` ${preview.cells} idle task cell${preview.cells === 1 ? ' is' : 's are'} closed first.` : ''}\n\nKept: the vault key (${sanitizeLine(preview.vaultKey)}) and ${sanitizeLine(preview.home)} with the agent files and task history. Shared folders on disk are not touched. Its place in a team of machines is kept too.\n\nThis cannot be undone.`,
         button: 'Reset',
       }))
     )

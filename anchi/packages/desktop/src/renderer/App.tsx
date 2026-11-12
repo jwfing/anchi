@@ -416,7 +416,14 @@ export function TeamList({
   onSelect(server: string, agentId: string): void;
   onBuilder(server: string): void;
 }) {
-  const groups = connections.map((server) => ({
+  const groups: {
+    server: ServerState;
+    via: string;
+    /** For a machine only known through another one: that machine's label. */
+    through?: string;
+    model: Model;
+    agents: AgentSummary[];
+  }[] = connections.map((server) => ({
     server,
     via: server.name,
     model: fleet[server.name] ?? EMPTY_MODEL,
@@ -444,6 +451,7 @@ export function TeamList({
           status: peer.online ? 'connected' : 'error',
         },
         via: source.name,
+        through: source.label,
         model,
         agents: model.agents.filter((a) => a.peer?.node === peer.node),
       });
@@ -455,7 +463,7 @@ export function TeamList({
   return (
     <>
       <div className="section-label">AGENTS · {total}</div>
-      {groups.map(({ server, via, model, agents }) => {
+      {groups.map(({ server, via, through, model, agents }) => {
         const proposals = server.name.startsWith('peer:') ? 0 : Object.keys(model.proposals).length;
         const rows = (
           <>
@@ -515,7 +523,7 @@ export function TeamList({
             {rows}
           </div>
         ) : (
-          <TeamGroup key={server.name} server={server} count={agents.length}>
+          <TeamGroup key={server.name} server={server} through={through} count={agents.length}>
             {rows}
           </TeamGroup>
         );
@@ -533,10 +541,13 @@ export function agentLabel(agent: AgentSummary): string {
 
 function TeamGroup({
   server,
+  through,
   count,
   children,
 }: {
   server: ServerState;
+  /** Set for a team member this app is not connected to: the machine that reports it. */
+  through?: string;
   count: number;
   children: ReactNode;
 }) {
@@ -566,10 +577,17 @@ function TeamGroup({
     >
       <summary className="team-host" title={server.name}>
         <Icon name="chevron" size={14} className="team-chevron" />
-        <span className={`dot dot-${server.status}`} />
+        {/* A team member that is off is not a failure of this app: no error colour. */}
+        <span
+          className={`dot dot-${through && server.status !== 'connected' ? 'off' : server.status}`}
+        />
         <span className="col grow min0">
           <span className="strong ellipsis">{sanitizeLine(server.label)}</span>
-          <span className="small muted">{server.status}</span>
+          <span className="small muted ellipsis">
+            {through
+              ? `${server.status === 'connected' ? 'online' : 'offline'} · through ${sanitizeLine(through)}`
+              : server.status}
+          </span>
         </span>
         <span className="team-host-count">
           {count}

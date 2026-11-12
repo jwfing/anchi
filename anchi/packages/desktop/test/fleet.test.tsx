@@ -221,6 +221,10 @@ describe('one sidebar', () => {
     );
     expect(out.match(/class="team-host"/g)).toHaveLength(2);
     expect(out).toContain('Agents on dora');
+    // A member that is off is offline, reported by the machine that knows it: not an error.
+    expect(out).toContain('offline · through local');
+    expect(out).not.toContain('dot-error');
+    expect(out).not.toContain('>error<');
   });
 
   it('marks the open view and shows the state of a machine that is not connected', () => {

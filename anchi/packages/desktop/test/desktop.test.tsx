@@ -12,7 +12,14 @@ import type {
 } from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
+import {
+  checkCall,
+  DESKTOP_METHODS,
+  externalUrl,
+  forgetQuestion,
+  guardedCall,
+  teamRemainder,
+} from '../src/main/bridge.ts';
 import { mergePath, parseShellPath } from '../src/main/env.ts';
 import { switchLoginStartup } from '../src/main/startup.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
@@ -355,6 +362,32 @@ describe('bridge', () => {
     await expect(switchLoginStartup('yes', deps(true))).rejects.toThrow('choose on or off');
     await expect(switchLoginStartup(true, deps(true, 'win32'))).rejects.toThrow(/Windows/);
     expect(ran).toHaveLength(2);
+  });
+
+  it('says what a team keeps of a machine that is forgotten', () => {
+    const node = (n: string, label: string) => ({ node: n, label, online: false });
+    const directory = {
+      self: 'aaa',
+      configured: true,
+      nodes: [node('aaa', 'local'), node('bbb', 'newuser'), node('ccc', 'dora\u001b[31m')],
+    } as never;
+    const forget = forgetQuestion({ name: 'box', target: 'ssh:dev@box' }, directory);
+    expect(forget.message).toBe('Forget box?');
+    expect(forget.detail).toContain('nothing there is deleted');
+    expect(forget.detail).toContain('box is in a team with newuser, dora.');
+    expect(forget.detail).toContain('does not take it out of that team');
+    expect(forget.detail).toContain('revoke it first');
+    expect(forget.detail).not.toContain('\u001b');
+    // No team, a team of one, or a machine that could not be asked: nothing to add.
+    for (const none of [undefined, { self: 'aaa', nodes: [node('aaa', 'local')] }, { vm: 'x' }]) {
+      expect(teamRemainder(none as never, 'box')).toBe('');
+      expect(
+        forgetQuestion({ name: 'box', target: 'ssh:box' }, none as never).detail,
+      ).not.toContain('team');
+    }
+    expect(
+      teamRemainder({ self: 'aaa', nodes: [node('bbb', 'newuser')] } as never, 'It'),
+    ).toContain('that machine goes on listing its agents');
   });
 
   it('takes only plain objects as parameters', () => {

@@ -28,14 +28,14 @@ import {
   session,
   shell,
 } from 'electron';
-import { type Confirmation, externalUrl } from './bridge.ts';
+import { type Confirmation, externalUrl, forgetQuestion } from './bridge.ts';
 import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
 import { bootstrapServer, ServerSetup } from './server-setup.ts';
 import { switchLoginStartup } from './startup.ts';
 import { ReleaseUpdates } from './updates.ts';
 import { LOCAL_UPGRADE, REMOTE_UPGRADE, runScript, ServerUpgrade } from './upgrade.ts';
-import type { DaemonStatus } from '@anchi/protocol';
+import type { DaemonStatus, PeerDirectory } from '@anchi/protocol';
 import type { ServerState } from '../shared.ts';
 
 // Embedded by the build: the desktop's version is independent of the connected daemon.
@@ -363,6 +363,17 @@ ipcMain.handle('anchi:removeServer', async (event, name: unknown) => {
   const saved = listServers(layout.root).find((s) => s.name === name);
   if (saved && serverSetup.busy(saved.target)) throw new Error('initialization is already running');
   if (saved && serverUpgrade.busy(saved.target)) throw new Error('an upgrade is running');
+  if (saved) {
+    // Only a connected machine can say whether it is in a team; the question is asked anyway.
+    let directory: PeerDirectory | undefined;
+    try {
+      directory = (await connections.lease(saved.target).read('peers.directory', {})) as
+        PeerDirectory | undefined;
+    } catch {
+      directory = undefined;
+    }
+    if (!(await confirm(forgetQuestion(saved, directory)))) return listServers(layout.root);
+  }
   const gone = removeServer(layout.root, String(name ?? ''));
   connections.remove(gone.target);
   if (selected === gone.target) selected = 'local';
