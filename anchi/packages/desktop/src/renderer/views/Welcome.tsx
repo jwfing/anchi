@@ -8,7 +8,7 @@ import {
   type WelcomeStep,
 } from '@anchi/core/welcome';
 import type { Notifications, SetupStatus } from '@anchi/protocol';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BUILDER, useApp } from '../App.tsx';
 import { accountName, Icon } from '../ui.tsx';
 import { message } from '../api.ts';
@@ -115,6 +115,17 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
     setPreparing(false);
     refresh();
   };
+
+  // A machine that was never set up is prepared as soon as the guide knows it: the system
+  // dialog still asks first, and declining it leaves the Set up button. Once per guide.
+  const offered = useRef(false);
+  useEffect(() => {
+    if (offered.current || !status || preparing || status.preparing) return;
+    if (server.status !== 'connected' || status.host?.missing.length) return;
+    if (nextSetupAction(status) !== 'install' || status.vm !== 'missing') return;
+    offered.current = true;
+    void prepare();
+  }, [status, server.status]);
 
   const startAgent = async () => {
     if (!status) return;

@@ -244,6 +244,26 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
   for (const id of patch.highRisk?.disable ?? []) {
     if (!current.highRisk?.disable.includes(id)) out.push(`${id} without asking you`);
   }
+  // Writes that stop waiting for approval: `ask` dropped, or `auto` set where it was not.
+  if (patch.approvals) {
+    const before = current.approvals ?? {};
+    for (const id of new Set([...Object.keys(before), ...Object.keys(patch.approvals)])) {
+      const [was, now] = [before[id], patch.approvals[id]];
+      if ((was === 'ask' && now !== 'ask') || (now === 'auto' && was !== 'auto')) {
+        out.push(`write through ${sanitizeLine(id).slice(0, 40)} without asking you`);
+      }
+    }
+  }
+  // A new trigger starts tasks when nobody is looking, often on content nobody has read.
+  const known = (current.triggers ?? []).map((t) => JSON.stringify(t));
+  for (const t of patch.triggers ?? []) {
+    if (known.includes(JSON.stringify(t))) continue;
+    out.push(
+      'schedule' in t
+        ? `start tasks by itself on the schedule ${sanitizeLine(String(t.schedule)).slice(0, 60)}`
+        : `start tasks by itself for new ${sanitizeLine(String(t.poll?.type)).slice(0, 40)} items`,
+    );
+  }
   return out;
 }
 
@@ -314,7 +334,7 @@ export async function confirmation(
     if (!added.length) return undefined;
     return {
       message: `Give @${p.agentId} more access?`,
-      detail: `Its tasks will be able to use:\n\n${added.map((a) => `• ${a}`).join('\n')}`,
+      detail: `It will be able to use or do:\n\n${added.map((a) => `• ${a}`).join('\n')}`,
       button: 'Give access',
     };
   }

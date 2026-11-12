@@ -3,7 +3,14 @@
 //   node --import ./anchi/node_modules/tsx/dist/loader.mjs anchi/packages/desktop/scripts/demo.ts
 // writes docs/assets/desktop.png and landing/dist/desktop.png.
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -378,6 +385,55 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
     },
   }),
 };
+
+// ANCHI_DEMO_LOG names a file that receives every call that would change something, one JSON
+// line each, so a run can check what reached the daemon after a system dialog was answered.
+const journal = process.env.ANCHI_DEMO_LOG;
+const record = (method: string, params: unknown) => {
+  if (journal) appendFileSync(journal, `${JSON.stringify({ method, params })}\n`);
+};
+if (custom) {
+  // With ANCHI_DEMO_STOPPED the secure room is stopped until it is prepared.
+  if (process.env.ANCHI_DEMO_STOPPED) Object.assign(status, { vm: 'stopped', installed: false });
+  const writes: { [M in MethodName]?: (params: never) => Result<M> } = {
+    'approvals.decide': () => null,
+    'tasks.delete': () => ({ deleted: 1 }),
+    'tasks.tree': (p: { taskId: string }) => tasks.filter((t) => t.id === p.taskId),
+    'tasks.search': () => [],
+    'tasks.send': (p: { taskId: string }) => tasks.find((t) => t.id === p.taskId)!,
+    'tasks.create': () => tasks[0]!,
+    'setup.resetPreview': () => ({
+      vm: 'running',
+      busy: 0,
+      cells: 0,
+      home,
+      vaultKey: join(home, 'vault.key'),
+    }),
+    'setup.reset': () => status,
+    'setup.prepare': () => Object.assign(status, { vm: 'running', installed: true }),
+    'connectors.importGh': () => ({ id: 'github', connected: true, account: 'example' }),
+    'connectors.awsProfile': () => ({ id: 'aws', connected: true, account: '123456789012' }),
+    'connectors.remove': (p: { id: string }) => ({ id: p.id, connected: false }) as never,
+    'agents.allowHost': (p: { host: string }) => ({
+      egress: ['github.com', 'registry.npmjs.org', p.host],
+    }),
+    'agents.update': (p: { apply?: boolean }) => ({
+      diff: '+connectors: [github, aws]\n',
+      errors: [],
+      warnings: [],
+      base: 'b',
+      applied: p.apply === true,
+    }),
+  };
+  for (const [method, answer] of Object.entries(writes)) {
+    (answers as Record<string, (p: unknown) => unknown>)[method] = (params) => {
+      if (!/tree|search|Preview/.test(method)) record(method, params);
+      return (answer as (p: unknown) => unknown)(params);
+    };
+  }
+  // The connections start disconnected here, so that connecting them can be tried.
+  status.connectors = [];
+}
 
 const home = mkdtempSync(join(tmpdir(), 'anchi-demo-'));
 mkdirSync(join(home, 'run'), { recursive: true });

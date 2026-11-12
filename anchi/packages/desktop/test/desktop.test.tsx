@@ -253,6 +253,53 @@ describe('bridge', () => {
     });
   });
 
+  it('asks before an agent stops asking for its writes or starts tasks by itself', async () => {
+    const current = {
+      connectors: ['github', 'x'],
+      workspaces: [],
+      delegates: [],
+      highRisk: { disable: [] },
+      approvals: { github: 'ask' },
+      triggers: [{ schedule: '0 9 * * *', text: 'daily' }],
+    };
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return method === 'agents.settings' ? { current } : { applied: true };
+    };
+    const apply = (patch: object, answer: (detail: string) => boolean) =>
+      guardedCall('agents.update', { agentId: 'dev', patch, apply: true }, read, async (q) =>
+        answer(q.detail),
+      );
+    let detail = '';
+    await expect(
+      apply(
+        {
+          approvals: { x: 'auto' },
+          triggers: [
+            { schedule: '0 9 * * *', text: 'daily' },
+            { schedule: '*/5 * * * *\u001b[31m', text: 'often' },
+          ],
+        },
+        (d) => {
+          detail = d;
+          return false;
+        },
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(detail).toContain('• write through github without asking you');
+    expect(detail).toContain('• write through x without asking you');
+    expect(detail).toContain('• start tasks by itself on the schedule */5 * * * *');
+    expect(detail, 'the schedule it already had is not asked again').not.toContain('0 9 * * *');
+    expect(detail).not.toContain('\u001b');
+    expect(sent, 'cancelled: nothing was saved').toEqual(['agents.settings']);
+    // Asking for more approvals, or dropping a schedule, narrows: no dialog.
+    await apply({ approvals: { github: 'ask', x: 'ask' }, triggers: [] }, () => {
+      throw new Error('asked for a narrowing change');
+    });
+    expect(sent.at(-1)).toBe('agents.update');
+  });
+
   it('takes only plain objects as parameters', () => {
     expect(checkCall('agents.list', undefined).params).toEqual({});
     expect(() => checkCall('tasks.get', ['t-1'])).toThrow(/must be an object/);
@@ -667,6 +714,21 @@ describe('access in plain words', () => {
       'Cannot use an account that is not switched on here',
       'Never sees a password or token: Anchi adds them outside its cell',
     ]);
+  });
+
+  it('follows the approvals and schedules of the draft, before they are saved', () => {
+    const lines = plainWords(
+      {
+        ...none,
+        connectors: ['github'],
+        approvals: { github: 'ask' },
+        triggers: [{ schedule: '0 9 * * *', text: 'daily' }],
+      },
+      // What the file says now is not what the draft says.
+      { ...fixed, approvals: {} },
+    );
+    expect(text(lines, true)).toContain('Acts through github; anything that writes waits for you');
+    expect(lines.find((l) => l.text === 'Starts tasks by itself: 1 schedule')?.warn).toBe(true);
   });
 
   it('says so when no website may be reached, and falls back to the fixed delegates', () => {

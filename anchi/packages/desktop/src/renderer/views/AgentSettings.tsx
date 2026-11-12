@@ -6,6 +6,7 @@ import type {
   AgentUpdate,
   Effort,
   RuntimeId,
+  TriggerSetting,
   WorkspaceSetting,
 } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
@@ -135,13 +136,25 @@ export function AgentSettingsView({
                         />
                         <ConnectorLogo id={c.id} />
                         <span className="strong">{connectorName(c.id)}</span>
-                        <span className="small muted">
-                          {c.connected === false
-                            ? 'not connected yet: connect it in Settings'
-                            : fixed.approvals[c.id] === 'ask'
-                              ? 'writes wait for you'
-                              : ''}
+                        <span className="small muted grow">
+                          {c.connected === false ? 'not connected yet: connect it in Settings' : ''}
                         </span>
+                        {draft.approvals && draft.connectors.includes(c.id) && (
+                          <select
+                            className="row-select"
+                            aria-label={`${connectorName(c.id)} writes`}
+                            value={draft.approvals[c.id] ?? ''}
+                            onChange={(e) => {
+                              const { [c.id]: _, ...rest } = draft.approvals ?? {};
+                              const mode = e.target.value as 'ask' | 'auto' | '';
+                              edit({ approvals: mode ? { ...rest, [c.id]: mode } : rest });
+                            }}
+                          >
+                            <option value="">Writes: the default</option>
+                            <option value="ask">Writes: ask me first</option>
+                            <option value="auto">Writes: without asking</option>
+                          </select>
+                        )}
                       </label>
                     ))}
                   </section>
@@ -344,6 +357,10 @@ export function AgentSettingsView({
                 ))}
             </section>
 
+            {draft.triggers && (
+              <Schedules value={draft.triggers} onChange={(triggers) => edit({ triggers })} />
+            )}
+
             <section className="card">
               <h2>Websites it may reach</h2>
               {fixed.egress === null ? (
@@ -407,16 +424,26 @@ export function AgentSettingsView({
                 Set in the agent file <span className="small muted normal">· read-only here</span>
               </h2>
               <dl className="facts">
-                <dt>Schedules</dt>
-                <dd>
-                  {fixed.triggers.length ? fixed.triggers.map(sanitizeLine).join(' · ') : 'none'}
-                </dd>
-                <dt>Asks first</dt>
-                <dd>
-                  {Object.entries(fixed.approvals)
-                    .map(([k, v]) => `${sanitizeLine(k)}: ${sanitizeLine(v)}`)
-                    .join(' · ') || 'the defaults'}
-                </dd>
+                {!draft.triggers && (
+                  <>
+                    <dt>Schedules</dt>
+                    <dd>
+                      {fixed.triggers.length
+                        ? fixed.triggers.map(sanitizeLine).join(' · ')
+                        : 'none'}
+                    </dd>
+                  </>
+                )}
+                {!draft.approvals && (
+                  <>
+                    <dt>Asks first</dt>
+                    <dd>
+                      {Object.entries(fixed.approvals)
+                        .map(([k, v]) => `${sanitizeLine(k)}: ${sanitizeLine(v)}`)
+                        .join(' · ') || 'the defaults'}
+                    </dd>
+                  </>
+                )}
                 {fixed.extends && (
                   <>
                     <dt>Template</dt>
@@ -509,6 +536,112 @@ export function AgentSettingsView({
         )}
       </div>
     </div>
+  );
+}
+
+/** Schedules people ask for, by their cron expression. */
+export const SCHEDULE_PRESETS: [string, string][] = [
+  ['0 9 * * 1-5', 'Weekdays at 09:00'],
+  ['0 9 * * *', 'Every day at 09:00'],
+  ['0 * * * *', 'Every hour'],
+  ['*/15 * * * *', 'Every 15 minutes'],
+];
+
+/**
+ * The triggers that start tasks without the user. A schedule is edited here (a preset or its
+ * cron expression, and what to do); a poll for new items is kept or removed, and written in
+ * the agent file.
+ */
+function Schedules({
+  value,
+  onChange,
+}: {
+  value: TriggerSetting[];
+  onChange: (next: TriggerSetting[]) => void;
+}) {
+  const set = (i: number, next: TriggerSetting) =>
+    onChange(value.map((t, j) => (j === i ? next : t)));
+  return (
+    <section className="card">
+      <h2>Schedules</h2>
+      <p className="small muted">
+        Start a task by itself. Nobody is watching when it runs, so writes that ask first still wait
+        for you, and a new schedule is confirmed in a system dialog.
+      </p>
+      {value.map((t, i) =>
+        'schedule' in t ? (
+          <div key={i} className="schedule">
+            <div className="row gap wrap">
+              <label className="field">
+                <span className="sr-only">When</span>
+                <select
+                  value={SCHEDULE_PRESETS.some(([cron]) => cron === t.schedule) ? t.schedule : ''}
+                  onChange={(e) => e.target.value && set(i, { ...t, schedule: e.target.value })}
+                >
+                  {SCHEDULE_PRESETS.map(([cron, words]) => (
+                    <option key={cron} value={cron}>
+                      {words}
+                    </option>
+                  ))}
+                  <option value="">Another time (cron)</option>
+                </select>
+              </label>
+              <label className="field">
+                <span className="sr-only">Cron expression</span>
+                <input
+                  className="mono cron"
+                  value={t.schedule}
+                  spellCheck={false}
+                  onChange={(e) => set(i, { ...t, schedule: e.target.value })}
+                />
+              </label>
+              <span className="grow" />
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => onChange(value.filter((_, j) => j !== i))}
+              >
+                Remove
+              </button>
+            </div>
+            <label className="field">
+              <span className="sr-only">What to do</span>
+              <textarea
+                rows={2}
+                value={t.text}
+                placeholder="What the agent should do each time"
+                onChange={(e) => set(i, { ...t, text: e.target.value })}
+              />
+            </label>
+          </div>
+        ) : (
+          <div key={i} className="check-row">
+            <span className="grow ellipsis">
+              Every {t.every ?? 5} min, for new {sanitizeLine(String(t.poll.type))} items:{' '}
+              <span className="muted">{sanitizeLine(t.text).slice(0, 80)}</span>
+            </span>
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => onChange(value.filter((_, j) => j !== i))}
+            >
+              Remove
+            </button>
+          </div>
+        ),
+      )}
+      {!value.length && <p className="small muted">None: it only works when asked.</p>}
+      <div className="row">
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={value.length >= 20}
+          onClick={() => onChange([...value, { schedule: SCHEDULE_PRESETS[0]![0], text: '' }])}
+        >
+          Add a schedule
+        </button>
+      </div>
+    </section>
   );
 }
 

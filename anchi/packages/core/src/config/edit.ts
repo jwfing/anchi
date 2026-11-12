@@ -1,5 +1,5 @@
 import { Document, isMap, isNode, isScalar, parseDocument, Scalar, type YAMLMap } from 'yaml';
-import type { Connector, HighRiskId, Runtime, Workspace } from './schema.ts';
+import type { ApprovalMode, Connector, HighRiskId, Runtime, Trigger, Workspace } from './schema.ts';
 
 /** Where new scalar keys go: after the last of these that precede them. */
 const ORDER = ['id', 'name', 'description', 'extends', 'runtime', 'model', 'effort', 'prompt'];
@@ -21,6 +21,13 @@ export interface AgentPatch {
   highRisk?: { disable: HighRiskId[] };
   /** Replaces the delegation allowlist, including when inherited from a template. */
   delegates?: string[];
+  /**
+   * Per connector, whether its writes wait for approval. The map replaces the file's; an empty
+   * one removes the key, so the defaults apply again.
+   */
+  approvals?: Partial<Record<Connector, ApprovalMode>>;
+  /** Replaces the schedules and polls that start tasks; an empty list removes them. */
+  triggers?: Trigger[];
   /** Set by the daemon only (allowing a refused host); never emptied into open egress. */
   egress?: string[];
 }
@@ -129,6 +136,11 @@ export function patchAgentYaml(text: string, patch: AgentPatch): string {
       replace(['highRisk', 'disable'], node);
     } else replace(['highRisk'], doc.createNode({ disable: ids }, { flow: true }));
   }
+  if (patch.approvals !== undefined) {
+    if (!Object.keys(patch.approvals).length && !inherits) doc.delete('approvals');
+    else replace(['approvals'], doc.createNode(patch.approvals, { flow: true }));
+  }
+  set('triggers', patch.triggers, false);
   // `ro` is the default mode; name only when it differs from the path's last segment.
   set(
     'workspaces',

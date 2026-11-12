@@ -2623,3 +2623,26 @@ h3 {
   font-weight: 500;
   color: var(--muted);
 }
+.row-select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: 12.5px;
+}
+.schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--subtle);
+}
+.schedule textarea {
+  width: 100%;
+  resize: vertical;
+}
+.cron {
+  width: 150px;
+}

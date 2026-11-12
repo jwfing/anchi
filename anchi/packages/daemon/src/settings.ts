@@ -25,7 +25,7 @@ import {
   type Trigger,
   workspaceSchema,
 } from '@anchi/core';
-import type { AgentSettings, AgentUpdate, WorkspaceSetting } from '@anchi/protocol';
+import type { AgentSettings, AgentUpdate, TriggerSetting, WorkspaceSetting } from '@anchi/protocol';
 import { z } from 'zod';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
 
@@ -50,10 +50,21 @@ const patchSchema = z.strictObject({
   connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
   highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
+  approvals: field.approvals,
+  triggers: field.triggers,
 });
 
 /** The fields a patch may change, for messages. */
 export const PATCH_FIELDS = Object.keys(patchSchema.shape);
+
+/**
+ * The fields a builder's patch may change. Approvals and triggers decide what happens without
+ * the user, so the builder changes them only in a complete agent file, which is reviewed whole;
+ * the user edits them directly in the settings panel.
+ */
+export const BUILDER_PATCH_FIELDS = PATCH_FIELDS.filter(
+  (field) => field !== 'approvals' && field !== 'triggers',
+);
 
 export function parsePatch(raw: unknown): AgentPatch {
   const parsed = patchSchema.safeParse(raw);
@@ -84,6 +95,8 @@ const EDITABLE = [
   'connectors',
   'workspaces',
   'highRisk',
+  'approvals',
+  'triggers',
 ] as const;
 
 /** One line per trigger, for display. */
@@ -124,6 +137,8 @@ export function settingsView(
         ...(w.name ? { name: w.name } : {}),
       })),
       highRisk: { disable: [...(agent.highRisk?.disable ?? [])] },
+      approvals: { ...agent.approvals },
+      triggers: (agent.triggers ?? []).map((t) => ({ ...t })) as TriggerSetting[],
     },
     inherited,
     fixed: {
@@ -217,8 +232,15 @@ export function updateAgentFile(
   const errors: string[] = [];
   const warnings: string[] = [];
   let before: string[] = [];
+  let asked: string[] = [];
+  let scheduled: string[] = [];
   try {
-    before = resolveAgent(id, layout).highRisk.disable;
+    const now = resolveAgent(id, layout);
+    before = now.highRisk.disable;
+    asked = Object.entries(now.approvals ?? {})
+      .filter(([, mode]) => mode === 'ask')
+      .map(([connector]) => connector);
+    scheduled = (now.triggers ?? []).map(triggerLine);
   } catch {
     // A broken file exempts nothing yet.
   }
@@ -236,6 +258,15 @@ export function updateAgentFile(
     const added = agent.highRisk.disable.filter((h) => !before.includes(h));
     if (added.length) {
       warnings.push(`@${id} does ${added.join(', ')} without asking you (highRisk)`);
+    }
+    const approvals: Record<string, string | undefined> = agent.approvals ?? {};
+    const freed = asked.filter((connector) => approvals[connector] !== 'ask');
+    if (freed.length) {
+      warnings.push(`@${id} writes through ${freed.join(', ')} without asking you (approvals)`);
+    }
+    const started = (agent.triggers ?? []).map(triggerLine).filter((t) => !scheduled.includes(t));
+    if (started.length) {
+      warnings.push(`@${id} starts tasks by itself: ${started.join('; ')} (triggers)`);
     }
     if (opts.inventory) {
       const found = checkReferences(agent, opts.inventory, opts.workspaceRoot ?? '');

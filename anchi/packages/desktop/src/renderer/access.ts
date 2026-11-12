@@ -14,13 +14,17 @@ export interface AccessLine {
  * say. `name` turns a connector id into what the user calls it.
  */
 export function plainWords(
-  values: Pick<AgentSettingValues, 'connectors' | 'workspaces' | 'delegates' | 'highRisk'>,
+  values: Pick<
+    AgentSettingValues,
+    'connectors' | 'workspaces' | 'delegates' | 'highRisk' | 'approvals' | 'triggers'
+  >,
   fixed: Pick<FixedSettings, 'approvals' | 'egress' | 'sandbox' | 'delegates' | 'highRiskGlobal'>,
   name: (connector: string) => string = (id) => id,
 ): AccessLine[] {
   const lines: AccessLine[] = [];
   for (const id of values.connectors) {
-    const mode = fixed.approvals[id];
+    // The draft's approvals when the daemon sends them; an older one only has the fixed map.
+    const mode = (values.approvals ?? fixed.approvals)[id];
     lines.push({
       can: true,
       text:
@@ -50,6 +54,14 @@ export function plainWords(
         ? { can: true, text: `Reaches only ${fixed.egress.map(sanitizeLine).join(', ')}` }
         : { can: false, text: 'Cannot reach any website of its own choosing' },
   );
+  const triggers = values.triggers?.length ?? 0;
+  if (triggers) {
+    lines.push({
+      can: true,
+      warn: true,
+      text: `Starts tasks by itself: ${triggers} ${triggers === 1 ? 'schedule' : 'schedules'}`,
+    });
+  }
   const exempt = [...new Set([...values.highRisk.disable, ...(fixed.highRiskGlobal ?? [])])];
   if (exempt.length) {
     lines.push({

@@ -412,7 +412,19 @@ export interface AgentPatch {
    * file. The list replaces the file's; `[]` removes it. Unknown ids are refused.
    */
   highRisk?: { disable: string[] };
+  /**
+   * Per connector, `ask` holds its writes for approval and `auto` does not. The map replaces
+   * the file's; `{}` removes it, so the defaults apply again.
+   */
+  approvals?: Record<string, 'auto' | 'ask'>;
+  /** Replaces the agent's schedules and polls; `[]` removes them. */
+  triggers?: TriggerSetting[];
 }
+
+/** A trigger as in the agent file: a cron schedule, or a poll for new items. */
+export type TriggerSetting =
+  | { schedule: string; text: string }
+  | { poll: { type: string } & Record<string, unknown>; text: string; every?: number };
 
 /** An agent's editable settings, as resolved (templates included). */
 export interface AgentSettingValues {
@@ -430,6 +442,9 @@ export interface AgentSettingValues {
   workspaces: WorkspaceSetting[];
   /** High-risk operations this agent does without approval (`highRisk.disable`), by id. */
   highRisk: { disable: string[] };
+  /** Per-connector approval modes and triggers; absent on daemons that cannot edit them. */
+  approvals?: Record<string, 'auto' | 'ask'>;
+  triggers?: TriggerSetting[];
 }
 
 /** Settings the panel shows but does not edit (they are changed in the agent file). */

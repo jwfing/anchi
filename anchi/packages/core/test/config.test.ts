@@ -244,6 +244,34 @@ describe('patchAgentYaml', () => {
     );
   });
 
+  it('replaces approvals and triggers, and removes them when emptied', () => {
+    expect(patchAgentYaml('runtime: codex\n', { approvals: { github: 'ask' } })).toBe(
+      'runtime: codex\napprovals: {github: ask}\n',
+    );
+    expect(
+      patchAgentYaml('approvals: { github: ask } # careful\n', {
+        approvals: { github: 'auto', x: 'ask' },
+      }),
+    ).toBe('approvals: {github: auto, x: ask} # careful\n');
+    expect(patchAgentYaml('runtime: codex\napprovals: {github: ask}\n', { approvals: {} })).toBe(
+      'runtime: codex\n',
+    );
+    expect(
+      patchAgentYaml('extends: base\napprovals: {github: ask}\n', { approvals: {} }),
+    ).toContain('approvals: {}');
+    const scheduled = patchAgentYaml('runtime: codex\n', {
+      triggers: [{ schedule: '0 9 * * 1-5', text: 'Check the dependencies' }],
+    });
+    expect(scheduled).toBe(
+      'runtime: codex\ntriggers:\n  - schedule: 0 9 * * 1-5\n    text: Check the dependencies\n',
+    );
+    expect(patchAgentYaml(scheduled, { triggers: [] })).toBe('runtime: codex\n');
+    // Fields the patch does not name stay as they are.
+    expect(patchAgentYaml(scheduled, { approvals: { github: 'ask' } })).toContain(
+      'schedule: 0 9 * * 1-5',
+    );
+  });
+
   it("writes high-risk exemptions in the file's own shape, keeping its comments", () => {
     expect(patchAgentYaml('runtime: codex\n', { highRisk: { disable: ['github-merge'] } })).toBe(
       'runtime: codex\nhighRisk: {disable: [github-merge]}\n',
