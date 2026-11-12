@@ -1,13 +1,19 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HomeLayout } from '@anchi/core';
+import {
+  autostartFile,
+  LAUNCHD_LABEL,
+  plistPath,
+  SYSTEMD_UNIT,
+  unitPath,
+} from './autostart-file.ts';
 import { DaemonClient } from './rpc.ts';
 
-export const LAUNCHD_LABEL = 'dev.anchi.daemon';
+export { autostartFile, LAUNCHD_LABEL, SYSTEMD_UNIT };
 
 /** node + args that start the daemon from source (tsx loader). */
 export function daemonCommand(): string[] {
@@ -50,10 +56,6 @@ export async function connectOrStart(
     if (client) return client;
   }
   throw new Error(`daemon did not start within ${timeoutMs / 1000}s; see ${layout.logFile}`);
-}
-
-function plistPath(): string {
-  return join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
 }
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -100,13 +102,6 @@ ${args}
 const unitWord = (s: string) =>
   `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%')}"`;
 
-export const SYSTEMD_UNIT = 'anchi-daemon.service';
-
-function unitPath(): string {
-  const config = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return join(config, 'systemd', 'user', SYSTEMD_UNIT);
-}
-
 /**
  * A systemd user unit equivalent to the launchd agent: started at login, restarted on failure. On a
  * remote server (`guest` = `local`, scripts/server-install.sh) the daemon drives the guest it runs in.
@@ -137,11 +132,6 @@ WantedBy=default.target
 }
 
 /** Runs the daemon at login: launchd on macOS, a systemd user unit on Linux. */
-/** The file that starts the daemon at login, whether or not it exists. */
-export function autostartFile(): string {
-  return process.platform === 'darwin' ? plistPath() : unitPath();
-}
-
 export function installAutostart(layout: HomeLayout): string {
   if (process.platform === 'darwin') return installLaunchd(layout);
   if (process.platform !== 'linux') throw new Error('autostart needs macOS or Linux');
