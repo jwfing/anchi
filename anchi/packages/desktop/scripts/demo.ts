@@ -228,6 +228,98 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
   'usage.summary': () => [],
   'usage.quota': () => [],
   'team.nodes': () => [],
+  // Only custom runs open these views.
+  'tasks.audit': (p: { taskId: string }) => ({
+    taskId: p.taskId,
+    total: 23,
+    truncated: false,
+    cells: 1,
+    registration: null,
+    requests: 23,
+    injected: { github: 7 },
+    credentialsSent: {},
+    hosts: [
+      {
+        host: 'api.github.com',
+        requests: 9,
+        injected: 7,
+        decisions: { inject: 7, pass: 2 } as Record<string, number>,
+      },
+      {
+        host: 'registry.npmjs.org',
+        requests: 14,
+        injected: 0,
+        decisions: { pass: 14 } as Record<string, number>,
+      },
+    ],
+    refused: [],
+    held: [
+      {
+        operation: 'POST /repos/example/shop/pulls',
+        host: 'api.github.com',
+        risk: null,
+        outcome: 'waiting',
+      },
+    ],
+    streamed: 0,
+    bridge: [],
+    scan: 'clean (12 files)',
+    rows: [],
+  }),
+  'agents.settings': (p: { agentId: string }) => ({
+    agentId: p.agentId,
+    editable: true,
+    current: {
+      name: 'Developer',
+      description: 'Fixes issues and opens pull requests',
+      runtime: 'codex',
+      model: '',
+      effort: '',
+      prompt: {
+        mode: 'append',
+        text: 'Keep pull requests small. Run the auth tests before pushing.',
+      },
+      skills: ['code-review'],
+      connectors: ['github'],
+      delegates: ['reviewer'],
+      workspaces: [{ path: 'shop', mode: 'ro' }],
+      highRisk: { disable: [] },
+    },
+    inherited: [],
+    fixed: {
+      image: 'anchi-codex',
+      sandbox: 'cell',
+      delegates: ['reviewer'],
+      triggers: [],
+      approvals: { github: 'ask' },
+      egress: null,
+    },
+    inventory: {
+      skills: [
+        {
+          id: 'code-review',
+          name: 'code-review',
+          description: 'Review checklist for pull requests',
+        },
+        { id: 'release-notes', name: 'release-notes', description: 'Writes a changelog entry' },
+      ],
+      connectors: [
+        { id: 'github', connected: true },
+        { id: 'aws', connected: true },
+        { id: 'gmail', connected: true },
+        { id: 'notion', connected: false },
+      ],
+      runtimes: [
+        { id: 'codex', connected: true },
+        { id: 'claude-code', connected: true },
+        { id: 'hermes', connected: true },
+      ],
+      workspaces: { dirs: ['shop', 'notes'], shared: true },
+      agents: ['developer', 'reviewer', 'ops'],
+      images: [],
+      highRisk: ['github.merge', 'github.push-default-branch'],
+    },
+  }),
 };
 
 const home = mkdtempSync(join(tmpdir(), 'anchi-demo-'));

@@ -12,11 +12,14 @@ import type {
   RuntimeId,
   ServiceConnectorId,
   SetupStatus,
+  TaskRow,
 } from '@anchi/protocol';
 
 /**
  * The daemon methods the window may call. The renderer draws agent text, so it is treated as
  * the most exposed part of the app: destructive actions require a native confirmation here.
+ * Deleting a task is one of them: the window names an id, and the dialog shows what the daemon
+ * says that id is.
  */
 export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'daemon.status',
@@ -38,6 +41,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'tasks.search',
   'tasks.tree',
   'tasks.get',
+  'tasks.delete',
   'tasks.send',
   'tasks.retry',
   'tasks.cancel',
@@ -128,6 +132,10 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
   },
   'peers.remove': (p) => {
     peerNodeSchema.parse((p as { node?: unknown }).node);
+  },
+  'tasks.delete': (p) => {
+    const id = (p as { taskId?: unknown }).taskId;
+    if (typeof id !== 'string' || !id || id.length > 80) throw new Error('choose a task');
   },
   'agents.deletePreview': (p) => deletionParams(p, false),
   'agents.delete': (p) => deletionParams(p, true),
@@ -328,6 +336,22 @@ export async function confirmation(
         `This starts or installs the Anchi VM on the server, its services and the ${runtime} runtime image, then unlocks the vault. The first install takes several minutes.\n\n` +
         'The vault key (~/.config/anchi/vault.key on the server) is the only way to read the credentials you store. Back it up once it exists.',
       button: 'Prepare',
+    };
+  }
+  if (call.method === 'tasks.delete') {
+    // The window names only an id; what is deleted is read from the daemon and shown here.
+    const { taskId } = call.params as { taskId: string };
+    const tree = (await read('tasks.tree', { taskId })) as TaskRow[];
+    const task = tree.find((t) => t.id === taskId);
+    if (!task) throw new Error('task not found');
+    // The daemon deletes the task and what it delegated, not the tasks above it.
+    const below = (id: string): TaskRow[] =>
+      tree.filter((t) => t.parentId === id).flatMap((child) => [child, ...below(child.id)]);
+    const delegated = below(taskId).length;
+    return {
+      message: `Delete this task of @${sanitizeLine(task.agentId)}?`,
+      detail: `“${sanitizeLine(task.title).slice(0, 200)}” (${task.id})${delegated ? ` and the ${delegated} task${delegated === 1 ? '' : 's'} it delegated` : ''}, with their transcripts. A task that is still running is not deleted: cancel it first.\n\nAudit logs are kept. This cannot be undone.`,
+      button: 'Delete task',
     };
   }
   if (call.method === 'skills.remove') {

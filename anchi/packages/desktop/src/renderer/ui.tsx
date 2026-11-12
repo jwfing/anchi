@@ -15,6 +15,20 @@ export function runtimeName(runtime: string): string {
   }
 }
 
+/** What the user calls the account behind a runtime. */
+export function accountName(runtime: string): string {
+  switch (runtime) {
+    case 'codex':
+      return 'ChatGPT';
+    case 'claude-code':
+      return 'Claude';
+    case 'hermes':
+      return 'Other provider';
+    default:
+      return sanitizeLine(runtime);
+  }
+}
+
 const PATHS = {
   chat: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z',
   shield: 'M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z',

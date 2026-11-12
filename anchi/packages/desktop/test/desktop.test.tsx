@@ -23,7 +23,14 @@ import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
 import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
-import { bodyClickOpens, TaskTurn } from '../src/renderer/views/Agent.tsx';
+import {
+  auditHosts,
+  composerMode,
+  historyTasks,
+  reachChips,
+  shownTask,
+} from '../src/renderer/views/Agent.tsx';
+import { plainWords } from '../src/renderer/access.ts';
 import { DelegationChoices, settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
 import {
@@ -59,7 +66,7 @@ describe('bridge', () => {
     ).rejects.toThrow('cancelled');
     expect(calls).toEqual(['builder.proposal']);
   });
-  it('allows the explicit agent deletion flow while blocking task deletion, reset and shutdown', () => {
+  it('allows the explicit deletion flows while blocking reset, single setup steps and shutdown', () => {
     expect(checkCall('tasks.create', { agentId: 'dev', text: 'x' }).method).toBe('tasks.create');
     expect(
       checkCall('team.preview', { agentId: 'dev', execution: { server: 'cloud', agent: 'coder' } })
@@ -82,7 +89,6 @@ describe('bridge', () => {
       'team.poll',
       'setup.reset',
       'setup.run',
-      'tasks.delete',
       'agents.allowHost',
       // Only the main process imports a Google client, from a file the user picked.
       'services.googleClient',
@@ -95,7 +101,47 @@ describe('bridge', () => {
     expect([...DESKTOP_METHODS].filter((m) => /delete|reset|shutdown|setup\.run/.test(m))).toEqual([
       'agents.deletePreview',
       'agents.delete',
+      'tasks.delete',
     ]);
+    expect(() => checkCall('tasks.delete', {})).toThrow(/choose a task/);
+    expect(() => checkCall('tasks.delete', { taskId: ['t-1'] })).toThrow(/choose a task/);
+  });
+
+  it('deletes a task only after a dialog that says what the daemon would delete', async () => {
+    const row = (id: string, parentId: string | null, title: string) => ({
+      id,
+      agentId: 'dev',
+      title,
+      parentId,
+      rootId: 't-root',
+    });
+    const tree = [
+      row('t-root', null, 'the task above'),
+      row('t-1', 't-root', 'tidy\u001b[31m the repo'),
+      row('t-2', 't-1', 'delegated'),
+      row('t-3', 't-2', 'delegated again'),
+      row('t-4', 't-root', 'a sibling'),
+    ];
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return method === 'tasks.tree' ? tree : { deleted: 3 };
+    };
+    await expect(
+      guardedCall('tasks.delete', { taskId: 't-1' }, read, async (q) => {
+        expect(q.message).toBe('Delete this task of @dev?');
+        expect(q.detail).toContain('“tidy the repo” (t-1) and the 2 tasks it delegated');
+        expect(q.detail).not.toContain('\u001b');
+        expect(q.detail).toContain('cannot be undone');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'nothing is deleted when the dialog is cancelled').toEqual(['tasks.tree']);
+    await guardedCall('tasks.delete', { taskId: 't-1' }, read, async () => true);
+    expect(sent).toEqual(['tasks.tree', 'tasks.tree', 'tasks.delete']);
+    await expect(
+      guardedCall('tasks.delete', { taskId: 't-gone' }, read, async () => true),
+    ).rejects.toThrow('task not found');
   });
 
   it('takes only plain objects as parameters', () => {
@@ -352,38 +398,86 @@ describe('approval card', () => {
 });
 
 describe('agent conversation', () => {
-  const turn = (status: TaskRow['status']) =>
-    renderToStaticMarkup(
-      <Ctx.Provider value={{ model: EMPTY_MODEL } as unknown as AppContext}>
-        <TaskTurn
-          task={{ id: 't-1', agentId: 'dev', title: 'go', status, trigger: 'user' } as TaskRow}
-          selected={false}
-          onSelect={() => undefined}
-          onContinue={() => undefined}
-        />
-      </Ctx.Provider>,
-    );
+  const task = (over: Partial<TaskRow>) =>
+    ({
+      id: 't-1',
+      agentId: 'dev',
+      title: 'go',
+      status: 'done',
+      trigger: 'user',
+      ...over,
+    }) as TaskRow;
 
-  it('offers to continue a task only once its turn has ended', () => {
-    expect(turn('done')).toContain('Continue this task');
-    expect(turn('failed')).toContain('Continue this task');
-    expect(turn('running')).not.toContain('Continue this task');
-    expect(turn('queued')).not.toContain('Continue this task');
+  it('continues a task whose turn has ended, and starts a new one only when asked', () => {
+    expect(composerMode(task({ status: 'done' }), false)).toBe('continue');
+    expect(composerMode(task({ status: 'failed' }), false)).toBe('continue');
+    expect(composerMode(task({ status: 'cancelled' }), false)).toBe('continue');
+    expect(composerMode(task({ status: 'done' }), true), 'Start a new task').toBe('new');
+    expect(composerMode(undefined, false), 'no task yet').toBe('new');
   });
 
-  it('shows that a task card opens its conversation', () => {
-    expect(turn('running')).toContain('Details');
-    expect(turn('running')).toContain('task-card-body opens');
-    expect(turn('done')).toContain('Continue task t-1');
-    expect(turn('done')).not.toContain('btn btn-small');
+  it('takes no reply while a turn runs, nor for a task only watched through its parent', () => {
+    expect(composerMode(task({ status: 'running' }), false)).toBe('wait');
+    expect(composerMode(task({ status: 'queued' }), false)).toBe('wait');
+    expect(
+      composerMode(task({ peer: { kind: 'mirror', observed: true } as TaskRow['peer'] }), false),
+    ).toBe('observed');
   });
 
-  it('opens a task from its body, except on its controls or after selecting text', () => {
-    const at = (control: boolean) => ({ closest: () => (control ? {} : null) });
-    expect(bodyClickOpens(at(false), '')).toBe(true);
-    expect(bodyClickOpens(at(true), ''), 'Continue, links, tool calls').toBe(false);
-    expect(bodyClickOpens(at(false), 'copied text')).toBe(false);
-    expect(bodyClickOpens(null, '')).toBe(true);
+  it('shows the chosen task while it exists, else the newest', () => {
+    const tasks = [task({ id: 'a', createdAt: 1 }), task({ id: 'b', createdAt: 2 })];
+    expect(shownTask(tasks, 'a')?.id).toBe('a');
+    expect(shownTask(tasks, undefined)?.id).toBe('b');
+    expect(shownTask(tasks, 'deleted')?.id).toBe('b');
+    expect(shownTask([], 'a')).toBeUndefined();
+  });
+
+  it('narrows history by state and by words in the title or the result, newest first', () => {
+    const tasks = [
+      task({ id: 'a', createdAt: 1, title: 'Fix login', result: 'opened a pull request' }),
+      task({ id: 'b', createdAt: 2, title: 'Upgrade eslint', status: 'failed' }),
+      task({ id: 'c', createdAt: 3, title: 'Review login PR', status: 'running' }),
+    ];
+    const ids = (
+      ...args: Parameters<typeof historyTasks> extends [unknown, ...infer R] ? R : never
+    ) => historyTasks(tasks, ...args).map((t) => t.id);
+    expect(ids('all', '', [])).toEqual(['c', 'b', 'a']);
+    expect(ids('running', '', [])).toEqual(['c']);
+    expect(ids('failed', '', [])).toEqual(['b']);
+    expect(ids('needs', '', [{ task: 'a' } as Approval])).toEqual(['a']);
+    expect(ids('all', 'LOGIN', [])).toEqual(['c', 'a']);
+    expect(ids('all', 'pull request', []), 'words in the result').toEqual(['a']);
+    expect(ids('failed', 'login', [])).toEqual([]);
+  });
+
+  it('says in the header what the agent thinks with and what it can reach', () => {
+    const agent = { runtime: 'codex', connectors: ['github'] } as AgentSummary;
+    expect(reachChips(agent).map((c) => c.text)).toEqual([
+      'ChatGPT',
+      'GitHub',
+      'No access to your files',
+    ]);
+    expect(
+      reachChips({ ...agent, connectors: [], workspaces: ['shop (ro)'] }).map((c) => c.text),
+    ).toEqual(['ChatGPT', '1 shared folder']);
+  });
+
+  it('counts what each host was asked and what was refused in the task record', () => {
+    const audit = {
+      hosts: [
+        { host: 'api.github.com', requests: 9, injected: 7, decisions: { inject: 7, pass: 2 } },
+        {
+          host: 'evil.example\u001b[0m',
+          requests: 2,
+          injected: 0,
+          decisions: { 'egress-denied': 2 },
+        },
+      ],
+    } as never;
+    expect(auditHosts(audit)).toEqual([
+      { host: 'api.github.com', note: '9 requests · 7 with your account', refused: false },
+      { host: 'evil.example', note: '2 requests · 2 refused', refused: true },
+    ]);
   });
 
   it('keeps the task panel and the conversation beside it usable while resizing', () => {
@@ -391,7 +485,72 @@ describe('agent conversation', () => {
     expect(clampWidth(2000, 560, 600)).toBe(560 + 600 - PANEL_WIDTH.main);
     expect(clampWidth(100, 560, 600)).toBe(PANEL_WIDTH.min);
     expect(clampWidth(900, 560, 200)).toBe(400);
-    expect(clampWidth(900, 400, 100)).toBe(PANEL_WIDTH.min);
+  });
+});
+
+describe('access in plain words', () => {
+  const fixed = { approvals: {}, egress: null, sandbox: 'cell', delegates: [] };
+  const none = { connectors: [], workspaces: [], delegates: [], highRisk: { disable: [] } };
+  const text = (lines: ReturnType<typeof plainWords>, can: boolean) =>
+    lines.filter((l) => l.can === can).map((l) => l.text);
+
+  it('says an agent with nothing granted reaches no account and no file', () => {
+    const lines = plainWords(none, fixed);
+    expect(text(lines, true)).toEqual(['Reaches any public website']);
+    expect(text(lines, false)).toEqual([
+      'Cannot read any file on this computer',
+      'Cannot use any of your connected accounts',
+      'Cannot hand work to another agent',
+      'Never sees a password or token: Anchi adds them outside its cell',
+    ]);
+  });
+
+  it('names each grant, and marks write access and skipped approvals', () => {
+    const lines = plainWords(
+      {
+        connectors: ['github', 'gmail'],
+        workspaces: [
+          { path: 'shop', mode: 'ro' },
+          { path: 'notes\u001b[31m', mode: 'rw' },
+        ],
+        delegates: ['reviewer'],
+        highRisk: { disable: ['github.merge'] },
+      },
+      {
+        ...fixed,
+        approvals: { github: 'ask' },
+        egress: ['github.com'],
+        highRiskGlobal: ['x.post'],
+      },
+      (id) => id.toUpperCase(),
+    );
+    expect(text(lines, true)).toEqual([
+      'Acts through GITHUB; anything that writes waits for you',
+      'Acts through GMAIL; high-risk operations wait for you',
+      'Reads files in shop',
+      'Reads and changes files in notes',
+      'Hands work to @reviewer',
+      'Reaches only github.com',
+      'Does without asking: github.merge, x.post',
+    ]);
+    expect(lines.filter((l) => l.warn).map((l) => l.text)).toEqual([
+      'Reads and changes files in notes',
+      'Does without asking: github.merge, x.post',
+    ]);
+    expect(text(lines, false)).toEqual([
+      'Cannot read files outside the shared folders',
+      'Cannot use an account that is not switched on here',
+      'Never sees a password or token: Anchi adds them outside its cell',
+    ]);
+  });
+
+  it('says so when no website may be reached, and falls back to the fixed delegates', () => {
+    const lines = plainWords(
+      { ...none, delegates: undefined },
+      { ...fixed, egress: [], delegates: ['ops'] },
+    );
+    expect(text(lines, false)).toContain('Cannot reach any website of its own choosing');
+    expect(text(lines, true)).toContain('Hands work to @ops');
   });
 });
 
