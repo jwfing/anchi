@@ -2290,3 +2290,72 @@ h3 {
 .dot-approval {
   background: var(--amber);
 }
+
+/* New agent: templates, the builder's draft, and the review beside them. */
+.builder-pane {
+  padding: 24px 32px;
+}
+.templates {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.templates p {
+  margin: 0;
+}
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.template {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+}
+.template:hover,
+.template.selected {
+  border-color: var(--accent);
+  background: #fff;
+}
+.template .chips {
+  margin-top: 4px;
+  gap: 6px;
+}
+.template .chip {
+  height: 22px;
+}
+.template-icon {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  border-radius: 10px;
+  background: var(--subtle);
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.template:hover .template-icon,
+.template.selected .template-icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.proposal .approval-band {
+  flex: none;
+}
+.proposal .panel-section {
+  gap: 9px;
+}
+.file-view > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  padding: 6px 0;
+}

@@ -33,6 +33,7 @@ import {
 import { plainWords } from '../src/renderer/access.ts';
 import { DelegationChoices, settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
+import { TEMPLATES } from '../src/renderer/views/Builder.tsx';
 import {
   codexLoginHelp,
   ProbeNote,
@@ -485,6 +486,29 @@ describe('agent conversation', () => {
     expect(clampWidth(2000, 560, 600)).toBe(560 + 600 - PANEL_WIDTH.main);
     expect(clampWidth(100, 560, 600)).toBe(PANEL_WIDTH.min);
     expect(clampWidth(900, 560, 200)).toBe(400);
+  });
+});
+
+describe('new agent templates', () => {
+  it('asks the builder for an agent with a valid id and only connectors that exist', () => {
+    const known: string[] = [...CONNECTOR_IDS, ...SERVICE_CONNECTORS];
+    for (const t of TEMPLATES) {
+      expect(t.request, t.id).toContain(`with the id ${t.id} `);
+      expect(t.id).toMatch(/^[a-z0-9][a-z0-9-]{0,39}$/);
+      const named = [...t.request.matchAll(/the ([a-z ]+?) connectors?\b/g)].flatMap((m) =>
+        m[1]!.split(' and '),
+      );
+      for (const id of named) expect(known, `${t.id}: ${id}`).toContain(id);
+      // A template never asks for access without the user's approval of what it writes.
+      if (named.length) expect(t.request, t.id).toMatch(/ask me|my approval/);
+    }
+    expect(TEMPLATES.map((t) => t.id)).toEqual([
+      'reviewer',
+      'developer',
+      'inbox',
+      'researcher',
+      'social',
+    ]);
   });
 });
 

@@ -266,8 +266,19 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
     scan: 'clean (12 files)',
     rows: [],
   }),
-  'agents.settings': (p: { agentId: string }) => ({
+  'agents.createPreview': (p: { agentId: string }) => ({
+    id: 'p-demo',
     agentId: p.agentId,
+    kind: 'create' as const,
+    agentYaml: 'name: Reviewer\nruntime: codex\nconnectors: [github]\n',
+    imageYaml: null,
+    agentDiff: '+name: Reviewer\n+runtime: codex\n+connectors: [github]\n',
+    imageDiff: '',
+    errors: [],
+    warnings: [],
+  }),
+  'agents.settings': (p: { agentId?: string }) => ({
+    agentId: p.agentId ?? 'reviewer',
     editable: true,
     current: {
       name: 'Developer',

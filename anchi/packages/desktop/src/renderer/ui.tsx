@@ -152,6 +152,7 @@ export function Composer({
   disabled,
   hint,
   inputRef,
+  initialText = '',
   onSend,
 }: {
   placeholder: string;
@@ -159,9 +160,11 @@ export function Composer({
   disabled?: boolean;
   hint?: string;
   inputRef?: Ref<HTMLTextAreaElement>;
+  /** What the box holds at first, for the user to edit before sending. */
+  initialText?: string;
   onSend: (text: string) => Promise<unknown>;
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText);
   const [busy, setBusy] = useState(false);
   const send = async () => {
     const value = text.trim();
