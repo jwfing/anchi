@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar, TeamList } from '../src/renderer/App.tsx';
 import { machineCall } from '../src/renderer/api.ts';
 import { EMPTY_MODEL, reduceFleet, type Fleet } from '../src/renderer/model.ts';
+import { attention, attentionCount } from '../src/renderer/views/NeedsYou.tsx';
 
 const agent: AgentSummary = {
   id: 'dev',
@@ -95,7 +96,7 @@ describe('all-machine desktop', () => {
         onBuilder={() => {}}
       />,
     );
-    expect(out).toContain('TEAM · 2');
+    expect(out).toContain('AGENTS · 2');
     expect(out).toContain('@dev on local');
     expect(out).toContain('@dev on newuser');
     expect(out.match(/aria-current="true"/g)).toHaveLength(1);
@@ -150,7 +151,7 @@ it('discovers a third machine through one connection and deduplicates directly c
       onBuilder={() => {}}
     />,
   );
-  expect(out).toContain('TEAM · 3');
+  expect(out).toContain('AGENTS · 3');
   expect(out.match(/aria-label="@dev on dora"/g)).toHaveLength(1);
   expect(out.match(/aria-label="@dev on newuser"/g)).toHaveLength(1);
 });
@@ -158,7 +159,7 @@ it('discovers a third machine through one connection and deduplicates directly c
 describe('one sidebar', () => {
   const local = { name: 'local', label: 'local', status: 'connected' as const };
   const remote = { name: 'instabox:newuser', label: 'newuser', status: 'error' as const };
-  const sidebar = (connections: (typeof local | typeof remote)[], approvals = 0) =>
+  const sidebar = (connections: (typeof local | typeof remote)[], waiting = 0) =>
     renderToStaticMarkup(
       <Sidebar
         fleet={Object.fromEntries(
@@ -167,7 +168,7 @@ describe('one sidebar', () => {
         connections={connections}
         selected="local"
         view={{ kind: 'usage' }}
-        approvals={approvals}
+        waiting={waiting}
         setView={() => {}}
         onSelect={() => {}}
         onBuilder={() => {}}
@@ -176,21 +177,21 @@ describe('one sidebar', () => {
 
   it('lists the agents of a single machine without a machine heading', () => {
     const out = sidebar([local]);
-    expect(out).toContain('TEAM · 1');
+    expect(out).toContain('AGENTS · 1');
     expect(out).toContain('aria-label="@dev on local"');
     expect(out).not.toContain('team-host');
     expect(out).not.toContain('Agents on local');
-    expect(out).toContain('This computer · connected');
-    expect(out).toContain('aria-label="local is connected. Open settings"');
+    expect(out).toContain('>Protected<');
+    expect(out).toContain('This computer · 1 agent sealed');
   });
 
   it('groups agents by machine and counts connections once there are several', () => {
     const out = sidebar([local, remote], 2);
     expect(out.match(/class="team-host"/g)).toHaveLength(2);
     expect(out).toContain('Agents on newuser');
-    expect(out).toContain('1/2 machines connected');
+    expect(out).toContain('1/2 machines · 1 agent sealed');
     expect(out).not.toContain('This computer ·');
-    expect(out).toContain('aria-label="Approvals, 2 waiting"');
+    expect(out).toContain('aria-label="Needs you, 2 waiting"');
   });
 
   it('keeps a machine heading for a peer discovered through the only connection', () => {
@@ -225,7 +226,90 @@ describe('one sidebar', () => {
     const out = sidebar([{ ...local, status: 'error' as const }]);
     expect(out).toContain('aria-label="Usage" aria-current="page"');
     expect(out).toContain('dot dot-error');
+    expect(out).toContain('>Not connected<');
     expect(out).toContain('This computer · error');
     expect(out).toContain('Offline · last known state');
+  });
+});
+
+describe('needs you', () => {
+  const local = { name: 'local', label: 'local', status: 'connected' as const };
+  const approval = (id: string, createdAt: number) =>
+    ({ id, agent: 'dev', task: 't', createdAt, timeout: 600 }) as never;
+  const locked = {
+    vm: 'running',
+    installed: true,
+    vaultUnlocked: false,
+    vaultKeyPresent: true,
+  } as never;
+
+  it('gathers held writes of every machine, oldest first, each with its machine', () => {
+    const remote = { name: 'ssh:box', label: 'box', status: 'connected' as const };
+    const found = attention(
+      {
+        local: { ...EMPTY_MODEL, approvals: [approval('same', 20)] },
+        'ssh:box': { ...EMPTY_MODEL, approvals: [approval('same', 10)] },
+      },
+      [local, remote],
+      null,
+    );
+    expect(found.approvals.map((a) => [a.server.name, a.approval.id])).toEqual([
+      ['ssh:box', 'same'],
+      ['local', 'same'],
+    ]);
+    expect(attentionCount(found)).toBe(2);
+  });
+
+  it('adds a locked vault, a machine that does not answer, and what can be upgraded', () => {
+    const found = attention(
+      { local: { ...EMPTY_MODEL, setup: locked } },
+      [
+        local,
+        { name: 'ssh:down', label: 'down', status: 'error', error: 'no route' },
+        { name: 'ssh:new', label: 'new', status: 'needs-setup' },
+        { name: 'ssh:old', label: 'old', status: 'connected', newer: '9.9.9', install: 'release' },
+        { name: 'ssh:src', label: 'src', status: 'connected', newer: '9.9.9', install: 'source' },
+      ],
+      { currentVersion: '1.0.0', version: '9.9.9', url: 'https://example.com' },
+    );
+    expect(found.notices.map((n) => [n.kind, n.kind === 'update' ? 'app' : n.server.name])).toEqual(
+      [
+        ['vault', 'local'],
+        ['connection', 'ssh:down'],
+        ['connection', 'ssh:new'],
+        ['upgrade', 'ssh:old'],
+        ['update', 'app'],
+      ],
+    );
+  });
+
+  it('asks for nothing about a machine the user disconnected or one still connecting', () => {
+    const found = attention(
+      { local: { ...EMPTY_MODEL, setup: locked, approvals: [] } },
+      [
+        { ...local, status: 'connecting' },
+        { name: 'ssh:off', label: 'off', status: 'disconnected' },
+      ],
+      null,
+    );
+    expect(attentionCount(found)).toBe(0);
+  });
+
+  it('says the vault is locked in the sidebar, in place of protected', () => {
+    const out = renderToStaticMarkup(
+      <Sidebar
+        fleet={{ local: { ...EMPTY_MODEL, agents: [agent], setup: locked } }}
+        connections={[local]}
+        selected="local"
+        view={{ kind: 'inbox' }}
+        waiting={1}
+        setView={() => {}}
+        onSelect={() => {}}
+        onBuilder={() => {}}
+      />,
+    );
+    expect(out).toContain('>Vault locked<');
+    expect(out).not.toContain('>Protected<');
+    expect(out).toContain('aria-label="Needs you, 1 waiting" aria-current="page"');
   });
 });

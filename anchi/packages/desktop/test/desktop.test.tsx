@@ -331,6 +331,10 @@ describe('approval card', () => {
         <ApprovalCard approval={approval} />
       </Ctx.Provider>,
     );
+    // The band that agent text cannot draw comes first.
+    expect(out.indexOf('Anchi · needs your approval')).toBeLessThan(
+      out.indexOf('Approve a write by @assistant?'),
+    );
     for (const text of [
       'Approve a write by @assistant?',
       'x (api.x.com)',

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type {
   AgentSummary,
+  Approval,
   MethodName,
   Result,
   RuntimeEvent,
@@ -196,6 +197,25 @@ const status: SetupStatus = {
 };
 const skills: SkillInfo[] = [];
 
+// ANCHI_DEMO_STEPS names a steps file for drive.mjs to run against the stand-in daemon instead of
+// the documented screenshot, to look at other views; nothing in the repository is written then,
+// and a held write waits so the approval views have something to show.
+const custom = process.env.ANCHI_DEMO_STEPS;
+const held: Approval = {
+  id: 'ap-demo',
+  kind: 'proxy',
+  task: 't-demo2',
+  agent: 'developer',
+  connector: 'github',
+  operation: 'POST /repos/example/shop/pulls',
+  host: 'api.github.com',
+  summary: '{"title": "Fix login validation", "head": "fix/login-validation", "base": "main"}',
+  createdAt: now - 18_000,
+  timeout: 600,
+  reason: 'Writes to GitHub wait for you (set in the agent’s access)',
+  origin: 'user → @developer',
+};
+
 const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
   'agents.list': () => agents,
   'tasks.list': (p: { agentId?: string }) =>
@@ -203,7 +223,7 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
   'tasks.events': (p: { taskId: string; afterSeq?: number }) =>
     events(p.taskId).filter((e) => e.seq > (p.afterSeq ?? 0)),
   'setup.status': () => status,
-  'approvals.list': () => [],
+  'approvals.list': () => (custom ? [held] : []),
   'skills.list': () => skills,
   'usage.summary': () => [],
   'usage.quota': () => [],
@@ -223,9 +243,6 @@ await new Promise<void>((ready) => server.listen(join(home, 'run', 'daemon.sock'
 
 const shot = join(home, 'desktop.png');
 const steps = join(home, 'steps.json');
-// ANCHI_DEMO_STEPS names a steps file for drive.mjs to run against the stand-in daemon instead of
-// the documented screenshot, to look at other views; nothing in the repository is written then.
-const custom = process.env.ANCHI_DEMO_STEPS;
 writeFileSync(
   steps,
   custom

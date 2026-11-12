@@ -495,10 +495,6 @@ h2 {
 .side-button.active {
   background: var(--line);
 }
-.side-status {
-  margin-top: 6px;
-  font-weight: 400;
-}
 .badge {
   flex: none;
   min-width: 18px;
@@ -1139,32 +1135,51 @@ h2 {
   margin: 0 14px 14px;
   border: 1px solid var(--approval-line);
   background: var(--approval-soft);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: 12px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 .approval-full {
-  margin: 16px 0;
+  margin: 0;
 }
-.approval-head {
+/* The band agent text cannot draw: what is under it comes from the daemon's record. */
+.approval-band {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 14px;
+  background: var(--rail);
+  color: #fff;
+  font-size: 12px;
+}
+.approval-band-title {
+  font-size: 11px;
   font-weight: 600;
-  color: var(--approval);
-  flex-wrap: wrap;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.approval-machine {
+  color: #d8d3c6;
 }
 .approval-left {
   margin-left: auto;
-  font-weight: 500;
-  font-size: 12px;
+  color: #d8d3c6;
+}
+.approval-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.approval-head {
+  font-size: 15px;
+  font-weight: 600;
 }
 .approval-grid {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  row-gap: 4px;
+  grid-template-columns: 120px minmax(0, 1fr);
+  row-gap: 5px;
   margin: 0;
   font-size: 13px;
   color: var(--ink-2);
@@ -1190,13 +1205,12 @@ h2 {
   overflow-wrap: anywhere;
 }
 .approval-full .approval-summary {
-  max-height: none;
+  max-height: 320px;
   font-size: 13px;
 }
 .approval-actions {
   display: flex;
   gap: 8px;
-  justify-content: flex-end;
 }
 .trusted {
   display: flex;
@@ -1869,4 +1883,89 @@ h2 {
 }
 .more[open] > summary .team-chevron {
   transform: rotate(90deg);
+}
+
+/* Needs you: one column of what waits for the user. */
+.inbox {
+  align-items: center;
+  padding: 32px 24px 48px;
+}
+.inbox-col {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.inbox-col h1,
+.inbox-col p {
+  margin: 0;
+}
+.inbox-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.inbox-item .approval {
+  align-self: stretch;
+}
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.notice-icon {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--subtle);
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.notice-actions {
+  flex: none;
+}
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 48px 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--accent);
+}
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.protection {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  min-width: 0;
+  color: var(--accent);
+}
+.protection .muted {
+  color: var(--muted);
+}
+.protection-warn {
+  color: var(--approval);
+  border-color: var(--approval-line);
+  background: var(--approval-soft);
 }
