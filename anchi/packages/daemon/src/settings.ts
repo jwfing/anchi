@@ -52,6 +52,8 @@ const patchSchema = z.strictObject({
   highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
   approvals: field.approvals,
   triggers: field.triggers,
+  // null removes the list: any public host again.
+  egress: field.egress.unwrap().nullable().optional(),
 });
 
 /** The fields a patch may change, for messages. */
@@ -63,7 +65,7 @@ export const PATCH_FIELDS = Object.keys(patchSchema.shape);
  * the user edits them directly in the settings panel.
  */
 export const BUILDER_PATCH_FIELDS = PATCH_FIELDS.filter(
-  (field) => field !== 'approvals' && field !== 'triggers',
+  (field) => field !== 'approvals' && field !== 'triggers' && field !== 'egress',
 );
 
 export function parsePatch(raw: unknown): AgentPatch {
@@ -76,7 +78,8 @@ export function parsePatch(raw: unknown): AgentPatch {
     !unique(delegates) ||
     !unique(connectors) ||
     !unique(workspaces?.map((w) => w.path)) ||
-    !unique(highRisk?.disable)
+    !unique(highRisk?.disable) ||
+    !unique(parsed.data.egress ?? undefined)
   ) {
     throw new Error('invalid settings: an entry appears twice');
   }
@@ -97,6 +100,7 @@ const EDITABLE = [
   'highRisk',
   'approvals',
   'triggers',
+  'egress',
 ] as const;
 
 /** One line per trigger, for display. */
@@ -139,6 +143,7 @@ export function settingsView(
       highRisk: { disable: [...(agent.highRisk?.disable ?? [])] },
       approvals: { ...agent.approvals },
       triggers: (agent.triggers ?? []).map((t) => ({ ...t })) as TriggerSetting[],
+      egress: agent.egress ? [...agent.egress] : null,
     },
     inherited,
     fixed: {
@@ -234,8 +239,10 @@ export function updateAgentFile(
   let before: string[] = [];
   let asked: string[] = [];
   let scheduled: string[] = [];
+  let hosts: string[] | undefined;
   try {
     const now = resolveAgent(id, layout);
+    hosts = now.egress;
     before = now.highRisk.disable;
     asked = Object.entries(now.approvals ?? {})
       .filter(([, mode]) => mode === 'ask')
@@ -267,6 +274,13 @@ export function updateAgentFile(
     const started = (agent.triggers ?? []).map(triggerLine).filter((t) => !scheduled.includes(t));
     if (started.length) {
       warnings.push(`@${id} starts tasks by itself: ${started.join('; ')} (triggers)`);
+    }
+    // A limited agent that reaches more: a new host, or every public host again.
+    if (hosts && !agent.egress) {
+      warnings.push(`@${id} reaches any public host: its egress list is removed (egress)`);
+    } else if (hosts && agent.egress) {
+      const reached = agent.egress.filter((h) => !hosts.includes(h));
+      if (reached.length) warnings.push(`@${id} may also reach ${reached.join(', ')} (egress)`);
     }
     if (opts.inventory) {
       const found = checkReferences(agent, opts.inventory, opts.workspaceRoot ?? '');

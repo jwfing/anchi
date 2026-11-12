@@ -266,6 +266,11 @@ describe('patchAgentYaml', () => {
       'runtime: codex\ntriggers:\n  - schedule: 0 9 * * 1-5\n    text: Check the dependencies\n',
     );
     expect(patchAgentYaml(scheduled, { triggers: [] })).toBe('runtime: codex\n');
+    // An empty host list is a list (nothing reachable), not open egress; null removes it.
+    expect(patchAgentYaml('runtime: codex\n', { egress: [] })).toBe('runtime: codex\negress: []\n');
+    expect(patchAgentYaml('runtime: codex\negress: [a.io]\n', { egress: null })).toBe(
+      'runtime: codex\n',
+    );
     // Fields the patch does not name stay as they are.
     expect(patchAgentYaml(scheduled, { approvals: { github: 'ask' } })).toContain(
       'schedule: 0 9 * * 1-5',

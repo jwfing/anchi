@@ -2646,3 +2646,11 @@ h3 {
 .cron {
   width: 150px;
 }
+.chip-x {
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+}

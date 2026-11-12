@@ -32,6 +32,7 @@ import { type Confirmation, externalUrl } from './bridge.ts';
 import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
 import { bootstrapServer, ServerSetup } from './server-setup.ts';
+import { switchLoginStartup } from './startup.ts';
 import { ReleaseUpdates } from './updates.ts';
 import { LOCAL_UPGRADE, REMOTE_UPGRADE, runScript, ServerUpgrade } from './upgrade.ts';
 import type { DaemonStatus } from '@anchi/protocol';
@@ -385,41 +386,28 @@ ipcMain.handle('anchi:loginStartup', (event) => {
   fromApp(event);
   return process.platform !== 'win32' && existsSync(autostartFile());
 });
-ipcMain.handle('anchi:setLoginStartup', async (event, on: unknown) => {
+ipcMain.handle('anchi:setLoginStartup', (event, on: unknown) => {
   fromApp(event);
-  if (typeof on !== 'boolean') throw new Error('choose on or off');
-  if (process.platform === 'win32') throw new Error('Windows has no local Anchi server');
-  const question: Confirmation = on
-    ? {
-        message: 'Start Anchi’s background service when you log in?',
-        detail:
-          'Anchi adds a login item for its daemon on this computer (launchd on macOS, a systemd user unit on Linux), so agents and schedules work without opening this app.',
-        button: 'Start at login',
-      }
-    : {
-        message: 'Stop starting Anchi’s background service at login?',
-        detail:
-          'The login item is removed. If login started the service that runs now, it stops with it: running tasks end, and this app starts the service again when it reconnects.',
-        button: 'Remove the login item',
-      };
-  if (!(await confirm(question))) return existsSync(autostartFile());
-  const cli = process.env.ANCHI_CLI ?? 'anchi';
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(cli, ['--server', 'local', 'daemon', on ? 'install' : 'uninstall'], {
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    let stderr = '';
-    child.stderr.on('data', (d: Buffer) => {
-      stderr = (stderr + d.toString('utf8')).slice(-2000);
-    });
-    child.on('error', () => reject(new Error(`${cli} not found`)));
-    child.on('close', (code) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(sanitizeLine(stderr.trim() || `${cli} daemon exited with ${code}`))),
-    );
+  return switchLoginStartup(on, {
+    platform: process.platform,
+    installed: () => existsSync(autostartFile()),
+    confirm,
+    run: (args) =>
+      new Promise<void>((resolve, reject) => {
+        const cli = process.env.ANCHI_CLI ?? 'anchi';
+        const child = spawn(cli, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+        let stderr = '';
+        child.stderr.on('data', (d: Buffer) => {
+          stderr = (stderr + d.toString('utf8')).slice(-2000);
+        });
+        child.on('error', () => reject(new Error(`${cli} not found`)));
+        child.on('close', (code) =>
+          code === 0
+            ? resolve()
+            : reject(new Error(sanitizeLine(stderr.trim() || `${cli} daemon exited with ${code}`))),
+        );
+      }),
   });
-  return existsSync(autostartFile());
 });
 ipcMain.handle('anchi:copyUpdateCommand', (event) => {
   fromApp(event);

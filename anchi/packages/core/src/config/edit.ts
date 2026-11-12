@@ -28,8 +28,11 @@ export interface AgentPatch {
   approvals?: Partial<Record<Connector, ApprovalMode>>;
   /** Replaces the schedules and polls that start tasks; an empty list removes them. */
   triggers?: Trigger[];
-  /** Set by the daemon only (allowing a refused host); never emptied into open egress. */
-  egress?: string[];
+  /**
+   * The hosts the agent may reach. A list, even an empty one, is always written; `null` removes
+   * the key, after which the agent reaches any public host unless a template limits it.
+   */
+  egress?: string[] | null;
 }
 
 /**
@@ -122,7 +125,8 @@ export function patchAgentYaml(text: string, patch: AgentPatch): string {
   set('connectors', patch.connectors, true);
   set('delegates', patch.delegates, true);
   // An empty egress list is not the same as none (open egress): it is always written.
-  if (patch.egress !== undefined) {
+  if (patch.egress === null) doc.delete('egress');
+  else if (patch.egress !== undefined) {
     const node = doc.createNode(patch.egress);
     node.flow = true;
     replace(['egress'], node);

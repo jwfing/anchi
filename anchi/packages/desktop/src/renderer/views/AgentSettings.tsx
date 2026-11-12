@@ -361,63 +361,57 @@ export function AgentSettingsView({
               <Schedules value={draft.triggers} onChange={(triggers) => edit({ triggers })} />
             )}
 
-            <section className="card">
-              <h2>Websites it may reach</h2>
-              {fixed.egress === null ? (
-                <p className="small muted">
-                  Any public website. To limit it to a list, set{' '}
-                  <span className="mono">egress</span> in the agent file; hosts can then be added
-                  here.
-                </p>
-              ) : (
-                <>
+            {draft.egress !== undefined ? (
+              <Websites value={draft.egress} onChange={(egress) => edit({ egress })} />
+            ) : (
+              <section className="card">
+                <h2>Websites it may reach</h2>
+                {fixed.egress === null ? (
                   <p className="small muted">
-                    Only these. Everything else is refused at the gatekeeper and shown in the task’s
-                    record. Removing a host is done in the agent file.
+                    Any public website. This machine’s Anchi cannot change that from here yet.
                   </p>
-                  <div className="chips">
-                    {fixed.egress.map((h) => (
-                      <span key={h} className="chip chip-off mono">
-                        {sanitizeLine(h)}
-                      </span>
-                    ))}
-                    {!fixed.egress.length && <span className="small muted">None yet.</span>}
-                  </div>
-                  <form
-                    className="row gap"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const value = host.trim();
-                      if (!value) return;
-                      void act(
-                        () => call('agents.allowHost', { agentId, host: value }),
-                        `${value} allowed`,
-                      ).then((done) => {
-                        if (!done) return;
-                        setHost('');
-                        load();
-                      });
-                    }}
-                  >
-                    <label className="field grow">
-                      <span className="sr-only">Host to allow</span>
-                      <input
-                        value={host}
-                        placeholder="registry.npmjs.org"
-                        spellCheck={false}
-                        onChange={(e) => setHost(e.target.value)}
-                      />
-                    </label>
-                    <button type="submit" className="btn" disabled={!host.trim() || changed}>
-                      Allow this host…
-                    </button>
-                  </form>
-                  {changed && (
-                    <span className="small muted">Save or discard the other changes first.</span>
-                  )}
-                </>
-              )}
-            </section>
+                ) : (
+                  <>
+                    <div className="chips">
+                      {fixed.egress.map((h) => (
+                        <span key={h} className="chip chip-off mono">
+                          {sanitizeLine(h)}
+                        </span>
+                      ))}
+                    </div>
+                    <form
+                      className="row gap"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const value = host.trim();
+                        if (!value) return;
+                        void act(
+                          () => call('agents.allowHost', { agentId, host: value }),
+                          `${value} allowed`,
+                        ).then((done) => {
+                          if (!done) return;
+                          setHost('');
+                          load();
+                        });
+                      }}
+                    >
+                      <label className="field grow">
+                        <span className="sr-only">Host to allow</span>
+                        <input
+                          value={host}
+                          placeholder="registry.npmjs.org"
+                          spellCheck={false}
+                          onChange={(e) => setHost(e.target.value)}
+                        />
+                      </label>
+                      <button type="submit" className="btn" disabled={!host.trim() || changed}>
+                        Allow this host…
+                      </button>
+                    </form>
+                  </>
+                )}
+              </section>
+            )}
 
             <section className="card">
               <h2>
@@ -539,6 +533,92 @@ export function AgentSettingsView({
   );
 }
 
+/**
+ * The hosts an agent may reach: any public website, or only a list. Choosing the list starts it
+ * with what is typed; a host is added or removed in the draft and saved with the other changes.
+ */
+function Websites({
+  value,
+  onChange,
+}: {
+  value: string[] | null;
+  onChange: (next: string[] | null) => void;
+}) {
+  const [host, setHost] = useState('');
+  const add = () => {
+    const h = host.trim().toLowerCase();
+    if (!h || value?.includes(h)) return;
+    onChange([...(value ?? []), h]);
+    setHost('');
+  };
+  return (
+    <section className="card">
+      <h2>Websites it may reach</h2>
+      <div className="segmented" role="group" aria-label="Websites">
+        <button type="button" aria-pressed={value === null} onClick={() => onChange(null)}>
+          Any public website
+        </button>
+        <button
+          type="button"
+          className="ask"
+          aria-pressed={value !== null}
+          onClick={() => value === null && onChange([])}
+        >
+          Only these
+        </button>
+      </div>
+      {value === null ? (
+        <p className="small muted">
+          Its tasks can send anything they hold to any public host. Choose Only these to limit it.
+        </p>
+      ) : (
+        <>
+          <p className="small muted">
+            Everything else is refused at the gatekeeper and shown in the task’s record. Use a host
+            name, or *.example.com for its subdomains.
+          </p>
+          <div className="chips">
+            {value.map((h) => (
+              <span key={h} className="chip chip-off mono">
+                {sanitizeLine(h)}
+                <button
+                  type="button"
+                  className="chip-x"
+                  aria-label={`Remove ${h}`}
+                  onClick={() => onChange(value.filter((x) => x !== h))}
+                >
+                  <Icon name="x" size={11} />
+                </button>
+              </span>
+            ))}
+            {!value.length && <span className="small muted">None: it reaches no website.</span>}
+          </div>
+          <form
+            className="row gap"
+            onSubmit={(e) => {
+              e.preventDefault();
+              add();
+            }}
+          >
+            <label className="field grow">
+              <span className="sr-only">Host to allow</span>
+              <input
+                value={host}
+                placeholder="registry.npmjs.org"
+                spellCheck={false}
+                onChange={(e) => setHost(e.target.value)}
+              />
+            </label>
+            <button type="submit" className="btn btn-small" disabled={!host.trim()}>
+              Add
+            </button>
+          </form>
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Schedules people ask for, by their cron expression. */
 export const SCHEDULE_PRESETS: [string, string][] = [
   ['0 9 * * 1-5', 'Weekdays at 09:00'],
@@ -548,9 +628,8 @@ export const SCHEDULE_PRESETS: [string, string][] = [
 ];
 
 /**
- * The triggers that start tasks without the user. A schedule is edited here (a preset or its
- * cron expression, and what to do); a poll for new items is kept or removed, and written in
- * the agent file.
+ * The triggers that start tasks without the user: a schedule (a preset or its cron expression,
+ * and what to do), or a check for new GitHub or Linear issues with what to do for each.
  */
 function Schedules({
   value,
@@ -615,23 +694,96 @@ function Schedules({
             </label>
           </div>
         ) : (
-          <div key={i} className="check-row">
-            <span className="grow ellipsis">
-              Every {t.every ?? 5} min, for new {sanitizeLine(String(t.poll.type))} items:{' '}
-              <span className="muted">{sanitizeLine(t.text).slice(0, 80)}</span>
-            </span>
-            <button
-              type="button"
-              className="btn btn-small"
-              onClick={() => onChange(value.filter((_, j) => j !== i))}
-            >
-              Remove
-            </button>
+          <div key={i} className="schedule">
+            <div className="row gap wrap">
+              <label className="field">
+                <span className="sr-only">New items of</span>
+                <select
+                  value={t.poll.type}
+                  onChange={(e) =>
+                    set(i, {
+                      ...t,
+                      poll:
+                        e.target.value === 'github-issues'
+                          ? { type: 'github-issues', query: '' }
+                          : { type: 'linear-issues' },
+                    })
+                  }
+                >
+                  <option value="github-issues">New GitHub issues</option>
+                  <option value="linear-issues">New Linear issues</option>
+                </select>
+              </label>
+              {t.poll.type === 'github-issues' ? (
+                <label className="field grow">
+                  <span className="sr-only">GitHub search</span>
+                  <input
+                    className="mono"
+                    value={String(t.poll.query ?? '')}
+                    placeholder="repo:owner/name is:issue is:open label:agent"
+                    spellCheck={false}
+                    onChange={(e) => set(i, { ...t, poll: { ...t.poll, query: e.target.value } })}
+                  />
+                </label>
+              ) : (
+                (['team', 'label', 'state'] as const).map((k) => (
+                  <label key={k} className="field">
+                    <span className="sr-only">{k}</span>
+                    <input
+                      value={String(t.poll[k] ?? '')}
+                      placeholder={k}
+                      spellCheck={false}
+                      onChange={(e) => {
+                        const { [k]: _, ...rest } = t.poll;
+                        set(i, {
+                          ...t,
+                          poll: e.target.value
+                            ? { ...rest, [k]: e.target.value }
+                            : (rest as typeof t.poll),
+                        });
+                      }}
+                    />
+                  </label>
+                ))
+              )}
+              <label className="field">
+                <span className="sr-only">Minutes between checks</span>
+                <select
+                  value={t.every ?? 5}
+                  onChange={(e) => set(i, { ...t, every: Number(e.target.value) })}
+                >
+                  {[5, 15, 60].map((n) => (
+                    <option key={n} value={n}>
+                      every {n} min
+                    </option>
+                  ))}
+                  {![5, 15, 60].includes(t.every ?? 5) && (
+                    <option value={t.every}>every {t.every} min</option>
+                  )}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => onChange(value.filter((_, j) => j !== i))}
+              >
+                Remove
+              </button>
+            </div>
+            <label className="field">
+              <span className="sr-only">What to do for each</span>
+              <textarea
+                rows={2}
+                value={t.text}
+                placeholder="What to do for each new item; {title}, {url} and {id} are filled in"
+                onChange={(e) => set(i, { ...t, text: e.target.value })}
+              />
+            </label>
           </div>
         ),
       )}
       {!value.length && <p className="small muted">None: it only works when asked.</p>}
-      <div className="row">
+      <div className="row gap">
         <button
           type="button"
           className="btn btn-small"
@@ -639,6 +791,16 @@ function Schedules({
           onClick={() => onChange([...value, { schedule: SCHEDULE_PRESETS[0]![0], text: '' }])}
         >
           Add a schedule
+        </button>
+        <button
+          type="button"
+          className="btn btn-small"
+          disabled={value.length >= 20}
+          onClick={() =>
+            onChange([...value, { poll: { type: 'github-issues', query: '' }, text: '', every: 5 }])
+          }
+        >
+          Add a check for new items
         </button>
       </div>
     </section>

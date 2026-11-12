@@ -254,6 +254,14 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
       }
     }
   }
+  // More to reach: every public host again, or a host the list did not have.
+  if (patch.egress === null && current.egress) out.push('reach any public website');
+  if (patch.egress && current.egress) {
+    const before = current.egress;
+    for (const host of patch.egress) {
+      if (!before.includes(host)) out.push(`reach ${sanitizeLine(String(host)).slice(0, 80)}`);
+    }
+  }
   // A new trigger starts tasks when nobody is looking, often on content nobody has read.
   const known = (current.triggers ?? []).map((t) => JSON.stringify(t));
   for (const t of patch.triggers ?? []) {

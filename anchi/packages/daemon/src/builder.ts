@@ -326,7 +326,9 @@ function readPatch(id: string, yaml: string): AgentPatch {
   if (named !== undefined && named !== id) throw new Error(`id "${named}" does not match "${id}"`);
   for (const k of ['description', 'model', 'effort']) if (fields[k] === null) fields[k] = '';
   const other = `a patch changes only ${BUILDER_PATCH_FIELDS.join(', ')}; send a complete anchi-agent block to change other fields`;
-  const refused = Object.keys(fields).filter((k) => k === 'approvals' || k === 'triggers');
+  const refused = Object.keys(fields).filter((k) =>
+    ['approvals', 'triggers', 'egress'].includes(k),
+  );
   if (refused.length) throw new Error(`a patch cannot change ${refused.join(' or ')}\n${other}`);
   try {
     return parsePatch(fields);

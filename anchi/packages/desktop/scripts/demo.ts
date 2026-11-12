@@ -348,6 +348,9 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
       delegates: ['reviewer'],
       workspaces: [{ path: 'shop', mode: 'ro' }],
       highRisk: { disable: [] },
+      approvals: { github: 'ask' as const },
+      triggers: [],
+      egress: ['github.com', 'registry.npmjs.org'],
     },
     inherited: [],
     fixed: {

@@ -14,6 +14,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
 import { mergePath, parseShellPath } from '../src/main/env.ts';
+import { switchLoginStartup } from '../src/main/startup.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
 import type { ServerState } from '../src/shared.ts';
 import { count } from '../src/renderer/format.ts';
@@ -298,6 +299,62 @@ describe('bridge', () => {
       throw new Error('asked for a narrowing change');
     });
     expect(sent.at(-1)).toBe('agents.update');
+  });
+
+  it('asks before an agent reaches more hosts, not before it reaches fewer', async () => {
+    const settings = (egress: string[] | null) => ({
+      current: { connectors: [], workspaces: [], delegates: [], highRisk: { disable: [] }, egress },
+    });
+    const asked: string[] = [];
+    const apply = (egress: string[] | null, now: string[] | null) =>
+      guardedCall(
+        'agents.update',
+        { agentId: 'dev', patch: { egress }, apply: true },
+        async (method) => (method === 'agents.settings' ? settings(now) : { applied: true }),
+        async (q) => {
+          asked.push(q.detail);
+          return false;
+        },
+      );
+    await expect(apply(['github.com', 'evil.example'], ['github.com'])).rejects.toThrow(
+      'cancelled',
+    );
+    expect(asked.at(-1)).toContain('• reach evil.example');
+    expect(asked.at(-1)).not.toContain('github.com');
+    await expect(apply(null, ['github.com'])).rejects.toThrow('cancelled');
+    expect(asked.at(-1)).toContain('• reach any public website');
+    // Starting a list, or shortening one, only narrows.
+    await apply(['github.com'], null);
+    await apply([], ['github.com']);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('switches start at login only after its dialog, through the CLI, on this computer', async () => {
+    const ran: string[][] = [];
+    let item = false;
+    const deps = (answer: boolean, platform = 'darwin') => ({
+      platform,
+      installed: () => item,
+      confirm: async (q: { message: string; detail: string }) => {
+        expect(q.message).toMatch(/log in|at login/);
+        return answer;
+      },
+      run: async (args: string[]) => {
+        ran.push(args);
+        item = args.at(-1) === 'install';
+      },
+    });
+    expect(await switchLoginStartup(true, deps(false)), 'declined: nothing installed').toBe(false);
+    expect(ran).toEqual([]);
+    expect(await switchLoginStartup(true, deps(true))).toBe(true);
+    expect(ran).toEqual([['--server', 'local', 'daemon', 'install']]);
+    // Removing it stops a daemon that login started, so it is asked too.
+    expect(await switchLoginStartup(false, deps(false)), 'declined: still installed').toBe(true);
+    expect(await switchLoginStartup(false, deps(true))).toBe(false);
+    expect(ran.at(-1)).toEqual(['--server', 'local', 'daemon', 'uninstall']);
+    await expect(switchLoginStartup('yes', deps(true))).rejects.toThrow('choose on or off');
+    await expect(switchLoginStartup(true, deps(true, 'win32'))).rejects.toThrow(/Windows/);
+    expect(ran).toHaveLength(2);
   });
 
   it('takes only plain objects as parameters', () => {
@@ -729,6 +786,13 @@ describe('access in plain words', () => {
     );
     expect(text(lines, true)).toContain('Acts through github; anything that writes waits for you');
     expect(lines.find((l) => l.text === 'Starts tasks by itself: 1 schedule')?.warn).toBe(true);
+    // The draft's hosts, not the file's.
+    expect(
+      text(plainWords({ ...none, egress: ['github.com'] }, { ...fixed, egress: null }), true),
+    ).toEqual(['Reaches only github.com']);
+    expect(
+      text(plainWords({ ...none, egress: null }, { ...fixed, egress: ['a.io'] }), true),
+    ).toEqual(['Reaches any public website']);
   });
 
   it('says so when no website may be reached, and falls back to the fixed delegates', () => {

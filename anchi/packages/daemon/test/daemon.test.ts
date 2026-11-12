@@ -2825,6 +2825,7 @@ describe('agent settings', () => {
       delegates: [],
       approvals: {},
       triggers: [],
+      egress: null,
     });
     expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
@@ -2902,6 +2903,41 @@ describe('agent settings', () => {
     ]);
     expect(after.fixed.triggers).toEqual(['schedule 0 9 * * 1-5']);
     expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toMatch(/^# my developer\n/);
+    // Hosts: starting a list narrows; a new host and removing the list widen, and say so.
+    const limit = await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { egress: ['github.com'] },
+    });
+    expect(limit.warnings).toEqual([]);
+    await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { egress: ['github.com'] },
+      apply: true,
+      base: limit.base,
+    });
+    expect((await client.call('agents.settings', { agentId: 'dev' })).current.egress).toEqual([
+      'github.com',
+    ]);
+    for (const [egress, message] of [
+      [['*'], /invalid settings/],
+      [['https://github.com'], /invalid settings/],
+      [['github.com', 'github.com'], /twice/],
+    ] as const) {
+      await expect(
+        client.call('agents.update', { agentId: 'dev', patch: { egress } as never }),
+      ).rejects.toThrow(message);
+    }
+    expect(
+      (
+        await client.call('agents.update', {
+          agentId: 'dev',
+          patch: { egress: ['github.com', 'pypi.org'] },
+        })
+      ).warnings,
+    ).toEqual(['@dev may also reach pypi.org (egress)']);
+    expect(
+      (await client.call('agents.update', { agentId: 'dev', patch: { egress: null } })).warnings,
+    ).toEqual(['@dev reaches any public host: its egress list is removed (egress)']);
     // Asking again, and dropping the schedule, give nothing up: no warning.
     const back = await client.call('agents.update', {
       agentId: 'dev',
@@ -3199,6 +3235,7 @@ describe('agent settings', () => {
     );
 
     expect(patch('triggers: []').errors.join()).toMatch(/send a complete anchi-agent block/);
+    expect(patch('egress: [evil.example]').errors.join()).toMatch(/a patch cannot change egress/);
     expect(patch('approvals: {github: auto}').errors.join()).toMatch(
       /a patch cannot change approvals[\s\S]*send a complete anchi-agent block/,
     );

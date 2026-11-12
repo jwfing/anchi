@@ -16,7 +16,7 @@ export interface AccessLine {
 export function plainWords(
   values: Pick<
     AgentSettingValues,
-    'connectors' | 'workspaces' | 'delegates' | 'highRisk' | 'approvals' | 'triggers'
+    'connectors' | 'workspaces' | 'delegates' | 'highRisk' | 'approvals' | 'triggers' | 'egress'
   >,
   fixed: Pick<FixedSettings, 'approvals' | 'egress' | 'sandbox' | 'delegates' | 'highRiskGlobal'>,
   name: (connector: string) => string = (id) => id,
@@ -47,11 +47,12 @@ export function plainWords(
       text: `Hands work to ${delegates.map((d) => `@${sanitizeLine(d)}`).join(', ')}`,
     });
   }
+  const egress = values.egress !== undefined ? values.egress : fixed.egress;
   lines.push(
-    fixed.egress === null
+    egress === null
       ? { can: true, text: 'Reaches any public website' }
-      : fixed.egress.length
-        ? { can: true, text: `Reaches only ${fixed.egress.map(sanitizeLine).join(', ')}` }
+      : egress.length
+        ? { can: true, text: `Reaches only ${egress.map(sanitizeLine).join(', ')}` }
         : { can: false, text: 'Cannot reach any website of its own choosing' },
   );
   const triggers = values.triggers?.length ?? 0;

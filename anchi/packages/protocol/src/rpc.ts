@@ -419,6 +419,11 @@ export interface AgentPatch {
   approvals?: Record<string, 'auto' | 'ask'>;
   /** Replaces the agent's schedules and polls; `[]` removes them. */
   triggers?: TriggerSetting[];
+  /**
+   * The hosts the agent may reach, replacing the file's list; `null` removes the list, so the
+   * agent reaches any public host again.
+   */
+  egress?: string[] | null;
 }
 
 /** A trigger as in the agent file: a cron schedule, or a poll for new items. */
@@ -445,6 +450,8 @@ export interface AgentSettingValues {
   /** Per-connector approval modes and triggers; absent on daemons that cannot edit them. */
   approvals?: Record<string, 'auto' | 'ask'>;
   triggers?: TriggerSetting[];
+  /** The hosts it may reach; null for any public host. Absent on daemons that cannot edit it. */
+  egress?: string[] | null;
 }
 
 /** Settings the panel shows but does not edit (they are changed in the agent file). */
