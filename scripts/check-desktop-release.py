@@ -192,8 +192,8 @@ with tempfile.TemporaryDirectory(prefix="anchi-desktop-release-", dir="/tmp") as
     steps.write_text(
         json.dumps(
             [
-                {"waitFor": ".protection .dot-connected"},
-                {"eval": "document.querySelector('.protection .dot').className"},
+                {"waitFor": ".app[data-local=connected]"},
+                {"eval": "document.querySelector('.app').dataset.local"},
             ]
         )
     )
@@ -209,7 +209,7 @@ with tempfile.TemporaryDirectory(prefix="anchi-desktop-release-", dir="/tmp") as
             ok=False,
             timeout=180,
         )
-        if result.returncode or "dot-connected" not in result.stdout:
+        if result.returncode or '"connected"' not in result.stdout:
             log = home / ".anchi/data/daemon.log"
             raise AssertionError(result.stdout + result.stderr + (log.read_text() if log.exists() else ""))
     finally:

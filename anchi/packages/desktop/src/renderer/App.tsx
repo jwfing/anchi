@@ -134,7 +134,9 @@ export function App() {
     setView({ kind: 'agent', agentId });
   };
   return (
-    <div className="app">
+    // The local machine's connection state, for checks of a packaged app: it is there in every
+    // view, the guide included, which leaves the sidebar out.
+    <div className="app" data-local={connections.find((c) => c.name === 'local')?.status ?? 'none'}>
       {connections.map((node) => (
         <MachineSync key={node.name} server={node} dispatch={dispatch} say={say} />
       ))}
