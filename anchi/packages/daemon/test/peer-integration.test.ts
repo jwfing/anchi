@@ -447,8 +447,9 @@ it('resolves the CLI join target relative to the selected Anchi home', async () 
       ],
       {
         env: { ...process.env, ANCHI_HOME: t.leadHome.root, ANCHI_SERVER: 'local' },
-        timeout: 5000,
+        timeout: 25_000,
       },
     ),
   ).rejects.toThrow('Choose a different machine');
-});
+  // The CLI is compiled from source as it starts, which alone can pass 5 s on a cold CI runner.
+}, 30_000);
