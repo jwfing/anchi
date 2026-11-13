@@ -3,12 +3,20 @@
 //   node --import ./anchi/node_modules/tsx/dist/loader.mjs anchi/packages/desktop/scripts/demo.ts
 // writes docs/assets/desktop.png and landing/dist/desktop.png.
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type {
   AgentSummary,
+  Approval,
   MethodName,
   Result,
   RuntimeEvent,
@@ -169,11 +177,51 @@ const status: SetupStatus = {
     { id: 'github', connected: true, account: 'example' },
     { id: 'aws', connected: true, account: '123456789012', profile: 'example' },
   ],
-  services: [],
-  googleClient: false,
+  services: [
+    {
+      id: 'gmail',
+      connected: true,
+      mode: 'ask',
+      account: 'ana@example.com',
+      accounts: [],
+      reauthRequired: false,
+      revocationPending: false,
+    },
+    ...(['drive', 'notion', 'slack', 'x', 'reddit'] as const).map((id) => ({
+      id,
+      connected: false,
+      mode: 'ask' as const,
+      account: null,
+      accounts: [],
+      reauthRequired: false,
+      revocationPending: false,
+    })),
+  ],
+  googleClient: true,
+  xClient: false,
+  redditClient: false,
   workspaces: false,
 };
 const skills: SkillInfo[] = [];
+
+// ANCHI_DEMO_STEPS names a steps file for drive.mjs to run against the stand-in daemon instead of
+// the documented screenshot, to look at other views; nothing in the repository is written then,
+// and a held write waits so the approval views have something to show.
+const custom = process.env.ANCHI_DEMO_STEPS;
+const held: Approval = {
+  id: 'ap-demo',
+  kind: 'proxy',
+  task: 't-demo2',
+  agent: 'developer',
+  connector: 'github',
+  operation: 'POST /repos/example/shop/pulls',
+  host: 'api.github.com',
+  summary: '{"title": "Fix login validation", "head": "fix/login-validation", "base": "main"}',
+  createdAt: now - 18_000,
+  timeout: 600,
+  reason: 'Writes to GitHub wait for you (set in the agent’s access)',
+  origin: 'user → @developer',
+};
 
 const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
   'agents.list': () => agents,
@@ -182,12 +230,213 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
   'tasks.events': (p: { taskId: string; afterSeq?: number }) =>
     events(p.taskId).filter((e) => e.seq > (p.afterSeq ?? 0)),
   'setup.status': () => status,
-  'approvals.list': () => [],
+  'approvals.list': () => (custom ? [held] : []),
   'skills.list': () => skills,
   'usage.summary': () => [],
   'usage.quota': () => [],
   'team.nodes': () => [],
+  // Only custom runs open these views.
+  'tasks.audit': (p: { taskId: string }) => ({
+    taskId: p.taskId,
+    total: 23,
+    truncated: false,
+    cells: 1,
+    registration: null,
+    requests: 23,
+    injected: { github: 7 },
+    credentialsSent: {},
+    hosts: [
+      {
+        host: 'api.github.com',
+        requests: 9,
+        injected: 7,
+        decisions: { inject: 7, pass: 2 } as Record<string, number>,
+      },
+      {
+        host: 'registry.npmjs.org',
+        requests: 14,
+        injected: 0,
+        decisions: { pass: 14 } as Record<string, number>,
+      },
+    ],
+    refused: [],
+    held: [
+      {
+        operation: 'POST /repos/example/shop/pulls',
+        host: 'api.github.com',
+        risk: null,
+        outcome: 'waiting',
+      },
+    ],
+    streamed: 0,
+    bridge: [],
+    scan: 'clean (12 files)',
+    rows: [],
+  }),
+  'access.summary': () => ({
+    since: now - 7 * 86_400_000,
+    tasks: 12,
+    agents: [
+      {
+        agent: 'developer',
+        tasks: 7,
+        requests: 164,
+        injected: { github: 41 },
+        credentialsOther: 0,
+        refused: 2,
+        held: 3,
+        hosts: 4,
+        services: 0,
+      },
+      {
+        agent: 'reviewer',
+        tasks: 5,
+        requests: 58,
+        injected: { github: 30 },
+        credentialsOther: 0,
+        refused: 0,
+        held: 0,
+        hosts: 2,
+        services: 0,
+      },
+    ],
+    hosts: [
+      {
+        host: 'api.github.com',
+        requests: 120,
+        agents: ['developer', 'reviewer'],
+        decisions: { inject: 71 } as Record<string, number>,
+      },
+      {
+        host: 'registry.npmjs.org',
+        requests: 88,
+        agents: ['developer'],
+        decisions: { pass: 88 } as Record<string, number>,
+      },
+    ],
+    services: [],
+    credentials: [],
+    refused: [],
+    partial: false,
+  }),
+  'agents.createPreview': (p: { agentId: string }) => ({
+    id: 'p-demo',
+    agentId: p.agentId,
+    kind: 'create' as const,
+    agentYaml: 'name: Reviewer\nruntime: codex\nconnectors: [github]\n',
+    imageYaml: null,
+    agentDiff: '+name: Reviewer\n+runtime: codex\n+connectors: [github]\n',
+    imageDiff: '',
+    errors: [],
+    warnings: [],
+  }),
+  'agents.settings': (p: { agentId?: string }) => ({
+    agentId: p.agentId ?? 'reviewer',
+    editable: true,
+    current: {
+      name: 'Developer',
+      description: 'Fixes issues and opens pull requests',
+      runtime: 'codex',
+      model: '',
+      effort: '',
+      prompt: {
+        mode: 'append',
+        text: 'Keep pull requests small. Run the auth tests before pushing.',
+      },
+      skills: ['code-review'],
+      connectors: ['github'],
+      delegates: ['reviewer'],
+      workspaces: [{ path: 'shop', mode: 'ro' }],
+      highRisk: { disable: [] },
+      approvals: { github: 'ask' as const },
+      triggers: [],
+      egress: ['github.com', 'registry.npmjs.org'],
+    },
+    inherited: [],
+    fixed: {
+      image: 'anchi-codex',
+      sandbox: 'cell',
+      delegates: ['reviewer'],
+      triggers: [],
+      approvals: { github: 'ask' },
+      egress: ['github.com', 'registry.npmjs.org'],
+    },
+    inventory: {
+      skills: [
+        {
+          id: 'code-review',
+          name: 'code-review',
+          description: 'Review checklist for pull requests',
+        },
+        { id: 'release-notes', name: 'release-notes', description: 'Writes a changelog entry' },
+      ],
+      connectors: [
+        { id: 'github', connected: true },
+        { id: 'aws', connected: true },
+        { id: 'gmail', connected: true },
+        { id: 'notion', connected: false },
+      ],
+      runtimes: [
+        { id: 'codex', connected: true },
+        { id: 'claude-code', connected: true },
+        { id: 'hermes', connected: true },
+      ],
+      workspaces: { dirs: ['shop', 'notes'], shared: true },
+      agents: ['developer', 'reviewer', 'ops'],
+      images: [],
+      highRisk: ['github.merge', 'github.push-default-branch'],
+    },
+  }),
 };
+
+// ANCHI_DEMO_LOG names a file that receives every call that would change something, one JSON
+// line each, so a run can check what reached the daemon after a system dialog was answered.
+const journal = process.env.ANCHI_DEMO_LOG;
+const record = (method: string, params: unknown) => {
+  if (journal) appendFileSync(journal, `${JSON.stringify({ method, params })}\n`);
+};
+if (custom) {
+  // With ANCHI_DEMO_STOPPED the secure room is stopped until it is prepared.
+  if (process.env.ANCHI_DEMO_STOPPED) Object.assign(status, { vm: 'stopped', installed: false });
+  const writes: { [M in MethodName]?: (params: never) => Result<M> } = {
+    'approvals.decide': () => null,
+    'tasks.delete': () => ({ deleted: 1 }),
+    'tasks.tree': (p: { taskId: string }) => tasks.filter((t) => t.id === p.taskId),
+    'tasks.search': () => [],
+    'tasks.send': (p: { taskId: string }) => tasks.find((t) => t.id === p.taskId)!,
+    'tasks.create': () => tasks[0]!,
+    'setup.resetPreview': () => ({
+      vm: 'running',
+      busy: 0,
+      cells: 0,
+      home,
+      vaultKey: join(home, 'vault.key'),
+    }),
+    'setup.reset': () => status,
+    'setup.prepare': () => Object.assign(status, { vm: 'running', installed: true }),
+    'connectors.importGh': () => ({ id: 'github', connected: true, account: 'example' }),
+    'connectors.awsProfile': () => ({ id: 'aws', connected: true, account: '123456789012' }),
+    'connectors.remove': (p: { id: string }) => ({ id: p.id, connected: false }) as never,
+    'agents.allowHost': (p: { host: string }) => ({
+      egress: ['github.com', 'registry.npmjs.org', p.host],
+    }),
+    'agents.update': (p: { apply?: boolean }) => ({
+      diff: '+connectors: [github, aws]\n',
+      errors: [],
+      warnings: [],
+      base: 'b',
+      applied: p.apply === true,
+    }),
+  };
+  for (const [method, answer] of Object.entries(writes)) {
+    (answers as Record<string, (p: unknown) => unknown>)[method] = (params) => {
+      if (!/tree|search|Preview/.test(method)) record(method, params);
+      return (answer as (p: unknown) => unknown)(params);
+    };
+  }
+  // The connections start disconnected here, so that connecting them can be tried.
+  status.connectors = [];
+}
 
 const home = mkdtempSync(join(tmpdir(), 'anchi-demo-'));
 mkdirSync(join(home, 'run'), { recursive: true });
@@ -198,24 +447,26 @@ const server = createServer((socket) => {
     return (answer as (p: unknown) => unknown)(params);
   });
 });
-await new Promise<void>((ready) => server.listen(join(home, 'run', 'daemon.sock'), ready));
+// ANCHI_DEMO_DOWN leaves no daemon to connect to, to look at the window while one is missing.
+if (!process.env.ANCHI_DEMO_DOWN) {
+  await new Promise<void>((ready) => server.listen(join(home, 'run', 'daemon.sock'), ready));
+}
 
 const shot = join(home, 'desktop.png');
 const steps = join(home, 'steps.json');
 writeFileSync(
   steps,
-  JSON.stringify([
-    { size: [1440, 900, 2] },
-    { waitFor: '.agents' },
-    { wait: 1500 },
-    { clickText: '@developer' },
-    { waitFor: '.task-card-head' },
-    { wait: 800 },
-    { eval: "[...document.querySelectorAll('.task-card-head')].at(-1).click()" },
-    { waitFor: '.panel .t-message' },
-    { wait: 800 },
-    { shot },
-  ]),
+  custom
+    ? readFileSync(custom, 'utf8')
+    : JSON.stringify([
+        { size: [1440, 900, 2] },
+        { waitFor: '.sidebar' },
+        { wait: 1500 },
+        { clickText: '@developer' },
+        { waitFor: '.thread .thread-message' },
+        { wait: 800 },
+        { shot },
+      ]),
 );
 // Asynchronous, so this process keeps answering the app while drive.mjs runs it.
 const code = await new Promise<number | null>((done) =>
@@ -226,6 +477,7 @@ const code = await new Promise<number | null>((done) =>
 );
 server.close();
 if (code !== 0) throw new Error(`drive.mjs exited with ${code}`);
+if (custom) process.exit(0);
 for (const out of ['docs/assets/desktop.png', 'landing/dist/desktop.png']) {
   copyFileSync(shot, join(repo, out));
   console.log(out);

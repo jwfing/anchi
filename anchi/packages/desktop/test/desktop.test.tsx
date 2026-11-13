@@ -12,8 +12,16 @@ import type {
 } from '@anchi/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { checkCall, DESKTOP_METHODS, externalUrl, guardedCall } from '../src/main/bridge.ts';
+import {
+  checkCall,
+  DESKTOP_METHODS,
+  externalUrl,
+  forgetQuestion,
+  guardedCall,
+  teamRemainder,
+} from '../src/main/bridge.ts';
 import { mergePath, parseShellPath } from '../src/main/env.ts';
+import { switchLoginStartup } from '../src/main/startup.ts';
 import { type AppContext, Ctx } from '../src/renderer/App.tsx';
 import type { ServerState } from '../src/shared.ts';
 import { count } from '../src/renderer/format.ts';
@@ -22,10 +30,17 @@ import { ConnectorLogo, connectorName } from '../src/renderer/logos.tsx';
 import { Markdown } from '../src/renderer/markdown.tsx';
 import { agentActivity, EMPTY_MODEL, reduce } from '../src/renderer/model.ts';
 import { toolSummary, transcript } from '../src/renderer/transcript.ts';
-import { clampWidth, PANEL_WIDTH } from '../src/renderer/ui.tsx';
-import { bodyClickOpens, TaskTurn } from '../src/renderer/views/Agent.tsx';
+import {
+  auditHosts,
+  composerMode,
+  historyTasks,
+  reachChips,
+  shownTask,
+} from '../src/renderer/views/Agent.tsx';
+import { plainWords } from '../src/renderer/access.ts';
 import { DelegationChoices, settingsPatch } from '../src/renderer/views/AgentSettings.tsx';
 import { ApprovalCard } from '../src/renderer/views/Approvals.tsx';
+import { TEMPLATES } from '../src/renderer/views/Builder.tsx';
 import {
   codexLoginHelp,
   ProbeNote,
@@ -59,7 +74,7 @@ describe('bridge', () => {
     ).rejects.toThrow('cancelled');
     expect(calls).toEqual(['builder.proposal']);
   });
-  it('allows the explicit agent deletion flow while blocking task deletion, reset and shutdown', () => {
+  it('allows the explicit deletion and reset flows while blocking single setup steps and shutdown', () => {
     expect(checkCall('tasks.create', { agentId: 'dev', text: 'x' }).method).toBe('tasks.create');
     expect(
       checkCall('team.preview', { agentId: 'dev', execution: { server: 'cloud', agent: 'coder' } })
@@ -80,10 +95,7 @@ describe('bridge', () => {
       'team.cancel',
       'team.approve',
       'team.poll',
-      'setup.reset',
       'setup.run',
-      'tasks.delete',
-      'agents.allowHost',
       // Only the main process imports a Google client, from a file the user picked.
       'services.googleClient',
       'services.removeGoogleClient',
@@ -95,7 +107,287 @@ describe('bridge', () => {
     expect([...DESKTOP_METHODS].filter((m) => /delete|reset|shutdown|setup\.run/.test(m))).toEqual([
       'agents.deletePreview',
       'agents.delete',
+      'tasks.delete',
+      'setup.resetPreview',
+      'setup.reset',
     ]);
+    // The word that resets is typed by the user and checked before anything is asked or sent.
+    expect(() => checkCall('setup.reset', {})).toThrow(/type reset/);
+    expect(() => checkCall('setup.reset', { confirm: 'Reset' })).toThrow(/type reset/);
+    for (const profile of ['', 'a b', '../x', 'x'.repeat(65), 7]) {
+      expect(() => checkCall('connectors.awsProfile', { profile }), String(profile)).toThrow(
+        /AWS profile/,
+      );
+    }
+    expect(() => checkCall('tasks.delete', {})).toThrow(/choose a task/);
+    expect(() => checkCall('tasks.delete', { taskId: ['t-1'] })).toThrow(/choose a task/);
+  });
+
+  it('deletes a task only after a dialog that says what the daemon would delete', async () => {
+    const row = (id: string, parentId: string | null, title: string) => ({
+      id,
+      agentId: 'dev',
+      title,
+      parentId,
+      rootId: 't-root',
+    });
+    const tree = [
+      row('t-root', null, 'the task above'),
+      row('t-1', 't-root', 'tidy\u001b[31m the repo'),
+      row('t-2', 't-1', 'delegated'),
+      row('t-3', 't-2', 'delegated again'),
+      row('t-4', 't-root', 'a sibling'),
+    ];
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return method === 'tasks.tree' ? tree : { deleted: 3 };
+    };
+    await expect(
+      guardedCall('tasks.delete', { taskId: 't-1' }, read, async (q) => {
+        expect(q.message).toBe('Delete this task of @dev?');
+        expect(q.detail).toContain('“tidy the repo” (t-1) and the 2 tasks it delegated');
+        expect(q.detail).not.toContain('\u001b');
+        expect(q.detail).toContain('cannot be undone');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'nothing is deleted when the dialog is cancelled').toEqual(['tasks.tree']);
+    await guardedCall('tasks.delete', { taskId: 't-1' }, read, async () => true);
+    expect(sent).toEqual(['tasks.tree', 'tasks.tree', 'tasks.delete']);
+    await expect(
+      guardedCall('tasks.delete', { taskId: 't-gone' }, read, async () => true),
+    ).rejects.toThrow('task not found');
+  });
+
+  it('resets only when no task runs, after a dialog that says what is deleted and kept', async () => {
+    const preview = { vm: 'running', busy: 0, cells: 2, home: '/h/.anchi', vaultKey: '/h/key' };
+    const sent: string[] = [];
+    const reader = (states: object[]) => async (method: string) => {
+      sent.push(method);
+      return method === 'setup.resetPreview' ? states.shift() : { vm: 'missing' };
+    };
+    await expect(
+      guardedCall(
+        'setup.reset',
+        { confirm: 'reset' },
+        reader([{ ...preview, busy: 1 }]),
+        async () => {
+          throw new Error('asked while a task runs');
+        },
+      ),
+    ).rejects.toThrow('1 task is running or queued');
+    await expect(
+      guardedCall('setup.reset', { confirm: 'reset' }, reader([preview]), async (q) => {
+        expect(q.detail).toContain('every AI account and connection must be connected again');
+        expect(q.detail).toContain('2 idle task cells are closed first');
+        expect(q.detail).toContain('Kept: the vault key (/h/key) and /h/.anchi');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    await expect(
+      guardedCall(
+        'setup.reset',
+        { confirm: 'reset' },
+        reader([preview, { ...preview, busy: 1 }]),
+        async () => true,
+      ),
+    ).rejects.toThrow('A task started during confirmation');
+    expect(sent, 'refused every time: the reset was never sent').not.toContain('setup.reset');
+    await guardedCall(
+      'setup.reset',
+      { confirm: 'reset' },
+      reader([preview, preview]),
+      async () => true,
+    );
+    expect(sent.at(-1)).toBe('setup.reset');
+  });
+
+  it('imports the gh login or an AWS profile only after a dialog that says what agents get', async () => {
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return { id: 'github', connected: true };
+    };
+    await expect(
+      guardedCall('connectors.importGh', {}, read, async (q) => {
+        expect(q.detail).toContain('every scope of that login');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    await expect(
+      guardedCall('connectors.awsProfile', { profile: 'dev-readonly' }, read, async (q) => {
+        expect(q.message).toBe('Connect AWS through the profile dev-readonly?');
+        expect(q.detail).toContain('whatever the profile’s role allows');
+        return false;
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'cancelled: no credential was read').toEqual([]);
+    await guardedCall('connectors.importGh', {}, read, async () => true);
+    expect(sent).toEqual(['connectors.importGh']);
+  });
+
+  it('lets an agent reach a new host only after a dialog that says what that allows', async () => {
+    for (const host of ['', '*.example.com', 'a b', 'https://x.io', 'x'.repeat(260), 7]) {
+      expect(
+        () => checkCall('agents.allowHost', { agentId: 'dev', host }),
+        String(host).slice(0, 20),
+      ).toThrow(/one host name/);
+    }
+    expect(() => checkCall('agents.allowHost', { agentId: '../x', host: 'x.io' })).toThrow();
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return { egress: ['github.com', 'x.io'] };
+    };
+    await expect(
+      guardedCall(
+        'agents.allowHost',
+        { agentId: 'dev', host: ' Registry.NPMJS.org ' },
+        read,
+        async (q) => {
+          expect(q.message).toBe('Let @dev reach registry.npmjs.org?');
+          expect(q.detail).toContain('including the contents of shared folders');
+          return false;
+        },
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(sent, 'cancelled: the agent file was not changed').toEqual([]);
+    await guardedCall('agents.allowHost', { agentId: 'dev', host: 'x.io' }, read, async () => true);
+    expect(sent).toEqual(['agents.allowHost']);
+    // Reading what agents reached changes nothing and needs no dialog.
+    await guardedCall('access.summary', {}, read, async () => {
+      throw new Error('asked for a read');
+    });
+  });
+
+  it('asks before an agent stops asking for its writes or starts tasks by itself', async () => {
+    const current = {
+      connectors: ['github', 'x'],
+      workspaces: [],
+      delegates: [],
+      highRisk: { disable: [] },
+      approvals: { github: 'ask' },
+      triggers: [{ schedule: '0 9 * * *', text: 'daily' }],
+    };
+    const sent: string[] = [];
+    const read = async (method: string) => {
+      sent.push(method);
+      return method === 'agents.settings' ? { current } : { applied: true };
+    };
+    const apply = (patch: object, answer: (detail: string) => boolean) =>
+      guardedCall('agents.update', { agentId: 'dev', patch, apply: true }, read, async (q) =>
+        answer(q.detail),
+      );
+    let detail = '';
+    await expect(
+      apply(
+        {
+          approvals: { x: 'auto' },
+          triggers: [
+            { schedule: '0 9 * * *', text: 'daily' },
+            { schedule: '*/5 * * * *\u001b[31m', text: 'often' },
+          ],
+        },
+        (d) => {
+          detail = d;
+          return false;
+        },
+      ),
+    ).rejects.toThrow('cancelled');
+    expect(detail).toContain('• write through github without asking you');
+    expect(detail).toContain('• write through x without asking you');
+    expect(detail).toContain('• start tasks by itself on the schedule */5 * * * *');
+    expect(detail, 'the schedule it already had is not asked again').not.toContain('0 9 * * *');
+    expect(detail).not.toContain('\u001b');
+    expect(sent, 'cancelled: nothing was saved').toEqual(['agents.settings']);
+    // Asking for more approvals, or dropping a schedule, narrows: no dialog.
+    await apply({ approvals: { github: 'ask', x: 'ask' }, triggers: [] }, () => {
+      throw new Error('asked for a narrowing change');
+    });
+    expect(sent.at(-1)).toBe('agents.update');
+  });
+
+  it('asks before an agent reaches more hosts, not before it reaches fewer', async () => {
+    const settings = (egress: string[] | null) => ({
+      current: { connectors: [], workspaces: [], delegates: [], highRisk: { disable: [] }, egress },
+    });
+    const asked: string[] = [];
+    const apply = (egress: string[] | null, now: string[] | null) =>
+      guardedCall(
+        'agents.update',
+        { agentId: 'dev', patch: { egress }, apply: true },
+        async (method) => (method === 'agents.settings' ? settings(now) : { applied: true }),
+        async (q) => {
+          asked.push(q.detail);
+          return false;
+        },
+      );
+    await expect(apply(['github.com', 'evil.example'], ['github.com'])).rejects.toThrow(
+      'cancelled',
+    );
+    expect(asked.at(-1)).toContain('• reach evil.example');
+    expect(asked.at(-1)).not.toContain('github.com');
+    await expect(apply(null, ['github.com'])).rejects.toThrow('cancelled');
+    expect(asked.at(-1)).toContain('• reach any public website');
+    // Starting a list, or shortening one, only narrows.
+    await apply(['github.com'], null);
+    await apply([], ['github.com']);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('switches start at login only after its dialog, through the CLI, on this computer', async () => {
+    const ran: string[][] = [];
+    let item = false;
+    const deps = (answer: boolean, platform = 'darwin') => ({
+      platform,
+      installed: () => item,
+      confirm: async (q: { message: string; detail: string }) => {
+        expect(q.message).toMatch(/log in|at login/);
+        return answer;
+      },
+      run: async (args: string[]) => {
+        ran.push(args);
+        item = args.at(-1) === 'install';
+      },
+    });
+    expect(await switchLoginStartup(true, deps(false)), 'declined: nothing installed').toBe(false);
+    expect(ran).toEqual([]);
+    expect(await switchLoginStartup(true, deps(true))).toBe(true);
+    expect(ran).toEqual([['--server', 'local', 'daemon', 'install']]);
+    // Removing it stops a daemon that login started, so it is asked too.
+    expect(await switchLoginStartup(false, deps(false)), 'declined: still installed').toBe(true);
+    expect(await switchLoginStartup(false, deps(true))).toBe(false);
+    expect(ran.at(-1)).toEqual(['--server', 'local', 'daemon', 'uninstall']);
+    await expect(switchLoginStartup('yes', deps(true))).rejects.toThrow('choose on or off');
+    await expect(switchLoginStartup(true, deps(true, 'win32'))).rejects.toThrow(/Windows/);
+    expect(ran).toHaveLength(2);
+  });
+
+  it('says what a team keeps of a machine that is forgotten', () => {
+    const node = (n: string, label: string) => ({ node: n, label, online: false });
+    const directory = {
+      self: 'aaa',
+      configured: true,
+      nodes: [node('aaa', 'local'), node('bbb', 'newuser'), node('ccc', 'dora\u001b[31m')],
+    } as never;
+    const forget = forgetQuestion({ name: 'box', target: 'ssh:dev@box' }, directory);
+    expect(forget.message).toBe('Forget box?');
+    expect(forget.detail).toContain('nothing there is deleted');
+    expect(forget.detail).toContain('box is in a team with newuser, dora.');
+    expect(forget.detail).toContain('does not take it out of that team');
+    expect(forget.detail).toContain('revoke it first');
+    expect(forget.detail).not.toContain('\u001b');
+    // No team, a team of one, or a machine that could not be asked: nothing to add.
+    for (const none of [undefined, { self: 'aaa', nodes: [node('aaa', 'local')] }, { vm: 'x' }]) {
+      expect(teamRemainder(none as never, 'box')).toBe('');
+      expect(
+        forgetQuestion({ name: 'box', target: 'ssh:box' }, none as never).detail,
+      ).not.toContain('team');
+    }
+    expect(
+      teamRemainder({ self: 'aaa', nodes: [node('bbb', 'newuser')] } as never, 'It'),
+    ).toContain('that machine goes on listing its agents');
   });
 
   it('takes only plain objects as parameters', () => {
@@ -331,6 +623,10 @@ describe('approval card', () => {
         <ApprovalCard approval={approval} />
       </Ctx.Provider>,
     );
+    // The band that agent text cannot draw comes first.
+    expect(out.indexOf('Anchi · needs your approval')).toBeLessThan(
+      out.indexOf('Approve a write by @assistant?'),
+    );
     for (const text of [
       'Approve a write by @assistant?',
       'x (api.x.com)',
@@ -348,46 +644,197 @@ describe('approval card', () => {
 });
 
 describe('agent conversation', () => {
-  const turn = (status: TaskRow['status']) =>
-    renderToStaticMarkup(
-      <Ctx.Provider value={{ model: EMPTY_MODEL } as unknown as AppContext}>
-        <TaskTurn
-          task={{ id: 't-1', agentId: 'dev', title: 'go', status, trigger: 'user' } as TaskRow}
-          selected={false}
-          onSelect={() => undefined}
-          onContinue={() => undefined}
-        />
-      </Ctx.Provider>,
+  const task = (over: Partial<TaskRow>) =>
+    ({
+      id: 't-1',
+      agentId: 'dev',
+      title: 'go',
+      status: 'done',
+      trigger: 'user',
+      ...over,
+    }) as TaskRow;
+
+  it('continues a task whose turn has ended, and starts a new one only when asked', () => {
+    expect(composerMode(task({ status: 'done' }), false)).toBe('continue');
+    expect(composerMode(task({ status: 'failed' }), false)).toBe('continue');
+    expect(composerMode(task({ status: 'cancelled' }), false)).toBe('continue');
+    expect(composerMode(task({ status: 'done' }), true), 'Start a new task').toBe('new');
+    expect(composerMode(undefined, false), 'no task yet').toBe('new');
+  });
+
+  it('takes no reply while a turn runs, nor for a task only watched through its parent', () => {
+    expect(composerMode(task({ status: 'running' }), false)).toBe('wait');
+    expect(composerMode(task({ status: 'queued' }), false)).toBe('wait');
+    expect(
+      composerMode(task({ peer: { kind: 'mirror', observed: true } as TaskRow['peer'] }), false),
+    ).toBe('observed');
+  });
+
+  it('shows the chosen task while it exists, else the newest', () => {
+    const tasks = [task({ id: 'a', createdAt: 1 }), task({ id: 'b', createdAt: 2 })];
+    expect(shownTask(tasks, 'a')?.id).toBe('a');
+    expect(shownTask(tasks, undefined)?.id).toBe('b');
+    expect(shownTask(tasks, 'deleted')?.id).toBe('b');
+    expect(shownTask([], 'a')).toBeUndefined();
+  });
+
+  it('narrows history by state and by words in the title or the result, newest first', () => {
+    const tasks = [
+      task({ id: 'a', createdAt: 1, title: 'Fix login', result: 'opened a pull request' }),
+      task({ id: 'b', createdAt: 2, title: 'Upgrade eslint', status: 'failed' }),
+      task({ id: 'c', createdAt: 3, title: 'Review login PR', status: 'running' }),
+    ];
+    const ids = (
+      ...args: Parameters<typeof historyTasks> extends [unknown, ...infer R] ? R : never
+    ) => historyTasks(tasks, ...args).map((t) => t.id);
+    expect(ids('all', '', [])).toEqual(['c', 'b', 'a']);
+    expect(ids('running', '', [])).toEqual(['c']);
+    expect(ids('failed', '', [])).toEqual(['b']);
+    expect(ids('needs', '', [{ task: 'a' } as Approval])).toEqual(['a']);
+    expect(ids('all', 'LOGIN', [])).toEqual(['c', 'a']);
+    expect(ids('all', 'pull request', []), 'words in the result').toEqual(['a']);
+    expect(ids('failed', 'login', [])).toEqual([]);
+  });
+
+  it('says in the header what the agent thinks with and what it can reach', () => {
+    const agent = { runtime: 'codex', connectors: ['github'] } as AgentSummary;
+    expect(reachChips(agent).map((c) => c.text)).toEqual([
+      'ChatGPT',
+      'GitHub',
+      'No access to your files',
+    ]);
+    expect(
+      reachChips({ ...agent, connectors: [], workspaces: ['shop (ro)'] }).map((c) => c.text),
+    ).toEqual(['ChatGPT', '1 shared folder']);
+  });
+
+  it('counts what each host was asked and what was refused in the task record', () => {
+    const audit = {
+      hosts: [
+        { host: 'api.github.com', requests: 9, injected: 7, decisions: { inject: 7, pass: 2 } },
+        {
+          host: 'evil.example\u001b[0m',
+          requests: 2,
+          injected: 0,
+          decisions: { 'egress-denied': 2 },
+        },
+      ],
+    } as never;
+    expect(auditHosts(audit)).toEqual([
+      { host: 'api.github.com', note: '9 requests · 7 with your account', refused: false },
+      { host: 'evil.example', note: '2 requests · 2 refused', refused: true },
+    ]);
+  });
+});
+
+describe('new agent templates', () => {
+  it('asks the builder for an agent with a valid id and only connectors that exist', () => {
+    const known: string[] = [...CONNECTOR_IDS, ...SERVICE_CONNECTORS];
+    for (const t of TEMPLATES) {
+      expect(t.request, t.id).toContain(`with the id ${t.id} `);
+      expect(t.id).toMatch(/^[a-z0-9][a-z0-9-]{0,39}$/);
+      const named = [...t.request.matchAll(/the ([a-z ]+?) connectors?\b/g)].flatMap((m) =>
+        m[1]!.split(' and '),
+      );
+      for (const id of named) expect(known, `${t.id}: ${id}`).toContain(id);
+      // A template never asks for access without the user's approval of what it writes.
+      if (named.length) expect(t.request, t.id).toMatch(/ask me|my approval/);
+    }
+    expect(TEMPLATES.map((t) => t.id)).toEqual([
+      'reviewer',
+      'developer',
+      'inbox',
+      'researcher',
+      'social',
+    ]);
+  });
+});
+
+describe('access in plain words', () => {
+  const fixed = { approvals: {}, egress: null, sandbox: 'cell', delegates: [] };
+  const none = { connectors: [], workspaces: [], delegates: [], highRisk: { disable: [] } };
+  const text = (lines: ReturnType<typeof plainWords>, can: boolean) =>
+    lines.filter((l) => l.can === can).map((l) => l.text);
+
+  it('says an agent with nothing granted reaches no account and no file', () => {
+    const lines = plainWords(none, fixed);
+    expect(text(lines, true)).toEqual(['Reaches any public website']);
+    expect(text(lines, false)).toEqual([
+      'Cannot read any file on this computer',
+      'Cannot use any of your connected accounts',
+      'Cannot hand work to another agent',
+      'Never sees a password or token: Anchi adds them outside its cell',
+    ]);
+  });
+
+  it('names each grant, and marks write access and skipped approvals', () => {
+    const lines = plainWords(
+      {
+        connectors: ['github', 'gmail'],
+        workspaces: [
+          { path: 'shop', mode: 'ro' },
+          { path: 'notes\u001b[31m', mode: 'rw' },
+        ],
+        delegates: ['reviewer'],
+        highRisk: { disable: ['github.merge'] },
+      },
+      {
+        ...fixed,
+        approvals: { github: 'ask' },
+        egress: ['github.com'],
+        highRiskGlobal: ['x.post'],
+      },
+      (id) => id.toUpperCase(),
     );
-
-  it('offers to continue a task only once its turn has ended', () => {
-    expect(turn('done')).toContain('Continue this task');
-    expect(turn('failed')).toContain('Continue this task');
-    expect(turn('running')).not.toContain('Continue this task');
-    expect(turn('queued')).not.toContain('Continue this task');
+    expect(text(lines, true)).toEqual([
+      'Acts through GITHUB; anything that writes waits for you',
+      'Acts through GMAIL; high-risk operations wait for you',
+      'Reads files in shop',
+      'Reads and changes files in notes',
+      'Hands work to @reviewer',
+      'Reaches only github.com',
+      'Does without asking: github.merge, x.post',
+    ]);
+    expect(lines.filter((l) => l.warn).map((l) => l.text)).toEqual([
+      'Reads and changes files in notes',
+      'Does without asking: github.merge, x.post',
+    ]);
+    expect(text(lines, false)).toEqual([
+      'Cannot read files outside the shared folders',
+      'Cannot use an account that is not switched on here',
+      'Never sees a password or token: Anchi adds them outside its cell',
+    ]);
   });
 
-  it('shows that a task card opens its conversation', () => {
-    expect(turn('running')).toContain('Details');
-    expect(turn('running')).toContain('task-card-body opens');
-    expect(turn('done')).toContain('Continue task t-1');
-    expect(turn('done')).not.toContain('btn btn-small');
+  it('follows the approvals and schedules of the draft, before they are saved', () => {
+    const lines = plainWords(
+      {
+        ...none,
+        connectors: ['github'],
+        approvals: { github: 'ask' },
+        triggers: [{ schedule: '0 9 * * *', text: 'daily' }],
+      },
+      // What the file says now is not what the draft says.
+      { ...fixed, approvals: {} },
+    );
+    expect(text(lines, true)).toContain('Acts through github; anything that writes waits for you');
+    expect(lines.find((l) => l.text === 'Starts tasks by itself: 1 schedule')?.warn).toBe(true);
+    // The draft's hosts, not the file's.
+    expect(
+      text(plainWords({ ...none, egress: ['github.com'] }, { ...fixed, egress: null }), true),
+    ).toEqual(['Reaches only github.com']);
+    expect(
+      text(plainWords({ ...none, egress: null }, { ...fixed, egress: ['a.io'] }), true),
+    ).toEqual(['Reaches any public website']);
   });
 
-  it('opens a task from its body, except on its controls or after selecting text', () => {
-    const at = (control: boolean) => ({ closest: () => (control ? {} : null) });
-    expect(bodyClickOpens(at(false), '')).toBe(true);
-    expect(bodyClickOpens(at(true), ''), 'Continue, links, tool calls').toBe(false);
-    expect(bodyClickOpens(at(false), 'copied text')).toBe(false);
-    expect(bodyClickOpens(null, '')).toBe(true);
-  });
-
-  it('keeps the task panel and the conversation beside it usable while resizing', () => {
-    expect(clampWidth(700, 560, 600)).toBe(700);
-    expect(clampWidth(2000, 560, 600)).toBe(560 + 600 - PANEL_WIDTH.main);
-    expect(clampWidth(100, 560, 600)).toBe(PANEL_WIDTH.min);
-    expect(clampWidth(900, 560, 200)).toBe(400);
-    expect(clampWidth(900, 400, 100)).toBe(PANEL_WIDTH.min);
+  it('says so when no website may be reached, and falls back to the fixed delegates', () => {
+    const lines = plainWords(
+      { ...none, delegates: undefined },
+      { ...fixed, egress: [], delegates: ['ops'] },
+    );
+    expect(text(lines, false)).toContain('Cannot reach any website of its own choosing');
+    expect(text(lines, true)).toContain('Hands work to @ops');
   });
 });
 
@@ -841,9 +1288,9 @@ describe('getting started', () => {
     ).rejects.toThrow('cancelled');
     expect(asked).toContain('vault.key');
     expect(sent, 'refused: only the status was read').toEqual(['setup.status']);
-    for (const method of ['setup.run', 'setup.reset']) {
-      expect(() => checkCall(method, {})).toThrow(/does not call/);
-    }
+    // Single setup steps stay out of reach; a reset needs its typed word and its own dialog.
+    expect(() => checkCall('setup.run', {})).toThrow(/does not call/);
+    expect(() => checkCall('setup.reset', {})).toThrow(/type reset to confirm/);
   });
 
   it('asks to unlock, not to install, when unlocking is all preparing does', async () => {

@@ -2823,6 +2823,9 @@ describe('agent settings', () => {
       workspaces: [],
       highRisk: { disable: [] },
       delegates: [],
+      approvals: {},
+      triggers: [],
+      egress: null,
     });
     expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
@@ -2854,6 +2857,93 @@ describe('agent settings', () => {
     await expect(
       client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base }),
     ).rejects.toThrow(/changed since you reviewed it/);
+  });
+
+  it("edits an agent's approvals and schedules, refuses invalid ones and says what stops asking", async () => {
+    write(
+      'agents/dev.yaml',
+      '# my developer\nruntime: codex\nconnectors: [github]\napprovals: {github: ask}\n',
+    );
+    const { client } = await start();
+    const before = await client.call('agents.settings', { agentId: 'dev' });
+    expect(before.current.approvals).toEqual({ github: 'ask' });
+    expect(before.current.triggers).toEqual([]);
+    const file = readFileSync(join(root, 'agents/dev.yaml'), 'utf8');
+    for (const [patch, message] of [
+      [{ approvals: { github: 'sometimes' } }, /invalid settings/],
+      [{ approvals: { teleport: 'ask' } }, /invalid settings/],
+      [{ approvals: ['github'] }, /invalid settings/],
+      [{ triggers: [{ schedule: 'every morning', text: 'go' }] }, /invalid settings/],
+      [{ triggers: [{ schedule: '0 9 * * *' }] }, /invalid settings/],
+      [{ triggers: [{ schedule: '0 9 * * *', text: 'go', run: 'rm -rf' }] }, /invalid settings/],
+    ] as const) {
+      await expect(
+        client.call('agents.update', { agentId: 'dev', patch: patch as never }),
+      ).rejects.toThrow(message);
+    }
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toBe(file);
+    const patch = {
+      approvals: { github: 'auto' as const },
+      triggers: [{ schedule: '0 9 * * 1-5', text: 'Check the dependencies' }],
+    };
+    const preview = await client.call('agents.update', { agentId: 'dev', patch });
+    expect(preview.errors).toEqual([]);
+    expect(preview.warnings).toEqual([
+      '@dev writes through github without asking you (approvals)',
+      '@dev starts tasks by itself: schedule 0 9 * * 1-5 (triggers)',
+    ]);
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8'), 'a preview writes nothing').toBe(
+      file,
+    );
+    await client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base });
+    const after = await client.call('agents.settings', { agentId: 'dev' });
+    expect(after.current.approvals).toEqual({ github: 'auto' });
+    expect(after.current.triggers).toEqual([
+      { schedule: '0 9 * * 1-5', text: 'Check the dependencies' },
+    ]);
+    expect(after.fixed.triggers).toEqual(['schedule 0 9 * * 1-5']);
+    expect(readFileSync(join(root, 'agents/dev.yaml'), 'utf8')).toMatch(/^# my developer\n/);
+    // Hosts: starting a list narrows; a new host and removing the list widen, and say so.
+    const limit = await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { egress: ['github.com'] },
+    });
+    expect(limit.warnings).toEqual([]);
+    await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { egress: ['github.com'] },
+      apply: true,
+      base: limit.base,
+    });
+    expect((await client.call('agents.settings', { agentId: 'dev' })).current.egress).toEqual([
+      'github.com',
+    ]);
+    for (const [egress, message] of [
+      [['*'], /invalid settings/],
+      [['https://github.com'], /invalid settings/],
+      [['github.com', 'github.com'], /twice/],
+    ] as const) {
+      await expect(
+        client.call('agents.update', { agentId: 'dev', patch: { egress } as never }),
+      ).rejects.toThrow(message);
+    }
+    expect(
+      (
+        await client.call('agents.update', {
+          agentId: 'dev',
+          patch: { egress: ['github.com', 'pypi.org'] },
+        })
+      ).warnings,
+    ).toEqual(['@dev may also reach pypi.org (egress)']);
+    expect(
+      (await client.call('agents.update', { agentId: 'dev', patch: { egress: null } })).warnings,
+    ).toEqual(['@dev reaches any public host: its egress list is removed (egress)']);
+    // Asking again, and dropping the schedule, give nothing up: no warning.
+    const back = await client.call('agents.update', {
+      agentId: 'dev',
+      patch: { approvals: { github: 'ask' }, triggers: [] },
+    });
+    expect(back.warnings).toEqual([]);
   });
 
   it("edits an agent's high-risk exemptions, refuses unknown ids and shows the global ones", async () => {
@@ -3145,6 +3235,10 @@ describe('agent settings', () => {
     );
 
     expect(patch('triggers: []').errors.join()).toMatch(/send a complete anchi-agent block/);
+    expect(patch('egress: [evil.example]').errors.join()).toMatch(/a patch cannot change egress/);
+    expect(patch('approvals: {github: auto}').errors.join()).toMatch(
+      /a patch cannot change approvals[\s\S]*send a complete anchi-agent block/,
+    );
     expect(patch('skills: [nope]').errors).toEqual(['skill "nope" is not installed']);
     expect(patch(`connectors: [${connectorSchema.options.join(', ')}]`).errors).toEqual([]);
     expect(patch('runtime: codex').errors).toEqual(['the patch changes nothing']);

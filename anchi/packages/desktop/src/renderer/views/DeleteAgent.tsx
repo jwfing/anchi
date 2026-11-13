@@ -178,7 +178,9 @@ export function DeletionDetails({ preview: p }: { preview: AgentDeletionPreview 
           {p.tasks} tasks and {p.delegated} delegated tasks, including their transcripts.
         </li>
         <li>{p.triggers} triggers and their stored state.</li>
-        <li>Its VM home, working files, runtime sessions, installed skills and policy rules.</li>
+        <li>
+          Its files and sessions in the secure room, its installed skills and its policy rules.
+        </li>
       </ul>
       {p.running > 0 && (
         <p className="banner banner-warn">
@@ -198,8 +200,8 @@ export function DeletionDetails({ preview: p }: { preview: AgentDeletionPreview 
         </p>
       )}
       <p>
-        Workspaces{p.workspaces.length ? ` (${p.workspaces.map(sanitizeLine).join(', ')})` : ''} and
-        audit logs are kept. This cannot be undone.
+        Shared folders{p.workspaces.length ? ` (${p.workspaces.map(sanitizeLine).join(', ')})` : ''}{' '}
+        and audit logs are kept. This cannot be undone.
       </p>
     </>
   );

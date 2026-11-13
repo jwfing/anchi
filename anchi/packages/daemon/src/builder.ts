@@ -32,7 +32,7 @@ import type { BuilderProposal, SetupStatus, Execution, TeamDescription } from '@
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
-import { digest, lineDiff, PATCH_FIELDS, parsePatch, updateAgentFile } from './settings.ts';
+import { BUILDER_PATCH_FIELDS, digest, lineDiff, parsePatch, updateAgentFile } from './settings.ts';
 
 export const BUILDER_ID = 'builder';
 
@@ -325,12 +325,15 @@ function readPatch(id: string, yaml: string): AgentPatch {
   const { id: named, ...fields } = raw as Record<string, unknown>;
   if (named !== undefined && named !== id) throw new Error(`id "${named}" does not match "${id}"`);
   for (const k of ['description', 'model', 'effort']) if (fields[k] === null) fields[k] = '';
+  const other = `a patch changes only ${BUILDER_PATCH_FIELDS.join(', ')}; send a complete anchi-agent block to change other fields`;
+  const refused = Object.keys(fields).filter((k) =>
+    ['approvals', 'triggers', 'egress'].includes(k),
+  );
+  if (refused.length) throw new Error(`a patch cannot change ${refused.join(' or ')}\n${other}`);
   try {
     return parsePatch(fields);
   } catch (err) {
-    throw new Error(
-      `${(err as Error).message.trim()}\na patch changes only ${PATCH_FIELDS.join(', ')}; send a complete anchi-agent block to change other fields`,
-    );
+    throw new Error(`${(err as Error).message.trim()}\n${other}`);
   }
 }
 

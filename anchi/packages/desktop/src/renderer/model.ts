@@ -3,6 +3,7 @@ import type {
   Approval,
   BuilderProposal,
   RuntimeEvent,
+  SetupStatus,
   StoredEvent,
   TaskRow,
 } from '@anchi/protocol';
@@ -16,6 +17,8 @@ export interface Model {
   approvals: Approval[];
   /** Builder proposals waiting for a decision, by the agent they create or change. */
   proposals: Record<string, BuilderProposal>;
+  /** The machine's setup status as last read: whether its vault is locked, what is connected. */
+  setup?: SetupStatus;
 }
 
 export const EMPTY_MODEL: Model = {
@@ -47,7 +50,8 @@ export type Action =
   | { type: 'event'; taskId: string; seq?: number; event: RuntimeEvent; ts: number }
   | { type: 'approvals'; approvals: Approval[] }
   | { type: 'proposal'; proposal: BuilderProposal }
-  | { type: 'proposalDone'; proposalId: string };
+  | { type: 'proposalDone'; proposalId: string }
+  | { type: 'setup'; status: SetupStatus };
 
 /** Adds events after the last one known; repeats and out-of-order pages are dropped. */
 function append(known: StoredEvent[] | undefined, more: StoredEvent[]): StoredEvent[] {
@@ -94,6 +98,8 @@ export function reduce(model: Model, action: Action): Model {
         ...model,
         proposals: { ...model.proposals, [action.proposal.agentId]: action.proposal },
       };
+    case 'setup':
+      return { ...model, setup: action.status };
     case 'proposalDone': {
       const proposals = Object.fromEntries(
         Object.entries(model.proposals).filter(([, p]) => p.id !== action.proposalId),

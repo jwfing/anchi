@@ -1449,6 +1449,19 @@ setup
           `  ${home}: agents, templates, images, skills, settings, the task database and logs`,
         );
         console.log(styleText('green', `Kept: ${join(home, 'keybindings.json')}.`));
+        // The home holds this machine's team identity. The other members keep the directory.
+        const team = await client.call('peers.directory').catch(() => undefined);
+        const others = team?.nodes?.filter((n) => n.node !== team.self) ?? [];
+        if (others.length) {
+          console.log(
+            styleText(
+              'yellow',
+              `This machine leaves its team for good, but ${others.map((n) => sanitizeLine(n.label)).join(', ')} ` +
+                `keep${others.length === 1 ? 's' : ''} listing its agents as offline. Revoke it there: ` +
+                `anchi --server <that machine> team revoke ${team!.self}`,
+            ),
+          );
+        }
       } else {
         console.log(
           styleText(

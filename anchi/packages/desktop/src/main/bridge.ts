@@ -9,14 +9,19 @@ import type {
   BuilderProposal,
   MethodName,
   Notifications,
+  PeerDirectory,
+  ResetPreview,
   RuntimeId,
   ServiceConnectorId,
   SetupStatus,
+  TaskRow,
 } from '@anchi/protocol';
 
 /**
  * The daemon methods the window may call. The renderer draws agent text, so it is treated as
  * the most exposed part of the app: destructive actions require a native confirmation here.
+ * Deleting a task is one of them: the window names an id, and the dialog shows what the daemon
+ * says that id is.
  */
 export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'daemon.status',
@@ -31,6 +36,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'team.nodes',
   'team.preview',
   'agents.update',
+  'agents.allowHost',
   'agents.deletePreview',
   'agents.delete',
   'tasks.create',
@@ -38,6 +44,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'tasks.search',
   'tasks.tree',
   'tasks.get',
+  'tasks.delete',
   'tasks.send',
   'tasks.retry',
   'tasks.cancel',
@@ -53,7 +60,11 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'setup.importClaude',
   'setup.importHermes',
   'setup.prepare',
+  'setup.resetPreview',
+  'setup.reset',
   'connectors.set',
+  'connectors.importGh',
+  'connectors.awsProfile',
   'connectors.remove',
   'builder.proposal',
   'builder.apply',
@@ -67,6 +78,7 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'skills.update',
   'skills.remove',
   'usage.summary',
+  'access.summary',
   'usage.quota',
   'services.setMode',
   'services.setToken',
@@ -86,6 +98,7 @@ export const NOTIFICATIONS: readonly (keyof Notifications)[] = [
   'oauth',
   'codexSignIn',
   'claudeSignIn',
+  'reset',
   'tasksDeleted',
   'approvals',
   'setup',
@@ -128,6 +141,28 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
   },
   'peers.remove': (p) => {
     peerNodeSchema.parse((p as { node?: unknown }).node);
+  },
+  'setup.reset': (p) => {
+    // The word is typed by the user; anything else never reaches the dialog.
+    if ((p as { confirm?: unknown }).confirm !== 'reset') throw new Error('type reset to confirm');
+  },
+  'connectors.awsProfile': (p) => {
+    const profile = (p as { profile?: unknown }).profile;
+    if (typeof profile !== 'string' || !/^[A-Za-z0-9_.@-]{1,64}$/.test(profile)) {
+      throw new Error('enter the name of an AWS profile');
+    }
+  },
+  'agents.allowHost': (p) => {
+    const { agentId, host } = p as { agentId?: unknown; host?: unknown };
+    idSchema.parse(agentId);
+    // One host name; the daemon checks it again and refuses wildcards.
+    if (typeof host !== 'string' || !/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/i.test(host.trim())) {
+      throw new Error('give one host name, such as registry.npmjs.org');
+    }
+  },
+  'tasks.delete': (p) => {
+    const id = (p as { taskId?: unknown }).taskId;
+    if (typeof id !== 'string' || !id || id.length > 80) throw new Error('choose a task');
   },
   'agents.deletePreview': (p) => deletionParams(p, false),
   'agents.delete': (p) => deletionParams(p, true),
@@ -210,6 +245,34 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
   for (const id of patch.highRisk?.disable ?? []) {
     if (!current.highRisk?.disable.includes(id)) out.push(`${id} without asking you`);
   }
+  // Writes that stop waiting for approval: `ask` dropped, or `auto` set where it was not.
+  if (patch.approvals) {
+    const before = current.approvals ?? {};
+    for (const id of new Set([...Object.keys(before), ...Object.keys(patch.approvals)])) {
+      const [was, now] = [before[id], patch.approvals[id]];
+      if ((was === 'ask' && now !== 'ask') || (now === 'auto' && was !== 'auto')) {
+        out.push(`write through ${sanitizeLine(id).slice(0, 40)} without asking you`);
+      }
+    }
+  }
+  // More to reach: every public host again, or a host the list did not have.
+  if (patch.egress === null && current.egress) out.push('reach any public website');
+  if (patch.egress && current.egress) {
+    const before = current.egress;
+    for (const host of patch.egress) {
+      if (!before.includes(host)) out.push(`reach ${sanitizeLine(String(host)).slice(0, 80)}`);
+    }
+  }
+  // A new trigger starts tasks when nobody is looking, often on content nobody has read.
+  const known = (current.triggers ?? []).map((t) => JSON.stringify(t));
+  for (const t of patch.triggers ?? []) {
+    if (known.includes(JSON.stringify(t))) continue;
+    out.push(
+      'schedule' in t
+        ? `start tasks by itself on the schedule ${sanitizeLine(String(t.schedule)).slice(0, 60)}`
+        : `start tasks by itself for new ${sanitizeLine(String(t.poll?.type)).slice(0, 40)} items`,
+    );
+  }
   return out;
 }
 
@@ -280,7 +343,7 @@ export async function confirmation(
     if (!added.length) return undefined;
     return {
       message: `Give @${p.agentId} more access?`,
-      detail: `Its tasks will be able to use:\n\n${added.map((a) => `• ${a}`).join('\n')}`,
+      detail: `It will be able to use or do:\n\n${added.map((a) => `• ${a}`).join('\n')}`,
       button: 'Give access',
     };
   }
@@ -330,6 +393,47 @@ export async function confirmation(
       button: 'Prepare',
     };
   }
+  if (call.method === 'agents.allowHost') {
+    const { agentId, host } = call.params as { agentId: string; host: string };
+    return {
+      message: `Let @${agentId} reach ${host.trim().toLowerCase()}?`,
+      detail: `The host is added to the websites @${agentId} may reach. Its tasks can then send it anything they hold, including the contents of shared folders. Only add a host you trust.`,
+      button: 'Allow this host',
+    };
+  }
+  if (call.method === 'connectors.importGh') {
+    return {
+      message: 'Use the GitHub login of the gh command line?',
+      detail:
+        'Anchi reads the token of the gh CLI on the server (gh auth token) and stores it in the vault. It carries every scope of that login, so agents with the GitHub connection can act with all of them; a fine-grained token pasted instead is narrower.',
+      button: 'Use this login',
+    };
+  }
+  if (call.method === 'connectors.awsProfile') {
+    const { profile } = call.params as { profile: string };
+    return {
+      message: `Connect AWS through the profile ${profile}?`,
+      detail:
+        'Anchi exports temporary credentials of this profile with the AWS CLI on the server, stores them in the vault and renews them before they expire. Agents with the AWS connection can do whatever the profile’s role allows: choose a profile with a narrow role.',
+      button: 'Connect AWS',
+    };
+  }
+  if (call.method === 'tasks.delete') {
+    // The window names only an id; what is deleted is read from the daemon and shown here.
+    const { taskId } = call.params as { taskId: string };
+    const tree = (await read('tasks.tree', { taskId })) as TaskRow[];
+    const task = tree.find((t) => t.id === taskId);
+    if (!task) throw new Error('task not found');
+    // The daemon deletes the task and what it delegated, not the tasks above it.
+    const below = (id: string): TaskRow[] =>
+      tree.filter((t) => t.parentId === id).flatMap((child) => [child, ...below(child.id)]);
+    const delegated = below(taskId).length;
+    return {
+      message: `Delete this task of @${sanitizeLine(task.agentId)}?`,
+      detail: `“${sanitizeLine(task.title).slice(0, 200)}” (${task.id})${delegated ? ` and the ${delegated} task${delegated === 1 ? '' : 's'} it delegated` : ''}, with their transcripts. A task that is still running is not deleted: cancel it first.\n\nAudit logs are kept. This cannot be undone.`,
+      button: 'Delete task',
+    };
+  }
   if (call.method === 'skills.remove') {
     const id = String((call.params as { id?: unknown }).id ?? '');
     const agents = (await read('agents.list', {})) as AgentSummary[];
@@ -344,6 +448,34 @@ export async function confirmation(
     };
   }
   return undefined;
+}
+
+/**
+ * What stays of a machine in its team when this app forgets it: every member keeps the team's
+ * directory, so forgetting a machine here does not take it out. Empty when the machine is in no
+ * team, or cannot say.
+ */
+export function teamRemainder(directory: PeerDirectory | undefined, name: string): string {
+  // An older daemon, or one without a peer listener, may answer with something else.
+  const nodes = Array.isArray(directory?.nodes) ? directory.nodes : [];
+  const others = nodes.filter((n) => n.node !== directory?.self);
+  if (!others.length) return '';
+  const labels = others.map((n) => sanitizeLine(n.label).slice(0, 40)).join(', ');
+  return `${name} is in a team with ${labels}. Forgetting it here does not take it out of that team: ${others.length === 1 ? 'that machine goes' : 'those machines go'} on listing its agents, as offline once it is gone. To take it out, revoke it first (Settings → Machines → Link machines into a team).`;
+}
+
+/** The question before the desktop forgets a saved machine. */
+export function forgetQuestion(
+  saved: { name: string; target: string },
+  directory: PeerDirectory | undefined,
+): Confirmation {
+  const name = sanitizeLine(saved.name);
+  const team = teamRemainder(directory, name);
+  return {
+    message: `Forget ${name}?`,
+    detail: `This app stops connecting to ${name} (${sanitizeLine(saved.target)}). Anchi on that machine keeps running with its agents, tasks and accounts; nothing there is deleted.${team ? `\n\n${team}` : ''}`,
+    button: 'Forget machine',
+  };
 }
 
 /** Checks a call from the window, asks what needs asking, then sends it. */
@@ -375,6 +507,26 @@ export async function guardedCall(
     const latest = await read('agents.deletePreview', { agentId: p.agentId });
     if (JSON.stringify(latest) !== JSON.stringify(preview))
       throw new Error('Agent or tasks changed during confirmation; review deletion again.');
+    return read(call.method, call.params);
+  }
+  if (call.method === 'setup.reset') {
+    const preview = (await read('setup.resetPreview', {})) as ResetPreview;
+    if (preview.busy) {
+      throw new Error(
+        `${preview.busy} task${preview.busy === 1 ? ' is' : 's are'} running or queued; cancel them or wait first`,
+      );
+    }
+    if (
+      !(await confirm({
+        message: 'Reset Anchi on this machine?',
+        detail: `Deletes the Anchi VM with everything in it: the vault’s contents (every AI account and connection must be connected again), the installed components and the agents’ files in the VM.${preview.cells ? ` ${preview.cells} idle task cell${preview.cells === 1 ? ' is' : 's are'} closed first.` : ''}\n\nKept: the vault key (${sanitizeLine(preview.vaultKey)}) and ${sanitizeLine(preview.home)} with the agent files and task history. Shared folders on disk are not touched. Its place in a team of machines is kept too.\n\nThis cannot be undone.`,
+        button: 'Reset',
+      }))
+    )
+      throw new Error('cancelled');
+    // A task started while the dialog was open would be lost with the VM.
+    const latest = (await read('setup.resetPreview', {})) as ResetPreview;
+    if (latest.busy) throw new Error('A task started during confirmation; review the reset again.');
     return read(call.method, call.params);
   }
   const question = await confirmation(call, read);

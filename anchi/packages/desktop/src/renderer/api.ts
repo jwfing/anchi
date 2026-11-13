@@ -1,6 +1,9 @@
 import type { MethodName, Params, Result } from '@anchi/protocol';
 import type { AnchiApi } from '../shared.ts';
 
+// The views take the window's types from here, one level up, not from outside the renderer.
+export type { ReleaseUpdate, ServerState } from '../shared.ts';
+
 declare global {
   interface Window {
     anchi: AnchiApi;
@@ -31,8 +34,16 @@ export async function allEvents(call: Call, taskId: string) {
 
 /** Electron prefixes errors from the main process; the daemon's own message is what matters. */
 export function message(err: unknown): string {
-  return String((err as Error)?.message ?? err).replace(
+  const text = String((err as Error)?.message ?? err).replace(
     /^Error invoking remote method '[^']+': (Error: )?/,
     '',
   );
+  // The daemon passes on what the VM tool printed, which tells the reader to run a command.
+  if (text.startsWith('GUEST_UNAVAILABLE')) {
+    return 'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.';
+  }
+  if (text.includes('PEER_NETWORK_NOT_CONFIGURED')) {
+    return 'This machine has no team address yet. Save one under Settings → Machines → Link machines into a team.';
+  }
+  return text;
 }

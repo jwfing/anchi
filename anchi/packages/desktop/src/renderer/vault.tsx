@@ -1,5 +1,5 @@
 import type { SetupStatus } from '@anchi/protocol';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { useApp } from './App.tsx';
 
 /** Says when the vault on a running, installed guest is locked (it is after a restart). */
@@ -9,8 +9,24 @@ export function vaultLocked(s: SetupStatus): boolean {
   );
 }
 
+/**
+ * Says when a machine's VM exists but agents cannot run in it: it is stopped (a stopped VM
+ * cannot say what is installed in it, so `installed` is not asked), or its parts were installed
+ * by another version of Anchi. A machine that was never set up is neither.
+ */
+export function roomDown(s: SetupStatus): 'stopped' | 'outdated' | undefined {
+  if (s.vm === 'stopped') return 'stopped';
+  if (s.vm === 'running' && s.installed && s.guestOutdated) return 'outdated';
+  return undefined;
+}
+
 /** Sent when the vault was unlocked here, so every view that showed it locked asks again. */
 const UNLOCKED = 'anchi:vault-unlocked';
+
+/** Tells every view that a vault was unlocked from this window. */
+export function vaultUnlocked() {
+  window.dispatchEvent(new Event(UNLOCKED));
+}
 
 /**
  * Unlocks the vault through setup.prepare, which the main process confirms in a system dialog.
@@ -25,7 +41,7 @@ export function useUnlockVault(): (status: SetupStatus) => Promise<boolean> {
         () => call('setup.prepare', { runtime, confirm: true }),
         'Vault unlocked',
       );
-      if (done) window.dispatchEvent(new Event(UNLOCKED));
+      if (done) vaultUnlocked();
       return Boolean(done);
     },
     [act, call],
@@ -64,35 +80,5 @@ export function VaultLockedCard({
         </button>
       </div>
     </section>
-  );
-}
-
-/** Across the window, so a locked vault is not mistaken for credentials that are gone. */
-export function VaultBanner() {
-  const { server, call } = useApp();
-  const unlock = useUnlockVault();
-  const [status, setStatus] = useState<SetupStatus>();
-  useEffect(() => {
-    setStatus(undefined);
-    if (server.status !== 'connected') return;
-    const check = () =>
-      void call('setup.status')
-        .then(setStatus)
-        .catch(() => undefined);
-    check();
-    return onVaultUnlocked(check);
-  }, [server.status, server.name, call]);
-  if (!status || !vaultLocked(status)) return null;
-  return (
-    <div className="conn-banner vault-banner" role="status">
-      <span className="dot dot-error" />
-      <span className="grow">
-        The vault on {server.name} is locked: agents cannot use your credentials until it is
-        unlocked. They are still stored.
-      </span>
-      <button type="button" className="btn btn-small" onClick={() => void unlock(status)}>
-        Unlock
-      </button>
-    </div>
   );
 }

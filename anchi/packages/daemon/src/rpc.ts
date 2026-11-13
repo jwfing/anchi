@@ -38,6 +38,9 @@ export class Peer extends EventEmitter {
     maxFrameBytes = CLIENT_MAX_FRAME_BYTES,
   ) {
     super();
+    // A client follows each kind of notification with a listener of its own, and there are
+    // more kinds than Node's default of ten listeners before it warns of a leak.
+    this.setMaxListeners(32);
     this.decoder = new FrameDecoder(
       maxFrameBytes,
       (value) => {

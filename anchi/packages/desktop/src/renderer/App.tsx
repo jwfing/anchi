@@ -1,5 +1,5 @@
 import { sanitizeLine } from '@anchi/core/sanitize';
-import type { Notifications } from '@anchi/protocol';
+import type { AgentSummary, Notifications } from '@anchi/protocol';
 import {
   createContext,
   type Dispatch,
@@ -12,7 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { ServerState } from '../shared.ts';
+import type { ReleaseUpdate, ServerState } from '../shared.ts';
 import { allEvents, machineCall, type Call, message } from './api.ts';
 import {
   type Action,
@@ -23,26 +23,27 @@ import {
   type FleetAction,
   reduceFleet,
 } from './model.ts';
-import { Avatar, Icon, runtimeName } from './ui.tsx';
-import { DesktopUpdates } from './updates.tsx';
+import { Avatar, Icon } from './ui.tsx';
+import { useDesktopUpdate } from './updates.tsx';
 import { AgentView } from './views/Agent.tsx';
 import { DeleteAgentDialog } from './views/DeleteAgent.tsx';
-import { ApprovalsView } from './views/Approvals.tsx';
+import { attention, attentionCount, NeedsYouView } from './views/NeedsYou.tsx';
 import { BuilderView } from './views/Builder.tsx';
-import { SettingsView } from './views/Settings.tsx';
+import { type SettingsSection, SettingsView } from './views/Settings.tsx';
+import { StartingView } from './views/Starting.tsx';
 import { onboarded, setOnboarded, WelcomeView } from './views/Welcome.tsx';
 import { welcomeStep } from '@anchi/core/welcome';
 import { UsageView } from './views/Usage.tsx';
-import { VaultBanner } from './vault.tsx';
+import { onVaultUnlocked, roomDown, vaultLocked } from './vault.tsx';
 
 export const BUILDER = 'builder';
 
 export type View =
   | { kind: 'agent'; agentId: string }
   | { kind: 'builder' }
-  | { kind: 'approvals' }
+  | { kind: 'inbox' }
   | { kind: 'usage' }
-  | { kind: 'settings' }
+  | { kind: 'settings'; section?: SettingsSection }
   | { kind: 'welcome' };
 
 export interface AppContext {
@@ -126,9 +127,8 @@ export function App() {
     };
   }, []);
   const server = connections.find((s) => s.name === selected) ?? connections[0] ?? LOCAL;
-  const team = (fleet[server.name] ?? EMPTY_MODEL).agents.filter((a) => a.id !== BUILDER);
-  const approvals = Object.values(fleet).reduce((count, m) => count + m.approvals.length, 0);
-  const connected = connections.filter((s) => s.status === 'connected').length;
+  const [update, postpone] = useDesktopUpdate();
+  const waiting = attentionCount(attention(fleet, connections, update));
   const openAgent = (name: string, agentId: string) => {
     selectServer(name);
     setView({ kind: 'agent', agentId });
@@ -139,7 +139,6 @@ export function App() {
         <MachineSync key={node.name} server={node} dispatch={dispatch} say={say} />
       ))}
       <div className="notifications">
-        <DesktopUpdates />
         {flash && (
           <div className={flash.error ? 'flash flash-error' : 'flash'} role="status">
             {sanitizeLine(flash.text)}
@@ -147,79 +146,29 @@ export function App() {
         )}
       </div>
       <div className="body">
-        <nav className="rail" aria-label="Main">
-          <RailButton
-            label="Team"
-            icon="chat"
-            active={view.kind === 'agent' || view.kind === 'builder'}
-            onClick={() =>
-              setView(team[0] ? { kind: 'agent', agentId: team[0].id } : { kind: 'builder' })
-            }
+        {view.kind !== 'welcome' && (
+          <Sidebar
+            fleet={fleet}
+            connections={connections}
+            selected={server.name}
+            view={view}
+            waiting={waiting}
+            setView={setView}
+            onSelect={openAgent}
+            onBuilder={(name) => {
+              selectServer(name);
+              setView({ kind: 'builder' });
+            }}
           />
-          <RailButton
-            label="Approvals"
-            icon="shield"
-            badge={approvals}
-            active={view.kind === 'approvals'}
-            onClick={() => setView({ kind: 'approvals' })}
-          />
-          <RailButton
-            label="Usage"
-            icon="chart"
-            active={view.kind === 'usage'}
-            onClick={() => setView({ kind: 'usage' })}
-          />
-          <div className="spacer" />
-          <button
-            type="button"
-            className="rail-button"
-            title={`${connected}/${connections.length} machines connected`}
-            aria-label={`${connected} machines connected. Open settings`}
-            onClick={() => setView({ kind: 'settings' })}
-          >
-            <Icon name="server" size={20} />
-            <span className={`rail-dot dot-${connected ? 'connected' : 'error'}`} />
-          </button>
-          <RailButton
-            label="Settings"
-            icon="gear"
-            active={view.kind === 'settings'}
-            onClick={() => setView({ kind: 'settings' })}
-          />
-        </nav>
-        {(view.kind === 'agent' || view.kind === 'builder') && (
-          <aside className="agents" aria-label="Agents on all machines">
-            <button
-              type="button"
-              className={`new-agent ${view.kind === 'builder' ? 'selected' : ''}`}
-              onClick={() => setView({ kind: 'builder' })}
-            >
-              <span className="new-agent-icon">
-                <Icon name="plus" size={16} />
-              </span>
-              <span className="col">
-                <span className="strong">New agent</span>
-                <span className="small muted">Choose a machine in the builder</span>
-              </span>
-            </button>
-            <TeamList
-              fleet={fleet}
-              connections={connections}
-              selected={server.name}
-              view={view}
-              onSelect={openAgent}
-              onBuilder={(name) => {
-                selectServer(name);
-                setView({ kind: 'builder' });
-              }}
-            />
-          </aside>
         )}
         <ScopedView
           key={`${server.name}:${server.status}`}
           server={server}
           connections={connections}
           model={fleet[server.name] ?? EMPTY_MODEL}
+          fleet={fleet}
+          update={update}
+          onPostpone={postpone}
           dispatchFleet={dispatch}
           act={act}
           selectServer={selectServer}
@@ -288,6 +237,15 @@ function MachineSync({
         }
       }
     });
+    // Whether the vault is locked decides what the sidebar and the inbox say; an older daemon
+    // or a machine still being prepared may not answer, which is not an error to show.
+    const setup = () =>
+      void call('setup.status')
+        .then((status) => send({ type: 'setup', status }))
+        .catch(() => undefined);
+    setup();
+    const timer = setInterval(setup, 60_000);
+    const offVault = onVaultUnlocked(setup);
     void Promise.all([
       call('agents.list').then((agents) => send({ type: 'agents', agents })),
       tasks(),
@@ -296,9 +254,151 @@ function MachineSync({
     return () => {
       current = false;
       off();
+      offVault();
+      clearInterval(timer);
     };
   }, [server.name, server.label, server.status, dispatch, say]);
   return null;
+}
+
+/**
+ * The one navigation column: what waits for the user, the agents, then usage and settings. It
+ * stays in every view, so an agent is always one click away.
+ */
+export function Sidebar({
+  fleet,
+  connections,
+  selected,
+  view,
+  waiting,
+  setView,
+  onSelect,
+  onBuilder,
+}: {
+  fleet: Fleet;
+  connections: ServerState[];
+  selected: string;
+  view: View;
+  /** Held writes and notices, from every machine. */
+  waiting: number;
+  setView(view: View): void;
+  onSelect(server: string, agentId: string): void;
+  onBuilder(server: string): void;
+}) {
+  return (
+    <nav className="sidebar" aria-label="Main">
+      <SideButton
+        label="Needs you"
+        icon="inbox"
+        badge={waiting}
+        active={view.kind === 'inbox'}
+        onClick={() => setView({ kind: 'inbox' })}
+      />
+      <SideButton
+        label="New agent"
+        icon="plus"
+        active={view.kind === 'builder'}
+        onClick={() => setView({ kind: 'builder' })}
+      />
+      <div className="sidebar-team">
+        <TeamList
+          fleet={fleet}
+          connections={connections}
+          selected={selected}
+          view={view}
+          onSelect={onSelect}
+          onBuilder={onBuilder}
+        />
+      </div>
+      <Protection
+        fleet={fleet}
+        connections={connections}
+        onOpen={(inbox) =>
+          setView(inbox ? { kind: 'inbox' } : { kind: 'settings', section: 'machines' })
+        }
+      />
+      <div className="sidebar-foot">
+        <SideButton
+          label="Usage"
+          icon="chart"
+          active={view.kind === 'usage'}
+          onClick={() => setView({ kind: 'usage' })}
+        />
+        <SideButton
+          label="Settings"
+          icon="gear"
+          active={view.kind === 'settings'}
+          onClick={() => setView({ kind: 'settings' })}
+        />
+      </div>
+    </nav>
+  );
+}
+
+/**
+ * What protects the agents, in a line: a single machine's connection and vault, or how many
+ * machines are connected. A locked vault sends the user to the inbox, where it is unlocked.
+ */
+function Protection({
+  fleet,
+  connections,
+  onOpen,
+}: {
+  fleet: Fleet;
+  connections: ServerState[];
+  onOpen(inbox: boolean): void;
+}) {
+  const connected = connections.filter((s) => s.status === 'connected');
+  const only = connections.length === 1 ? connections[0] : undefined;
+  // A locked vault or a stopped secure room: agents there cannot work until it is seen to.
+  const locked = connected.filter((s) => {
+    const setup = fleet[s.name]?.setup;
+    return setup && (vaultLocked(setup) || roomDown(setup));
+  });
+  const stopped = locked.some((s) => {
+    const setup = fleet[s.name]?.setup;
+    return setup && roomDown(setup);
+  });
+  const agents = connected.reduce(
+    (n, s) => n + (fleet[s.name]?.agents ?? []).filter((a) => a.id !== BUILDER && !a.peer).length,
+    0,
+  );
+  const place = only
+    ? only.name === 'local'
+      ? 'This computer'
+      : sanitizeLine(only.label)
+    : `${connected.length}/${connections.length} machines`;
+  const state = only ? only.status : connected.length ? 'connected' : 'error';
+  const ok = state === 'connected' && !locked.length;
+  const title = ok
+    ? 'Protected'
+    : locked.length
+      ? stopped
+        ? 'Secure room stopped'
+        : 'Vault locked'
+      : 'Not connected';
+  const detail = locked.length
+    ? stopped
+      ? 'Agents cannot start tasks'
+      : 'Agents cannot use your accounts'
+    : state === 'connected'
+      ? `${place} · ${agents} ${agents === 1 ? 'agent' : 'agents'} sealed`
+      : `${place} · ${only ? only.status : 'none connected'}`;
+  return (
+    <button
+      type="button"
+      className={`protection ${ok ? '' : 'protection-warn'}`}
+      title={only ? `${only.name}: ${only.status}` : detail}
+      aria-label={`${title}. ${detail}. ${locked.length ? 'Open Needs you' : 'Open machines'}`}
+      onClick={() => onOpen(locked.length > 0)}
+    >
+      <span className="row gap-s">
+        <span className={`dot dot-${locked.length ? 'error' : state}`} />
+        <span className="strong">{title}</span>
+      </span>
+      <span className="small muted ellipsis">{detail}</span>
+    </button>
+  );
 }
 
 export function TeamList({
@@ -316,7 +416,14 @@ export function TeamList({
   onSelect(server: string, agentId: string): void;
   onBuilder(server: string): void;
 }) {
-  const groups = connections.map((server) => ({
+  const groups: {
+    server: ServerState;
+    via: string;
+    /** For a machine only known through another one: that machine's label. */
+    through?: string;
+    model: Model;
+    agents: AgentSummary[];
+  }[] = connections.map((server) => ({
     server,
     via: server.name,
     model: fleet[server.name] ?? EMPTY_MODEL,
@@ -344,22 +451,25 @@ export function TeamList({
           status: peer.online ? 'connected' : 'error',
         },
         via: source.name,
+        through: source.label,
         model,
         agents: model.agents.filter((a) => a.peer?.node === peer.node),
       });
     }
   }
   const total = groups.reduce((n, g) => n + g.agents.length, 0);
+  // With one machine and no discovered peers there is nothing to tell apart: no host heading.
+  const flat = groups.length === 1;
   return (
     <>
-      <div className="section-label">TEAM · {total}</div>
-      {groups.map(({ server, via, model, agents }) => {
+      <div className="section-label">AGENTS · {total}</div>
+      {groups.map(({ server, via, through, model, agents }) => {
         const proposals = server.name.startsWith('peer:') ? 0 : Object.keys(model.proposals).length;
-        return (
-          <TeamGroup key={server.name} server={server} count={agents.length}>
+        const rows = (
+          <>
             {!!proposals && (
               <button className="btn btn-small" onClick={() => onBuilder(server.name)}>
-                Proposals on {sanitizeLine(server.label)} ({proposals})
+                {flat ? 'Proposals' : `Proposals on ${sanitizeLine(server.label)}`} ({proposals})
               </button>
             )}
             {agents.map((agent) => {
@@ -380,14 +490,7 @@ export function TeamList({
                     {tone !== 'working' && <span className={`presence presence-${tone}`} />}
                   </span>
                   <span className="col grow min0">
-                    <span className="strong ellipsis">
-                      @{sanitizeLine(agent.peer?.agent ?? agent.id)}
-                    </span>
-                    {agent.runtime && (
-                      <span className="tag tag-off agent-runtime ellipsis">
-                        {runtimeName(agent.runtime)}
-                      </span>
-                    )}
+                    <span className="strong ellipsis">{agentLabel(agent)}</span>
                     {(() => {
                       const preview =
                         server.status === 'connected'
@@ -413,6 +516,15 @@ export function TeamList({
                   : 'Agents appear when this machine connects.'}
               </p>
             )}
+          </>
+        );
+        return flat ? (
+          <div key={server.name} className="team-group">
+            {rows}
+          </div>
+        ) : (
+          <TeamGroup key={server.name} server={server} through={through} count={agents.length}>
+            {rows}
           </TeamGroup>
         );
       })}
@@ -420,12 +532,22 @@ export function TeamList({
   );
 }
 
+/** What an agent is called: its name when it has one of its own, else its id. */
+export function agentLabel(agent: AgentSummary): string {
+  const id = agent.peer?.agent ?? agent.id;
+  const name = sanitizeLine(agent.name ?? '').trim();
+  return name && name !== id ? name : `@${sanitizeLine(id)}`;
+}
+
 function TeamGroup({
   server,
+  through,
   count,
   children,
 }: {
   server: ServerState;
+  /** Set for a team member this app is not connected to: the machine that reports it. */
+  through?: string;
   count: number;
   children: ReactNode;
 }) {
@@ -455,10 +577,17 @@ function TeamGroup({
     >
       <summary className="team-host" title={server.name}>
         <Icon name="chevron" size={14} className="team-chevron" />
-        <span className={`dot dot-${server.status}`} />
+        {/* A team member that is off is not a failure of this app: no error colour. */}
+        <span
+          className={`dot dot-${through && server.status !== 'connected' ? 'off' : server.status}`}
+        />
         <span className="col grow min0">
           <span className="strong ellipsis">{sanitizeLine(server.label)}</span>
-          <span className="small muted">{server.status}</span>
+          <span className="small muted ellipsis">
+            {through
+              ? `${server.status === 'connected' ? 'online' : 'offline'} · through ${sanitizeLine(through)}`
+              : server.status}
+          </span>
         </span>
         <span className="team-host-count">
           {count}
@@ -474,6 +603,9 @@ function ScopedView({
   server,
   connections,
   model,
+  fleet,
+  update,
+  onPostpone,
   dispatchFleet,
   act,
   selectServer,
@@ -483,6 +615,9 @@ function ScopedView({
   server: ServerState;
   connections: ServerState[];
   model: Model;
+  fleet: Fleet;
+  update: ReleaseUpdate | null;
+  onPostpone: () => void;
   dispatchFleet: Dispatch<FleetAction>;
   act: AppContext['act'];
   selectServer: AppContext['selectServer'];
@@ -531,7 +666,12 @@ function ScopedView({
     ])
       .then(([status, agents, tasks]) => {
         if (!current) return;
-        if (welcomeStep(status, agents, tasks) === 'done') setOnboarded(server.name);
+        // Someone whose agents already finished work is not new: a stopped secure room or a
+        // locked vault is theirs to fix from Needs you, not a reason to start the guide again.
+        const used =
+          agents.some((a) => a.id !== BUILDER) &&
+          tasks.some((t) => t.agentId !== BUILDER && t.status === 'done');
+        if (used || welcomeStep(status, agents, tasks) === 'done') setOnboarded(server.name);
         else setView({ kind: 'welcome' });
       })
       .catch(() => {});
@@ -555,17 +695,29 @@ function ScopedView({
   return (
     <Ctx.Provider value={ctx}>
       <div className="machine-content">
-        {view.kind !== 'settings' && view.kind !== 'agent' && (
-          <div className="machine-toolbar">
-            <MachinePicker />
-            <span className="small muted">Tasks belong to the selected machine</span>
-          </div>
+        {connections.length > 1 &&
+          view.kind !== 'settings' &&
+          view.kind !== 'agent' &&
+          view.kind !== 'inbox' &&
+          view.kind !== 'welcome' && (
+            <div className="machine-toolbar">
+              <MachinePicker />
+              <span className="small muted">Tasks belong to the selected machine</span>
+            </div>
+          )}
+        {(view.kind === 'settings' || view.kind === 'inbox') && (
+          <ConnectionBanner onOpen={() => setView({ kind: 'settings', section: 'machines' })} />
         )}
-        <ConnectionBanner onOpen={() => setView({ kind: 'settings' })} />
-        {server.status === 'connected' && <VaultBanner />}
         <div className="machine-body">
           {view.kind === 'settings' ? (
-            <SettingsView />
+            <SettingsView section={view.section} />
+          ) : view.kind === 'inbox' ? (
+            <NeedsYouView
+              fleet={fleet}
+              connections={connections}
+              update={update}
+              onPostpone={onPostpone}
+            />
           ) : view.kind === 'welcome' ? (
             <WelcomeView
               onFinish={() =>
@@ -573,15 +725,11 @@ function ScopedView({
               }
             />
           ) : server.status !== 'connected' ? (
-            <main className="main empty">
-              {sanitizeLine(server.label)} is {server.status}. Connect it in Settings to open tasks
-              and make changes.
-            </main>
+            <StartingView />
           ) : (
             <>
               {view.kind === 'agent' && <AgentView key={view.agentId} agentId={view.agentId} />}
               {view.kind === 'builder' && <BuilderView />}
-              {view.kind === 'approvals' && <ApprovalsView />}
               {view.kind === 'usage' && <UsageView />}
             </>
           )}
@@ -627,7 +775,7 @@ export function MachinePicker() {
   );
 }
 
-/** Says so while the window is not talking to its server; otherwise the rail's dot is enough. */
+/** Says so while the window is not talking to its server; otherwise the sidebar's dot is enough. */
 function ConnectionBanner({ onOpen }: { onOpen: () => void }) {
   const { server } = useApp();
   if (server.status === 'connected') return null;
@@ -640,13 +788,13 @@ function ConnectionBanner({ onOpen }: { onOpen: () => void }) {
           : `Not connected to ${sanitizeLine(server.label)}${server.error ? `: ${sanitizeLine(server.error)}` : ''}`}
       </span>
       <button type="button" className="btn btn-small" onClick={onOpen}>
-        Server settings
+        Machines
       </button>
     </div>
   );
 }
 
-function RailButton({
+function SideButton({
   label,
   icon,
   active,
@@ -654,7 +802,7 @@ function RailButton({
   onClick,
 }: {
   label: string;
-  icon: 'chat' | 'shield' | 'chart' | 'gear';
+  icon: 'inbox' | 'chart' | 'gear' | 'plus';
   active: boolean;
   badge?: number;
   onClick: () => void;
@@ -662,12 +810,13 @@ function RailButton({
   return (
     <button
       type="button"
-      className={`rail-button ${active ? 'active' : ''}`}
+      className={`side-button ${active ? 'active' : ''}`}
       aria-label={badge ? `${label}, ${badge} waiting` : label}
-      title={label}
+      aria-current={active ? 'page' : undefined}
       onClick={onClick}
     >
-      <Icon name={icon} size={20} />
+      <Icon name={icon} size={18} />
+      <span className="grow ellipsis">{label}</span>
       {!!badge && <span className="badge">{badge}</span>}
     </button>
   );

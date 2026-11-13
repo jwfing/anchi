@@ -25,7 +25,7 @@ import {
   type Trigger,
   workspaceSchema,
 } from '@anchi/core';
-import type { AgentSettings, AgentUpdate, WorkspaceSetting } from '@anchi/protocol';
+import type { AgentSettings, AgentUpdate, TriggerSetting, WorkspaceSetting } from '@anchi/protocol';
 import { z } from 'zod';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
 
@@ -50,10 +50,23 @@ const patchSchema = z.strictObject({
   connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
   workspaces: z.array(workspaceSchema).max(10).optional(),
   highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
+  approvals: field.approvals,
+  triggers: field.triggers,
+  // null removes the list: any public host again.
+  egress: field.egress.unwrap().nullable().optional(),
 });
 
 /** The fields a patch may change, for messages. */
 export const PATCH_FIELDS = Object.keys(patchSchema.shape);
+
+/**
+ * The fields a builder's patch may change. Approvals and triggers decide what happens without
+ * the user, so the builder changes them only in a complete agent file, which is reviewed whole;
+ * the user edits them directly in the settings panel.
+ */
+export const BUILDER_PATCH_FIELDS = PATCH_FIELDS.filter(
+  (field) => field !== 'approvals' && field !== 'triggers' && field !== 'egress',
+);
 
 export function parsePatch(raw: unknown): AgentPatch {
   const parsed = patchSchema.safeParse(raw);
@@ -65,7 +78,8 @@ export function parsePatch(raw: unknown): AgentPatch {
     !unique(delegates) ||
     !unique(connectors) ||
     !unique(workspaces?.map((w) => w.path)) ||
-    !unique(highRisk?.disable)
+    !unique(highRisk?.disable) ||
+    !unique(parsed.data.egress ?? undefined)
   ) {
     throw new Error('invalid settings: an entry appears twice');
   }
@@ -84,6 +98,9 @@ const EDITABLE = [
   'connectors',
   'workspaces',
   'highRisk',
+  'approvals',
+  'triggers',
+  'egress',
 ] as const;
 
 /** One line per trigger, for display. */
@@ -124,6 +141,9 @@ export function settingsView(
         ...(w.name ? { name: w.name } : {}),
       })),
       highRisk: { disable: [...(agent.highRisk?.disable ?? [])] },
+      approvals: { ...agent.approvals },
+      triggers: (agent.triggers ?? []).map((t) => ({ ...t })) as TriggerSetting[],
+      egress: agent.egress ? [...agent.egress] : null,
     },
     inherited,
     fixed: {
@@ -217,8 +237,17 @@ export function updateAgentFile(
   const errors: string[] = [];
   const warnings: string[] = [];
   let before: string[] = [];
+  let asked: string[] = [];
+  let scheduled: string[] = [];
+  let hosts: string[] | undefined;
   try {
-    before = resolveAgent(id, layout).highRisk.disable;
+    const now = resolveAgent(id, layout);
+    hosts = now.egress;
+    before = now.highRisk.disable;
+    asked = Object.entries(now.approvals ?? {})
+      .filter(([, mode]) => mode === 'ask')
+      .map(([connector]) => connector);
+    scheduled = (now.triggers ?? []).map(triggerLine);
   } catch {
     // A broken file exempts nothing yet.
   }
@@ -236,6 +265,22 @@ export function updateAgentFile(
     const added = agent.highRisk.disable.filter((h) => !before.includes(h));
     if (added.length) {
       warnings.push(`@${id} does ${added.join(', ')} without asking you (highRisk)`);
+    }
+    const approvals: Record<string, string | undefined> = agent.approvals ?? {};
+    const freed = asked.filter((connector) => approvals[connector] !== 'ask');
+    if (freed.length) {
+      warnings.push(`@${id} writes through ${freed.join(', ')} without asking you (approvals)`);
+    }
+    const started = (agent.triggers ?? []).map(triggerLine).filter((t) => !scheduled.includes(t));
+    if (started.length) {
+      warnings.push(`@${id} starts tasks by itself: ${started.join('; ')} (triggers)`);
+    }
+    // A limited agent that reaches more: a new host, or every public host again.
+    if (hosts && !agent.egress) {
+      warnings.push(`@${id} reaches any public host: its egress list is removed (egress)`);
+    } else if (hosts && agent.egress) {
+      const reached = agent.egress.filter((h) => !hosts.includes(h));
+      if (reached.length) warnings.push(`@${id} may also reach ${reached.join(', ')} (egress)`);
     }
     if (opts.inventory) {
       const found = checkReferences(agent, opts.inventory, opts.workspaceRoot ?? '');

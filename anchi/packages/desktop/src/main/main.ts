@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homeLayout, sanitizeLine } from '@anchi/core';
 import {
+  autostartFile,
   addServer,
   chosenServer,
   connectRemote,
@@ -26,13 +28,14 @@ import {
   session,
   shell,
 } from 'electron';
-import { type Confirmation, externalUrl } from './bridge.ts';
+import { type Confirmation, externalUrl, forgetQuestion } from './bridge.ts';
 import { Connections } from './connections.ts';
 import { adoptLoginPath } from './env.ts';
 import { bootstrapServer, ServerSetup } from './server-setup.ts';
+import { switchLoginStartup } from './startup.ts';
 import { ReleaseUpdates } from './updates.ts';
 import { LOCAL_UPGRADE, REMOTE_UPGRADE, runScript, ServerUpgrade } from './upgrade.ts';
-import type { DaemonStatus } from '@anchi/protocol';
+import type { DaemonStatus, PeerDirectory } from '@anchi/protocol';
 import type { ServerState } from '../shared.ts';
 
 // Embedded by the build: the desktop's version is independent of the connected daemon.
@@ -360,6 +363,17 @@ ipcMain.handle('anchi:removeServer', async (event, name: unknown) => {
   const saved = listServers(layout.root).find((s) => s.name === name);
   if (saved && serverSetup.busy(saved.target)) throw new Error('initialization is already running');
   if (saved && serverUpgrade.busy(saved.target)) throw new Error('an upgrade is running');
+  if (saved) {
+    // Only a connected machine can say whether it is in a team; the question is asked anyway.
+    let directory: PeerDirectory | undefined;
+    try {
+      directory = (await connections.lease(saved.target).read('peers.directory', {})) as
+        PeerDirectory | undefined;
+    } catch {
+      directory = undefined;
+    }
+    if (!(await confirm(forgetQuestion(saved, directory)))) return listServers(layout.root);
+  }
   const gone = removeServer(layout.root, String(name ?? ''));
   connections.remove(gone.target);
   if (selected === gone.target) selected = 'local';
@@ -373,6 +387,38 @@ ipcMain.handle('anchi:openExternal', async (event, url: unknown) => {
 ipcMain.handle('anchi:update', (event) => {
   fromApp(event);
   return updates.available;
+});
+/**
+ * Whether the daemon starts at login on this computer, and switching it. The CLI installs or
+ * removes the login item, as `anchi daemon install` does; the window only asks for on or off,
+ * and either way is confirmed here, because removing it stops a daemon that login started.
+ */
+ipcMain.handle('anchi:loginStartup', (event) => {
+  fromApp(event);
+  return process.platform !== 'win32' && existsSync(autostartFile());
+});
+ipcMain.handle('anchi:setLoginStartup', (event, on: unknown) => {
+  fromApp(event);
+  return switchLoginStartup(on, {
+    platform: process.platform,
+    installed: () => existsSync(autostartFile()),
+    confirm,
+    run: (args) =>
+      new Promise<void>((resolve, reject) => {
+        const cli = process.env.ANCHI_CLI ?? 'anchi';
+        const child = spawn(cli, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+        let stderr = '';
+        child.stderr.on('data', (d: Buffer) => {
+          stderr = (stderr + d.toString('utf8')).slice(-2000);
+        });
+        child.on('error', () => reject(new Error(`${cli} not found`)));
+        child.on('close', (code) =>
+          code === 0
+            ? resolve()
+            : reject(new Error(sanitizeLine(stderr.trim() || `${cli} daemon exited with ${code}`))),
+        );
+      }),
+  });
 });
 ipcMain.handle('anchi:copyUpdateCommand', (event) => {
   fromApp(event);
