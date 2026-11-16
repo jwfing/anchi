@@ -528,7 +528,18 @@ export class Daemon {
    * Host placement: starts the services process (proxy, vault, approvals) once installed, then
    * registers the host principal. Failures are logged; `host.status` says what is missing.
    */
-  private async startHostServices(): Promise<void> {
+  private startHostServices(): Promise<void> {
+    // One start at a time: a vault step that arrives while the daemon's own start is still
+    // waiting for the control socket waits for that start instead of spawning a second process.
+    this.hostStarting ??= this.startHostServicesOnce().finally(() => {
+      this.hostStarting = undefined;
+    });
+    return this.hostStarting;
+  }
+
+  private hostStarting: Promise<void> | undefined;
+
+  private async startHostServicesOnce(): Promise<void> {
     const services = this.hostServices;
     if (!services || this.opts.hostServices === false) return;
     if (!(this.vm as HostTransport).installed() || services.running()) return;
@@ -538,6 +549,14 @@ export class Daemon {
     } catch (err) {
       this.log(`host placement: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Before a vault step on the host placement, the services that hold the vault must be up:
+   * right after `daemon start` they may still be starting (seen on a Linux CI runner).
+   */
+  private async beforeSetupStep(action: SetupAction): Promise<void> {
+    if (this.vm.placement === 'host' && action.startsWith('vault-')) await this.startHostServices();
   }
 
   /** The connectors with a credential in the vault, as the host principal's grants. */
@@ -1323,6 +1342,7 @@ export class Daemon {
           runtime,
           () => setupStatus(this.guest, this.vm, this.services),
           async (action) => {
+            await this.beforeSetupStep(action);
             await this.setup.run(action, (line) => this.broadcast('setup', { action, line }));
             if (action === 'install' || action === 'vm-start') await this.startHostServices();
           },
@@ -1416,6 +1436,7 @@ export class Daemon {
       if (this.preparing) throw new Error('Environment setup is already running.');
       if (!SETUP_ACTIONS.includes(action)) throw new Error('unknown setup step');
       this.log(`setup ${action} started`);
+      await this.beforeSetupStep(action);
       await this.setup.run(action, (line) => this.broadcast('setup', { action, line }));
       this.log(`setup ${action} done`);
       if (action === 'install' || action === 'vm-start') await this.startHostServices();
