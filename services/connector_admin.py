@@ -10,6 +10,7 @@ import sys
 import admin
 import auth
 import connectors
+import placement
 import x_auth
 import reddit_auth
 from common import Denied, rpc
@@ -22,15 +23,19 @@ def module_for(connector):
 def credential_for(connector, account=auth.DEFAULT_ACCOUNT):
     """Runs as the connector user: the auth socket returns only that identity's token."""
     spec = connectors.CONNECTORS[connector]
+    socket_path = placement.auth_socket(connector)
     if spec.credential.startswith('google:'):
-        value = rpc('/run/secure-auth/token.sock', {'op': 'access_token', 'account': account})
+        value = rpc(socket_path, {'op': 'access_token', 'account': account})
     else:
-        value = rpc('/run/secure-auth/token.sock', {'op': 'token'})
+        value = rpc(socket_path, {'op': 'token'})
     return value.get('access_token') or value.get('token')
 
 
 def run_as(user, function):
-    """Fork, drop to `user`, run `function`, and return its JSON result to the (root) parent."""
+    """Fork, drop to `user`, run `function`, and return its JSON result to the (root) parent.
+    On a host placement there is one user: the function runs here."""
+    if placement.HOST:
+        return function()
     reader, writer = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -105,7 +110,7 @@ def disconnect(connector, account=auth.DEFAULT_ACCOUNT):
 
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    if os.getuid() != 0:
+    if not placement.admin_allowed():
         raise Denied('GUEST_ADMIN_REQUIRED')
     connector, action = sys.argv[1], sys.argv[2]
     # An account names one of a Google connector's accounts; other connectors have one credential.

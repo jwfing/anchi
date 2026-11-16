@@ -190,6 +190,36 @@ The agent team (`anchi/`, `guest/anchi_cell.py`, `services/egress_*.py`) runs Co
 - **Audit.** `/var/log/anchi-egress/audit.jsonl` records method, host, path, operation, decision, task and agent, and whether the cell sent a placeholder, nothing or a credential of its own, never header values or query strings. The user sees a task's rows with `anchi audit TASK` or **^X l** on the task; the daemon reads them through a fixed guest command that takes only a task id. They are written by the trusted proxy, but hosts and paths come from the agent's requests and are rendered as agent text. The file rotates at 50 MB and keeps one older file; the daemon saves each task's rows when its cells close, so a task's record lasts as long as the task. When a cell sends a credential that is not a placeholder, the proxy alerts the daemon at once (a note in the task and a desktop notification); this flags a credential that reached the cell from elsewhere, and does not stop the request. `make verify-anchi` runs the live isolation checks, and `anchi scan TASK` checks a live cell for real credential values.
 - **Subscription limits.** The proxy reads the limits of the Codex and Claude subscriptions from responses it injected credentials into: Codex's rate-limit message in the model stream (plan, percent used, window length and reset time, all bounded) and Claude's `anthropic-ratelimit-*` headers (printable, bounded). It parses only that message type and keeps nothing else of the stream; of Codex's response headers it keeps only the limit families (`x-codex-primary-*`, `-secondary-*`, `-credits-*`, `-rate-limit-*`). When Codex's limits are missing or more than five minutes old and the daemon asks for them, the proxy itself calls Codex's read-only usage endpoint (`GET https://chatgpt.com/backend-api/wham/usage`) with the stored login, at most once every five minutes; no cell takes part. The last values are kept in the proxy's state directory across restarts and are not a security control.
 
+## Host placement (no VM)
+
+A daemon started with `ANCHI_GUEST=host` ([docs/HOST_PLACEMENT.md](docs/HOST_PLACEMENT.md)) runs
+no cells. Its egress proxy, vault and auth service run on the user's computer as the user, and
+the user's own Claude Code and Codex sessions reach the proxy from inside those runtimes' own
+sandboxes (Seatbelt on macOS, bubblewrap on Linux), through settings Anchi writes with the user's
+confirmation and can undo. The trust zones differ from the VM's:
+
+- **Trusted:** everything the user runs outside a sandbox, the daemon, the proxy and the trusted
+  services. They share one user and one kernel; the role separation between them (one socket per
+  caller role, the proxy's control socket for the daemon's UID only) is code hygiene, not a kernel
+  boundary.
+- **Untrusted:** the commands a session's runtime runs inside its sandbox. The sandbox denies them
+  the vault, the key, `~/.ssh`, `~/.aws` and the other listed paths, direct network access, Unix
+  sockets and writes outside the working directory. Their only way out is the proxy, where the
+  egress rules, credential injection, high-risk approvals and audit apply as for cells, and the
+  user's own runtime logins pass untouched.
+- **Outside both:** the runtime process and its built-in tools (Claude Code's Read, Edit, WebFetch
+  and WebSearch, MCP servers, hooks and shell-mode commands; Codex's web search, MCP servers, apps,
+  browser and computer use). They run with the user's full access and are not proxied. A command
+  the user excludes from the sandbox, an unsandboxed retry or a Codex escalation runs the same way;
+  Anchi's settings disable Claude Code's retry and `anchi host status` reports exclusions.
+
+Credential isolation holds for what passes the proxy: a sandboxed command sees placeholders and
+never a stored credential. It does not hold for content, and not for a tool the runtime runs
+outside the sandbox. The vault's key, while unlocked, is a file under `~/.anchi/host/state/run`
+(mode 0600) rather than guest memory, and swap is not disabled. Both sandboxes are user-space
+mechanisms maintained by their vendors; the VM remains the hardened placement, and a remote
+server the unattended one.
+
 ## Isolation and platform limits
 
 Guided preparation combines environment installation, vault initialization/unlock and runtime

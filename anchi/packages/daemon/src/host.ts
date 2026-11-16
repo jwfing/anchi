@@ -146,6 +146,16 @@ export const IN_GUEST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
 };
 
 /**
+ * The steps of a daemon without a VM (`ANCHI_GUEST=host`): scripts/host-install.sh prepares the
+ * Python side under ~/.anchi/host, and the vault steps run on this computer (vault.mjs).
+ */
+export const HOST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
+  install: [['bash', 'scripts/host-install.sh']],
+  'vault-init': [vaultStep('init')],
+  'vault-unlock': [VAULT_UNLOCK],
+};
+
+/**
  * `setup.reset`: deletes the VM and everything in it (the vault's encrypted files included).
  * Lima ignores an instance that does not exist. The vault key and Anchi home are the CLI's.
  */

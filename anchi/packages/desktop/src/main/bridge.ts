@@ -2,6 +2,7 @@ import { peerNetworkConfigSchema, peerRecordSchema, peerNodeSchema } from '@anch
 import { autoPublishWarning } from '@anchi/core/publish';
 import { agentLayerSchema, idSchema, parseYamlAs, sanitizeLine } from '@anchi/core';
 import type {
+  HostStatus,
   AgentPatch,
   AgentDeletionPreview,
   AgentSettings,
@@ -62,6 +63,9 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'setup.prepare',
   'setup.resetPreview',
   'setup.reset',
+  'host.status',
+  'host.enable',
+  'host.disable',
   'connectors.set',
   'connectors.importGh',
   'connectors.awsProfile',
@@ -399,6 +403,18 @@ export async function confirmation(
       message: `Let @${agentId} reach ${host.trim().toLowerCase()}?`,
       detail: `The host is added to the websites @${agentId} may reach. Its tasks can then send it anything they hold, including the contents of shared folders. Only add a host you trust.`,
       button: 'Allow this host',
+    };
+  }
+  if (call.method === 'host.enable') {
+    // What is written and where comes from the daemon, never from the window.
+    const status = (await read('host.status', {})) as HostStatus;
+    return {
+      message: 'Write Anchi’s sandbox settings into Claude Code and Codex on this computer?',
+      detail:
+        `Anchi edits ${status.claude.file} and ${status.codex.file} (undo: Disable), and puts claude and codex shims in ${status.shimDir}. ` +
+        `Sessions then reach the network through Anchi on port ${status.port}, with placeholders instead of your connected credentials. ` +
+        'Settings of your own in those files are refused, not merged.',
+      button: 'Write settings',
     };
   }
   if (call.method === 'connectors.importGh') {

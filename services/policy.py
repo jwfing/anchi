@@ -14,13 +14,16 @@ import importlib
 
 from common import Denied, fields
 import connectors
+import placement
 
-DATABASE = Path('/var/lib/secure-policy/policy.sqlite3')
+DATABASE = placement.path('/var/lib/secure-policy/policy.sqlite3', 'policy/policy.sqlite3')
 BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
 
 
 @contextmanager
 def database():
+    if placement.HOST:
+        DATABASE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     conn = sqlite3.connect(DATABASE, timeout=5)
     conn.row_factory = sqlite3.Row
     try:

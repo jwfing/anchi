@@ -41,7 +41,7 @@ import type {
   VmSize,
 } from '@anchi/protocol';
 import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
-import type { RuntimeId } from '@anchi/protocol';
+import type { HostStatus, RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeJson, sanitizeLine, sanitizeLines } from '@anchi/core';
@@ -1160,6 +1160,10 @@ async function newVmSize(
   opts: { yes?: boolean; cpus?: string; memory?: string },
 ): Promise<VmSize | undefined> {
   const s = await client.call('setup.status');
+  if (s.placement === 'host') {
+    if (opts.cpus || opts.memory) fail('this daemon runs without a VM (host placement)');
+    return undefined;
+  }
   if (s.vm !== 'missing' || !s.vmSize) {
     if (opts.cpus || opts.memory) fail('the VM exists; change its size with limactl edit anchi-vm');
     return undefined;
@@ -1515,6 +1519,67 @@ async function readStdin(): Promise<string> {
   if (!text) fail('no secret on stdin: run this in a terminal to be prompted, or redirect a file');
   return text;
 }
+
+const host = program
+  .command('host')
+  .description(
+    'The host placement: Anchi without a VM, for your own claude and codex sessions (ANCHI_GUEST=host)',
+  );
+
+function printHostStatus(s: HostStatus) {
+  const lines = [
+    `installed: ${s.installed ? 'yes' : 'no (anchi setup install)'} · services: ${s.running ? 'running' : 'stopped'} · settings: ${s.enabled ? 'written' : 'not written'}`,
+    `proxy port: ${s.port} · connectors: ${s.connectors.join(', ') || 'none'} · ask: ${s.ask.join(', ') || 'none'}`,
+    `shims: ${s.shimDir}${s.shimOnPath ? '' : ' (put it first on PATH: export PATH="' + s.shimDir + ':$PATH")'}`,
+    `Claude Code: ${s.claude.file}${s.claude.managed ? ' (managed)' : ''}${s.claude.excludedCommands.length ? ` · excludedCommands run outside the sandbox: ${s.claude.excludedCommands.join(', ')}` : ''}`,
+    `Codex: ${s.codex.file}${s.codex.managed ? ' (managed)' : ''}`,
+    `trust bundle: ${s.caBundle}`,
+    s.missing.length ? `missing on this computer: ${s.missing.join(', ')}` : '',
+  ];
+  for (const line of lines) if (line) console.log(line);
+}
+
+host
+  .command('status')
+  .description('Whether the host placement is installed, running and written into the runtimes')
+  .option('--json', 'the full status as JSON')
+  .action((opts: { json?: boolean }) =>
+    withClient(async (client) => {
+      const s = await client.call('host.status');
+      if (opts.json) return console.log(jsonOut(s));
+      printHostStatus(s);
+    }),
+  );
+
+host
+  .command('enable')
+  .description(
+    "Write Claude Code's and Codex's sandbox and trust settings and the shims (undo: anchi host disable)",
+  )
+  .option('-y, --yes', 'skip the confirmation')
+  .action((opts: { yes?: boolean }) =>
+    withClient(async (client) => {
+      const before = await client.call('host.status');
+      const consent =
+        `Write sandbox settings into ${before.claude.file} and ${before.codex.file}, and shims into ${before.shimDir}? ` +
+        'Your own sandbox settings are refused rather than merged. Sessions then reach the network through Anchi on port ' +
+        `${before.port} with placeholders instead of credentials; see docs/HOST_PLACEMENT.md.`;
+      if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+      const s = await client.call('host.enable');
+      printHostStatus(s);
+      if (!s.shimOnPath)
+        console.log(`Add the shims first on PATH in your shell: export PATH="${s.shimDir}:$PATH"`);
+    }),
+  );
+
+host
+  .command('disable')
+  .description('Restore the runtime settings Anchi changed and remove the shims')
+  .action(() =>
+    withClient(async (client) => {
+      printHostStatus(await client.call('host.disable'));
+    }),
+  );
 
 const daemon = program.command('daemon').description('Manage the background daemon');
 daemon

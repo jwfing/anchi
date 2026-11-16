@@ -7,6 +7,7 @@ import re
 import socket
 import ssl
 import struct
+import sys
 from pathlib import Path
 import time
 
@@ -89,7 +90,15 @@ def rpc(path, request, timeout=30):
     return response['result']
 
 
+# macOS: getsockopt(SOL_LOCAL, LOCAL_PEERCRED) fills a struct xucred, whose uid follows the version.
+LOCAL_PEERCRED = (0, 1)
+XUCRED_SIZE = 76
+
+
 def peer_uid(conn):
+    """The connected peer's UID as the kernel reports it, on Linux (SO_PEERCRED) and macOS."""
+    if sys.platform == 'darwin':
+        return struct.unpack('II', conn.getsockopt(*LOCAL_PEERCRED, XUCRED_SIZE)[:8])[1]
     return struct.unpack('3i', conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
 
 

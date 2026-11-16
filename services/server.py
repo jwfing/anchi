@@ -1,8 +1,12 @@
-"""Socket-activated, single-request connections; kernel UID is authoritative."""
+"""Single-request connections. In the VM the services are socket-activated and the kernel UID of
+the caller is authoritative. On a host placement (no VM, one user) `--listen <role>=<path>` binds
+one socket per caller role: the role comes from the socket the client chose, the kernel UID must
+be this process's own, and what keeps a session away from these sockets is its sandbox."""
 
 import os
 import pwd
 import re
+import selectors
 import socket
 import sqlite3
 import sys
@@ -20,6 +24,9 @@ from common import CELL_AGENT_HOST_UID, Denied, peer_uid, recv_json, send_json
 
 MODES = ('auth', 'policy', *connectors.CONNECTORS)
 RATE_LIMIT, RATE_WINDOW = 60, 60
+# Caller roles a host listener may be bound to; the cell user has no listener (no cells there).
+HOST_ROLES = ('egress', *connectors.CONNECTORS)
+LISTENER = re.compile(r'^([a-z0-9-]{1,40})=(/\S+)$')
 
 
 def handler_for(mode):
@@ -55,7 +62,15 @@ def recover_connector(mode):
 
 
 class Service:
-    def __init__(self, mode, service_uids, cell_uid=CELL_AGENT_HOST_UID, clock=time.monotonic, peer=peer_uid):
+    def __init__(
+        self,
+        mode,
+        service_uids,
+        cell_uid=CELL_AGENT_HOST_UID,
+        clock=time.monotonic,
+        peer=peer_uid,
+        own_uid=None,
+    ):
         if mode not in MODES:
             raise ValueError('Unknown service')
         self.mode, self.service_uids, self.clock, self.peer = mode, service_uids, clock, peer
@@ -64,6 +79,9 @@ class Service:
         self.bridge_uids = {uid for uid, name in service_uids.items() if name == 'egress'}
         if mode in connectors.CONNECTORS:
             self.allowed_uids |= self.bridge_uids
+        # Host listeners: the roles this service answers, and the only UID that may connect.
+        self.allowed_roles = set(HOST_ROLES) if mode in ('auth', 'policy') else {'egress'}
+        self.own_uid = os.getuid() if own_uid is None else own_uid
         self.writes_ready = True
         self._handler = None
         self.recent = deque()
@@ -86,17 +104,28 @@ class Service:
             raise Denied('RATE_LIMITED')
         self.recent.append(now)
 
-    def process(self, conn):
+    def identify(self, conn, role=None):
+        """The caller: a service name, or None for the cell user. From the kernel UID in the VM.
+        On a host listener (`role` is the socket's) the UID must be this process's own and the
+        role one this service answers; a role is never taken from the request."""
+        uid = self.peer(conn)
+        if role is not None:
+            if uid != self.own_uid or role not in self.allowed_roles:
+                raise Denied('CALLER_DENIED')
+            return role
+        if uid not in self.allowed_uids:
+            raise Denied('CALLER_DENIED')
+        return self.service_uids.get(uid)
+
+    def process(self, conn, role=None):
         """One request per connection. Errors never carry provider details or tracebacks."""
         try:
-            uid = self.peer(conn)
-            if uid not in self.allowed_uids:
-                raise Denied('CALLER_DENIED')
+            caller = self.identify(conn, role)
             self.throttle()
             request = recv_json(conn)
             agent, account = None, 'default'
             connector = connectors.CONNECTORS.get(self.mode)
-            if uid in self.bridge_uids and connector and isinstance(request, dict):
+            if caller == 'egress' and connector and isinstance(request, dict):
                 agent = request.pop('agent', None)
                 if not isinstance(agent, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', agent):
                     raise Denied('BAD_AGENT')
@@ -112,7 +141,6 @@ class Service:
                 and connector.ops.get(self.mode + '.' + str(request.get('op'))) == connectors.WRITE
             ):
                 raise Denied('LEDGER_UNAVAILABLE')
-            caller = self.service_uids.get(uid)
             if self.mode == 'auth' and request.get('op') not in credential_ops(caller):
                 raise Denied('CREDENTIAL_SCOPE_DENIED')
             policy_client.AGENT = agent
@@ -136,10 +164,71 @@ class Service:
             pass
 
 
+def parse_listeners(args):
+    """`--listen <role>=<absolute path>` pairs: one socket per host caller role, no duplicates."""
+    listeners = {}
+    while args:
+        if len(args) < 2 or args[0] != '--listen':
+            raise ValueError('USAGE')
+        match = LISTENER.fullmatch(args[1])
+        if match is None or match.group(1) not in HOST_ROLES or match.group(1) in listeners:
+            raise ValueError('BAD_LISTENER')
+        listeners[match.group(1)] = match.group(2)
+        args = args[2:]
+    if not listeners:
+        raise ValueError('USAGE')
+    return listeners
+
+
+def bind_listeners(listeners):
+    """Fresh sockets reachable by this user only; their directory is the daemon's (mode 0700)."""
+    sockets = {}
+    for role, path in listeners.items():
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        sock.bind(path)
+        os.chmod(path, 0o600)
+        sock.listen(16)
+        sockets[sock] = role
+    return sockets
+
+
+def serve_host(service, listeners, stop=None):
+    """Accepts on every role socket in turn until `stop` (a threading.Event) is set."""
+    sockets = bind_listeners(listeners)
+    selector = selectors.DefaultSelector()
+    for sock, role in sockets.items():
+        selector.register(sock, selectors.EVENT_READ, role)
+    try:
+        while stop is None or not stop.is_set():
+            for key, _ in selector.select(0.2):
+                conn, _ = key.fileobj.accept()
+                with conn:
+                    conn.settimeout(3)
+                    service.process(conn, role=key.data)
+    finally:
+        selector.close()
+        for sock in sockets:
+            sock.close()
+
+
 def main():
     mode = sys.argv[1]
     if mode not in MODES:
         raise SystemExit('Unknown service')
+    if len(sys.argv) > 2:
+        try:
+            listeners = parse_listeners(sys.argv[2:])
+        except ValueError as exc:
+            raise SystemExit(f'{exc}: server.py <mode> --listen <role>=<socket path> ...') from None
+        # The VM's units run with UMask=0077; the daemon's children inherit the user's.
+        os.umask(0o077)
+        service = Service(mode, {})
+        service.writes_ready = recover_connector(mode)
+        return serve_host(service, listeners)
     service_uids = {pwd.getpwnam(c.user).pw_uid: c.id for c in connectors.CONNECTORS.values()}
     try:
         service_uids[pwd.getpwnam('anchi-egress').pw_uid] = 'egress'

@@ -13,6 +13,7 @@ import type {
 } from '@anchi/protocol';
 import type { Guest, VmTransport } from './guest.ts';
 import { APP_VERSION, defaultVmSize, hostResources, REPO_ROOT, VAULT_KEY } from './host.ts';
+import { hostPython } from './host-placement.ts';
 import { limaPin, type LimaPin } from './lima.ts';
 import type { ServiceSetup } from './services.ts';
 
@@ -121,6 +122,17 @@ export function hostReadiness(
       platform: process.platform,
       missing: ['python3', 'sudo'].filter((name) => !executable(name)),
       installHint: 'This server needs Python 3.11+ and passwordless sudo for its login user.',
+    };
+  }
+  if (placement === 'host') {
+    // No VM: the proxy and the trusted services run on this computer, on its own Python.
+    return {
+      platform: process.platform,
+      missing: hostPython() ? [] : ['python3 (3.11 or newer)'],
+      installHint:
+        process.platform === 'darwin'
+          ? 'Install Python 3.11 or newer (python.org or brew install python), then prepare again.'
+          : 'Install python3 (3.11 or newer) with its venv module, then prepare again.',
     };
   }
   // Where Anchi has a pinned Lima, setup downloads it when PATH has none new enough (lima.ts).

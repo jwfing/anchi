@@ -1,6 +1,10 @@
+import os
+import shutil
 import socket
 import sys
+import tempfile
 import threading
+import time
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -8,7 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'services'))
 import connector_base
 import server
-from common import recv_json, send_json
+from common import Denied, recv_json, rpc, send_json
 
 GMAIL_UID, EGRESS_UID, CELL_UID, STRANGER_UID = 1001, 1002, 2001, 3001
 SERVICE_UIDS = {GMAIL_UID: 'gmail', EGRESS_UID: 'egress'}
@@ -31,12 +35,12 @@ class ServerTests(unittest.TestCase):
         service.clock_object = clock
         return service
 
-    def exchange(self, service, uid, write):
+    def exchange(self, service, uid, write, role=None):
         # Socketpair buffers are small; serve concurrently so large frames never deadlock the test.
         a, b = socket.socketpair()
         with a, b:
             service.peer = lambda conn: uid
-            worker = threading.Thread(target=service.process, args=(b,))
+            worker = threading.Thread(target=service.process, args=(b,), kwargs={'role': role})
             worker.start()
             try:
                 write(a)
@@ -198,6 +202,75 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request(service, CELL_UID, {'text': text})['result']['text'], text)
         service = self.service('gmail', lambda request: {'text': '你' * 22000})
         self.assertEqual(self.request(service, CELL_UID, {'op': 'x'})['error'], 'RESPONSE_TOO_LARGE')
+
+    def host(self, service, uid, role, value):
+        return self.exchange(service, uid, lambda a: send_json(a, value), role=role)
+
+    def test_host_listener_role_is_the_socket_not_the_uid(self):
+        """Host placement: the role is the listener's, only this process's UID may connect, and
+        a role never widens what the mode answers or the credential scope."""
+        called = []
+        auth = self.service('auth', lambda request, caller: called.append(caller) or {'ok': 1})
+        auth.own_uid = 500
+        self.assertTrue(self.host(auth, 500, 'egress', {'op': 'egress_credential'})['ok'])
+        self.assertEqual(self.host(auth, 500, 'gmail', {'op': 'egress_credential'})['error'], 'CREDENTIAL_SCOPE_DENIED')
+        self.assertTrue(self.host(auth, 500, 'gmail', {'op': 'access_token'})['ok'])
+        self.assertEqual(called, ['egress', 'gmail'])
+        # Another UID is refused whatever socket it reached; so is a role no listener may carry.
+        for uid, role in ((501, 'egress'), (0, 'egress'), (500, 'cell'), (500, 'root'), (500, '')):
+            self.assertEqual(self.host(auth, uid, role, {'op': 'egress_credential'})['error'], 'CALLER_DENIED')
+        self.assertEqual(called, ['egress', 'gmail'])
+        # A connector answers the bridge only, which still has to name the agent and account.
+        gmail = self.service('gmail', lambda request: {'echo': request})
+        gmail.own_uid = 500
+        self.assertEqual(self.host(gmail, 500, 'gmail', {'op': 'x'})['error'], 'CALLER_DENIED')
+        self.assertEqual(self.host(gmail, 500, 'egress', {'op': 'x'})['error'], 'BAD_AGENT')
+        self.assertEqual(
+            self.host(gmail, 500, 'egress', {'op': 'x', 'agent': 'dev', 'account': 'work'})['result'],
+            {'echo': {'op': 'x'}},
+        )
+
+    def test_host_listeners_bind_one_socket_per_role(self):
+        for bad in (
+            [],
+            ['--listen', 'cell=/run/x.sock'],
+            ['--listen', 'egress=relative.sock'],
+            ['--listen', 'egress=/run/a.sock', '--listen', 'egress=/run/b.sock'],
+            ['--port', '1'],
+            ['--listen'],
+        ):
+            with self.assertRaises(ValueError):
+                server.parse_listeners(bad)
+        self.assertEqual(
+            server.parse_listeners(['--listen', 'egress=/run/a.sock', '--listen', 'gmail=/run/b.sock']),
+            {'egress': '/run/a.sock', 'gmail': '/run/b.sock'},
+        )
+        # Real sockets, real kernel peer credentials: the caller is this process on both platforms.
+        tmp = tempfile.mkdtemp(prefix='anchi-host-')
+        self.addCleanup(shutil.rmtree, tmp, True)
+        called = []
+        service = server.Service('auth', {})
+        service.handler = lambda request, caller: called.append(caller) or {'caller': caller}
+        listeners = {'egress': f'{tmp}/egress.sock', 'gmail': f'{tmp}/gmail.sock'}
+        stop = threading.Event()
+        worker = threading.Thread(target=server.serve_host, args=(service, listeners, stop))
+        worker.start()
+        try:
+            for _ in range(100):
+                if all(Path(path).exists() for path in listeners.values()):
+                    break
+                time.sleep(0.05)
+            self.assertEqual(oct(os.stat(listeners['egress']).st_mode & 0o777), '0o600')
+            self.assertEqual(rpc(listeners['egress'], {'op': 'egress_credential'}), {'caller': 'egress'})
+            with self.assertRaises(Denied) as refused:
+                rpc(listeners['gmail'], {'op': 'egress_credential'})
+            self.assertEqual(str(refused.exception), 'CREDENTIAL_SCOPE_DENIED')
+            self.assertEqual(rpc(listeners['gmail'], {'op': 'access_token'}), {'caller': 'gmail'})
+        finally:
+            stop.set()
+            worker.join(10)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(called, ['egress', 'gmail'])
 
 
 if __name__ == '__main__':

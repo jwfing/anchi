@@ -8,6 +8,7 @@ import sys
 import resource
 
 import auth
+import placement
 import x_auth
 import reddit_auth
 from common import Denied, fields
@@ -19,7 +20,10 @@ GOOGLE_ACTIONS = ('begin', 'complete', 'cancel', 'disconnect', 'set-account')
 
 
 def refresh_egress():
-    """Best effort: on failure the timer retries, and services fail closed until it succeeds."""
+    """Best effort: on failure the timer retries, and services fail closed until it succeeds.
+    A host placement has no network rules to refresh: its proxy reads the vault directly."""
+    if placement.HOST:
+        return
     try:
         subprocess.run(
             ['systemctl', 'start', 'secure-egress-refresh.service'], capture_output=True, timeout=60, check=False
@@ -30,7 +34,7 @@ def refresh_egress():
 
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    if os.getuid() != 0:
+    if not placement.admin_allowed():
         raise Denied('GUEST_ADMIN_REQUIRED')
     action = sys.argv[1]
     connector = sys.argv[2] if len(sys.argv) > 2 else 'gmail'
@@ -42,17 +46,18 @@ def main():
     if len(sys.argv) > 4 or (len(sys.argv) > 3 and (connector not in auth.GOOGLE or action not in GOOGLE_ACTIONS)):
         raise Denied('UNKNOWN_ADMIN_ACTION')
     auth.account_name(account)
-    if action in REFRESH_ACTIONS:
+    if action in REFRESH_ACTIONS and not placement.HOST:
         # The action runs as secure-auth in a child; root stays only to refresh the allowlists.
         pid = os.fork()
         if pid:
             _, status = os.waitpid(pid, 0)
             refresh_egress()
             sys.exit(os.waitstatus_to_exitcode(status))
-    identity = pwd.getpwnam('secure-auth')
-    os.setgroups([])
-    os.setgid(identity.pw_gid)
-    os.setuid(identity.pw_uid)
+    if not placement.HOST:
+        identity = pwd.getpwnam('secure-auth')
+        os.setgroups([])
+        os.setgid(identity.pw_gid)
+        os.setuid(identity.pw_uid)
     os.umask(0o077)
     value = {}
     if action in ('import-client', 'begin', 'complete', 'import-token', 'import-aws', 'set-account'):

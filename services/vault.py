@@ -9,8 +9,9 @@ import tempfile
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from common import Denied
+import placement
 
-KEY = Path('/run/secure-vault/master.key')
+KEY = placement.path('/run/secure-vault/master.key', 'run/master.key')
 NAMES = {
     'client.json',
     'reddit-client.json',

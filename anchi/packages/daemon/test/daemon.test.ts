@@ -38,6 +38,7 @@ import {
 } from '../src/index.ts';
 import { AUDIT_SAVED_MAX, extractLinks, Store } from '../src/store.ts';
 import { defaultVmSize, hostResources } from '../src/host.ts';
+import { HOST_PORT_DEFAULT, hostPaths, HostTransport } from '../src/host-placement.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
@@ -3628,5 +3629,44 @@ describe('review gaps: approvals decided late, RPC lookup, template delegates', 
     expect((await client.call('agents.settings', { agentId: 'lead' })).fixed.delegates).toEqual([
       'qa',
     ]);
+  });
+});
+
+describe('host placement', () => {
+  /** A daemon without a VM: the proxy would be its child, but nothing is installed here. */
+  const onHost = () => {
+    const transport = new HostTransport(hostPaths(homeLayout(root)), join(root, 'no-services'));
+    return { vm: transport, guest: new Guest(transport) };
+  };
+
+  it('reports its placement, refuses tasks and asks for the install before enabling', async () => {
+    const { client } = await start(60_000, undefined, undefined, onHost());
+    const status = await client.call('setup.status');
+    expect(status.placement).toBe('host');
+    expect(status.vm).toBe('missing');
+    expect(status.host?.installHint).toMatch(/Python 3\.11/);
+    await expect(client.call('tasks.create', { agentId: 'dev', text: 'hi' })).rejects.toThrow(
+      /HOST_PLACEMENT/,
+    );
+    const host = await client.call('host.status');
+    expect(host).toMatchObject({
+      placement: 'host',
+      installed: false,
+      running: false,
+      enabled: false,
+    });
+    expect(host.port).toBe(HOST_PORT_DEFAULT);
+    await expect(client.call('host.enable')).rejects.toThrow(/HOST_NOT_RUNNING/);
+    expect((await client.call('host.disable')).enabled).toBe(false);
+    // No trigger runs and no cell is reaped without a VM; the daemon says why, once.
+    expect(logs.filter((l) => /cell reap skipped/.test(l)).length).toBe(1);
+  });
+
+  it('is refused on a daemon that drives a VM', async () => {
+    const { client } = await start();
+    expect((await client.call('setup.status')).placement).toBe('lima');
+    for (const method of ['host.status', 'host.enable', 'host.disable'] as const) {
+      await expect(client.call(method)).rejects.toThrow(/HOST_PLACEMENT_ONLY/);
+    }
   });
 });

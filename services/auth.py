@@ -14,9 +14,10 @@ import uuid
 from urllib.parse import urlencode
 
 from common import Denied, fields, google_json
+import placement
 import vault
 
-STORE = Path('/var/lib/secure-auth')
+STORE = placement.path('/var/lib/secure-auth', 'auth')
 SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 DRIVE_SCOPES = frozenset(
     {'https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.file'}
@@ -69,6 +70,9 @@ EGRESS_CONNECTORS = {
 
 @contextmanager
 def locked():
+    # The VM's store is a systemd StateDirectory; on the host the service makes its own.
+    if placement.HOST:
+        STORE.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (STORE / 'lock').open('a') as lock:
         if os.getuid() == 0:
             owner = STORE.stat()

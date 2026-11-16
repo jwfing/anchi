@@ -13,7 +13,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const VM = process.env.ANCHI_INSTALL_VM ?? 'anchi-vm';
-const IN_GUEST = (process.env.ANCHI_GUEST ?? 'lima') === 'local';
+const GUEST = process.env.ANCHI_GUEST ?? 'lima';
+const IN_GUEST = GUEST === 'local';
+// No VM (host placement): vault_admin.py runs on this computer, as the user, on the Python of
+// ~/.anchi/host/venv, with the vault under ~/.anchi/host/state (anchi/packages/daemon/src/host-placement.ts).
+const ON_HOST = GUEST === 'host';
+const ANCHI_HOME = process.env.ANCHI_HOME ?? join(homedir(), '.anchi');
 
 class Refused extends Error {}
 
@@ -22,17 +27,28 @@ function refuse(message) {
 }
 
 function remote(action, value) {
-  const result = spawnSync(
-    IN_GUEST ? 'sudo' : 'limactl',
-    [
-      ...(IN_GUEST ? [] : ['shell', VM, '--', 'sudo']),
-      '-n',
-      '/usr/bin/python3',
-      '/opt/secure-vm/services/vault_admin.py',
-      action,
-    ],
-    { input: value === undefined ? '' : JSON.stringify(value), encoding: 'utf8' },
-  );
+  const input = value === undefined ? '' : JSON.stringify(value);
+  const result = ON_HOST
+    ? spawnSync(
+        join(ANCHI_HOME, 'host/venv/bin/python'),
+        [join(dirname(fileURLToPath(import.meta.url)), '../services/vault_admin.py'), action],
+        {
+          input,
+          encoding: 'utf8',
+          env: { ...process.env, ANCHI_HOST_STATE: join(ANCHI_HOME, 'host/state') },
+        },
+      )
+    : spawnSync(
+        IN_GUEST ? 'sudo' : 'limactl',
+        [
+          ...(IN_GUEST ? [] : ['shell', VM, '--', 'sudo']),
+          '-n',
+          '/usr/bin/python3',
+          '/opt/secure-vm/services/vault_admin.py',
+          action,
+        ],
+        { input, encoding: 'utf8' },
+      );
   let response;
   try {
     response = JSON.parse(result.stdout);

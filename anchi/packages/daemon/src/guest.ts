@@ -50,17 +50,21 @@ export interface GuestTransport {
   spawn(args: string[]): ChildProcessWithoutNullStreams;
 }
 
-/** Where the guest is: a Lima VM on this computer, or this machine itself. */
+/** Where the guest is: a Lima VM on this computer, this machine itself, or no guest at all. */
 export interface VmTransport extends GuestTransport {
-  /** `lima`: a VM this computer runs; `local`: the daemon runs inside the guest. */
-  readonly placement: 'lima' | 'local';
+  /**
+   * `lima`: a VM this computer runs; `local`: the daemon runs inside the guest (a remote
+   * server); `host`: no VM, the proxy and the vault run on this computer as the user, for the
+   * user's own sandboxed runtimes (host-placement.ts).
+   */
+  readonly placement: 'lima' | 'local' | 'host';
   vmStatus(): Promise<'missing' | 'stopped' | 'running' | 'unknown'>;
   /** The guest's CPUs and memory, for the Runtimes screen. */
   vmSize(): Promise<{ cpus: number; memoryGiB: number } | undefined>;
 }
 
 /** Runs `child` to completion with `stdin`, keeping at most MAX_OUTPUT bytes of its output. */
-function collect(
+export function collect(
   child: ChildProcessWithoutNullStreams,
   stdin: string,
   timeoutMs: number,

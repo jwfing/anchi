@@ -55,6 +55,9 @@ Commands:
   team                             Manage peer teams and legacy remote execution
                                    members
   setup                            Runtime and connector setup
+  host                             The host placement: Anchi without a VM, for
+                                   your own claude and codex sessions
+                                   (ANCHI_GUEST=host)
   daemon                           Manage the background daemon
 ```
 
@@ -712,6 +715,54 @@ Options:
 Usage: anchi setup service-mode [options] <id> <mode>
 
 Writes of a service: auto, or ask (X and Reddit ask until set to auto)
+```
+
+### `anchi host`
+
+```text
+Usage: anchi host [options] [command]
+
+The host placement: Anchi without a VM, for your own claude and codex sessions
+(ANCHI_GUEST=host)
+
+Commands:
+  status [options]  Whether the host placement is installed, running and written
+                    into the runtimes
+  enable [options]  Write Claude Code's and Codex's sandbox and trust settings
+                    and the shims (undo: anchi host disable)
+  disable           Restore the runtime settings Anchi changed and remove the
+                    shims
+```
+
+#### `anchi host status`
+
+```text
+Usage: anchi host status [options]
+
+Whether the host placement is installed, running and written into the runtimes
+
+Options:
+  --json      the full status as JSON
+```
+
+#### `anchi host enable`
+
+```text
+Usage: anchi host enable [options]
+
+Write Claude Code's and Codex's sandbox and trust settings and the shims (undo:
+anchi host disable)
+
+Options:
+  -y, --yes   skip the confirmation
+```
+
+#### `anchi host disable`
+
+```text
+Usage: anchi host disable [options]
+
+Restore the runtime settings Anchi changed and remove the shims
 ```
 
 ### `anchi daemon`

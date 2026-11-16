@@ -251,6 +251,12 @@ export interface SetupStatus {
   /** Host-only readiness; optional for clients connected to an older daemon. */
   vaultKeyPresent?: boolean;
   host?: { platform: string; missing: string[]; installHint: string };
+  /**
+   * Where the guest is: `lima` (a VM on this computer), `local` (the daemon is on a remote
+   * server) or `host` (no VM; see `host.status`). Optional for older daemons, which are `lima`
+   * or `local`.
+   */
+  placement?: 'lima' | 'local' | 'host';
   vm: 'missing' | 'stopped' | 'running' | 'unknown';
   vaultUnlocked: boolean;
   installed: boolean;
@@ -293,6 +299,36 @@ export interface SetupStatus {
    * `anchi setup install` to update them.
    */
   guestOutdated?: boolean;
+}
+
+/**
+ * The host placement: no VM; Anchi's proxy, vault and approvals on this computer for the
+ * user's own Claude Code and Codex, under their sandboxes (docs/HOST_PLACEMENT.md).
+ */
+export interface HostStatus {
+  placement: 'host';
+  /** scripts/host-install.sh ran (a venv with the pinned mitmproxy). */
+  installed: boolean;
+  /** The proxy and the auth service are up. */
+  running: boolean;
+  /** The runtimes' settings and the shims are written (`host.enable`). */
+  enabled: boolean;
+  /** The loopback port the sessions' commands reach the proxy at. */
+  port: number;
+  /** Connectors whose every write waits for approval. */
+  ask: string[];
+  /** Where the `claude` and `codex` shims are; the user puts it first on PATH. */
+  shimDir: string;
+  shimOnPath: boolean;
+  /** System roots plus the proxy's CA, which the sessions' tools are told to trust. */
+  caBundle: string;
+  claude: { file: string; managed: boolean; excludedCommands: string[] };
+  codex: { file: string; managed: boolean };
+  /** The Python 3.11+ the install uses, or null when the computer has none. */
+  python: string | null;
+  missing: string[];
+  /** Connectors the proxy injects credentials for in host sessions. */
+  connectors: string[];
 }
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */
@@ -824,6 +860,15 @@ export interface Methods {
    * them after stopping the daemon).
    */
   'setup.reset': [{ confirm: string }, SetupStatus];
+  /** The host placement (`placement: host` daemons only; others refuse all three). */
+  'host.status': [Record<string, never>, HostStatus];
+  /**
+   * Writes the sandbox and trust settings of Claude Code and Codex and the shims, after the
+   * user confirmed in a dialog; refuses settings Anchi did not write. Needs the proxy running.
+   */
+  'host.enable': [Record<string, never>, HostStatus];
+  /** Restores the settings Anchi changed and removes the shims. */
+  'host.disable': [Record<string, never>, HostStatus];
   'connectors.set': [ConnectorSecret, ConnectorStatus];
   /** Imports the token of the host GitHub CLI (`gh auth token`); the caller has consent. */
   'connectors.importGh': [Record<string, never>, ConnectorStatus];
