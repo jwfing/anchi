@@ -1,4 +1,4 @@
-import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from 'node:child_process';
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import {
   accessSync,
   chmodSync,
@@ -10,19 +10,22 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { createServer } from 'node:net';
+import { createRequire } from 'node:module';
 import { cpus, homedir, totalmem } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { HomeLayout } from '@anchi/core';
+import { type ClientRequest, ControlClient } from '@anchi/host-services/client';
+import { type HostServicesPaths, hostServicesPaths } from '@anchi/host-services/paths';
 import type { HostStatus } from '@anchi/protocol';
-import { collect, type ExecResult, type VmTransport } from './guest.ts';
-import { REPO_ROOT } from './host.ts';
+import type { ExecResult, VmTransport } from './guest.ts';
+import { APP_VERSION, REPO_ROOT } from './host.ts';
 
 /**
- * The host placement: no VM. The egress proxy, the vault and its auth service run on this
- * computer as the user, started by the daemon, and the user's own Claude Code and Codex reach
- * the proxy from inside their sandboxes (docs/architecture/HOST_PLACEMENT_PLAN.md). Everything
- * lives under ~/.anchi/host; the Python side comes from scripts/host-install.sh.
+ * The host placement: no VM. The egress proxy, the vault and the approvals queue run on this
+ * computer as the user in one process the daemon starts (`@anchi/host-services`), and the
+ * user's own Claude Code and Codex reach the proxy from inside their sandboxes
+ * (docs/architecture/HOST_PLACEMENT_PLAN.md). Everything lives under ~/.anchi/host.
  */
 
 /** The loopback port the user's runtimes are pointed at (Codex's own proxy takes 3128). */
@@ -46,78 +49,36 @@ const CODEX_BEGIN = `# >>> ${CODEX_MARK} >>>`;
 const CODEX_END = `# <<< ${CODEX_MARK} <<<`;
 const CODEX_LINE = `default_permissions = "anchi" # ${CODEX_MARK}`;
 
-export interface HostPaths {
-  root: string;
-  state: string;
-  venv: string;
-  python: string;
-  mitmdump: string;
-  run: string;
-  /** The proxy's control socket, for host_control.py. */
-  control: string;
-  /** The auth service's socket for the proxy. */
-  authSocket: string;
-  mitm: string;
-  caCert: string;
+/** The services' layout plus what the daemon keeps beside it. */
+export interface HostPaths extends HostServicesPaths {
+  /** System roots plus the proxy's CA, written by the services; the sessions trust it. */
   caBundle: string;
-  audit: string;
   profile: string;
   manifest: string;
   bin: string;
-  installed: string;
 }
 
 export function hostPaths(layout: HomeLayout): HostPaths {
-  const root = join(layout.root, 'host');
-  const state = join(root, 'state');
-  const venv = join(root, 'venv');
+  const services = hostServicesPaths(join(layout.root, 'host'));
   return {
-    root,
-    state,
-    venv,
-    python: join(venv, 'bin/python'),
-    mitmdump: join(venv, 'bin/mitmdump'),
-    run: join(state, 'run'),
-    control: join(state, 'run/egress/control.sock'),
-    authSocket: join(state, 'run/auth-egress.sock'),
-    mitm: join(state, 'mitm'),
-    caCert: join(state, 'mitm/mitmproxy-ca-cert.pem'),
-    caBundle: join(root, 'ca-bundle.pem'),
-    audit: join(root, 'audit.jsonl'),
-    profile: join(root, 'profile.json'),
-    manifest: join(root, 'managed.json'),
-    bin: join(root, 'bin'),
-    installed: join(root, 'installed.json'),
+    ...services,
+    caBundle: services.bundle,
+    profile: join(services.root, 'profile.json'),
+    manifest: join(services.root, 'managed.json'),
+    bin: join(services.root, 'bin'),
   };
 }
 
-let pythonCache: { at: number; path: string | null } | undefined;
-
-/** A Python 3.11+ on PATH for scripts/host-install.sh, or null. Cached for a minute. */
-export function hostPython(path = process.env.PATH ?? ''): string | null {
-  if (pythonCache && Date.now() - pythonCache.at < 60_000) return pythonCache.path;
-  let found: string | null = null;
-  for (const name of ['python3.14', 'python3.13', 'python3.12', 'python3.11', 'python3']) {
-    for (const dir of path.split(delimiter)) {
-      const file = join(dir, name);
-      try {
-        accessSync(file, constants.X_OK);
-      } catch {
-        continue;
-      }
-      const res = spawnSync(file, ['-c', 'import sys; print(sys.version_info >= (3, 11))'], {
-        encoding: 'utf8',
-        timeout: 5000,
-      });
-      if (res.status === 0 && res.stdout.trim() === 'True') {
-        found = file;
-        break;
-      }
+/** The `openssl` command line, which the services sign their certificates with. */
+export function opensslAvailable(path = process.env.PATH ?? ''): boolean {
+  return path.split(delimiter).some((dir) => {
+    try {
+      accessSync(join(dir, 'openssl'), constants.X_OK);
+      return true;
+    } catch {
+      return false;
     }
-    if (found) break;
-  }
-  pythonCache = { at: Date.now(), path: found };
-  return found;
+  });
 }
 
 /** What the user chose for their host sessions (`~/.anchi/host/profile.json`). */
@@ -155,45 +116,132 @@ function replace(file: string, text: string, mode = 0o600): void {
 
 // ── guest commands on the host ─────────────────────────────
 
-/** The scripts the daemon may run on the host; others have no host counterpart. */
-const HOST_SCRIPTS = new Set(['vault_admin.py', 'admin.py', 'connector_admin.py']);
+/** How to start the services and their CLI: the release bundles beside the daemon, else the sources on tsx. */
+export interface HostCommand {
+  services: string[];
+  cli: string[];
+}
+
+export function hostCommand(): HostCommand {
+  if (import.meta.url.endsWith('.mjs')) {
+    const lib = dirname(fileURLToPath(import.meta.url));
+    return {
+      services: [process.execPath, join(lib, 'host-services.mjs')],
+      cli: [process.execPath, join(lib, 'host-vault.mjs')],
+    };
+  }
+  const tsx = createRequire(import.meta.url).resolve('tsx');
+  const src = join(REPO_ROOT, 'anchi/packages/host-services/src');
+  return {
+    services: [process.execPath, '--import', tsx, join(src, 'main.ts')],
+    cli: [process.execPath, '--import', tsx, join(src, 'cli.ts')],
+  };
+}
+
 const NOT_CONFIGURED: Record<string, unknown> = {
   'codex_admin.py': { configured: false, account_id: null, expires_at: null },
   'claude_admin.py': { configured: false, kind: null, expires_at: null },
   'hermes_admin.py': { configured: false, base_url: null, model: null },
 };
 
-export type HostRoute = { argv: string[] } | { answer: ExecResult };
-
 /**
- * The host command for a fixed guest command (`anchi-cell …` becomes host_control.py, the
- * admin scripts run from the checkout), or a canned answer where the host has no counterpart:
- * images are always present (nothing to build), the runtimes stay the user's own logins.
+ * The fixed guest commands the daemon runs, answered by the services over the control socket
+ * (`anchi-cell …` and the admin scripts) or by a canned answer where the host has no
+ * counterpart: images are always present (nothing to build), the runtimes stay the user's own
+ * logins, and nothing else runs. Output is one JSON line, as the guest's commands print it.
  */
-export function hostRoute(args: string[], paths: HostPaths, servicesDir: string): HostRoute {
-  const ok = (value: unknown): HostRoute => ({
-    answer: { code: 0, stdout: JSON.stringify(value), stderr: '' },
+export async function hostExec(
+  args: string[],
+  stdin: string,
+  call: (request: ClientRequest) => Promise<unknown>,
+): Promise<ExecResult> {
+  const ok = (value: unknown): ExecResult => ({
+    code: 0,
+    stdout: JSON.stringify(value),
+    stderr: '',
   });
-  const refused: HostRoute = {
-    answer: { code: 1, stdout: JSON.stringify({ error: 'HOST_PLACEMENT' }), stderr: '' },
+  const no = (code: string): ExecResult => ({
+    code: 1,
+    stdout: JSON.stringify({ error: code }),
+    stderr: '',
+  });
+  const input = (): Record<string, unknown> => {
+    const value: unknown = JSON.parse(stdin || '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('BAD_REQUEST');
+    return value as Record<string, unknown>;
   };
-  const installed = existsSync(paths.python);
-  const [command, second] = args;
-  if (command === 'anchi-cell')
-    return { argv: [paths.python, join(servicesDir, 'host_control.py'), ...args.slice(1)] };
-  if (command === 'anchi-image' && second === 'status') return ok({ present: installed });
-  if (command === 'anchi-image' && second === 'build')
-    return ok({ image: args[2], hash: args[3], reused: true });
-  if (command === 'test' && second === '-f')
-    return { answer: { code: installed ? 0 : 1, stdout: '', stderr: '' } };
-  if (command === 'mountpoint') return { answer: { code: 1, stdout: '', stderr: '' } };
-  if (command === '/usr/bin/python3' && typeof second === 'string') {
-    const script = second.slice(second.lastIndexOf('/') + 1);
-    if (HOST_SCRIPTS.has(script))
-      return { argv: [paths.python, join(servicesDir, script), ...args.slice(2)] };
-    if (script in NOT_CONFIGURED && args[2] === 'status') return ok(NOT_CONFIGURED[script]);
+  const [command, second, third, fourth, fifth] = args;
+  try {
+    if (command === 'anchi-cell') {
+      if (second === 'version') return ok(await call({ op: 'version' }));
+      if (second === 'list') return ok({ cells: [] });
+      if (second === 'reap') return ok({ reaped: [] });
+      if (second === 'quota') return ok(await call({ op: 'quota' }));
+      if (second === 'verify' && third)
+        return ok(await call({ op: 'verify', connector: third as never }));
+      if (second === 'egress-settings')
+        return ok(await call({ op: 'settings.set', settings: input() as never }));
+      if (second === 'register')
+        return ok(await call({ op: 'register', ...(input() as object) } as never));
+      if (second === 'unregister') return ok(await call({ op: 'unregister' }));
+      if (
+        second === 'approvals' &&
+        third === 'decide' &&
+        fourth &&
+        (fifth === 'allow' || fifth === 'deny')
+      )
+        return ok(await call({ op: 'approvals.decide', id: fourth, allow: fifth === 'allow' }));
+      return no('HOST_PLACEMENT');
+    }
+    if (command === 'anchi-image' && second === 'status') return ok({ present: true });
+    if (command === 'anchi-image' && second === 'build')
+      return ok({ image: third, hash: fourth, reused: true });
+    if (command === 'test' && second === '-f') return { code: 0, stdout: '', stderr: '' };
+    if (command === 'mountpoint') return { code: 1, stdout: '', stderr: '' };
+    if (command === '/usr/bin/python3' && typeof second === 'string') {
+      const script = second.slice(second.lastIndexOf('/') + 1);
+      if (script === 'vault_admin.py' && third === 'status')
+        return ok(await call({ op: 'vault.status' }));
+      if (script === 'admin.py') {
+        if (third === 'status') return ok(await call({ op: 'credentials.status' }));
+        if (third === 'import-token' && fourth)
+          return ok(
+            await call({
+              op: 'credentials.import',
+              connector: fourth as never,
+              value: String(input().token ?? ''),
+            }),
+          );
+        if (third === 'import-aws' && fourth === 'aws') {
+          const v = input();
+          return ok(
+            await call({
+              op: 'credentials.importAws',
+              access_key_id: String(v.access_key_id ?? ''),
+              secret_access_key: String(v.secret_access_key ?? ''),
+              region: String(v.region ?? ''),
+              ...(typeof v.session_token === 'string' ? { session_token: v.session_token } : {}),
+            }),
+          );
+        }
+        if (third === 'disconnect' && fourth)
+          return ok(await call({ op: 'credentials.remove', connector: fourth as never }));
+        if (third === 'set-account' && fourth)
+          return ok(
+            await call({
+              op: 'credentials.setAccount',
+              connector: fourth as never,
+              label: String(input().account ?? ''),
+            }),
+          );
+      }
+      if (script in NOT_CONFIGURED && third === 'status') return ok(NOT_CONFIGURED[script]);
+    }
+    return no('HOST_PLACEMENT');
+  } catch (err) {
+    // The services' codes (`VAULT_LOCKED`, `BAD_TOKEN_FORMAT`, …) reach the daemon as the guest's would.
+    return no(String((err as Error).message).slice(0, 120));
   }
-  return refused;
 }
 
 /** A child that prints a canned answer, for callers that own a process's stdio. */
@@ -213,39 +261,47 @@ function answerChild(answer: ExecResult): ChildProcessWithoutNullStreams {
 
 export class HostTransport implements VmTransport {
   readonly placement = 'host';
+  readonly client: ControlClient;
 
   constructor(
     readonly paths: HostPaths,
-    readonly servicesDir = join(REPO_ROOT, 'services'),
-  ) {}
+    readonly command: HostCommand = hostCommand(),
+  ) {
+    this.client = new ControlClient(paths.control, paths.token);
+  }
 
-  /** scripts/host-install.sh ran: the venv has its Python and mitmproxy. */
+  /** This computer can run the services: nothing to install beyond the `openssl` command. */
   installed(): boolean {
-    return existsSync(this.paths.python) && existsSync(this.paths.mitmdump);
+    return opensslAvailable();
   }
 
-  private env(): NodeJS.ProcessEnv {
-    return { ...process.env, ANCHI_HOST_STATE: this.paths.state };
+  /** The services process is up: its control socket and token are there. */
+  running(): boolean {
+    return existsSync(this.paths.control) && existsSync(this.paths.token);
   }
 
+  /** Only the approval stream is a long-running command; the CLI relays it from the services. */
   spawn(args: string[]): ChildProcessWithoutNullStreams {
-    const route = hostRoute(args, this.paths, this.servicesDir);
-    if ('answer' in route) return answerChild(route.answer);
-    return spawn(route.argv[0]!, route.argv.slice(1), {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: this.env(),
+    if (args[0] === 'anchi-cell' && args[1] === 'approvals' && args[2] === 'watch') {
+      const [bin, ...rest] = this.command.cli;
+      return spawn(bin!, [...rest, '--root', this.paths.root, 'approvals', 'watch'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    }
+    return answerChild({
+      code: 1,
+      stdout: JSON.stringify({ error: 'HOST_PLACEMENT' }),
+      stderr: '',
     });
   }
 
   exec(args: string[], stdin = '', timeoutMs = 120_000): Promise<ExecResult> {
-    const route = hostRoute(args, this.paths, this.servicesDir);
-    if ('answer' in route) return Promise.resolve(route.answer);
-    return collect(this.spawn(args), stdin, timeoutMs);
+    return hostExec(args, stdin, (request) => this.client.call(request, timeoutMs));
   }
 
-  /** `running` once installed: the services are the daemon's children, not a machine. */
-  async vmStatus(): Promise<'running' | 'missing'> {
-    return this.installed() ? 'running' : 'missing';
+  /** `running` while the services answer; `stopped` otherwise. There is no machine to start. */
+  async vmStatus(): Promise<'running' | 'stopped'> {
+    return this.running() ? 'running' : 'stopped';
   }
 
   async vmSize(): Promise<{ cpus: number; memoryGiB: number }> {
@@ -253,153 +309,95 @@ export class HostTransport implements VmTransport {
   }
 }
 
-// ── the services, as the daemon's children ────────────────
+// ── the services process ──────────────────────────────────
 
 const RESTART_MS = 3_000;
-const START_TIMEOUT_MS = 30_000;
-
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address() as { port: number };
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-/** The system's root certificates, which the proxy's CA is appended to for the sessions. */
-export function systemRoots(platform = process.platform): string {
-  return platform === 'darwin' ? '/etc/ssl/cert.pem' : '/etc/ssl/certs/ca-certificates.crt';
-}
 
 /**
- * The auth service (the vault's reader) and the egress proxy (mitmproxy with
- * services/egress_proxy.py), started when the daemon starts and restarted when they exit. Both
- * run as the user with their state under ~/.anchi/host/state; the proxy's own listener is a
- * loopback port chosen at start, and the sessions' port is a registered listener of its own.
+ * The services process (`@anchi/host-services`: the proxy, the vault, the approvals queue),
+ * started when the daemon starts and started again when it exits, until `stop`. It writes its
+ * control socket and the CA bundle under ~/.anchi/host; the daemon never holds a credential.
  */
 export class HostServices {
-  private children = new Map<string, ChildProcessWithoutNullStreams>();
-  private timers: NodeJS.Timeout[] = [];
+  private child?: ChildProcessWithoutNullStreams;
+  private timer?: NodeJS.Timeout;
   private stopped = false;
-  private internalPort?: number;
 
   constructor(
     private transport: HostTransport,
     private log: (line: string) => void = () => {},
+    private startTimeoutMs = 30_000,
+    /** Called whenever a (re)started process answers: the daemon registers the principal again. */
+    private onReady?: () => void,
   ) {}
 
-  private get paths(): HostPaths {
+  get paths(): HostPaths {
     return this.transport.paths;
   }
 
   running(): boolean {
-    return existsSync(this.paths.control);
+    return this.transport.running();
   }
 
   async start(): Promise<void> {
-    if (!this.transport.installed()) throw new Error('HOST_NOT_INSTALLED: run anchi setup install');
+    if (!this.transport.installed())
+      throw new Error('HOST_NOT_INSTALLED: the openssl command line is required');
     this.stopped = false;
-    for (const dir of [this.paths.state, this.paths.run, join(this.paths.run, 'egress')]) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-    }
+    mkdirSync(this.paths.root, { recursive: true, mode: 0o700 });
     rmSync(this.paths.control, { force: true });
-    this.internalPort ??= await freePort();
-    this.keep('auth', () => this.spawnAuth());
-    this.keep('proxy', () => this.spawnProxy(this.internalPort!));
+    this.keep();
     const started = Date.now();
-    while (!existsSync(this.paths.control) || !existsSync(this.paths.caCert)) {
-      if (Date.now() - started > START_TIMEOUT_MS)
-        throw new Error('HOST_SERVICES_TIMEOUT: the egress proxy did not start');
+    while (!this.running()) {
+      if (!this.child || Date.now() - started > this.startTimeoutMs)
+        throw new Error('HOST_SERVICES_TIMEOUT: the services did not start');
       await new Promise((r) => setTimeout(r, 200));
     }
-    this.writeBundle();
   }
 
-  /** Starts a child and starts it again when it ends, until `stop`. */
-  private keep(name: string, start: () => ChildProcessWithoutNullStreams): void {
-    const child = start();
-    this.children.set(name, child);
+  /** Starts the process and starts it again when it ends, until `stop`. */
+  private keep(): void {
+    const [bin, ...rest] = this.transport.command.services;
+    // `--parent`: the services end themselves when this daemon is gone, so a crash leaves no
+    // orphan holding the sessions' port.
+    const child = spawn(
+      bin!,
+      [
+        ...rest,
+        '--root',
+        this.paths.root,
+        '--version',
+        APP_VERSION,
+        '--parent',
+        String(process.pid),
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    this.child = child;
     child.stdin.end();
+    void this.awaitReady(child);
     child.stdout.on('data', () => {});
     let tail = '';
     child.stderr.on('data', (b: Buffer) => {
       tail = (tail + b.toString('utf8')).slice(-400);
     });
-    child.on('error', (err) => this.log(`host ${name}: ${err.message}`));
+    child.on('error', (err) => this.log(`host services: ${err.message}`));
     child.on('close', (code) => {
-      this.children.delete(name);
+      this.child = undefined;
       if (this.stopped) return;
-      this.log(`host ${name} exited (${code}): ${tail.trim().split('\n').at(-1) ?? ''}`);
-      const timer = setTimeout(() => this.keep(name, start), RESTART_MS);
-      timer.unref();
-      this.timers.push(timer);
+      this.log(`host services exited (${code}): ${tail.trim().split('\n').at(-1) ?? ''}`);
+      this.timer = setTimeout(() => this.keep(), RESTART_MS);
+      this.timer.unref();
     });
   }
 
-  private spawnAuth(): ChildProcessWithoutNullStreams {
-    return spawn(
-      this.paths.python,
-      [
-        join(this.transport.servicesDir, 'server.py'),
-        'auth',
-        '--listen',
-        `egress=${this.paths.authSocket}`,
-      ],
-      {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ANCHI_HOST_STATE: this.paths.state },
-      },
-    );
-  }
-
-  private spawnProxy(port: number): ChildProcessWithoutNullStreams {
-    const services = this.transport.servicesDir;
-    return spawn(
-      this.paths.mitmdump,
-      [
-        '--quiet',
-        '-s',
-        join(services, 'egress_proxy.py'),
-        '--listen-host',
-        '127.0.0.1',
-        '--listen-port',
-        String(port),
-        '--set',
-        `confdir=${this.paths.mitm}`,
-        '--set',
-        'stream_large_bodies=8m',
-        '--set',
-        'connection_strategy=lazy',
-      ],
-      {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          PYTHONPATH: services,
-          ANCHI_EGRESS_HOST: '1',
-          ANCHI_EGRESS_RUN: join(this.paths.run, 'egress'),
-          ANCHI_EGRESS_AUDIT: this.paths.audit,
-          ANCHI_EGRESS_AUTH: this.paths.authSocket,
-          ANCHI_EGRESS_STATE: join(this.paths.state, 'egress'),
-        },
-      },
-    );
-  }
-
-  /** System roots plus the proxy's CA: what the sessions' tools are told to trust. */
-  writeBundle(): void {
-    const roots = (() => {
-      try {
-        return readFileSync(systemRoots(), 'utf8');
-      } catch {
-        return '';
-      }
-    })();
-    const ca = readFileSync(this.paths.caCert, 'utf8');
-    replace(this.paths.caBundle, `${roots.trimEnd()}\n${ca.trim()}\n`, 0o644);
+  /** Waits for this child's control socket, then tells the daemon, unless the child is gone. */
+  private async awaitReady(child: ChildProcessWithoutNullStreams): Promise<void> {
+    const started = Date.now();
+    while (this.child === child && !this.running()) {
+      if (Date.now() - started > this.startTimeoutMs) return;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    if (this.child === child && !this.stopped) this.onReady?.();
   }
 
   /** Registers the host principal with the proxy: its connectors, approvals and port. */
@@ -418,9 +416,9 @@ export class HostServices {
 
   stop(): void {
     this.stopped = true;
-    for (const t of this.timers) clearTimeout(t);
-    for (const child of this.children.values()) child.kill();
-    this.children.clear();
+    clearTimeout(this.timer);
+    this.child?.kill();
+    this.child = undefined;
   }
 }
 
@@ -774,8 +772,7 @@ export function hostStatus(
 ): HostStatus {
   const manifest = readManifest(paths);
   const profile = readProfile(paths);
-  const installed = existsSync(paths.python) && existsSync(paths.mitmdump);
-  const python = hostPython(path);
+  const installed = opensslAvailable(path);
   const onPath = path.split(delimiter).some((d) => d === paths.bin || d === `${paths.bin}/`);
   const excluded = (() => {
     try {
@@ -805,8 +802,7 @@ export function hostStatus(
       excludedCommands: excluded,
     },
     codex: { file: files.codexConfig, managed: manifest?.codex.file === files.codexConfig },
-    python,
-    missing: python ? [] : ['python3 (3.11 or newer)'],
+    missing: installed ? [] : ['openssl'],
     connectors,
   };
 }

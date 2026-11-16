@@ -10,16 +10,14 @@ import uuid
 import resource
 
 import auth
-import placement
 import vault
 from common import Denied
 
 
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    if not placement.admin_allowed():
+    if os.getuid() != 0:
         raise Denied('GUEST_ADMIN_REQUIRED')
-    os.umask(0o077)
     action = sys.argv[1]
     if action == 'status':
         print(
@@ -40,9 +38,7 @@ def main():
             return
         if action != 'unlock':
             raise Denied('UNKNOWN_VAULT_ACTION')
-        # The VM runs without swap so the key never reaches a disk; a host has its own swap, and
-        # the key there lives in the user's state directory anyway (as the key file does).
-        if not placement.HOST and len(Path('/proc/swaps').read_text().splitlines()) > 1:
+        if len(Path('/proc/swaps').read_text().splitlines()) > 1:
             raise Denied('SWAP_MUST_BE_DISABLED')
         raw = sys.stdin.buffer.read(1025)
         if len(raw) > 1024:
@@ -53,20 +49,13 @@ def main():
         # A wrong key must never replace an already working in-memory key.
         for encrypted in auth.STORE.glob('*.json.enc'):
             vault.decrypt(encrypted.name[:-4], json.loads(encrypted.read_text()), master)
-        if placement.HOST:
-            # The user's own, like everything in the state directory.
-            vault.KEY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            temporary = vault.KEY.with_name('master.new')
-            fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-            os.fchmod(fd, 0o600)
-        else:
-            gid = pwd.getpwnam('secure-auth').pw_gid
-            vault.KEY.parent.mkdir(mode=0o750, exist_ok=True)
-            os.chown(vault.KEY.parent, 0, gid)
-            temporary = vault.KEY.with_name('master.new')
-            fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o640)
-            os.fchown(fd, 0, gid)
-            os.fchmod(fd, 0o640)
+        gid = pwd.getpwnam('secure-auth').pw_gid
+        vault.KEY.parent.mkdir(mode=0o750, exist_ok=True)
+        os.chown(vault.KEY.parent, 0, gid)
+        temporary = vault.KEY.with_name('master.new')
+        fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o640)
+        os.fchown(fd, 0, gid)
+        os.fchmod(fd, 0o640)
         with os.fdopen(fd, 'wb') as file:
             file.write(master)
         os.replace(temporary, vault.KEY)

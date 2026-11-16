@@ -12,11 +12,13 @@ import {
   disableHost,
   enableHost,
   HOST_PORT_DEFAULT,
+  hostCommand,
+  hostExec,
   hostPaths,
-  hostRoute,
   hostSpec,
   hostStatus,
   HostTransport,
+  opensslAvailable,
   readProfile,
   shimEnvironment,
   shimText,
@@ -38,91 +40,147 @@ function home() {
 const spec = {
   port: 18180,
   caBundle: '/h/.anchi/host/ca-bundle.pem',
-  caCert: '/h/.anchi/host/state/mitm/mitmproxy-ca-cert.pem',
+  caCert: '/h/.anchi/host/state/ca/ca.pem',
   denyRead: ['/h/.anchi/host', '/h/.ssh'],
 };
 
 describe('host placement: guest commands on the host', () => {
-  it('routes anchi-cell and the admin scripts to the host Python, and answers the rest', () => {
-    const { paths } = home();
-    const route = (args: string[]) => hostRoute(args, paths, '/repo/services');
-    expect(route(['anchi-cell', 'approvals', 'watch'])).toEqual({
-      argv: [paths.python, '/repo/services/host_control.py', 'approvals', 'watch'],
+  it('answers the daemon from the services, with canned answers where the host has no counterpart', async () => {
+    const calls: unknown[] = [];
+    const call = async (request: unknown) => {
+      calls.push(request);
+      const op = (request as { op: string }).op;
+      if (op === 'verify') throw new Error('NO_CREDENTIAL:NOT_CONNECTED');
+      return { answered: op };
+    };
+    const run = (args: string[], stdin = '') => hostExec(args, stdin, call);
+    expect(await run(['anchi-cell', 'version'])).toEqual({
+      code: 0,
+      stdout: '{"answered":"version"}',
+      stderr: '',
     });
-    expect(route(['/usr/bin/python3', '/opt/secure-vm/services/vault_admin.py', 'status'])).toEqual(
-      { argv: [paths.python, '/repo/services/vault_admin.py', 'status'] },
+    expect(JSON.parse((await run(['anchi-cell', 'list'])).stdout)).toEqual({ cells: [] });
+    expect(JSON.parse((await run(['anchi-cell', 'reap', 't1'])).stdout)).toEqual({ reaped: [] });
+    await run(['anchi-cell', 'egress-settings'], '{"high_risk_disabled": ["github-merge"]}');
+    expect(calls.at(-1)).toEqual({
+      op: 'settings.set',
+      settings: { high_risk_disabled: ['github-merge'] },
+    });
+    await run(['anchi-cell', 'register'], '{"connectors": ["github"], "listen_port": 18180}');
+    expect(calls.at(-1)).toEqual({ op: 'register', connectors: ['github'], listen_port: 18180 });
+    await run(['anchi-cell', 'approvals', 'decide', '0123456789abcdef', 'deny']);
+    expect(calls.at(-1)).toEqual({ op: 'approvals.decide', id: '0123456789abcdef', allow: false });
+    // The services' refusal reaches the daemon as the guest's would: a code, exit 1.
+    expect(await run(['anchi-cell', 'verify', 'github'])).toEqual({
+      code: 1,
+      stdout: '{"error":"NO_CREDENTIAL:NOT_CONNECTED"}',
+      stderr: '',
+    });
+    await run(
+      ['/usr/bin/python3', '/opt/secure-vm/services/admin.py', 'import-token', 'github'],
+      '{"token": "ghp_x"}',
     );
-    expect(
-      route(['/usr/bin/python3', '/opt/secure-vm/services/admin.py', 'import-token', 'github']),
-    ).toEqual({ argv: [paths.python, '/repo/services/admin.py', 'import-token', 'github'] });
+    expect(calls.at(-1)).toEqual({ op: 'credentials.import', connector: 'github', value: 'ghp_x' });
+    await run(
+      ['/usr/bin/python3', '/opt/secure-vm/services/admin.py', 'import-aws', 'aws'],
+      '{"access_key_id": "AKIA1", "secret_access_key": "s", "region": "us-east-1", "session_token": "t"}',
+    );
+    expect(calls.at(-1)).toEqual({
+      op: 'credentials.importAws',
+      access_key_id: 'AKIA1',
+      secret_access_key: 's',
+      region: 'us-east-1',
+      session_token: 't',
+    });
+    await run(
+      ['/usr/bin/python3', '/opt/secure-vm/services/admin.py', 'set-account', 'aws'],
+      '{"account": "bot"}',
+    );
+    expect(calls.at(-1)).toEqual({ op: 'credentials.setAccount', connector: 'aws', label: 'bot' });
+    await run(['/usr/bin/python3', '/opt/secure-vm/services/admin.py', 'disconnect', 'linear']);
+    expect(calls.at(-1)).toEqual({ op: 'credentials.remove', connector: 'linear' });
+    await run(['/usr/bin/python3', '/opt/secure-vm/services/vault_admin.py', 'status']);
+    expect(calls.at(-1)).toEqual({ op: 'vault.status' });
     // The runtimes stay the user's own logins: never configured in the vault on the host.
     for (const script of ['codex_admin.py', 'claude_admin.py', 'hermes_admin.py']) {
-      const r = route(['/usr/bin/python3', `/opt/secure-vm/services/${script}`, 'status']);
-      expect('answer' in r && JSON.parse(r.answer.stdout).configured).toBe(false);
-      const refused = route([
-        '/usr/bin/python3',
-        `/opt/secure-vm/services/${script}`,
-        'import-token',
-      ]);
-      expect('answer' in refused && refused.answer.code).toBe(1);
+      const r = await run(['/usr/bin/python3', `/opt/secure-vm/services/${script}`, 'status']);
+      expect(JSON.parse(r.stdout).configured).toBe(false);
+      expect(
+        (await run(['/usr/bin/python3', `/opt/secure-vm/services/${script}`, 'import-token'])).code,
+      ).toBe(1);
     }
-    // Nothing else runs: no policy administration, no cell manager, no unknown script.
+    // Nothing else runs: no policy administration, no cell manager, no unknown script, no polls.
+    const before = calls.length;
     for (const args of [
       ['/usr/bin/python3', '/opt/secure-vm/services/policy_admin.py', 'show', 'x'],
       ['/usr/bin/python3', '/opt/secure-vm/services/../../etc/passwd', 'status'],
       ['limactl', 'shell'],
       ['anchi-image', 'remove', 'x'],
+      ['anchi-cell', 'start', 't', 'a'],
+      ['anchi-cell', 'poll'],
+      ['anchi-cell', 'approvals', 'decide', 'x', 'maybe'],
     ]) {
-      const r = route(args);
-      expect('answer' in r && r.answer).toEqual({
+      expect(await run(args), args.join(' ')).toEqual({
         code: 1,
         stdout: '{"error":"HOST_PLACEMENT"}',
         stderr: '',
       });
     }
-    // Not installed: no services, no images; installed: everything present, nothing to build.
-    expect(route(['test', '-f', '/opt/secure-vm/services/vault_admin.py'])).toEqual({
-      answer: { code: 1, stdout: '', stderr: '' },
+    expect(calls.length).toBe(before);
+    // Images are always present and nothing mounts: the setup status needs no VM.
+    expect(JSON.parse((await run(['anchi-image', 'status', 'codex', 'base'])).stdout)).toEqual({
+      present: true,
     });
-    mkdirSync(join(paths.venv, 'bin'), { recursive: true });
-    writeFileSync(paths.python, '');
-    expect(route(['test', '-f', '/opt/secure-vm/services/vault_admin.py'])).toEqual({
-      answer: { code: 0, stdout: '', stderr: '' },
+    expect(await run(['test', '-f', '/opt/secure-vm/services/vault_admin.py'])).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
     });
-    const image = route(['anchi-image', 'status', 'codex', 'base']);
-    expect('answer' in image && JSON.parse(image.answer.stdout)).toEqual({ present: true });
-    expect(route(['mountpoint', '-q', '/mnt/anchi-host'])).toEqual({
-      answer: { code: 1, stdout: '', stderr: '' },
-    });
-  });
-
-  it('is a transport that reports installed once the venv has Python and mitmdump', async () => {
-    const { paths } = home();
-    const transport = new HostTransport(paths, '/repo/services');
-    expect(transport.placement).toBe('host');
-    expect(await transport.vmStatus()).toBe('missing');
-    // A canned answer comes back through exec and spawn alike.
-    expect(await transport.exec(['mountpoint', '-q', '/x'])).toEqual({
+    expect(await run(['mountpoint', '-q', '/mnt/anchi-host'])).toEqual({
       code: 1,
       stdout: '',
       stderr: '',
     });
-    const child = transport.spawn(['anchi-image', 'status', 'codex', 'base']);
+    // A body the daemon sends is checked before it is forwarded.
+    expect((await run(['anchi-cell', 'register'], '[1]')).stdout).toBe('{"error":"BAD_REQUEST"}');
+  });
+
+  it('is a transport that reports the services as running once their socket exists', async () => {
+    const { paths } = home();
+    const transport = new HostTransport(paths, { services: ['x'], cli: ['y'] });
+    expect(transport.placement).toBe('host');
+    expect(transport.running()).toBe(false);
+    expect(await transport.vmStatus()).toBe('stopped');
+    expect((await transport.vmSize()).cpus).toBeGreaterThan(0);
+    // Without the services, a call that needs them says so, and never hangs.
+    const r = await transport.exec(['anchi-cell', 'version']);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toContain('HOST_SERVICES_UNAVAILABLE');
+    mkdirSync(paths.run, { recursive: true });
+    writeFileSync(paths.control, '');
+    writeFileSync(paths.token, 'x');
+    expect(transport.running()).toBe(true);
+    expect(await transport.vmStatus()).toBe('running');
+    // A canned answer comes back through spawn for anything but the approval stream.
+    const child = transport.spawn(['anchi-cell', 'start', 't']);
     const out: Buffer[] = [];
     child.stdout.on('data', (b: Buffer) => out.push(b));
     const code = await new Promise<number | null>((r) => child.on('close', r));
-    expect([code, Buffer.concat(out).toString()]).toEqual([0, '{"present":false}']);
-    mkdirSync(join(paths.venv, 'bin'), { recursive: true });
-    writeFileSync(paths.python, '');
-    writeFileSync(paths.mitmdump, '');
-    expect(await transport.vmStatus()).toBe('running');
-    expect((await transport.vmSize()).cpus).toBeGreaterThan(0);
+    expect([code, Buffer.concat(out).toString()]).toEqual([1, '{"error":"HOST_PLACEMENT"}']);
   });
 
-  it('asks a host-placement daemon for Python 3.11+, not Lima', () => {
+  it('starts the services from the sources in a checkout and from lib/ in a release', () => {
+    const command = hostCommand();
+    expect(command.services[0]).toBe(process.execPath);
+    expect(command.services.at(-1)).toMatch(/host-services\/src\/main\.ts$/);
+    expect(command.cli.at(-1)).toMatch(/host-services\/src\/cli\.ts$/);
+    expect(opensslAvailable('/nonexistent')).toBe(false);
+  });
+
+  it('asks a host-placement daemon for openssl, not Lima or Python', () => {
     const host = hostReadiness('host');
-    expect(host.missing.filter((m) => /lima|qemu|kvm/i.test(m))).toEqual([]);
-    expect(host.installHint).toMatch(/Python 3\.11/);
+    expect(host.missing.filter((m) => /lima|qemu|kvm|python/i.test(m))).toEqual([]);
+    expect(host.installHint).toMatch(/openssl/);
   });
 
   it('keeps the placement in the login-time daemon definitions', () => {
@@ -159,14 +217,12 @@ describe("host placement: the runtimes' settings", () => {
       GIT_SSL_CAINFO: spec.caBundle,
     });
     expect(excludedCommands).toEqual([]);
-    // What was there before is remembered, so disabling puts it back and nothing else.
     expect(managed.previousEnv.SSL_CERT_FILE).toBe('/mine.pem');
     expect(managed.previousEnv.CURL_CA_BUNDLE).toBeUndefined();
     expect(JSON.parse(claudeSettingsRestored(text, managed))).toEqual({
       model: 'opus',
       env: { EDITOR: 'vim', SSL_CERT_FILE: '/mine.pem' },
     });
-    // An empty or missing file is fine; a file that is not JSON is not.
     expect(JSON.parse(claudeSettingsText(undefined, spec).text).sandbox.enabled).toBe(true);
     expect(() => claudeSettingsText('{not json', spec)).toThrow(/CLAUDE_SETTINGS_UNREADABLE/);
     expect(() => claudeSettingsText('[1]', spec)).toThrow(/CLAUDE_SETTINGS_UNREADABLE/);
@@ -179,7 +235,6 @@ describe("host placement: the runtimes' settings", () => {
     const again = claudeSettingsText(first.text, { ...spec, port: 19000 }, first.managed);
     expect(JSON.parse(again.text).sandbox.network.httpProxyPort).toBe(19000);
     expect(again.managed).toEqual(first.managed);
-    // Commands the user excluded run outside the sandbox: reported, never silently kept.
     const excluded = claudeSettingsText(
       JSON.stringify({ sandbox: { excludedCommands: ['gh *', 7] } }),
       spec,
@@ -203,14 +258,12 @@ describe("host placement: the runtimes' settings", () => {
     expect(text.indexOf('[mcp_servers.x]')).toBeLessThan(
       text.indexOf('# >>> anchi host placement >>>'),
     );
-    // Enabling again replaces the block instead of stacking a second one.
     const again = codexConfigText(text, { ...spec, denyRead: ['/other'] });
     expect(again.split('anchi host placement >>>').length).toBe(2);
     expect(again).toContain('"/other" = "deny"');
     expect(again).not.toContain('/h/.ssh');
     expect(codexConfigRestored(again)).toBe(before);
     expect(codexConfigRestored(codexConfigText(undefined, spec))).toBe('');
-    // A path with a quote or a backslash stays one TOML string.
     expect(codexConfigText('', { ...spec, denyRead: ['/a"b\\c'] })).toContain(
       '"/a\\"b\\\\c" = "deny"',
     );
@@ -248,13 +301,11 @@ describe("host placement: the runtimes' settings", () => {
     const { root, paths, files } = home();
     mkdirSync(join(root, '.codex'), { recursive: true });
     writeFileSync(files.codexConfig, 'model = "o3"\n');
-    // No proxy CA yet: nothing is written, not even the manifest.
     expect(() => enableHost(paths, files, ['github'], undefined, root)).toThrow(/HOST_NOT_RUNNING/);
     expect(existsSync(paths.manifest)).toBe(false);
-    mkdirSync(join(paths.state, 'mitm'), { recursive: true });
+    mkdirSync(paths.ca, { recursive: true });
     writeFileSync(paths.caCert, 'CA');
     writeFileSync(paths.caBundle, 'ROOTS\nCA');
-    // Claude's file is refused for its own sandbox block: Codex's file and the shims stay untouched.
     mkdirSync(join(root, '.claude'), { recursive: true });
     writeFileSync(files.claudeSettings, '{"sandbox": {"enabled": false}}');
     expect(() => enableHost(paths, files, ['github'], undefined, root)).toThrow(/HAS_SANDBOX/);
@@ -278,13 +329,16 @@ describe("host placement: the runtimes' settings", () => {
       placement: 'host',
       enabled: true,
       running: true,
-      installed: false,
       shimOnPath: true,
       claude: { file: files.claudeSettings, managed: true, excludedCommands: [] },
       codex: { file: files.codexConfig, managed: true },
       connectors: ['github'],
     });
-    expect(hostStatus(paths, files, [], false, '/usr/bin').shimOnPath).toBe(false);
+    expect(hostStatus(paths, files, [], false, '/nonexistent')).toMatchObject({
+      shimOnPath: false,
+      installed: false,
+      missing: ['openssl'],
+    });
     expect(disableHost(paths)).toBe(true);
     expect(JSON.parse(readFileSync(files.claudeSettings, 'utf8'))).toEqual({ model: 'opus' });
     expect(readFileSync(files.codexConfig, 'utf8')).toBe('model = "o3"\n');

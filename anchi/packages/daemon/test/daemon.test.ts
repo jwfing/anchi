@@ -3635,31 +3635,30 @@ describe('review gaps: approvals decided late, RPC lookup, template delegates', 
 describe('host placement', () => {
   /** A daemon without a VM: the proxy would be its child, but nothing is installed here. */
   const onHost = () => {
-    const transport = new HostTransport(hostPaths(homeLayout(root)), join(root, 'no-services'));
-    return { vm: transport, guest: new Guest(transport) };
+    const transport = new HostTransport(hostPaths(homeLayout(root)));
+    return { vm: transport, guest: new Guest(transport), hostServices: false as const };
   };
 
   it('reports its placement, refuses tasks and asks for the install before enabling', async () => {
     const { client } = await start(60_000, undefined, undefined, onHost());
     const status = await client.call('setup.status');
     expect(status.placement).toBe('host');
-    expect(status.vm).toBe('missing');
-    expect(status.host?.installHint).toMatch(/Python 3\.11/);
+    expect(status.vm).toBe('stopped');
+    expect(status.host?.installHint).toMatch(/openssl/);
     await expect(client.call('tasks.create', { agentId: 'dev', text: 'hi' })).rejects.toThrow(
       /HOST_PLACEMENT/,
     );
     const host = await client.call('host.status');
     expect(host).toMatchObject({
       placement: 'host',
-      installed: false,
       running: false,
       enabled: false,
     });
     expect(host.port).toBe(HOST_PORT_DEFAULT);
     await expect(client.call('host.enable')).rejects.toThrow(/HOST_NOT_RUNNING/);
     expect((await client.call('host.disable')).enabled).toBe(false);
-    // No trigger runs and no cell is reaped without a VM; the daemon says why, once.
-    expect(logs.filter((l) => /cell reap skipped/.test(l)).length).toBe(1);
+    // No trigger runs and there is no cell to reap without a VM: the reap answers empty.
+    expect(logs.filter((l) => /cell reap|reaped orphaned/.test(l))).toEqual([]);
   });
 
   it('is refused on a daemon that drives a VM', async () => {

@@ -6,7 +6,8 @@
 //   node scripts/vault.mjs init|unlock|lock|status [--key-file <path>]
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, fsyncSync, mkdirSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -26,18 +27,23 @@ function refuse(message) {
   throw new Refused(message);
 }
 
+/** The host services' CLI: the release bundle beside this script's lib/, else the sources on tsx. */
+function hostCli() {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const bundled = join(root, 'lib/host-vault.mjs');
+  if (existsSync(bundled)) return [process.execPath, bundled];
+  const tsx = createRequire(join(root, 'anchi/package.json')).resolve('tsx');
+  return [process.execPath, '--import', tsx, join(root, 'anchi/packages/host-services/src/cli.ts')];
+}
+
 function remote(action, value) {
   const input = value === undefined ? '' : JSON.stringify(value);
+  const [bin, ...cli] = ON_HOST ? hostCli() : [];
   const result = ON_HOST
-    ? spawnSync(
-        join(ANCHI_HOME, 'host/venv/bin/python'),
-        [join(dirname(fileURLToPath(import.meta.url)), '../services/vault_admin.py'), action],
-        {
-          input,
-          encoding: 'utf8',
-          env: { ...process.env, ANCHI_HOST_STATE: join(ANCHI_HOME, 'host/state') },
-        },
-      )
+    ? spawnSync(bin, [...cli, '--root', join(ANCHI_HOME, 'host'), 'vault', action], {
+        input,
+        encoding: 'utf8',
+      })
     : spawnSync(
         IN_GUEST ? 'sudo' : 'limactl',
         [

@@ -13,7 +13,7 @@ import type {
 } from '@anchi/protocol';
 import type { Guest, VmTransport } from './guest.ts';
 import { APP_VERSION, defaultVmSize, hostResources, REPO_ROOT, VAULT_KEY } from './host.ts';
-import { hostPython } from './host-placement.ts';
+import { opensslAvailable } from './host-placement.ts';
 import { limaPin, type LimaPin } from './lima.ts';
 import type { ServiceSetup } from './services.ts';
 
@@ -125,14 +125,14 @@ export function hostReadiness(
     };
   }
   if (placement === 'host') {
-    // No VM: the proxy and the trusted services run on this computer, on its own Python.
+    // No VM: the services run on the daemon's own Node; openssl signs the proxy's certificates.
     return {
       platform: process.platform,
-      missing: hostPython() ? [] : ['python3 (3.11 or newer)'],
+      missing: opensslAvailable() ? [] : ['openssl'],
       installHint:
         process.platform === 'darwin'
-          ? 'Install Python 3.11 or newer (python.org or brew install python), then prepare again.'
-          : 'Install python3 (3.11 or newer) with its venv module, then prepare again.',
+          ? 'macOS ships openssl; put /usr/bin on PATH, then prepare again.'
+          : 'Install the openssl command line (Debian/Ubuntu: sudo apt-get install openssl), then prepare again.',
     };
   }
   // Where Anchi has a pinned Lima, setup downloads it when PATH has none new enough (lima.ts).

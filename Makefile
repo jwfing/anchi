@@ -18,6 +18,7 @@ check: lint
 	$(PYTHON) scripts/check-source.py
 	pnpm --dir anchi run check
 	$(PYTHON) scripts/gen-skill-cli.py --check
+	$(PYTHON) scripts/gen-egress-fixtures.py --check
 	$(PYTHON) -m unittest discover -s tests -q
 
 lint:

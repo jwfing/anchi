@@ -1,0 +1,17 @@
+{
+  "name": "@anchi/host-services",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/control/client.ts",
+    "./paths": "./src/paths.ts",
+    "./main": "./src/main.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@anchi/protocol": "workspace:*",
+    "zod": "^4.6.6"
+  }
+}

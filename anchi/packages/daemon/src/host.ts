@@ -146,11 +146,13 @@ export const IN_GUEST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
 };
 
 /**
- * The steps of a daemon without a VM (`ANCHI_GUEST=host`): scripts/host-install.sh prepares the
- * Python side under ~/.anchi/host, and the vault steps run on this computer (vault.mjs).
+ * The steps of a daemon without a VM (`ANCHI_GUEST=host`): nothing to install or start as a
+ * command (the daemon starts its services process itself after these steps), and the vault
+ * steps run on this computer (vault.mjs, against that process).
  */
 export const HOST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
-  install: [['bash', 'scripts/host-install.sh']],
+  'vm-start': [],
+  install: [],
   'vault-init': [vaultStep('init')],
   'vault-unlock': [VAULT_UNLOCK],
 };

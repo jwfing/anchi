@@ -12,7 +12,7 @@ host=$home/host
 audit=$host/audit.jsonl
 bin=$host/bin
 [[ -x $bin/claude || -x $bin/codex ]] || { echo 'run `anchi host enable` first' >&2; exit 1; }
-[[ -S $host/state/run/egress/control.sock ]] || { echo 'the proxy is not running (anchi host status)' >&2; exit 1; }
+[[ -S $host/state/run/control.sock ]] || { echo 'the proxy is not running (anchi host status)' >&2; exit 1; }
 export PATH=$bin:$PATH
 work=$(mktemp -d "${TMPDIR:-/tmp}/anchi-verify-host.XXXXXX")
 trap 'rm -rf "$work"' EXIT

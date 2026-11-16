@@ -9,6 +9,7 @@ Anchi is a secured agent team: a trusted daemon and TUI on the host, a Lima VM w
 | Path | Zone | Language |
 |---|---|---|
 | `anchi/packages/protocol`, `core`, `daemon`, `tui`, `desktop` | Trusted, host | TypeScript (Node 22+, pnpm workspace; the desktop app on Electron) |
+| `anchi/packages/host-services` | Trusted, host: the host placement's proxy, vault and approvals, one process beside the daemon (imports `protocol` only) | TypeScript |
 | `anchi/packages/cell-runner` | **Untrusted**, inside task cells | TypeScript |
 | `services/` | Trusted, VM (vault, auth, policy, egress proxy, connectors) | Python 3.11+ |
 | `guest/`, `systemd/`, `lima/` | VM bring-up, cell manager (`anchi_cell.py`), version pins (`cell.env`) | Shell, Python |

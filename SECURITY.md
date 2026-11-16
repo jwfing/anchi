@@ -193,15 +193,20 @@ The agent team (`anchi/`, `guest/anchi_cell.py`, `services/egress_*.py`) runs Co
 ## Host placement (no VM)
 
 A daemon started with `ANCHI_GUEST=host` ([docs/HOST_PLACEMENT.md](docs/HOST_PLACEMENT.md)) runs
-no cells. Its egress proxy, vault and auth service run on the user's computer as the user, and
-the user's own Claude Code and Codex sessions reach the proxy from inside those runtimes' own
-sandboxes (Seatbelt on macOS, bubblewrap on Linux), through settings Anchi writes with the user's
+no cells. Its egress proxy, vault and approvals queue run on the user's computer as the user, in
+one process the daemon starts on its own Node (`anchi/packages/host-services`), and the user's own
+Claude Code and Codex sessions reach the proxy from inside those runtimes' own sandboxes
+(Seatbelt on macOS, bubblewrap on Linux), through settings Anchi writes with the user's
 confirmation and can undo. The trust zones differ from the VM's:
 
-- **Trusted:** everything the user runs outside a sandbox, the daemon, the proxy and the trusted
-  services. They share one user and one kernel; the role separation between them (one socket per
-  caller role, the proxy's control socket for the daemon's UID only) is code hygiene, not a kernel
-  boundary.
+- **Trusted:** everything the user runs outside a sandbox, the daemon and the services process.
+  They share one user and one kernel. The services process alone holds the vault key (in memory,
+  never on disk) and the credentials; the daemon reaches it only over a control socket (0600 in a
+  0700 directory) whose token file (0600) proves the caller can read the user's files. That is
+  file-permission separation between the user's own processes, not a kernel boundary. Only the
+  hosts of connected connectors are TLS-terminated and inspected; every other connection, the
+  runtimes' own model traffic included, is tunnelled unread, after the egress list and the
+  public-address check.
 - **Untrusted:** the commands a session's runtime runs inside its sandbox. The sandbox denies them
   the vault, the key, `~/.ssh`, `~/.aws` and the other listed paths, direct network access, Unix
   sockets and writes outside the working directory. Their only way out is the proxy, where the
@@ -215,10 +220,11 @@ confirmation and can undo. The trust zones differ from the VM's:
 
 Credential isolation holds for what passes the proxy: a sandboxed command sees placeholders and
 never a stored credential. It does not hold for content, and not for a tool the runtime runs
-outside the sandbox. The vault's key, while unlocked, is a file under `~/.anchi/host/state/run`
-(mode 0600) rather than guest memory, and swap is not disabled. Both sandboxes are user-space
-mechanisms maintained by their vendors; the VM remains the hardened placement, and a remote
-server the unattended one.
+outside the sandbox. The vault's key, while unlocked, is in the services process's memory, and
+the computer's swap is not disabled. The rules the proxy applies are a port of the VM proxy's;
+`scripts/gen-egress-fixtures.py` replays the Python rules over a corpus and `make check` fails
+when the two decide differently. Both sandboxes are user-space mechanisms maintained by their
+vendors; the VM remains the hardened placement, and a remote server the unattended one.
 
 ## Isolation and platform limits
 

@@ -24,7 +24,6 @@ import secrets
 import shutil
 import socket
 import struct
-import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -48,11 +47,7 @@ SERVICE_CONNECTORS = ('gmail', 'drive', 'notion', 'slack', 'x', 'reddit')
 # Services with named Google accounts; the bridge pins one per cell.
 ACCOUNT_SERVICES = ('gmail', 'drive')
 ACCOUNT = re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
-SERVICE_SOCKET = os.environ.get('ANCHI_EGRESS_SERVICE_SOCKET', '/run/secure-{}/api.sock')
-# Host placement: the proxy runs as the user next to the daemon, with no cell group and no root.
-# The control socket then takes the proxy's own UID instead of root.
-HOST = os.environ.get('ANCHI_EGRESS_HOST') == '1'
-CONTROL_UID = os.getuid() if HOST else 0
+SERVICE_SOCKET = '/run/secure-{}/api.sock'
 SERVICE_MAX = 256 * 1024
 # Writes held by the policy service return at once; this bounds a slow upstream.
 SERVICE_TIMEOUT = 150
@@ -472,8 +467,6 @@ class Cell:
         self.credential_alerts = set()
         # Hosts refused by the egress list, already noted in the task.
         self.egress_notices = set()
-        # A host session sends the user's own runtime logins; a cell never has a credential.
-        self.own_credentials = False
 
     @property
     def directory(self):
@@ -551,15 +544,10 @@ class Registry:
             or not all(isinstance(p, str) and rules.EGRESS_PATTERN.fullmatch(p) for p in egress)
         ):
             raise ValueError('BAD_EGRESS')
-        # A loopback port for a host session's runtimes; only a host placement has them.
-        port = request.get('listen_port')
-        if port is not None and (not HOST or type(port) is not int or not 1024 <= port <= 65535):
-            raise ValueError('BAD_LISTEN')
         if task in self.cells:
             raise ValueError('CELL_EXISTS')
-        # The cell gets its own runtime's credential only. A host session's runtimes keep the
-        # user's own logins: no runtime grant, so their model traffic passes untouched.
-        return task, agent, set(connectors) | ({runtime} if port is None else set())
+        # The cell gets its own runtime's credential only.
+        return task, agent, set(connectors) | {runtime}
 
     async def register(self, request, extra=()):
         task, agent, grants = self.validate(request)
@@ -576,20 +564,12 @@ class Registry:
         # and its proxy injects nothing: its directory and socket stay reachable by every VM
         # user, as before the hardening. A task cell's are the cells' group's only.
         build = request.get('build') is True
-        port = request.get('listen_port')
-        # The user's own credentials (their runtime logins) are expected in a host session.
-        cell.own_credentials = port is not None
-        if port is not None:
-            # A host session: the user's runtimes are pointed at this loopback port, and every
-            # connection is bridged into mitmproxy like a cell's, so the same rules apply to it.
-            cell.server = await asyncio.start_server(lambda r, w: self.bridge(cell, r, w), '127.0.0.1', port)
-        else:
-            cell.directory.mkdir(parents=True, exist_ok=False)
-            own(cell.directory, 0o755 if build else 0o750, group=not build)
-            path = cell.directory / 'proxy.sock'
-            cell.server = await asyncio.start_unix_server(lambda r, w: self.bridge(cell, r, w), path=str(path))
-            # Only this cell has the directory bound in, and only the cells' group can connect.
-            own(path, 0o666 if build else 0o660, group=not build)
+        cell.directory.mkdir(parents=True, exist_ok=False)
+        own(cell.directory, 0o755 if build else 0o750, group=not build)
+        path = cell.directory / 'proxy.sock'
+        cell.server = await asyncio.start_unix_server(lambda r, w: self.bridge(cell, r, w), path=str(path))
+        # Only this cell has the directory bound in, and only the cells' group can connect.
+        own(path, 0o666 if build else 0o660, group=not build)
         cell.services = frozenset(request.get('services', []))
         cell.accounts = {
             s: request.get('accounts', {}).get(s, 'default') for s in cell.services if s in ACCOUNT_SERVICES
@@ -618,10 +598,9 @@ class Registry:
                 'egress': None if cell.egress is None else sorted(cell.egress),
                 'services': sorted(cell.services),
                 'accounts': cell.accounts,
-                **({'listen_port': port} if port is not None else {}),
             }
         )
-        return {'directory': str(cell.directory), **({'listen_port': port} if port is not None else {})}
+        return {'directory': str(cell.directory)}
 
     async def service_bridge(self, cell, service, reader, writer):
         """One request from the cell to a connector service, naming the cell's agent and, for
@@ -717,10 +696,6 @@ async def pipe(reader, writer):
 
 
 def peer_uid(sock):
-    """The connected peer's UID as the kernel reports it (as common.peer_uid, kept apart because
-    this module is installed without common.py)."""
-    if sys.platform == 'darwin':
-        return struct.unpack('II', sock.getsockopt(0, 1, 76)[:8])[1]
     return struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
 
 
@@ -763,7 +738,7 @@ class EgressProxy:
 
         self.registry.listen = (ctx.options.listen_host or '127.0.0.1', ctx.options.listen_port)
         CELLS.mkdir(parents=True, exist_ok=True)
-        if peer_gid() is None and not HOST:
+        if peer_gid() is None:
             log.error(
                 f'group {PEER_GROUP} is missing: cells cannot connect to their sockets; run `anchi setup install`'
             )
@@ -785,7 +760,7 @@ class EgressProxy:
 
     async def handle_control(self, reader, writer):
         try:
-            if peer_uid(writer.get_extra_info('socket')) != CONTROL_UID:
+            if peer_uid(writer.get_extra_info('socket')) != 0:
                 raise ValueError('CALLER_DENIED')
             line = await reader.readline()
             if len(line) > CONTROL_MAX or not line.endswith(b'\n'):
@@ -1263,7 +1238,7 @@ class EgressProxy:
             'op': decision.op,
             'decision': decision.action if decision.reason is None else f'{decision.action}:{decision.reason}',
         }
-        if entry['client_cred'] == 'other' and not cell.own_credentials:
+        if entry['client_cred'] == 'other':
             self.alert_credential(cell, entry)
         if not consistent:
             # The cell asked for one host and named another: no rule, credential or egress

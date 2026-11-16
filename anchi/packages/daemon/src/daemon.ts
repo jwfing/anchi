@@ -200,6 +200,8 @@ export interface DaemonOptions {
   triggers?: boolean;
   /** Watch the egress proxy's approval queue (default true). */
   approvals?: boolean;
+  /** Start the host placement's services process (default true; tests never start it). */
+  hostServices?: boolean;
   /** Shows a desktop notification; tests replace it. */
   notify?: (title: string, message: string) => Promise<void>;
   /** Reap guest cells at start (default true). */
@@ -577,11 +579,11 @@ export class Daemon {
    */
   private async startHostServices(): Promise<void> {
     const services = this.hostServices;
-    if (!services || !(this.vm as HostTransport).installed() || services.running()) return;
+    if (!services || this.opts.hostServices === false) return;
+    if (!(this.vm as HostTransport).installed() || services.running()) return;
     try {
       await services.start();
-      this.log('host placement: proxy and auth service started');
-      await this.registerHost();
+      this.log('host placement: services started');
     } catch (err) {
       this.log(`host placement: ${(err as Error).message}`);
     }
@@ -696,7 +698,12 @@ export class Daemon {
     }));
     const inGuest = this.vm.placement === 'local';
     const onHost = this.vm.placement === 'host';
-    if (this.vm instanceof HostTransport) this.hostServices = new HostServices(this.vm, this.log);
+    if (this.vm instanceof HostTransport) {
+      // Each time the services (re)start, the principal and the settings go to them again.
+      this.hostServices = new HostServices(this.vm, this.log, undefined, () => {
+        void this.registerHost().then(() => this.pushEgressSettings());
+      });
+    }
     // Inside a remote server the browser is the client's: it opens the URL the call returns.
     this.services = new ServiceSetup(
       this.guest,
@@ -1391,6 +1398,7 @@ export class Daemon {
               (line) => this.broadcast('setup', { action, line }),
               action === 'install' ? env : {},
             );
+            if (action === 'install' || action === 'vm-start') await this.startHostServices();
           },
           async (selected) => {
             this.broadcast('setup', {
@@ -1490,7 +1498,7 @@ export class Daemon {
       );
       await this.setup.run(action, (line) => this.broadcast('setup', { action, line }), env);
       this.log(`setup ${action} done`);
-      if (action === 'install') await this.startHostServices();
+      if (action === 'install' || action === 'vm-start') await this.startHostServices();
       await this.syncHostLogins();
       const status = await this.readSetupStatus();
       this.noteSetup(status);

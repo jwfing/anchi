@@ -35,7 +35,7 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Phase 3 (mostly done): containment, automatic checks, remaining acceptance; status |
 | [Host directories](architecture/HOST_DIRECTORIES_PLAN.md) | Workspaces of the Mac in agent cells |
 | [Host placement](architecture/HOST_PLACEMENT_PLAN.md) | Anchi's proxy, vault and approvals without a VM, with the user's own `claude` and `codex` under their sandboxes; spike results, design, status |
-| [Host services in TypeScript](architecture/HOST_SERVICES_TS_PLAN.md) | Plan: replace the host placement's Python proxy and vault with a TypeScript process, so no Python is needed; eight steps for separate agents, with tests and review criteria |
+| [Host services in TypeScript](architecture/HOST_SERVICES_TS_PLAN.md) | How the host placement's proxy and vault became a TypeScript process (`anchi/packages/host-services`), so no Python is needed: the steps, the parity fixtures and what deviated from the plan |
 | [Backlog](architecture/BACKLOG.md) | Open requests and known gaps (file preview plugins, audit log view, token usage and quota, large git pushes), and what was delivered from it |
 | [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md) | Agent configuration, client protocol, guest commands and cell runner protocol |
 

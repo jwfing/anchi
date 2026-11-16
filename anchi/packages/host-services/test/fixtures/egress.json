@@ -1,0 +1,2578 @@
+{
+ "aws": [
+  {
+   "body": "eyJsb2dHcm91cE5hbWUiOiIvYXBwIn0=",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {
+    "content-type": "application/x-amz-json-1.1",
+    "x-amz-target": "Logs_20140328.FilterLogEvents"
+   },
+   "method": "POST",
+   "region": "us-east-1",
+   "service": "logs",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/us-east-1/logs/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=86c48dd6a54659418e3f0b29cb108f6bb95c3fda520cb8f0d3d5e5ef190d5e0f",
+    "content-type": "application/x-amz-json-1.1",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-target": "Logs_20140328.FilterLogEvents"
+   },
+   "url": "https://logs.us-east-1.amazonaws.com/"
+  },
+  {
+   "body": "QWN0aW9uPUdldENhbGxlcklkZW50aXR5JlZlcnNpb249MjAxMS0wNi0xNQ==",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000",
+    "session_token": "fake-session"
+   },
+   "headers": {
+    "content-type": "application/x-www-form-urlencoded"
+   },
+   "method": "POST",
+   "region": "us-east-1",
+   "service": "sts",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/us-east-1/sts/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token, Signature=237b2f5d74cbdf6e3104d374e963f61170841a675cd6b6e04de85e38a7f0e61c",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-security-token": "fake-session"
+   },
+   "url": "https://sts.us-east-1.amazonaws.com/"
+  },
+  {
+   "body": "",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {
+    "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "method": "GET",
+   "region": "us-east-1",
+   "service": "s3",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=1568220eeff5543dc13cde2f75b987ad3a02c688b94e93e9688e1b1c17b53fc3",
+    "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "url": "https://s3.us-east-1.amazonaws.com/bucket?list-type=2&prefix=a%2Fb&max-keys=10"
+  },
+  {
+   "body": "aGVsbG8=",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {
+    "content-type": "text/plain",
+    "x-amz-content-sha256": "UNSIGNED-PAYLOAD"
+   },
+   "method": "PUT",
+   "region": "s3",
+   "service": "s3",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/s3/s3/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=7296483742aece4fdaf42de38cdf4e33ae7c58b23c18228576642102e6dd96a5",
+    "content-type": "text/plain",
+    "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "url": "https://bucket.s3.amazonaws.com/some%20key/with%2Fslash.txt"
+  },
+  {
+   "body": "",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {
+    "content-encoding": "aws-chunked",
+    "x-amz-content-sha256": "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+    "x-amz-decoded-content-length": "66560"
+   },
+   "method": "PUT",
+   "region": "s3",
+   "service": "s3",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/s3/s3/aws4_request, SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length, Signature=226c99027443d1cdb87f18d96583ebc03e692adf9a3431e8e746047bb6b264cc",
+    "content-encoding": "aws-chunked",
+    "x-amz-content-sha256": "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-decoded-content-length": "66560"
+   },
+   "url": "https://bucket.s3.amazonaws.com/key"
+  },
+  {
+   "body": "QWN0aW9uPURlc2NyaWJlSW5zdGFuY2VzJlZlcnNpb249MjAxNi0xMS0xNQ==",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {
+    "authorization": "ignored",
+    "connection": "keep-alive",
+    "content-type": "application/x-www-form-urlencoded",
+    "expect": "100-continue",
+    "user-agent": "aws-cli/2",
+    "x-amz-date": "ignored"
+   },
+   "method": "POST",
+   "region": "eu-west-1",
+   "service": "ec2",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/eu-west-1/ec2/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=de34ddd8174c91c9b97ac597f1f35fb5c0d7b56a9c338e5a0277c096d9757e16",
+    "content-type": "application/x-www-form-urlencoded",
+    "expect": "100-continue",
+    "user-agent": "aws-cli/2",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "url": "https://ec2.eu-west-1.amazonaws.com/"
+  },
+  {
+   "body": "e30=",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {
+    "content-type": "application/x-amz-json-1.0",
+    "x-amz-target": "DynamoDB_20120810.ListTables"
+   },
+   "method": "GET",
+   "region": "us-east-1",
+   "service": "dynamodb",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/us-east-1/dynamodb/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=abf8e3f9ef53b7342865f40ebf982c775e14da27bbf8fe5231fb74c6b1204f4e",
+    "content-type": "application/x-amz-json-1.0",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-target": "DynamoDB_20120810.ListTables"
+   },
+   "url": "https://dynamodb.us-east-1.amazonaws.com/a/../b/./c//d"
+  },
+  {
+   "body": "",
+   "credential": {
+    "access_key_id": "AKIAI44QH8DHBEXAMPLE",
+    "region": "us-east-1",
+    "secret_access_key": "fake/secret/key/0000000000"
+   },
+   "headers": {},
+   "method": "GET",
+   "region": "us-east-1",
+   "service": "iam",
+   "signed": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAI44QH8DHBEXAMPLE/20260102/us-east-1/iam/aws4_request, SignedHeaders=host;x-amz-date, Signature=d59438d5c70c0cd7a6901fc4054b887dbcc308129cb7cffdfc753d2df22fc6d4",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "url": "https://iam.amazonaws.com/?Action=ListUsers&Version=2010-05-08&b=2&a=1&a=0"
+  }
+ ],
+ "decisions": [
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "example.com",
+   "method": "GET",
+   "op": null,
+   "path": "/",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "example.com",
+   "method": "GET",
+   "op": null,
+   "path": "/",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "chatgpt.com",
+   "method": "GET",
+   "op": "GET /backend-api/codex/models",
+   "path": "/backend-api/codex/models",
+   "reason": "no-placeholder",
+   "rule": "codex"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "chatgpt.com",
+   "method": "GET",
+   "op": "GET /backend-api/codex/models",
+   "path": "/backend-api/codex/models",
+   "reason": "no-placeholder",
+   "rule": "codex"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "Bearer anchi-placeholder"
+   },
+   "host": "chatgpt.com",
+   "method": "POST",
+   "op": "POST /backend-api/codex/responses",
+   "path": "/backend-api/codex/responses",
+   "reason": null,
+   "risk": null,
+   "rule": "codex",
+   "write": false
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {
+    "authorization": "Bearer anchi-placeholder"
+   },
+   "host": "chatgpt.com",
+   "method": "POST",
+   "op": "POST /backend-api/codex/responses",
+   "path": "/backend-api/codex/responses",
+   "reason": null,
+   "risk": null,
+   "rule": "codex",
+   "write": false
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /backend-api/ps/mcp denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "Bearer anchi-placeholder"
+   },
+   "host": "chatgpt.com",
+   "method": "POST",
+   "op": "POST /backend-api/ps/mcp",
+   "path": "/backend-api/ps/mcp",
+   "reason": null,
+   "rule": "codex"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /backend-api/ps/mcp denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "codex"
+   ],
+   "headers": {
+    "authorization": "Bearer anchi-placeholder"
+   },
+   "host": "chatgpt.com",
+   "method": "POST",
+   "op": "POST /backend-api/ps/mcp",
+   "path": "/backend-api/ps/mcp",
+   "reason": null,
+   "rule": "codex"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /oauth/token denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "auth.openai.com",
+   "method": "POST",
+   "op": "POST /oauth/token",
+   "path": "/oauth/token",
+   "reason": null,
+   "rule": "openai-auth"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /oauth/token denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "auth.openai.com",
+   "method": "POST",
+   "op": "POST /oauth/token",
+   "path": "/oauth/token",
+   "reason": null,
+   "rule": "openai-auth"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "Bearer sk-ant-oat01-anchi-placeholder-0000000000000000000000000000000000000000"
+   },
+   "host": "api.anthropic.com",
+   "method": "POST",
+   "op": "POST /v1/messages",
+   "path": "/v1/messages",
+   "reason": null,
+   "risk": null,
+   "rule": "anthropic",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {
+    "authorization": "Bearer sk-ant-oat01-anchi-placeholder-0000000000000000000000000000000000000000"
+   },
+   "host": "api.anthropic.com",
+   "method": "POST",
+   "op": null,
+   "path": "/v1/messages",
+   "reason": "not-granted",
+   "rule": "anthropic"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "x-api-key": "sk-ant-api03-anchi-placeholder-0000000000000000000000000000000000000000"
+   },
+   "host": "api.anthropic.com",
+   "method": "POST",
+   "op": "POST /v1/messages",
+   "path": "/v1/messages",
+   "reason": null,
+   "risk": null,
+   "rule": "anthropic",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {
+    "x-api-key": "sk-ant-api03-anchi-placeholder-0000000000000000000000000000000000000000"
+   },
+   "host": "api.anthropic.com",
+   "method": "POST",
+   "op": null,
+   "path": "/v1/messages",
+   "reason": "not-granted",
+   "rule": "anthropic"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /v1/organizations/api_keys denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "x-api-key": "sk-ant-api03-anchi-placeholder-0000000000000000000000000000000000000000"
+   },
+   "host": "api.anthropic.com",
+   "method": "POST",
+   "op": "POST /v1/organizations/api_keys",
+   "path": "/v1/organizations/api_keys",
+   "reason": null,
+   "rule": "anthropic"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {
+    "x-api-key": "sk-ant-api03-anchi-placeholder-0000000000000000000000000000000000000000"
+   },
+   "host": "api.anthropic.com",
+   "method": "POST",
+   "op": null,
+   "path": "/v1/organizations/api_keys",
+   "reason": "not-granted",
+   "rule": "anthropic"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /v1/OAuth/Token denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "claude.ai",
+   "method": "POST",
+   "op": "POST /v1/OAuth/Token",
+   "path": "/v1/OAuth/Token",
+   "reason": null,
+   "rule": "anthropic-auth"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /v1/OAuth/Token denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "claude.ai",
+   "method": "POST",
+   "op": "POST /v1/OAuth/Token",
+   "path": "/v1/OAuth/Token",
+   "reason": null,
+   "rule": "anthropic-auth"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "GET",
+   "op": "GET /user",
+   "path": "/user",
+   "reason": null,
+   "risk": null,
+   "rule": "github-api",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/user",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "token anchi-placeholder"
+   },
+   "host": "api.github.com",
+   "method": "GET",
+   "op": "GET /repos/o/r/issues",
+   "path": "/repos/o/r/issues?state=open",
+   "reason": null,
+   "risk": null,
+   "rule": "github-api",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {
+    "authorization": "token anchi-placeholder"
+   },
+   "host": "api.github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/repos/o/r/issues?state=open",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /user/keys denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /user/keys",
+   "path": "/user/keys",
+   "reason": null,
+   "rule": "github-api"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/user/keys",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: PUT /repos/o/r/actions/secrets/X denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "PUT",
+   "op": "PUT /repos/o/r/actions/secrets/X",
+   "path": "/repos/o/r/actions/secrets/X",
+   "reason": null,
+   "rule": "github-api"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "PUT",
+   "op": null,
+   "path": "/repos/o/r/actions/secrets/X",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "PUT",
+   "op": "PUT /repos/o/r/pulls/7/merge",
+   "path": "/repos/o/r/pulls/7/merge",
+   "reason": null,
+   "risk": "github-merge",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "PUT",
+   "op": null,
+   "path": "/repos/o/r/pulls/7/merge",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "DELETE",
+   "op": "DELETE /repos/o/r",
+   "path": "/repos/o/r",
+   "reason": null,
+   "risk": "github-repo-delete",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "DELETE",
+   "op": null,
+   "path": "/repos/o/r",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "PATCH",
+   "op": "PATCH /repos/o/r",
+   "path": "/repos/o/r",
+   "reason": null,
+   "risk": "github-repo-settings",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "PATCH",
+   "op": null,
+   "path": "/repos/o/r",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "DELETE",
+   "op": "DELETE /repos/o/r/git/refs/heads/x",
+   "path": "/repos/o/r/git/refs/heads/x",
+   "reason": null,
+   "risk": "github-ref-delete",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "DELETE",
+   "op": null,
+   "path": "/repos/o/r/git/refs/heads/x",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /repos/o/r/hooks",
+   "path": "/repos/o/r/hooks",
+   "reason": null,
+   "risk": "github-access",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/repos/o/r/hooks",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6InF1ZXJ5IHsgdmlld2VyIHsgbG9naW4gfSB9In0=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /graphql",
+   "path": "/graphql",
+   "reason": null,
+   "risk": null,
+   "rule": "github-api",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6InF1ZXJ5IHsgdmlld2VyIHsgbG9naW4gfSB9In0=",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgbWVyZ2VQdWxsUmVxdWVzdChpbnB1dDoge30pIHsgeCB9IH0ifQ==",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /graphql",
+   "path": "/graphql",
+   "reason": null,
+   "risk": "github-graphql",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgbWVyZ2VQdWxsUmVxdWVzdChpbnB1dDoge30pIHsgeCB9IH0ifQ==",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6IiMgY1xucXVlcnkgUSB7IHYgfSBtdXRhdGlvbiBNIHsgZGVsZXRlUmVmKGlucHV0OiB7fSkgeyB4IH0gfSJ9",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /graphql",
+   "path": "/graphql",
+   "reason": null,
+   "risk": "github-graphql",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6IiMgY1xucXVlcnkgUSB7IHYgfSBtdXRhdGlvbiBNIHsgZGVsZXRlUmVmKGlucHV0OiB7fSkgeyB4IH0gfSJ9",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "bm90IGpzb24=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /graphql",
+   "path": "/graphql",
+   "reason": null,
+   "risk": "github-graphql-unreadable",
+   "rule": "github-api",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "bm90IGpzb24=",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6InF1ZXJ5IHsgc2VhcmNoKHF1ZXJ5OiBcIm11dGF0aW9uIHsgeCB9XCIpIHsgeCB9IH0ifQ==",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": "POST /graphql",
+   "path": "/graphql",
+   "reason": null,
+   "risk": null,
+   "rule": "github-api",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6InF1ZXJ5IHsgc2VhcmNoKHF1ZXJ5OiBcIm11dGF0aW9uIHsgeCB9XCIpIHsgeCB9IH0ifQ==",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "github-api"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "GET",
+   "op": "GET /o/r.git/info/refs",
+   "path": "/o/r.git/info/refs?service=git-upload-pack",
+   "reason": null,
+   "risk": null,
+   "rule": "github-git",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/o/r.git/info/refs?service=git-upload-pack",
+   "reason": "not-granted",
+   "rule": "github-git"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "POST",
+   "op": "POST /o/r.git/git-upload-pack",
+   "path": "/o/r.git/git-upload-pack",
+   "reason": null,
+   "risk": null,
+   "rule": "github-git",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "POST",
+   "op": null,
+   "path": "/o/r.git/git-upload-pack",
+   "reason": "not-granted",
+   "rule": "github-git"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/o/r/releases/download/v1/x.tgz",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/o/r/releases/download/v1/x.tgz",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/login",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "github.com",
+   "method": "GET",
+   "op": null,
+   "path": "/login",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6InF1ZXJ5IHsgaXNzdWUoaWQ6IFwiWC0xXCIpIHsgdGl0bGUgfSB9In0=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": "graphql:query,issue",
+   "path": "/graphql",
+   "reason": null,
+   "risk": null,
+   "rule": "linear",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6InF1ZXJ5IHsgaXNzdWUoaWQ6IFwiWC0xXCIpIHsgdGl0bGUgfSB9In0=",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "linear"
+  },
+  {
+   "action": "deny",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgYXBpS2V5Q3JlYXRlKGlucHV0OiB7bGFiZWw6IFwieFwifSkgeyBhcGlLZXkgeyBpZCB9IH0gfSJ9",
+   "deny": {
+    "body": "anchi: graphql:mutation,apiKeyCreate,apiKey denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": "graphql:mutation,apiKeyCreate,apiKey",
+   "path": "/graphql",
+   "reason": null,
+   "rule": "linear"
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgYXBpS2V5Q3JlYXRlKGlucHV0OiB7bGFiZWw6IFwieFwifSkgeyBhcGlLZXkgeyBpZCB9IH0gfSJ9",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "linear"
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgaXNzdWVEZWxldGUoaWQ6IDEpIHsgc3VjY2VzcyB9IH0ifQ==",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": "graphql:mutation,issueDelete",
+   "path": "/graphql",
+   "reason": null,
+   "risk": "linear-delete",
+   "rule": "linear",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgaXNzdWVEZWxldGUoaWQ6IDEpIHsgc3VjY2VzcyB9IH0ifQ==",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "linear"
+  },
+  {
+   "action": "inject",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgY29tbWVudENyZWF0ZShpbnB1dDoge30pIHsgc3VjY2VzcyB9IH0ifQ==",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": "graphql:mutation,commentCreate",
+   "path": "/graphql",
+   "reason": null,
+   "risk": null,
+   "rule": "linear",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "eyJxdWVyeSI6Im11dGF0aW9uIHsgY29tbWVudENyZWF0ZShpbnB1dDoge30pIHsgc3VjY2VzcyB9IH0ifQ==",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.linear.app",
+   "method": "POST",
+   "op": null,
+   "path": "/graphql",
+   "reason": "not-granted",
+   "rule": "linear"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "GET",
+   "op": "GET /api/projects/1/insights/",
+   "path": "/api/projects/1/insights/",
+   "reason": null,
+   "risk": null,
+   "rule": "posthog",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "GET",
+   "op": null,
+   "path": "/api/projects/1/insights/",
+   "reason": "not-granted",
+   "rule": "posthog"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "POST",
+   "op": "POST /api/projects/1/query/",
+   "path": "/api/projects/1/query/",
+   "reason": null,
+   "risk": null,
+   "rule": "posthog",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "POST",
+   "op": null,
+   "path": "/api/projects/1/query/",
+   "reason": "not-granted",
+   "rule": "posthog"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /api/personal_api_keys/ denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "POST",
+   "op": "POST /api/personal_api_keys/",
+   "path": "/api/personal_api_keys/",
+   "reason": null,
+   "rule": "posthog"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "POST",
+   "op": null,
+   "path": "/api/personal_api_keys/",
+   "reason": "not-granted",
+   "rule": "posthog"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "eu.posthog.com",
+   "method": "DELETE",
+   "op": "DELETE /api/organizations/o1",
+   "path": "/api/organizations/o1",
+   "reason": null,
+   "risk": "posthog-delete",
+   "rule": "posthog",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "eu.posthog.com",
+   "method": "DELETE",
+   "op": null,
+   "path": "/api/organizations/o1",
+   "reason": "not-granted",
+   "rule": "posthog"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "POST",
+   "op": "POST /api/organizations/o1/invites/",
+   "path": "/api/organizations/o1/invites/",
+   "reason": null,
+   "risk": "posthog-access",
+   "rule": "posthog",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "POST",
+   "op": null,
+   "path": "/api/organizations/o1/invites/",
+   "reason": "not-granted",
+   "rule": "posthog"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "GET",
+   "op": null,
+   "path": "/project/1/insights",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "us.posthog.com",
+   "method": "GET",
+   "op": null,
+   "path": "/project/1/insights",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "GET",
+   "op": "GET /api/0/organizations/",
+   "path": "/api/0/organizations/",
+   "reason": null,
+   "risk": null,
+   "rule": "sentry",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "GET",
+   "op": null,
+   "path": "/api/0/organizations/",
+   "reason": "not-granted",
+   "rule": "sentry"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: POST /api/0/api-tokens/ denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "POST",
+   "op": "POST /api/0/api-tokens/",
+   "path": "/api/0/api-tokens/",
+   "reason": null,
+   "rule": "sentry"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "POST",
+   "op": null,
+   "path": "/api/0/api-tokens/",
+   "reason": "not-granted",
+   "rule": "sentry"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "DELETE",
+   "op": "DELETE /api/0/projects/o/p/",
+   "path": "/api/0/projects/o/p/",
+   "reason": null,
+   "risk": "sentry-delete",
+   "rule": "sentry",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "DELETE",
+   "op": null,
+   "path": "/api/0/projects/o/p/",
+   "reason": "not-granted",
+   "rule": "sentry"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "POST",
+   "op": null,
+   "path": "/api/123/envelope/",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "sentry.io",
+   "method": "POST",
+   "op": null,
+   "path": "/api/123/envelope/",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.firecrawl.dev",
+   "method": "POST",
+   "op": "POST /v2/scrape",
+   "path": "/v2/scrape",
+   "reason": null,
+   "risk": null,
+   "rule": "firecrawl",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.firecrawl.dev",
+   "method": "POST",
+   "op": null,
+   "path": "/v2/scrape",
+   "reason": "not-granted",
+   "rule": "firecrawl"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.figma.com",
+   "method": "GET",
+   "op": "GET /v1/files/abc",
+   "path": "/v1/files/abc",
+   "reason": null,
+   "risk": null,
+   "rule": "figma",
+   "write": false
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.figma.com",
+   "method": "GET",
+   "op": null,
+   "path": "/v1/files/abc",
+   "reason": "not-granted",
+   "rule": "figma"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "api.figma.com",
+   "method": "POST",
+   "op": "POST /v2/webhooks",
+   "path": "/v2/webhooks",
+   "reason": null,
+   "risk": "figma-webhook",
+   "rule": "figma",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "api.figma.com",
+   "method": "POST",
+   "op": null,
+   "path": "/v2/webhooks",
+   "reason": "not-granted",
+   "rule": "figma"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "POST",
+   "op": "POST /api/v10/channels/1/messages",
+   "path": "/api/v10/channels/1/messages",
+   "reason": null,
+   "risk": null,
+   "rule": "discord",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "POST",
+   "op": null,
+   "path": "/api/v10/channels/1/messages",
+   "reason": "not-granted",
+   "rule": "discord"
+  },
+  {
+   "action": "deny",
+   "body": "",
+   "deny": {
+    "body": "anchi: GET /api/v10/channels/1/webhooks denied\n",
+    "content_type": "text/plain",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "GET",
+   "op": "GET /api/v10/channels/1/webhooks",
+   "path": "/api/v10/channels/1/webhooks",
+   "reason": null,
+   "rule": "discord"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "GET",
+   "op": null,
+   "path": "/api/v10/channels/1/webhooks",
+   "reason": "not-granted",
+   "rule": "discord"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "DELETE",
+   "op": "DELETE /api/v10/guilds/1",
+   "path": "/api/v10/guilds/1",
+   "reason": null,
+   "risk": "discord-delete",
+   "rule": "discord",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "DELETE",
+   "op": null,
+   "path": "/api/v10/guilds/1",
+   "reason": "not-granted",
+   "rule": "discord"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "PUT",
+   "op": "PUT /api/v10/guilds/1/bans/2",
+   "path": "/api/v10/guilds/1/bans/2",
+   "reason": null,
+   "risk": "discord-members",
+   "rule": "discord",
+   "write": true
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "PUT",
+   "op": null,
+   "path": "/api/v10/guilds/1/bans/2",
+   "reason": "not-granted",
+   "rule": "discord"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "GET",
+   "op": null,
+   "path": "/channels/1/2",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "discord.com",
+   "method": "GET",
+   "op": null,
+   "path": "/channels/1/2",
+   "reason": null,
+   "rule": null
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {},
+   "host": "awscli.amazonaws.com",
+   "method": "GET",
+   "op": null,
+   "path": "/awscli.zip",
+   "reason": "unsigned",
+   "rule": "aws"
+  },
+  {
+   "action": "pass",
+   "body": "",
+   "grants": [
+    "codex"
+   ],
+   "headers": {},
+   "host": "awscli.amazonaws.com",
+   "method": "GET",
+   "op": null,
+   "path": "/awscli.zip",
+   "reason": "not-granted",
+   "rule": "aws"
+  },
+  {
+   "action": "inject",
+   "body": "eyJsb2dHcm91cE5hbWUiOiIvYXBwIn0=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/logs/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=8e58c1c470b0b252425a07fe2041259b584aad5a99bcd378bfbc88a45e4cff84",
+    "content-type": "application/x-amz-json-1.1",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-target": "Logs_20140328.FilterLogEvents"
+   },
+   "host": "logs.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "logs:FilterLogEvents",
+   "path": "/",
+   "reason": null,
+   "risk": null,
+   "rule": "aws",
+   "write": false
+  },
+  {
+   "action": "inject",
+   "body": "e30=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/logs/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=8b6a4e406a5369ad74af5abcb2a949c8f0c84341be8f1139ae53c11acffe046c",
+    "content-type": "application/x-amz-json-1.1",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-target": "Logs_20140328.DeleteLogGroup"
+   },
+   "host": "logs.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "logs:DeleteLogGroup",
+   "path": "/",
+   "reason": null,
+   "risk": "aws-destroy",
+   "rule": "aws",
+   "write": true
+  },
+  {
+   "action": "inject",
+   "body": "QWN0aW9uPUdldENhbGxlcklkZW50aXR5JlZlcnNpb249MjAxMS0wNi0xNQ==",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/sts/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=5211f403087d179aeb2373a943f9d0af31cec506e621d0771ec3aa58f7d39998",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "sts.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "sts:GetCallerIdentity",
+   "path": "/",
+   "reason": null,
+   "risk": null,
+   "rule": "aws",
+   "write": false
+  },
+  {
+   "action": "deny",
+   "body": "QWN0aW9uPUFzc3VtZVJvbGUmVmVyc2lvbj0yMDExLTA2LTE1",
+   "deny": {
+    "body": "<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>anchi: sts:AssumeRole denied</Message></Error><RequestId>anchi</RequestId></ErrorResponse>",
+    "content_type": "text/xml",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/sts/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=58f0f5508d9edccf753e851a33e1aef3dd8fedac91760817f5f0fd92dfa8fb00",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "sts.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "sts:AssumeRole",
+   "path": "/",
+   "reason": null,
+   "rule": "aws"
+  },
+  {
+   "action": "inject",
+   "body": "QWN0aW9uPUxpc3RVc2VycyZWZXJzaW9uPTIwMTAtMDUtMDg=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/iam/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=7ed2e44e34056360c5201b7047cae464ddaac2b29ff65cb9dc62621fb74d2e30",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "iam.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "iam:ListUsers",
+   "path": "/",
+   "reason": null,
+   "risk": null,
+   "rule": "aws",
+   "write": false
+  },
+  {
+   "action": "deny",
+   "body": "QWN0aW9uPUNyZWF0ZUFjY2Vzc0tleSZWZXJzaW9uPTIwMTAtMDUtMDg=",
+   "deny": {
+    "body": "<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>anchi: iam:CreateAccessKey denied</Message></Error><RequestId>anchi</RequestId></ErrorResponse>",
+    "content_type": "text/xml",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/iam/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=8d2b454a6de5f744acf3c10f92f58dc664fc0419b56897c4f33d4d7828952685",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "iam.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "iam:CreateAccessKey",
+   "path": "/",
+   "reason": null,
+   "rule": "aws"
+  },
+  {
+   "action": "deny",
+   "body": "e30=",
+   "deny": {
+    "body": "{\"__type\": \"AccessDeniedException\", \"message\": \"anchi: sso:GetRoleCredentials denied\"}",
+    "content_type": "application/x-amz-json-1.1",
+    "status": 403
+   },
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/sso/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=5c68d61da89e9f221f01647c04774cae6f0676d84279120ce057c4204ac8bcc2",
+    "content-type": "application/x-amz-json-1.1",
+    "x-amz-date": "20260102T030405Z",
+    "x-amz-target": "SWBPortalService.GetRoleCredentials"
+   },
+   "host": "sso.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "sso:GetRoleCredentials",
+   "path": "/",
+   "reason": null,
+   "rule": "aws"
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/s3/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=9086de26eb3a023a06858b9e3124a5ee788069360c9e2b42596af1575cb9166b",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "s3.us-east-1.amazonaws.com",
+   "method": "DELETE",
+   "op": "s3:DELETE /bucket?delete",
+   "path": "/bucket?delete",
+   "reason": null,
+   "risk": "aws-s3-delete",
+   "rule": "aws",
+   "write": true
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/s3/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=cbb2ae40b5e4a24262b6fb4235e554e0bebf264fd62ae27366c7ec02844b1073",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "s3.us-east-1.amazonaws.com",
+   "method": "PUT",
+   "op": "s3:PUT /bucket?policy",
+   "path": "/bucket?policy",
+   "reason": null,
+   "risk": "aws-s3-access",
+   "rule": "aws",
+   "write": true
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/s3/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=c779c37129aab1c7a06b827ead89936c2105e3dd605a8c9b90936c0e9088a378",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "s3.us-east-1.amazonaws.com",
+   "method": "PUT",
+   "op": "s3:PUT /bucket/key",
+   "path": "/bucket/key?partNumber=1&uploadId=x",
+   "reason": null,
+   "risk": null,
+   "rule": "aws",
+   "write": true
+  },
+  {
+   "action": "inject",
+   "body": "",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/s3/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=321dd7295aee426c8a349dbe1c77cd5953566d30e7a4275b219067c7f6d38a61",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "bucket.s3.amazonaws.com",
+   "method": "PUT",
+   "op": "s3:PUT /key",
+   "path": "/key",
+   "reason": null,
+   "risk": null,
+   "rule": "aws",
+   "write": true
+  },
+  {
+   "action": "inject",
+   "body": "QWN0aW9uPVRlcm1pbmF0ZUluc3RhbmNlcyZWZXJzaW9uPTIwMTYtMTEtMTU=",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/ec2/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=ae0c9d0943fbf90a2ec9822497d44f89c636dd0282f23b9d958bca4aead58c97",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "ec2.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "ec2:TerminateInstances",
+   "path": "/",
+   "reason": null,
+   "risk": "aws-destroy",
+   "rule": "aws",
+   "write": true
+  },
+  {
+   "action": "inject",
+   "body": "QWN0aW9uPURlc2NyaWJlSW5zdGFuY2VzJlZlcnNpb249MjAxNi0xMS0xNQ==",
+   "grants": [
+    "aws",
+    "claude",
+    "codex",
+    "discord",
+    "figma",
+    "firecrawl",
+    "github",
+    "linear",
+    "posthog",
+    "sentry"
+   ],
+   "headers": {
+    "authorization": "AWS4-HMAC-SHA256 Credential=AKIAANCHIPLACEHOLDER/20260102/us-east-1/ec2/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=ac33e7ea3e9562b6085a9b99a01ffd2c8d582f44715becb14770c4780f581f6b",
+    "content-type": "application/x-www-form-urlencoded",
+    "x-amz-date": "20260102T030405Z"
+   },
+   "host": "ec2.us-east-1.amazonaws.com",
+   "method": "POST",
+   "op": "ec2:DescribeInstances",
+   "path": "/",
+   "reason": null,
+   "risk": null,
+   "rule": "aws",
+   "write": false
+  }
+ ],
+ "note": "Generated by scripts/gen-egress-fixtures.py from services/egress_rules.py; do not edit.",
+ "now": "20260102T030405Z"
+}

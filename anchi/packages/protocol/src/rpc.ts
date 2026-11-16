@@ -307,9 +307,9 @@ export interface SetupStatus {
  */
 export interface HostStatus {
   placement: 'host';
-  /** scripts/host-install.sh ran (a venv with the pinned mitmproxy). */
+  /** This computer can run the services (the `openssl` command line is present). */
   installed: boolean;
-  /** The proxy and the auth service are up. */
+  /** The services process (proxy, vault, approvals) is up. */
   running: boolean;
   /** The runtimes' settings and the shims are written (`host.enable`). */
   enabled: boolean;
@@ -324,8 +324,7 @@ export interface HostStatus {
   caBundle: string;
   claude: { file: string; managed: boolean; excludedCommands: string[] };
   codex: { file: string; managed: boolean };
-  /** The Python 3.11+ the install uses, or null when the computer has none. */
-  python: string | null;
+  /** What this computer lacks to run the services (`openssl`), empty when nothing. */
   missing: string[];
   /** Connectors the proxy injects credentials for in host sessions. */
   connectors: string[];
