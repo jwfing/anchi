@@ -4,19 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#10120f" />
-    <title>Anchi — AI agents on your computer, in a sealed room</title>
+    <title>Anchi — A Secured Agent Team</title>
     <meta
       name="description"
-      content="Anchi runs a team of AI agents on your own computer. Each task runs in a sealed cell, your accounts stay in a vault, and risky actions wait for you. Sign in with ChatGPT or Claude; no terminal needed."
+      content="Anchi builds a local agent team: each agent works in its own sandbox, never touches your keys, and uses only the accounts you allow. Agents work; you rest easy."
     />
     <link rel="canonical" href="https://anchi.elseward.xyz/en/" />
-    <meta property="og:title" content="Anchi — AI agents on your computer, in a sealed room" />
+    <meta property="og:title" content="Anchi — A Secured Agent Team" />
     <meta
       property="og:description"
-      content="Anchi runs a team of AI agents on your own computer. Each task runs in a sealed cell, your accounts stay in a vault, and risky actions wait for you. Sign in with ChatGPT or Claude; no terminal needed."
+      content="Anchi builds a local agent team: each agent works in its own sandbox, never touches your keys, and uses only the accounts you allow. Agents work; you rest easy."
     />
     <meta property="og:image" content="https://anchi.elseward.xyz/anchi-hero-vertical-en-dark.jpg" />
-    <meta property="og:image:alt" content="Anchi agents in sealed cells behind a gatekeeper that holds the keys" />
+    <meta property="og:image:alt" content="Anchi agent cells and trusted credential gateway" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://anchi.elseward.xyz/en/" />
@@ -34,7 +34,7 @@
       href="https://anchi.elseward.xyz/"
     />
     <script src="/language.js" defer></script>
-    <script src="/hero.js" defer></script>
+    <script src="/terminal.js" defer></script>
     <script src="/install.js" defer></script>
   </head>
   <body id="top">
@@ -52,11 +52,11 @@
         <span class="brand-wordmark">anchi</span></a
       >
       <nav aria-label="Main navigation">
-        <a href="#protect">What it protects</a><a href="#steps">How it works</a
-        ><a href="#install">Install</a><a href="#faq">Questions</a
+        <a href="#environment">Security</a><a href="#workflow">Workflow</a
+        ><a href="#platforms">Platforms</a
         ><a href="https://github.com/jwfing/anchi" class="github-link"
           >GitHub ↗</a
-        >
+        ><a href="https://x.com/JunwenFung">X ↗</a>
         <div class="language-switch" role="group" aria-label="Language">
           <a href="/zh/" lang="zh-CN" hreflang="zh-CN" data-language="zh">中</a
           ><span>/</span
@@ -72,15 +72,17 @@
       </nav>
     </header>
     <main id="main">
-      <section class="screen hero-screen wrap">
+      <section class="hero wrap fleet-hero">
         <div class="hero-copy">
-          <p class="eyebrow">An AI agent team that runs locally</p>
-          <h1>AI agents on your computer,<br /><span>in a sealed room.</span></h1>
+          <h1>An agent team for<br /><span>your core business.</span></h1>
           <p class="intro">
-            Give an agent a job. It thinks with your ChatGPT or Claude account, works in a
-            sealed cell on your computer, and asks you before it sends, posts or merges.
+            Let agents do real work, with access controls and human approval at key steps.
           </p>
-          <p class="text-links"><a href="#install">Install the desktop app</a><i>or</i><a href="#protect">see what it protects first</a></p>
+          <div class="hero-install" aria-label="Install the Anchi desktop app">
+            <span class="install-prompt" aria-hidden="true">$</span>
+            <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop</code>
+            <button class="install-copy" type="button" aria-label="Copy install command" aria-live="polite" hidden>Copy</button>
+          </div>
         </div>
         <figure class="fleet-figure">
           <video
@@ -94,76 +96,132 @@
             loop
             playsinline
             preload="auto"
-            aria-label="Three agents work in sealed cells inside the secure room on your computer and hold only placeholders. Anchi's gatekeeper swaps in the real credentials from the vault before a request reaches GitHub, AWS or another service. Real credentials inside a cell: zero."
+            aria-label="Three agents work in isolated cells inside a local VM and hold only placeholder credentials. The trusted gateway swaps in real credentials from the vault before requests reach GitHub, AWS, and other services. Real credentials inside cells: zero."
           ></video>
         </figure>
       </section>
-
-      <div class="wrap strip">
-        <span><b class="dot">●</b> Anchi 0.5.0 · development preview</span>
-        <span>AI accounts <b>ChatGPT</b> · <b>Claude</b> · other providers</span>
-        <span>Runs on <b>macOS</b> Apple Silicon · <b>Linux</b> x86_64</span>
-        <span>14 connections · GitHub, AWS, Linear, Slack, Notion, Gmail…</span>
-        <span>Apache-2.0 · source on GitHub</span>
-      </div>
-
-      <section class="screen wrap" id="protect">
-        <h2>Let agents work.<span>Keep the keys.</span></h2>
-        <div class="rows">
-          <div class="row">
-            <span class="mark">01</span>
-            <div><h3>Your accounts stay in a vault</h3><p>Agents use GitHub or Gmail through Anchi. They never see the password or the token.</p></div>
-            <div class="flow"><span>the agent asks</span><i>→</i><span>with a fake key</span><i>→</i><span class="end">the gatekeeper swaps in the real one</span><i>→</i><span>GitHub · Gmail · AWS</span></div>
-          </div>
-          <div class="row">
-            <span class="mark">02</span>
-            <div><h3>Every task runs in its own sealed cell</h3><p>It cannot read your files unless you share a folder with it, and it uses only the accounts you switch on for it.</p></div>
-            <div class="flow"><span>a new task</span><i>→</i><span class="end">a fresh sealed cell</span><i>→</i><span>reads only shared folders</span><i>→</i><span>credential scan before it closes</span></div>
-          </div>
-          <div class="row">
-            <span class="mark">03</span>
-            <div><h3>Risky actions wait for you</h3><p>Sending, posting and merging ask first. Approve or deny in one click from the Needs you inbox; a write left waiting is refused when its time runs out.</p></div>
-            <div class="flow"><span>send · post · merge</span><i>→</i><span>Needs you</span><i>→</i><span class="you">you approve</span><i>→</i><span>it runs</span><i>·</i><span class="off">refused on timeout</span></div>
-          </div>
+      <section class="section wrap security-section" id="environment">
+        <div class="section-heading">
+          <p class="eyebrow">01 / BOUNDARY</p>
+          <h2>Let agents work.<span>Keep the keys.</span></h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/isolation.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Isolated tasks</h3>
+            <p>Two layers of isolation: each task runs in its own cell inside a local VM.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/credentials.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Protected credentials</h3>
+            <p>Trusted services use real credentials outside the sandbox.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/authorization.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Access and approvals</h3>
+            <p>
+              Set folder, connector and network access: GitHub, AWS, Linear, PostHog, Sentry,
+              Firecrawl, Figma, Discord, Gmail, Google Drive, Notion and Slack. Listed high-risk
+              writes wait by default; explicit exceptions can bypass that default.
+            </p>
+          </article>
         </div>
         <div class="security-note">
           <span aria-hidden="true">[i]</span>
           <p>
-            The vault keeps your keys at home. What an agent reads still reaches the model
-            behind its AI account.
+            Credential isolation is not data isolation. What an agent reads can
+            still reach a cloud model.
             <a href="https://github.com/jwfing/anchi/blob/main/SECURITY.md"
               >Security model ↗</a
             >
           </p>
         </div>
       </section>
-
-      <section class="screen split wrap" id="steps">
-        <figure class="shot">
-          <img src="/desktop.png" width="1440" height="900" loading="lazy" alt="The Anchi desktop app. On the left: Needs you, New agent, three agents (developer, reviewer and ops) and a Protected status. In the middle: the developer's conversation, where a task fixed a test, opened a pull request and handed the work to the reviewer. Above the reply box: the agent's ChatGPT account, its GitHub connection and that it has no access to your files." />
-        </figure>
-        <div class="side">
-          <h2>Three steps to your first agent.<span>Nothing here needs a terminal.</span></h2>
-          <ol class="steps">
-            <li><span class="mark">1</span><div><h3>Set up the secure room</h3><p>Anchi installs the sealed space your agents run in, the vault and the gatekeeper on this computer. It asks once before it installs anything; the first time takes several minutes.</p></div></li>
-            <li><span class="mark">2</span><div><h3>Sign in to an AI account</h3><p>ChatGPT, Claude or another provider, in your browser. One is enough.</p></div></li>
-            <li><span class="mark">3</span><div><h3>Meet your first agent</h3><p>Pick a ready-made agent and give it a first task. No folder or account is shared until you say so.</p></div></li>
-          </ol>
-          <p class="note">Later agents start from a description or a template under New agent; before one exists, Anchi says in plain words which accounts it acts through, which folders it reads and which teammates it can hand work to. <a href="https://github.com/jwfing/anchi/blob/main/docs/DESKTOP.md">Desktop guide ↗</a></p>
+      <section class="section wrap workflow" id="workflow">
+        <div class="section-heading">
+          <p class="eyebrow">02 / WORKFLOW</p>
+          <h2>Build a team. Put it to work.</h2>
+        </div>
+        <div class="features concise-features">
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/agent.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Create agents</h3>
+            <p>Describe the teammate and define its role.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/team.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Form a team</h3>
+            <p>Choose teammates and set who can delegate to whom.</p>
+          </article>
+          <article>
+            <div class="feature-heading">
+              <img
+                class="feature-icon"
+                src="/icons/task.svg"
+                alt=""
+                aria-hidden="true"
+                width="44"
+                height="44"
+              />
+            </div>
+            <h3>Assign tasks</h3>
+            <p>Give the team a goal and let it work together.</p>
+          </article>
         </div>
       </section>
-
-      <section class="screen install-screen wrap" id="install">
-        <h2>Runs on your computer,<span>with your own AI account.</span></h2>
-        <div class="hero-install cmd" aria-label="Install the Anchi desktop app">
-          <span class="install-prompt" aria-hidden="true">$</span>
-          <code id="install-command">curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop</code>
-          <button class="install-copy" type="button" aria-label="Copy install command" aria-live="polite" hidden>Copy</button>
+      <section class="section wrap platforms-section" id="platforms">
+        <div class="section-heading">
+          <p class="eyebrow">03 / PLATFORMS &amp; RUNTIMES</p>
+          <h2>Your platform. Your runtime.</h2>
         </div>
-        <p class="note">One line installs the desktop app and its command-line tools, checked against the release's SHA-256. Then open Anchi; the three steps run inside it. <a href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md">Setup guide ↗</a></p>
         <div class="support-grid">
           <div class="support-group">
-            <p>RUNS ON</p>
+            <p>HOST PLATFORMS</p>
             <dl>
               <div>
                 <dt>
@@ -176,7 +234,7 @@
                       height="30" /></span
                   ><span>macOS</span>
                 </dt>
-                <dd>Apple Silicon · Anchi downloads what it needs</dd>
+                <dd>Apple Silicon</dd>
               </div>
               <div>
                 <dt>
@@ -189,12 +247,12 @@
                       height="30" /></span
                   ><span>Linux</span>
                 </dt>
-                <dd>x86_64 · experimental · needs QEMU and KVM</dd>
+                <dd>x86_64 · Experimental</dd>
               </div>
             </dl>
           </div>
           <div class="support-group">
-            <p>AI ACCOUNTS · ONE IS ENOUGH</p>
+            <p>AGENT RUNTIMES</p>
             <dl>
               <div>
                 <dt>
@@ -205,9 +263,9 @@
                       aria-hidden="true"
                       width="30"
                       height="30" /></span
-                  ><span>ChatGPT</span>
+                  ><span>Codex</span>
                 </dt>
-                <dd>Codex by OpenAI · sign in from the app</dd>
+                <dd>OpenAI</dd>
               </div>
               <div>
                 <dt>
@@ -218,9 +276,9 @@
                       aria-hidden="true"
                       width="30"
                       height="30" /></span
-                  ><span>Claude</span>
+                  ><span>Claude Code</span>
                 </dt>
-                <dd>Claude Code by Anthropic · sign in from the app</dd>
+                <dd>Anthropic</dd>
               </div>
               <div>
                 <dt>
@@ -231,32 +289,273 @@
                       aria-hidden="true"
                       width="30"
                       height="30" /></span
-                  ><span>Other provider</span>
+                  ><span>Hermes Agent</span>
                 </dt>
-                <dd>Hermes Agent · an address, a model and an API key</dd>
+                <dd>Nous Research</dd>
               </div>
             </dl>
           </div>
         </div>
         <p class="extension-note">
-          Other platforms and providers can be added by contributors.
+          Want another platform or runtime?
           <a href="https://github.com/jwfing/anchi/blob/main/CONTRIBUTING.md"
-            >Contributing guide ↗</a
+            >Help extend Anchi ↗</a
           >
         </p>
       </section>
-
-      <section class="screen faq-screen wrap" id="faq">
-        <div>
-          <h2>Before you start.<span>What to expect.</span></h2>
-          <p class="note"><a href="https://github.com/jwfing/anchi/blob/main/docs/README.md">Documentation</a> · <a href="https://github.com/jwfing/anchi/releases">Release notes</a> · <a href="https://github.com/jwfing/anchi/issues/new/choose">Report a problem</a> · <a href="https://github.com/jwfing/anchi/security/advisories/new">Report a vulnerability privately</a></p>
+      <section class="section wrap boot-section" id="setup">
+        <div class="boot-heading">
+          <div>
+            <p class="eyebrow">04 / BOOT YOUR TEAM</p>
+            <h2>Open Anchi.<span>Grow your team here.</span></h2>
+          </div>
+          <a
+            class="button primary"
+            href="https://github.com/jwfing/anchi/blob/main/docs/GETTING_STARTED.md"
+            >Setup guide ↗</a
+          >
         </div>
+        <figure class="app-shot">
+          <img src="/desktop.png" width="1440" height="900" loading="lazy" alt="The Anchi desktop app: three agents, developer, reviewer and ops, on the left; the developer's task conversation in the middle; the selected task's result, the work it delegated to the reviewer and its full transcript on the right." />
+          <figcaption>Desktop app · example data. Install it with <code>--desktop</code>: <code>curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop</code>. <a href="https://github.com/jwfing/anchi/blob/main/docs/DESKTOP.md#install">Desktop guide ↗</a></figcaption>
+        </figure>
+        <section
+          class="demo"
+          id="terminal"
+          aria-label="INTERACTIVE TUI PREVIEW"
+        >
+          <div class="terminal">
+            <div class="terminal-title">
+              <span><span class="prompt">❯</span> anchi</span
+              ><span>anchi — ~/workspace</span
+              ><span class="window-mark" aria-hidden="true">─ □ ×</span>
+            </div>
+            <div
+              class="view-tabs"
+              role="tablist"
+              aria-label="INTERACTIVE TUI PREVIEW"
+              hidden
+            >
+              <button
+                type="button"
+                id="view-team"
+                role="tab"
+                aria-controls="panel-team"
+                aria-selected="true"
+                tabindex="0"
+                data-view="team"
+              >
+                01 Teamwork</button
+              ><button
+                type="button"
+                id="view-builder"
+                role="tab"
+                aria-controls="panel-builder"
+                aria-selected="false"
+                tabindex="-1"
+                data-view="builder"
+              >
+                02 Agent builder</button
+              ><button
+                type="button"
+                id="view-approval"
+                role="tab"
+                aria-controls="panel-approval"
+                aria-selected="false"
+                tabindex="-1"
+                data-view="approval"
+              >
+                03 Approvals
+              </button>
+            </div>
+            <div class="terminal-body">
+              <aside class="terminal-sidebar" aria-label="Example sidebar">
+                <div class="sidebar-brand">anchi <span>安栖</span></div>
+                <p class="sidebar-heading">Configure</p>
+                <span>Runtimes</span><span>Skills</span><span>Connectors</span
+                ><span>Usage</span><span>Access</span>
+                <p class="sidebar-heading">Agents <span>3</span></p>
+                <span data-side="builder">+ Agent builder</span
+                ><span data-side="team" class="side-selected"
+                  >› @lead <i class="lime">●</i></span
+                ><span>@developer <i class="lime">●</i></span
+                ><span>@reviewer <i class="amber">●</i></span>
+                <p class="sidebar-heading">Tasks</p>
+                <span class="side-task">✓ review-release</span
+                ><span class="side-task">✓ check-diff</span>
+                <div class="sidebar-bottom">
+                  <span class="status-dot" aria-hidden="true"></span> local VM
+                </div>
+              </aside>
+              <div class="terminal-main">
+                <section
+                  class="demo-panel"
+                  id="panel-team"
+                  role="tabpanel"
+                  aria-labelledby="view-team"
+                  tabindex="0"
+                >
+                  <div class="panel-heading">
+                    <span>@lead / review the release</span
+                    ><span class="amber">● waiting</span>
+                  </div>
+                  <div class="transcript">
+                    <div class="message">
+                      <span class="speaker cyan">you</span>
+                      <p>
+                        Review the release. Ask @reviewer to check the changes.
+                      </p>
+                    </div>
+                    <div class="message">
+                      <span class="speaker lime"
+                        >@lead <span class="muted">/ codex</span></span
+                      >
+                      <p>
+                        I’ll inspect the branch and delegate the code review.
+                      </p>
+                    </div>
+                    <div class="tool-call">
+                      <span class="amber">↳ delegate → @reviewer</span>
+                      <p>Check the diff for bugs and missing tests.</p>
+                      <span class="muted"
+                        >└ <span class="lime">✓</span> Review complete. The
+                        patch is ready.</span
+                      >
+                    </div>
+                    <div class="held-write">
+                      <span class="amber">! approval_required</span
+                      ><span>Merge held for your approval.</span
+                      ><code>github.pull_request.merge</code>
+                    </div>
+                  </div>
+                  <div class="terminal-input">
+                    <span class="prompt">❯</span> Send a follow-up…<span
+                      class="block-cursor"
+                      aria-hidden="true"
+                    ></span>
+                  </div>
+                </section>
+                <section
+                  class="demo-panel"
+                  id="panel-builder"
+                  role="tabpanel"
+                  aria-labelledby="view-builder"
+                  tabindex="0"
+                  hidden
+                >
+                  <div class="panel-heading">
+                    <span>Agent builder</span
+                    ><span class="lime">+ new agent</span>
+                  </div>
+                  <div class="transcript">
+                    <div class="message">
+                      <span class="speaker cyan">you</span>
+                      <p>
+                        Create a reviewer. Give it GitHub access, read-only
+                        project files, and ask before writes.
+                      </p>
+                    </div>
+                    <div class="message">
+                      <span class="speaker lime">builder</span>
+                      <p>
+                        Here is the proposed agent. Review its scope before
+                        saving.
+                      </p>
+                    </div>
+                    <div class="config-preview">
+                      <p>
+                        <span class="muted">agent</span
+                        ><span class="lime">@reviewer</span>
+                      </p>
+                      <p>
+                        <span class="muted">runtime</span><span>claude</span>
+                      </p>
+                      <p>
+                        <span class="muted">connectors</span
+                        ><span>github <span class="amber">[ask]</span></span>
+                      </p>
+                      <p>
+                        <span class="muted">workspace</span
+                        ><span
+                          >project <span class="cyan">[read-only]</span></span
+                        >
+                      </p>
+                      <p><span class="muted">delegates</span><span>[]</span></p>
+                    </div>
+                  </div>
+                  <div class="terminal-input">
+                    <span class="lime">+</span> Proposal / review before
+                    anything is written
+                  </div>
+                </section>
+                <section
+                  class="demo-panel"
+                  id="panel-approval"
+                  role="tabpanel"
+                  aria-labelledby="view-approval"
+                  tabindex="0"
+                  hidden
+                >
+                  <div class="panel-heading">
+                    <span>Approvals / github</span
+                    ><span class="amber">1 pending</span>
+                  </div>
+                  <div class="transcript approval-transcript">
+                    <p class="approval-tag">WAITING FOR YOU</p>
+                    <h3>Approve a write by @lead?</h3>
+                    <p>
+                      Anchi holds listed high-risk writes by default unless exempted.
+                      Open review, choose y or n, then press Enter to confirm.
+                    </p>
+                    <div class="approval-detail">
+                      <p>
+                        <span>operation</span><code>pull_request.merge</code>
+                      </p>
+                      <p><span>target</span><code>example/app #42</code></p>
+                      <p>
+                        <span>started by</span
+                        ><code>you → @lead → @reviewer → @lead</code>
+                      </p>
+                    </div>
+                    <div class="approval-actions">
+                      <button type="button" data-decision="approved">
+                        [y] Choose approve</button
+                      ><button type="button" data-decision="denied">
+                        [n] Choose deny</button
+                      ><button type="button" data-confirm hidden>[Enter] Confirm example</button><button type="button" data-reset hidden>
+                        Replay example ↺
+                      </button>
+                    </div>
+                    <p
+                      class="decision-result"
+                      role="status"
+                      aria-live="polite"
+                    ></p>
+                  </div>
+                  <div class="terminal-input muted">
+                    This preview never executes an operation.
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="terminal-status">
+              <span
+                ><kbd>Tab</kbd> switch pane <kbd>Ctrl+X P</kbd> commands
+                <kbd>Ctrl+X ?</kbd> help</span
+              ><span><span class="lime">●</span> Codex + Claude Code + Hermes</span>
+            </div>
+          </div>
+          <p class="demo-caption">Interactive example · No live tasks</p>
+        </section>
+      </section>
+      <section class="section wrap" id="faq">
+        <div class="section-heading"><p class="eyebrow">05 / BEFORE YOU START</p><h2>What to expect.</h2></div>
         <div class="faq-list">
-          <details open><summary>Which AI account do I need?</summary><p>One of ChatGPT, Claude or another OpenAI-compatible provider. You sign in from the app, in your browser, with no CLI to install. Agents think with that account and use its subscription quota or API credit. A starter agent can be made without any model call. <a href="https://github.com/jwfing/anchi/blob/main/docs/FIRST_TASK.md">First-task guide ↗</a></p></details>
-          <details open><summary>What does setup need?</summary><p>On an Apple Silicon Mac, Anchi downloads what the secure room needs and checks it, so there is nothing to install first. Linux needs QEMU and KVM. The secure room takes half of your computer's CPUs and memory by default, which you can change, and at least 8 GB of disk plus room for your projects. The first setup takes several minutes.</p></details>
-          <details open><summary>Does everything stay on my computer?</summary><p>Your passwords and tokens do: they stay in the vault and never enter a cell. What an agent reads can reach the model behind its AI account and the websites it may visit. By default that is any public website. Under <strong>Advanced</strong> you can limit it to a list; the services it is connected to stay reachable, and Firecrawl, when connected, can fetch pages outside the list.</p></details>
-          <details open><summary>Is this ready for my real accounts?</summary><p>Release packages are not signed yet. If that matters to you, build and run Anchi from source, the desktop app included (<code>scripts/anchi-desktop</code>), so what runs is code you can review. Anchi has not completed a third-party security audit; before connecting sensitive production accounts, try the access and approval flow with test accounts.</p></details>
-          <details open><summary>Prefer a terminal?</summary><p>The same team also runs in the TUI and the CLI, with the same vault, cells and approvals. After you update the app, <strong>Needs you</strong> tells you when the secure room needs an update too. <a href="https://github.com/jwfing/anchi/blob/main/docs/KEYBINDINGS.md">TUI keys ↗</a></p></details>
+          <details><summary>Do I need a Codex account?</summary><p>Connect one runtime: Codex, Claude Code or Hermes. The builder uses whichever runtime is connected, and a starter agent can be created without any model call; a hand-written agent file works too. <a href="https://github.com/jwfing/anchi/blob/main/docs/FIRST_TASK.md">First-task guide ↗</a></p></details>
+          <details><summary>How much setup and disk space does it need?</summary><p>Install Lima and Python (plus QEMU/KVM on Linux). Setup creates a VM with half your host's CPUs and memory by default, and lets you change that. Keep at least 8 GB free for installation and more for images and projects. First setup and the first runtime build take several minutes.</p></details>
+          <details><summary>Does all my data stay on my computer?</summary><p>No. Managed credentials stay outside task cells, but content can reach the model and permitted destinations. Omitting egress allows public Internet access. An egress list always permits runtime and configured connector hosts; Firecrawl can fetch URLs outside it.</p></details>
+          <details><summary>Is this ready for sensitive production accounts?</summary><p>Release packages are not signed yet. If that matters to you, build and run Anchi from source, the desktop app included (<code>scripts/anchi-desktop</code>), so what runs is code you can review. Anchi has not completed a third-party security audit; before connecting sensitive production accounts, try the authorization and approval flow with test accounts. Model calls use your subscription quota or API credit.</p></details>
+          <details><summary>Where do I find docs, upgrades or help?</summary><p><a href="https://github.com/jwfing/anchi/blob/main/docs/README.md">Documentation</a> · <a href="https://github.com/jwfing/anchi/releases">Release notes</a> · <a href="https://github.com/jwfing/anchi/issues/new/choose">Report a problem</a>. Check release notes for required VM updates after updating the app. <a href="https://github.com/jwfing/anchi/security/advisories/new">Report vulnerabilities privately</a>.</p></details>
         </div>
       </section>
     </main>

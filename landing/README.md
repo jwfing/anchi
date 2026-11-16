@@ -41,36 +41,29 @@ gateway. The wordmark is live text so it stays crisp and accessible.
 `dist/desktop.png` is the desktop app screenshot with example data; see
 `docs/assets/README.md` to regenerate it.
 
-## Page design
+## Terminal design
 
-The page is a stack of screens (`.screen`, one viewport tall, parted by the page's hairline;
-agent4.xyz was the layout reference). The hero fills the first screen: a headline that names
-the thing and where it runs (AI agents on your computer, in a sealed room), one sentence about
-an agent that thinks with your own ChatGPT or Claude account, works in a sealed cell and asks
-before it sends, posts or merges, two text links, and the looping hero animation beside them.
-Under it one line of facts (`.strip`: version, AI accounts, platforms, connections, licence).
-Then one screen each: what Anchi protects (three rows, each with its flow in chips: lime marks
-Anchi's step, amber the step that waits for you), the three steps of the app's guide beside the
-desktop screenshot, the install command (`--desktop`, once on the page) with the platforms and
-AI accounts, and the questions. The TUI and CLI get one answer with a link to the key bindings,
-not a preview: the page is for people the desktop app is for.
-Keep setup details and download alternatives in the guides, and the platform status and
-security claims aligned with the root README.
+The hero contains a headline about an agent team for core business, one sentence about real
+work with access controls and human approval, and the desktop install command (`--desktop`).
+Keep setup details and download alternatives in the guides. The looping hero animation is
+followed by security boundaries, workflow, platforms/runtimes, and a TUI preview.
+Keep the platform status and security claims aligned with the root README.
 
-The page uses the desktop app's words, not the protocol's: the secure room (the VM), a sealed
-cell, the vault, an AI account (ChatGPT, Claude, Other provider; a runtime), a shared folder
-(a workspace), a teammate (delegation), **Needs you** (approvals), **New agent** (the builder)
-and **What it touched**. When the app renames something, rename it here in both languages
-(`docs/DESKTOP.md` has the current words).
+`terminal.js` enhances the static page with keyboard-accessible tabs (teamwork,
+agent builder, approvals) and simulated approval outcomes (choose y/n or click a choice, then Enter or Confirm). The demo never connects
+to the daemon or executes operations. Without JavaScript, the default session and
+documentation links remain available.
 
 The hero animation is the vertical export from `hero-animation/hero-v.html`
 (`dist/anchi-hero-vertical-{zh,en}-dark.mp4`, 880×928, 10.6s loop, no window frame). The matching
 `.jpg` is its first frame, used as the poster. Re-export both from
 `hero-animation/` when the diagram changes (see its README). Each language page
 loads its own video, and its `aria-label` explains the credential flow.
-`hero.js` pauses the video on the poster frame under `prefers-reduced-motion`; the page
-has no other script besides `language.js` and `install.js`, and works without JavaScript.
-Animations and smooth scrolling honor `prefers-reduced-motion`.
+`terminal.js` pauses the video on the poster frame under `prefers-reduced-motion`.
+
+Keep the demo aligned with the real TUI and its key bindings. On small screens the
+illustrative sidebar is hidden so the transcript remains readable. Animations and
+smooth scrolling honor `prefers-reduced-motion`.
 
 ## Section icons and brand assets
 
@@ -82,7 +75,7 @@ The six feature icons in `dist/icons/` are original SVG drawings for Anchi:
 The lime accent (`--lime`) marks actions and keywords only: buttons, links, the
 install prompt and copy control, hover/focus/selected states, and the highlighted
 second line of headings. Section labels, notes, and all icons use the neutral
-text colors (`--muted` / `--ink`).
+text colors (`--muted` / `--ink`). The TUI preview keeps the real TUI's colors.
 
 The four active platform/runtime icons (`*-ascii.svg`) are custom, monochrome
 character-grid illustrations for this page: an apple silhouette, a penguin,
