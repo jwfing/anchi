@@ -991,3 +991,45 @@ describe('destinations', () => {
     for (const first of listedRanges()) expect(publicAddress(infos(first))[0], first).toBeNull();
   });
 });
+
+describe('header parsing in linear time', () => {
+  // CodeQL flagged regexes that backtrack on session-controlled headers; these inputs took
+  // seconds with them and must stay fast.
+  it('parses AWS credential scopes without backtracking, and refuses malformed ones', async () => {
+    const { awsCredentialScope } = await import('../src/rules/decide.ts');
+    const good =
+      'AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261116/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=' +
+      'a'.repeat(64);
+    expect(awsCredentialScope(good)).toEqual({
+      key: 'AKIDEXAMPLE',
+      date: '20261116',
+      region: 'us-east-1',
+      service: 's3',
+    });
+    for (const bad of [
+      'Credential=AKID/2026111/us-east-1/s3/aws4_request',
+      'Credential=AKID/20261116/us-east-1/s3/aws4_requestX',
+      'Credential=/20261116/us-east-1/s3/aws4_request',
+      'Credential=AKID/20261116//s3/aws4_request',
+      'Credential=AKID/20261116/us-east-1/s3/extra/aws4_request',
+    ]) {
+      expect(awsCredentialScope(bad), bad).toBeNull();
+    }
+    const started = Date.now();
+    expect(awsCredentialScope('Credential='.repeat(50_000))).toBeNull();
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('trims trailing dots and matches the Hermes deny rule without backtracking', async () => {
+    const { hostMatches, hermesRule } = await import('../src/rules/decide.ts');
+    expect(hostMatches('api.github.com', 'API.github.com..')).toBe(true);
+    const started = Date.now();
+    expect(hostMatches('example.com', `x${'.'.repeat(100_000)}`)).toBe(false);
+    const deny = hermesRule('llm.example.com').deny![0]!;
+    expect(deny.test('GET /v1/organization/keys')).toBe(true);
+    expect(deny.test('POST /dashboard')).toBe(true);
+    expect(deny.test('GET /v1/chat/completions')).toBe(false);
+    expect(deny.test(`GET ${'/'.repeat(100_000)}x`)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+});

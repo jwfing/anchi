@@ -26,8 +26,15 @@ const decision = (
   reason: string | null = null,
 ): Decision => ({ action, rule, op, reason });
 
+/** `host` without its trailing dots, by a loop: a regex here would backtrack on a long run of dots. */
+function trimDots(host: string): string {
+  let end = host.length;
+  while (end > 0 && host.charCodeAt(end - 1) === 46) end--;
+  return host.slice(0, end);
+}
+
 export function hostMatches(pattern: string, host: string): boolean {
-  const h = host.toLowerCase().replace(/\.+$/, '');
+  const h = trimDots(host.toLowerCase());
   if (pattern.startsWith('*.')) return h.endsWith(pattern.slice(1));
   return h === pattern;
 }
@@ -56,7 +63,9 @@ export function hermesRule(host: string, basePath = ''): Rule {
     replaceOnly: true,
     ...(prefix ? { path: new RegExp(`^${escapeRegExp(prefix)}(/|$)`) } : {}),
     // OpenAI-style administration (organization, projects, API keys) is not an agent's business.
-    deny: [/^\S+ (\/[^ ]*)?\/(organization|organizations|dashboard)(\/|$)/i],
+    // Matched against `METHOD path`; the method has no slash, so any such segment is in the path
+    // (the Python rule's `^\S+ (/[^ ]*)?/…` written without its backtracking prefix).
+    deny: [/\/(?:organization|organizations|dashboard)(?:\/|$)/i],
   };
 }
 
@@ -81,11 +90,27 @@ export function classifyCredential(headers: Headers): 'none' | 'placeholder' | '
   return 'other';
 }
 
-const AWS_SCOPE = /Credential=[^/]+\/\d{8}\/([^/]+)\/([^/]+)\/aws4_request/;
+/**
+ * The `Credential=<key>/<date>/<region>/<service>/aws4_request` element of a SigV4
+ * Authorization header, split on its delimiters rather than matched with a regex: the header
+ * comes from the session, and `Credential=[^/]+/…` backtracks on repeated `Credential=`.
+ */
+export function awsCredentialScope(
+  authorization: string,
+): { key: string; date: string; region: string; service: string } | null {
+  for (const part of authorization.split(/[\s,]/)) {
+    if (!part.startsWith('Credential=')) continue;
+    const [key, date, region, service, terminal, ...rest] = part.slice(11).split('/');
+    if (rest.length || terminal !== 'aws4_request' || !key || !region || !service) continue;
+    if (date?.length !== 8 || !/^\d{8}$/.test(date)) continue;
+    return { key, date, region, service };
+  }
+  return null;
+}
 
 export function awsScope(headers: Headers): [string, string] | null {
-  const match = AWS_SCOPE.exec(headers.authorization ?? '');
-  return match ? [match[1]!, match[2]!] : null;
+  const scope = awsCredentialScope(headers.authorization ?? '');
+  return scope ? [scope.region, scope.service] : null;
 }
 
 /** The first value of `key` in a query string, as Python's parse_qs returns it (blank dropped). */

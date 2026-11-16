@@ -63,6 +63,8 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
     env = {
         **os.environ,
         "HOME": str(home),
+        # The default placement on a computer, whatever the CI job sets for its guest steps.
+        "ANCHI_GUEST": "host",
         "ANCHI_HOME": str(home / ".anchi"),
         "ANCHI_INSTALL_ROOT": str(home / ".local/share/anchi"),
         "ANCHI_BIN_DIR": str(bindir),

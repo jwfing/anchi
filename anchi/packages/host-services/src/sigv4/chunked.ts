@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import type { Headers } from '../rules/decide.ts';
+import { awsCredentialScope, type Headers } from '../rules/decide.ts';
 import { type AwsCredential, AWS_STREAMING, EMPTY_SHA256, signingKey } from './sign.ts';
 
 /**
@@ -9,8 +9,8 @@ import { type AwsCredential, AWS_STREAMING, EMPTY_SHA256, signingKey } from './s
  * its length.
  */
 
-const AWS_SIGNATURE =
-  /Credential=[^/]+\/(\d{8}\/[^/]+\/[^/]+\/aws4_request),.*Signature=([0-9a-f]{64})$/;
+/** The seed signature at the end of a re-signed Authorization header (fixed length, anchored). */
+const SEED_SIGNATURE = /Signature=([0-9a-f]{64})$/;
 const CHUNK_LINE = /^([0-9a-fA-F]{1,8});chunk-signature=[0-9a-f]{64}$/;
 const TRAILER =
   /^((?:[A-Za-z0-9-]{1,64}:[^\r\n]{0,256}\r\n){1,8})x-amz-trailer-signature:[0-9a-f]{64}\r\n\r\n$/;
@@ -133,10 +133,17 @@ export function awsChunkResigner(
 ): ChunkResigner | null {
   const kind = AWS_STREAMING[headers['x-amz-content-sha256'] ?? ''];
   if (kind === null || kind === undefined) return null;
-  const match = AWS_SIGNATURE.exec(headers.authorization ?? '');
-  if (match === null) throw new Error('re-signed request has no signature');
-  const [, scope, seed] = match;
-  const [date, region, service] = scope!.split('/');
-  const key = signingKey(credential.secret_access_key, date!, region!, service!);
-  return new ChunkResigner(key, headers['x-amz-date']!, scope!, seed!, kind === 'trailer');
+  const authorization = headers.authorization ?? '';
+  const scope = awsCredentialScope(authorization);
+  const seed = SEED_SIGNATURE.exec(authorization)?.[1];
+  if (scope === null || seed === undefined) throw new Error('re-signed request has no signature');
+  const { date, region, service } = scope;
+  const key = signingKey(credential.secret_access_key, date, region, service);
+  return new ChunkResigner(
+    key,
+    headers['x-amz-date']!,
+    `${date}/${region}/${service}/aws4_request`,
+    seed,
+    kind === 'trailer',
+  );
 }

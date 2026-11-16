@@ -283,8 +283,15 @@ export class HostProxy {
   // ── requests ─────────────────────────────────────────────
 
   private respond(res: ServerResponse, refusal: Refusal): void {
+    // Refusal bodies can quote request-derived text (a host, a path): never served as HTML.
+    const type =
+      refusal.headers['content-type'] === 'application/x-git-receive-pack-result'
+        ? 'application/x-git-receive-pack-result'
+        : 'text/plain; charset=utf-8';
     res.writeHead(refusal.status, {
       ...refusal.headers,
+      'content-type': type,
+      'x-content-type-options': 'nosniff',
       'content-length': String(refusal.body.length),
       connection: 'close',
     });
