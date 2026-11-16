@@ -44,14 +44,12 @@ import {
   type Methods,
   SETUP_ACTIONS,
   type SetupAction,
-  type ResetPreview,
   type ServiceConnectorId,
   type SetupStatus,
   type HostStatus,
   type TaskStatus,
   TOKEN_CONNECTOR_IDS,
   type TokenConnectorId,
-  type VmSize,
 } from '@anchi/protocol';
 import { ApprovalWatcher } from './approvals.ts';
 import { mergeAuditRows, summarizeAccess, summarizeAudit } from './audit.ts';
@@ -63,7 +61,7 @@ import {
   parseBlocks,
   Proposals,
 } from './builder.ts';
-import { Guest, type VmTransport, vmTransport } from './guest.ts';
+import { Guest, guestPlacement, InGuestTransport, type VmTransport } from './guest.ts';
 import {
   disableHost,
   enableHost,
@@ -82,17 +80,12 @@ import {
   ghToken,
   hostConnectorsFile,
   hostOutput,
-  hostResources,
   HOST_SETUP_STEPS,
   IN_GUEST_SETUP_STEPS,
   installKind,
-  migrateLegacyVm,
   readHostConnectors,
-  RESET_STEPS,
   SetupRunner,
-  SETUP_STEPS,
   VAULT_KEY,
-  vmSizeEnv,
   writeHostConnectors,
 } from './host.ts';
 import { CELL_CEILING, DEFAULT_MAX_CELLS, Hub } from './hub.ts';
@@ -113,11 +106,9 @@ import {
   CONNECTOR_IDS,
   connectorStatuses,
   readHostCodexLogin,
-  limaMinimum,
   prepareEnvironment,
   setupStatus,
 } from './setup.ts';
-import { activateLima, ensureLima } from './lima.ts';
 import { CodexSignIn, SIGN_IN_CANCELLED } from './codex-sign-in.ts';
 import { ClaudeSignIn, SIGN_IN_CANCELLED as CLAUDE_SIGN_IN_CANCELLED } from './claude-sign-in.ts';
 import { EVENTS_PAGE_LIMIT, Store } from './store.ts';
@@ -169,19 +160,7 @@ export interface DaemonOptions {
   turnTimeoutMs?: number;
   /** Host commands of setup steps and of connector imports (tests replace them). */
   setupSteps?: Partial<Record<SetupAction, string[][]>>;
-  /** Host commands of `setup.reset` (tests replace them; the default deletes the VM). */
-  resetSteps?: string[][];
   hostRun?: typeof hostOutput;
-  /**
-   * Rename a VM created as `secure-vm` and move the vault key at start (scripts/vm-name.sh).
-   * Off unless set: only the real daemon may stop and rename the machine's VM.
-   */
-  migrateVm?: boolean;
-  /**
-   * Download the pinned Lima into the Anchi home when none of the required version is on PATH
-   * (src/lima.ts). Off unless set: tests never download.
-   */
-  manageLima?: boolean;
   /** Keep runtime access tokens in step with host logins (default true). */
   hostLoginSync?: boolean;
   /** Host credential readers; tests use temporary files and a fake Keychain. */
@@ -222,18 +201,6 @@ type Handlers = {
 };
 
 const TASK_ID = /^t-[0-9a-f]{10}$/;
-
-/** `setup.run`'s `vmSize`: two numbers; their range is checked against the host. */
-function vmSizeParam(v: unknown): VmSize {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
-    throw new Error('BAD_VM_SIZE: vmSize must be {cpus, memoryGiB}');
-  }
-  const { cpus, memoryGiB, ...rest } = v as Record<string, unknown>;
-  if (Object.keys(rest).length || typeof cpus !== 'number' || typeof memoryGiB !== 'number') {
-    throw new Error('BAD_VM_SIZE: vmSize must be {cpus, memoryGiB}');
-  }
-  return { cpus, memoryGiB };
-}
 
 function str(v: unknown, what: string, max: number): string {
   if (typeof v !== 'string' || !v.length || v.length > max) throw new Error(`invalid ${what}`);
@@ -276,7 +243,7 @@ export class Daemon {
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
   readonly workspaceRoot: string;
-  /** The last inventory, so proposals can be checked without asking the VM again. */
+  /** The last inventory, so proposals can be checked without asking the guest again. */
   private lastInventory: Inventory | undefined;
   readonly services: ServiceSetup;
   private server?: Server;
@@ -492,7 +459,7 @@ export class Daemon {
 
   /**
    * Cells working at once: `maxCells` in ~/.anchi/settings.yaml (1–16), default 4. Each working
-   * cell can use up to 2 GB of the VM's memory; raise the VM's memory with it. A number outside
+   * cell can use up to 2 GB of the guest's memory. A number outside
    * the range becomes the nearest one allowed, and anything else the default; both are logged,
    * so a typo does not silently halve the cells the user asked for.
    */
@@ -538,7 +505,7 @@ export class Daemon {
     return this.autoBuilderRuntime;
   }
 
-  /** The VM's components come from another Anchi version; set by the latest setup status. */
+  /** The guest's components come from another Anchi version; set by the latest setup status. */
   private guestOutdated?: { guest: string | null; app: string };
   private warnedGuest = false;
 
@@ -563,19 +530,12 @@ export class Daemon {
 
   private guestWarning(): string {
     const { guest, app } = this.guestOutdated ?? { guest: null, app: APP_VERSION };
-    return `⚠ the VM's components were installed by Anchi ${guest ?? 'an older release'}; this is Anchi ${app}: run anchi setup install (Runtimes → I) to update them`;
+    return `⚠ the guest's components were installed by Anchi ${guest ?? 'an older release'}; this is Anchi ${app}: run anchi setup install (Runtimes → I) to update them`;
   }
 
-  /** Reads the setup status for its side effects; a VM that is not up is not an error. */
   /**
-   * A remote server's restart (a reboot, a disk resize) clears the vault's master key from tmpfs,
-   * and its triggers and tasks then fail until someone unlocks it. Its vault key lies on the same
-   * machine as the encrypted vault, so staying locked protects nothing there: unlock it at start.
-   * The Lima VM is different: its key stays on this computer, outside the VM's disk.
-   */
-  /**
-   * Host placement: starts the proxy and the auth service once the Python side is installed,
-   * then registers the host principal. Failures are logged; `host.status` says what is missing.
+   * Host placement: starts the services process (proxy, vault, approvals) once installed, then
+   * registers the host principal. Failures are logged; `host.status` says what is missing.
    */
   private async startHostServices(): Promise<void> {
     const services = this.hostServices;
@@ -610,7 +570,7 @@ export class Daemon {
     }
   }
 
-  /** A host placement runs no cells: tasks need a VM or a remote server. */
+  /** A host placement runs no cells: tasks need a remote server. */
   private noCells(): void {
     if (this.vm.placement === 'host')
       throw new Error(
@@ -620,7 +580,9 @@ export class Daemon {
 
   private hostOnly(): HostTransport {
     if (!(this.vm instanceof HostTransport))
-      throw new Error('HOST_PLACEMENT_ONLY: this daemon drives a VM; see docs/HOST_PLACEMENT.md');
+      throw new Error(
+        'HOST_PLACEMENT_ONLY: this daemon runs on a remote server; see docs/HOST_PLACEMENT.md',
+      );
     return this.vm;
   }
 
@@ -634,6 +596,12 @@ export class Daemon {
     );
   }
 
+  /**
+   * A restart (a reboot, a disk resize, the services process ending) clears the vault's master
+   * key from memory, and triggers and tasks then fail until someone unlocks it. The vault key
+   * lies on the same machine as the encrypted vault, so staying locked protects nothing here:
+   * unlock it at start.
+   */
   private async unlockServerVault(): Promise<void> {
     if (!existsSync(this.opts.vaultKeyFile ?? VAULT_KEY)) return;
     try {
@@ -673,14 +641,14 @@ export class Daemon {
     this.log = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
     this.vm =
       opts.vm ??
-      (process.env.ANCHI_GUEST === 'host'
+      (guestPlacement() === 'host'
         ? new HostTransport(hostPaths(opts.layout))
-        : vmTransport());
+        : new InGuestTransport());
     this.claudeSignIn = new ClaudeSignIn({
       home: opts.layout.root,
       log: (line) => this.log(line),
-      // A Lima daemon shares the user's computer; a daemon in the guest is a remote server.
-      browserHere: this.vm.placement === 'lima',
+      // A host-placement daemon shares the user's computer; a daemon in the guest is a remote server.
+      browserHere: this.vm.placement === 'host',
       store: async (token) => {
         await this.guest.importClaude(token);
         this.log('claude sign-in imported');
@@ -711,17 +679,7 @@ export class Daemon {
       opts.openUrl ?? (inGuest ? () => {} : undefined),
     );
     this.setup = new SetupRunner(
-      opts.setupSteps ?? (onHost ? HOST_SETUP_STEPS : inGuest ? IN_GUEST_SETUP_STEPS : SETUP_STEPS),
-      undefined,
-      opts.resetSteps ?? (inGuest || onHost ? null : RESET_STEPS),
-      undefined,
-      opts.manageLima && this.vm.placement === 'lima'
-        ? async (action, onLine) => {
-            // Deleting the VM needs no download: without any Lima there is no VM.
-            if (action === 'reset') activateLima(opts.layout.root, limaMinimum());
-            else await ensureLima(opts.layout.root, limaMinimum(), onLine);
-          }
-        : undefined,
+      opts.setupSteps ?? (onHost ? HOST_SETUP_STEPS : IN_GUEST_SETUP_STEPS),
     );
     this.approvals = new ApprovalWatcher(this.guest.transport, this.log, (id) =>
       this.hub.origin(id),
@@ -880,7 +838,7 @@ export class Daemon {
   }
 
   /**
-   * What agents can be given: installed skills, connectors (asked from the VM; null when it
+   * What agents can be given: installed skills, connectors (asked from the guest; null when it
    * cannot answer), directories under ~/AnchiWorkspaces, agents and images.
    */
   /** The subscription limits the egress proxy last saw, by runtime. */
@@ -974,7 +932,7 @@ export class Daemon {
     return inventory;
   }
 
-  /** The inventory without asking the VM: connector states from the last full one. */
+  /** The inventory without asking the guest: connector states from the last full one. */
   private quickInventory(): Pick<
     Inventory,
     'skills' | 'connectors' | 'runtimes' | 'agents' | 'servers' | 'peerAgents'
@@ -1109,7 +1067,7 @@ export class Daemon {
 
   /**
    * Deletes an agent and what Anchi keeps for it; see `agents.delete`. The steps on this machine
-   * run first, so a VM that is not running only leaves its part for a later run.
+   * run first, so a guest that is not running only leaves its part for a later run.
    */
   async deleteAgent(raw: unknown, confirm: unknown): Promise<AgentDeletion> {
     const id = this.deletableId(raw);
@@ -1154,7 +1112,7 @@ export class Daemon {
       vm = await this.guest.purgeAgent(id);
     } catch (err) {
       warnings.push(
-        `the VM kept @${id}'s home and skills (${(err as Error).message}); delete @${id} again once the VM runs`,
+        `the guest kept @${id}'s home and skills (${(err as Error).message}); delete @${id} again once it runs`,
       );
     }
     this.log(
@@ -1375,29 +1333,18 @@ export class Daemon {
       return this.hostStatusNow();
     },
     'setup.prepare': async (params) => {
-      const { runtime, vmSize } = z
-        .strictObject({
-          runtime: runtimeSchema,
-          confirm: z.literal(true),
-          vmSize: z
-            .strictObject({ cpus: z.number().int(), memoryGiB: z.number().int() })
-            .optional(),
-        })
+      const { runtime } = z
+        .strictObject({ runtime: runtimeSchema, confirm: z.literal(true) })
         .parse(params);
       if (this.preparing || this.setup.running)
         throw new Error('Environment setup is already running.');
-      const env = vmSize ? vmSizeEnv(vmSize, hostResources()) : {};
       this.preparing = runtime;
       try {
         await prepareEnvironment(
           runtime,
           () => setupStatus(this.guest, this.vm, this.services),
           async (action) => {
-            await this.setup.run(
-              action,
-              (line) => this.broadcast('setup', { action, line }),
-              action === 'install' ? env : {},
-            );
+            await this.setup.run(action, (line) => this.broadcast('setup', { action, line }));
             if (action === 'install' || action === 'vm-start') await this.startHostServices();
           },
           async (selected) => {
@@ -1486,36 +1433,17 @@ export class Daemon {
       void this.refreshSetup();
       return codexStatus(this.guest);
     },
-    'setup.run': async ({ action, vmSize }) => {
+    'setup.run': async ({ action }) => {
       if (this.preparing) throw new Error('Environment setup is already running.');
       if (!SETUP_ACTIONS.includes(action)) throw new Error('unknown setup step');
-      if (vmSize !== undefined && action !== 'install') {
-        throw new Error('BAD_VM_SIZE: only install creates a VM');
-      }
-      const env = vmSize === undefined ? {} : vmSizeEnv(vmSizeParam(vmSize), hostResources());
-      this.log(
-        `setup ${action} started${vmSize ? ` (a new VM: ${env.ANCHI_VM_CPUS} CPUs, ${env.ANCHI_VM_MEMORY_GIB} GiB)` : ''}`,
-      );
-      await this.setup.run(action, (line) => this.broadcast('setup', { action, line }), env);
+      this.log(`setup ${action} started`);
+      await this.setup.run(action, (line) => this.broadcast('setup', { action, line }));
       this.log(`setup ${action} done`);
       if (action === 'install' || action === 'vm-start') await this.startHostServices();
       await this.syncHostLogins();
       const status = await this.readSetupStatus();
       this.noteSetup(status);
       return status;
-    },
-    'setup.resetPreview': async () => this.resetPreview(),
-    'setup.reset': async ({ confirm }) => {
-      if (this.preparing) throw new Error('Environment setup is already running.');
-      if (confirm !== 'reset') throw new Error('type reset to confirm');
-      const { busy } = await this.resetPreview();
-      if (busy) throw new Error(`${busy} task(s) running or queued; cancel them or wait first`);
-      // Idle cells end with the VM anyway; closing them first keeps their transcripts whole.
-      await Promise.all(this.hub.liveTasks().map((t) => this.hub.closeCell(t, 'reset')));
-      this.log('setup reset started');
-      await this.setup.run('reset', (line) => this.broadcast('reset', { line }));
-      this.log('setup reset done: the VM is deleted');
-      return setupStatus(this.guest, this.vm);
     },
     'connectors.set': async (params) => {
       const secret = connectorSecret(params);
@@ -1660,20 +1588,6 @@ export class Daemon {
     },
   };
 
-  private async resetPreview(): Promise<ResetPreview> {
-    const busy = (['running', 'queued'] as const).reduce(
-      (n, status) => n + this.store.search({ status, limit: 500 }).length,
-      0,
-    );
-    return {
-      vm: await this.vm.vmStatus(),
-      busy,
-      cells: this.hub.cellCount(),
-      home: this.opts.layout.root,
-      vaultKey: VAULT_KEY,
-    };
-  }
-
   /** Stores a credential, verifies it with the service and records the account it reports. */
   private async connect(secret: ConnectorSecret): Promise<ConnectorStatus> {
     await this.guest.setConnector(secret);
@@ -1755,29 +1669,13 @@ export class Daemon {
     }
     if (existsSync(layout.socketFile)) rmSync(layout.socketFile);
 
-    // A Lima downloaded by an earlier run comes first on PATH for everything that follows.
-    if (this.opts.manageLima && this.vm.placement === 'lima')
-      activateLima(layout.root, limaMinimum());
-    // In the background: restarting a running VM takes longer than clients wait for the socket.
-    const migration =
-      this.opts.migrateVm && this.vm.placement === 'lima'
-        ? migrateLegacyVm((line) => this.log(line))
-        : undefined;
-    // Cells from a previous daemon cannot be reattached: their runner channel was its stdio. With
-    // a migration under way the reap waits for it: those cells are in the VM being renamed, which
-    // still answers to `secure-vm` until the rename lands.
-    if (this.opts.reap !== false) {
-      if (migration) void migration.then(() => this.reapCells());
-      else await this.reapCells();
-    }
+    // Cells from a previous daemon cannot be reattached: their runner channel was its stdio.
+    if (this.opts.reap !== false) await this.reapCells();
     // Which runtime the builder gets and whether the guest is outdated, before any client asks.
-    if (migration) void migration.then(() => this.refreshSetup());
-    else if (this.vm.placement === 'local' || this.vm.placement === 'host') {
-      // The vault key is on this machine: unlock, and on a host placement start the services first.
-      void this.startHostServices()
-        .then(() => this.unlockServerVault())
-        .then(() => this.refreshSetup());
-    } else void this.refreshSetup();
+    // The vault key is on this machine: unlock, and on a host placement start the services first.
+    void this.startHostServices()
+      .then(() => this.unlockServerVault())
+      .then(() => this.refreshSetup());
     this.hub.recoverInterrupted();
     await this.peers.start();
     this.peerTasks.start();

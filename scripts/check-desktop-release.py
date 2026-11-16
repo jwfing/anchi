@@ -64,8 +64,6 @@ with tempfile.TemporaryDirectory(prefix="anchi-desktop-release-", dir="/tmp") as
         "shutil.copyfile(source, args[args.index('-o') + 1])\n"
     )
     curl.chmod(0o755)
-    (fakebin / "limactl").write_text("#!/bin/sh\nexit 1\n")
-    (fakebin / "limactl").chmod(0o755)
     bindir = home / ".local/bin"
     bindir.mkdir(parents=True)
     apps = home / "Applications"

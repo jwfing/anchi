@@ -8,7 +8,7 @@ import type {
   WorkspaceSetting,
 } from '@anchi/protocol';
 
-/** Connectors in the order the panel shows them, also when the VM could not be asked. */
+/** Connectors in the order the panel shows them, also when the guest could not be asked. */
 const CONNECTORS = [...CONNECTOR_IDS, 'gmail', 'drive', 'notion', 'slack', 'x', 'reddit'];
 const RUNTIMES = ['codex', 'claude-code', 'hermes'] as const;
 const EFFORTS: (Effort | '')[] = ['', 'low', 'medium', 'high', 'xhigh'];
@@ -225,7 +225,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
   }
   rows.push({
     kind: 'header',
-    text: `WORKSPACES (~/AnchiWorkspaces; Space: off → ro → rw)${inv.workspaces.shared === false ? ' · not shared with the VM yet: Runtimes, W' : ''}`,
+    text: `WORKSPACES (~/AnchiWorkspaces; Space: off → ro → rw)${inv.workspaces.shared === false ? ' · not shared with the guest yet: Runtimes, W' : ''}`,
   });
   const dirs = [
     ...inv.workspaces.dirs,

@@ -30,14 +30,13 @@ import {
   type ExecResult,
   Guest,
   type GuestTransport,
-  LimaTransport,
+  type VmTransport,
   lineDiff,
   parseBlocks,
   summarizeAudit,
   auditHeadline,
 } from '../src/index.ts';
 import { AUDIT_SAVED_MAX, extractLinks, Store } from '../src/store.ts';
-import { defaultVmSize, hostResources } from '../src/host.ts';
 import { HOST_PORT_DEFAULT, hostPaths, HostTransport } from '../src/host-placement.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
@@ -320,25 +319,30 @@ const hostRun = async (cmd: string, args: string[]) => {
 const SETUP_STEPS = {
   'vm-start': [[process.execPath, '-e', 'console.log("vm started")']],
   install: [
-    [
-      process.execPath,
-      '-e',
-      'console.log("step one", process.env.ANCHI_VM_CPUS ?? "-", process.env.ANCHI_VM_MEMORY_GIB ?? "-")',
-    ],
+    [process.execPath, '-e', 'console.log("step one")'],
     [process.execPath, '-e', 'console.error("broken"); process.exit(3)'],
   ],
   'vault-init': [],
-  workspaces: [],
   'vault-unlock': [[process.execPath, '-e', 'console.log("{\\"unlocked\\": true}")']],
 };
 
-/** A Lima that reports the fake VM running, for the setup status that asks the guest. */
-class RunningLima extends LimaTransport {
-  override async vmStatus(): Promise<'running'> {
-    return 'running';
+/**
+ * The fake guest as a remote server's own machine (`placement: 'local'`), reported `missing`
+ * until a test says it runs, so the setup status that asks the guest can be exercised both ways.
+ */
+let vmRunning = false;
+class FakeVm implements VmTransport {
+  constructor(readonly placement: 'local' | 'host' = 'local') {}
+  async vmStatus() {
+    return vmRunning ? ('running' as const) : ('missing' as const);
+  }
+  exec(args: string[], stdin?: string) {
+    return transport.exec(args, stdin);
+  }
+  spawn(args: string[]) {
+    return transport.spawn(args);
   }
 }
-let vmRunning = false;
 
 async function start(
   idleMs = 60_000,
@@ -361,12 +365,12 @@ async function start(
     }),
     hostRun,
     setupSteps: SETUP_STEPS,
-    // Never the real `limactl delete`.
-    resetSteps: [['echo', 'deleted']],
+    // Never this machine's own vault key: a remote server unlocks its vault at start with it.
+    vaultKeyFile: join(root, 'no-vault-key'),
     layout,
     guest: new Guest(transport),
-    // No limactl: the tests never depend on a VM of the machine they run on.
-    vm: new (vmRunning ? RunningLima : LimaTransport)('anchi-vm', join(root, 'no-limactl')),
+    // The tests never depend on the machine they run on.
+    vm: new FakeVm(),
     log: (m) => void logs.push(m),
     quiet: true,
     idleMs,
@@ -398,14 +402,11 @@ afterEach(async () => {
 });
 
 describe('vault after a restart', () => {
-  /** The fake guest as a remote server's own machine: `placement: 'local'`. */
-  const inGuest = () => ({
-    placement: 'local' as const,
-    vmStatus: async () => 'running' as const,
-    vmSize: async () => undefined,
-    exec: (args: string[], stdin?: string) => transport.exec(args, stdin),
-    spawn: (args: string[]) => transport.spawn(args),
-  });
+  /** The fake guest as a remote server that is up. */
+  const inGuest = () => {
+    vmRunning = true;
+    return new FakeVm();
+  };
   /** Starts a daemon whose vault-unlock step leaves a marker file, and says whether it ran. */
   const unlockRan = async (extra: Partial<ConstructorParameters<typeof Daemon>[0]>) => {
     const marker = join(root, 'unlock-ran');
@@ -432,13 +433,8 @@ describe('vault after a restart', () => {
     expect(logs).toContain('unlocked the vault with the vault key on this server');
   });
 
-  it("leaves the Lima VM's vault locked, and a server without the key or already unlocked alone", async () => {
+  it('leaves a server without the key or already unlocked alone', async () => {
     transport.vaultUnlocked = false;
-    vmRunning = true;
-    expect(await unlockRan({}), 'Lima VM').toBe(false);
-    await daemon?.stop();
-    client?.close();
-
     expect(
       await unlockRan({ vm: inGuest(), vaultKeyFile: join(root, 'no-such-key') }),
       'no key on the server',
@@ -611,18 +607,6 @@ describe('daemon tasks', () => {
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
     // The connection survived every page; before paging, one oversized frame closed it.
     expect((await client.call('tasks.get', { taskId: task.id })).status).toBe('done');
-  });
-
-  it('resets only when confirmed and nothing runs', async () => {
-    const { client } = await start();
-    const preview = await client.call('setup.resetPreview');
-    expect(preview).toMatchObject({ busy: 0, cells: 0, home: root });
-    expect(preview.vaultKey).toMatch(/\.config\/anchi\/vault\.key$/);
-    await expect(client.call('setup.reset', { confirm: 'yes' })).rejects.toThrow(/type reset/);
-    const lines: string[] = [];
-    client.on('reset', (n) => lines.push(n.line));
-    await client.call('setup.reset', { confirm: 'reset' });
-    expect(lines).toEqual(['$ echo deleted', 'deleted']);
   });
 
   it("pins the agent's Google accounts to its cell", async () => {
@@ -1023,7 +1007,7 @@ describe('daemon tasks', () => {
     await expect(client.call('setup.run', { action: 'install' })).rejects.toThrow(
       /install failed: .* exited with 3: broken/,
     );
-    expect(lines).toContain('step one - -');
+    expect(lines).toContain('step one');
     await expect(client.call('setup.run', { action: 'nope' as never })).rejects.toThrow(
       /unknown setup step/,
     );
@@ -1038,13 +1022,13 @@ describe('daemon tasks', () => {
       { runtime: 'codex', confirm: false },
       { runtime: 'unknown', confirm: true },
       { runtime: 'codex', confirm: true, token: 'unexpected' },
-      { runtime: 'codex', confirm: true, vmSize: { cpus: 0, memoryGiB: 2 } },
+      { runtime: 'codex', confirm: true, vmSize: { cpus: 1, memoryGiB: 2 } },
     ])
       await expect(client.call('setup.prepare', params as never)).rejects.toThrow();
     expect(lines).toEqual([]);
   });
 
-  it('prepares only the selected runtime and refuses concurrent setup and reset', async () => {
+  it('prepares only the selected runtime and refuses concurrent setup', async () => {
     vmRunning = true;
     // Credentials are read only from an unlocked vault.
     transport.vaultUnlocked = true;
@@ -1088,7 +1072,6 @@ describe('daemon tasks', () => {
       for (const [method, params] of [
         ['setup.prepare', { runtime: 'codex', confirm: true }],
         ['setup.run', { action: 'install' }],
-        ['setup.reset', { confirm: 'reset' }],
       ] as const)
         await expect(client.call(method, params as never)).rejects.toThrow(/already running/);
       release();
@@ -1108,39 +1091,20 @@ describe('daemon tasks', () => {
     }
   });
 
-  it('creates the VM with the size picked, half of this computer by default', async () => {
+  it('runs the install steps in order and reports the step that failed', async () => {
     const { client } = await start();
-    const host = hostResources();
     const status = await client.call('setup.status');
-    expect(status.vmSize).toEqual({ default: defaultVmSize(host), host });
-    // Without a VM there is nothing to compare this version with.
+    // Before the guest is up there is nothing to compare this version with.
     expect(status.appVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(status.guestVersion).toBeNull();
     expect(status.guestOutdated).toBe(false);
     const lines: string[] = [];
     client.on('setup', ({ line }) => lines.push(line));
-    await expect(
-      client.call('setup.run', { action: 'install', vmSize: { cpus: 1, memoryGiB: 2 } }),
-    ).rejects.toThrow(/exited with 3/);
-    expect(lines).toContain('step one 1 2');
-    for (const vmSize of [
-      { cpus: 0, memoryGiB: 2 },
-      { cpus: host.cpus + 1, memoryGiB: 2 },
-      { cpus: 1, memoryGiB: 1 },
-      { cpus: 1, memoryGiB: host.memoryGiB + 1 },
-      { cpus: 1.5, memoryGiB: 2 },
-      { cpus: '1', memoryGiB: 2 },
-      { cpus: 1, memoryGiB: 2, disk: 100 },
-      null,
-    ]) {
-      await expect(
-        client.call('setup.run', { action: 'install', vmSize: vmSize as never }),
-      ).rejects.toThrow(/BAD_VM_SIZE/);
-    }
-    await expect(
-      client.call('setup.run', { action: 'vm-start', vmSize: { cpus: 1, memoryGiB: 2 } }),
-    ).rejects.toThrow(/BAD_VM_SIZE: only install/);
-    expect(lines.filter((l) => l.startsWith('step one'))).toEqual(['step one 1 2']);
+    await expect(client.call('setup.run', { action: 'install' })).rejects.toThrow(/exited with 3/);
+    expect(lines.filter((l) => l.startsWith('step one'))).toEqual(['step one']);
+    await expect(client.call('setup.run', { action: 'reset' as never })).rejects.toThrow(
+      /unknown setup step/,
+    );
   });
 
   it('answers Anchi tool calls as the task and agent of the cell', async () => {
@@ -1683,8 +1647,10 @@ describe('daemon tasks', () => {
 
   it('signs in to Claude only into an unlocked vault, and stores the token it printed', async () => {
     const fake = fakeClaude('auto');
+    // A daemon on the user's own computer (the host placement): the browser is here.
     const { client } = await start(60_000, undefined, undefined, {
       claudeBinary: async () => fake.binary,
+      vm: new FakeVm('host'),
     });
     await expect(client.call('setup.claudeSignIn')).rejects.toThrow(
       /Prepare the environment first/,
@@ -1692,7 +1658,7 @@ describe('daemon tasks', () => {
     expect(transport.claudeImports).toEqual([]);
     transport.vaultUnlocked = true;
     const ended = new Promise((resolve) => client.on('claudeSignIn', resolve));
-    // This daemon runs beside the browser (Lima): the localhost page finishes by itself.
+    // This daemon runs beside the browser (host placement): the localhost page finishes by itself.
     expect(await client.call('setup.claudeSignIn')).toEqual({ url: LOCAL, codeRequired: false });
     expect(await ended).toEqual({ state: 'done' });
     expect(transport.claudeImports).toEqual([{ token: TOKEN }]);
@@ -2136,7 +2102,7 @@ describe('builder', () => {
     ).toHaveLength(4);
   });
 
-  it('reports a VM that runs but cannot be asked instead of showing nothing installed', async () => {
+  it('reports a guest that runs but cannot be asked instead of showing nothing installed', async () => {
     vmRunning = true;
     transport.guestFails = true;
     const { client } = await start();
@@ -2145,13 +2111,11 @@ describe('builder', () => {
     expect(status.error).toMatch(/GUEST_SUDO_FAILED/);
     expect(status.installed).toBe(false);
     expect(status.guestOutdated).toBe(false);
-    // No limactl here: the VM's size is unknown, not invented.
-    expect(status.vmSize?.current).toBeUndefined();
     transport.guestFails = false;
     expect((await client.call('setup.status')).error).toBeUndefined();
   });
 
-  it('tells the user when another Anchi version installed the VM components', async () => {
+  it('tells the user when another Anchi version installed the guest components', async () => {
     vmRunning = true;
     transport.guestVersion = '0.0.1';
     const { client } = await start();
@@ -2640,13 +2604,13 @@ describe('deleting agents', () => {
     expect(readFileSync(join(root, 'ws/projects/web/keep.txt'), 'utf8')).toBe('mine');
   });
 
-  it('finishes the VM part on a later run when the VM is down, and refuses the builder', async () => {
+  it('finishes the guest part on a later run when the guest is down, and refuses the builder', async () => {
     write('agents/qa.yaml', 'runtime: codex\n');
     const { client } = await start();
     transport.purgeFails = true;
     const first = await client.call('agents.delete', { agentId: 'qa', confirm: 'qa' });
     expect(first.vm).toBeNull();
-    expect(first.warnings[0]).toMatch(/the VM kept @qa's home and skills .*delete @qa again/);
+    expect(first.warnings[0]).toMatch(/the guest kept @qa's home and skills .*delete @qa again/);
     expect(existsSync(join(root, 'agents/qa.yaml'))).toBe(false);
     transport.purgeFails = false;
     expect(await client.call('agents.deletePreview', { agentId: 'qa' })).toMatchObject({
@@ -3661,9 +3625,9 @@ describe('host placement', () => {
     expect(logs.filter((l) => /cell reap|reaped orphaned/.test(l))).toEqual([]);
   });
 
-  it('is refused on a daemon that drives a VM', async () => {
+  it('is refused on a daemon that runs on a remote server', async () => {
     const { client } = await start();
-    expect((await client.call('setup.status')).placement).toBe('lima');
+    expect((await client.call('setup.status')).placement).toBe('local');
     for (const method of ['host.status', 'host.enable', 'host.disable'] as const) {
       await expect(client.call(method)).rejects.toThrow(/HOST_PLACEMENT_ONLY/);
     }

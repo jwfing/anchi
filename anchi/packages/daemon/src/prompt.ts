@@ -59,7 +59,7 @@ export function environmentNote(agent: ResolvedAgent): string {
 
 /**
  * Where the user's shared directories are. Without this, an agent told to work in a workspace
- * still finds ${WORKDIR} named as its working directory, and may keep its files there, in the VM,
+ * still finds ${WORKDIR} named as its working directory, and may keep its files there, in the guest,
  * where the user never sees them.
  */
 function workspaceLines(agent: ResolvedAgent): string[] {

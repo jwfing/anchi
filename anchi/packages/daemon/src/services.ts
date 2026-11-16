@@ -12,7 +12,7 @@ import type { Guest } from './guest.ts';
 
 /**
  * Setup of the trusted connector services (Gmail, Drive, Notion, Slack, X, Reddit), moved from the
- * desktop app. Credentials go to the VM over stdin; Google tokens are obtained in the VM from
+ * desktop app. Credentials go to the guest over stdin; Google tokens are obtained in the guest from
  * an authorization code, so they never exist on the Mac.
  */
 
@@ -57,7 +57,7 @@ async function json(exec: Exec, args: string[], stdin = ''): Promise<Record<stri
     try {
       value = JSON.parse(out.split('\n').at(-1) ?? '') as Record<string, unknown>;
     } catch {
-      throw new Error('the VM did not answer; is it running?');
+      throw new Error('the guest did not answer; is it running?');
     }
   }
   if (r.code !== 0 || 'error' in value)
@@ -222,7 +222,7 @@ export class ServiceSetup {
 
   /**
    * Starts Google sign-in for Gmail or Drive: a loopback callback on 127.0.0.1, the
-   * authorization URL from the VM, and the code back to the VM. Returns the URL to open.
+   * authorization URL from the guest, and the code back to the guest. Returns the URL to open.
    * `account` names one of several Google accounts (`default` when omitted).
    */
   async googleLogin(id: ServiceConnectorId, account?: string): Promise<string> {

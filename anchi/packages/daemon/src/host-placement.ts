@@ -303,10 +303,6 @@ export class HostTransport implements VmTransport {
   async vmStatus(): Promise<'running' | 'stopped'> {
     return this.running() ? 'running' : 'stopped';
   }
-
-  async vmSize(): Promise<{ cpus: number; memoryGiB: number }> {
-    return { cpus: cpus().length, memoryGiB: Math.round(totalmem() / 2 ** 30) };
-  }
 }
 
 // ── the services process ──────────────────────────────────

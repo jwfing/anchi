@@ -4,15 +4,15 @@
 
 ## Goal
 
-Let a developer use Anchi's credential proxy, high-risk approvals and audit on their own machine, with the `claude` and `codex` they already have, without installing Lima, building a VM image or changing how they start a session:
+Let a developer use Anchi's credential proxy, high-risk approvals and audit on their own machine, with the `claude` and `codex` they already have, without a VM or a change to how they start a session:
 
 - no VM and no container: the runtime's own sandbox (Seatbelt on macOS, bubblewrap on Linux) is the boundary;
 - the user keeps typing `claude` and `codex` in their own terminal and IDE;
 - connector credentials (GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord) live in Anchi's vault and never enter the session;
 - `push main`, secret endpoints and the other `HIGH_RISK` entries wait for the user's decision as they do today;
-- the Lima VM and the remote server stay as they are, as the hardened placements.
+- the remote server stays as it is, as the hardened placement (the Lima VM placement this plan was written beside was removed on 2026-11-16; the host placement is now the default on a user's computer).
 
-This is a third **placement** next to `lima` and `local` (remote server): the daemon, the egress proxy, the vault and the policy service all run on the user's machine as the user, and the runtime is not an Anchi cell but a session the user started.
+This is a **placement** next to `local` (remote server): the daemon, the egress proxy, the vault and the policy service all run on the user's machine as the user, and the runtime is not an Anchi cell but a session the user started.
 
 ## Not in scope
 
@@ -86,7 +86,7 @@ Phase 2 adds **directory profiles**: a listener port per profile, written into t
 
 ### 5. Trusted services without systemd or UIDs
 
-In the VM, `services/server.py` requires socket activation and gates operations by the caller's kernel UID (`credential_ops(caller)`, `auth.handle(request, caller)`). On the host there is one user, so:
+On a remote server, `services/server.py` requires socket activation and gates operations by the caller's kernel UID (`credential_ops(caller)`, `auth.handle(request, caller)`). On the host there is one user, so:
 
 - `server.py <mode> --listen <role>=<socket path> …` (P1, done) replaces `LISTEN_FDS`: one socket per caller role under `~/.anchi/host/run/`, mode 0600, and the role comes from the socket that accepted the connection. The peer's kernel UID must still be the service's own (`LOCAL_PEERCRED` on macOS, `SO_PEERCRED` on Linux); a connector service answers the `egress` role only, and the credential scope per role is unchanged. The proxy's control socket takes the proxy's UID instead of root when `ANCHI_EGRESS_HOST=1`; `ANCHI_EGRESS_SERVICE_SOCKET` names where connector sockets live.
 - The role separation is code hygiene on the host, not a kernel boundary: the sandbox is what keeps a session away from these sockets (Claude Code denies Unix sockets unless `allowUnixSockets` lists them; Codex has `unix_sockets` with no default allow) and from the vault files (`denyRead`).
@@ -141,7 +141,7 @@ B stays the path for Hermes, which has no sandbox of its own, and for agents tha
 
 ## Open questions
 
-- Where the daemon lives on a Mac without the VM: `anchi` CLI as today, or the desktop app's bundled daemon only.
+- Where the daemon lives on a Mac: `anchi` CLI as today, or the desktop app's bundled daemon only.
 - Whether Claude Code's parent-proxy chaining (the `HTTPS_PROXY` run) is a bug or a version gap; if it starts working, the shim could be dropped for Claude Code.
 - Codex per-project profiles: whether `default_permissions` can be set per directory without a shim argument.
 - Hermes on the host: option B or not supported.

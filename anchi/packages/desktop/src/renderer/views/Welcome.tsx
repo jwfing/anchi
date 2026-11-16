@@ -122,7 +122,7 @@ export function WelcomeView({ onFinish }: { onFinish: () => void }) {
   useEffect(() => {
     if (offered.current || !status || preparing || status.preparing) return;
     if (server.status !== 'connected' || status.host?.missing.length) return;
-    if (nextSetupAction(status) !== 'install' || status.vm !== 'missing') return;
+    if (nextSetupAction(status) !== 'install' || status.installed) return;
     offered.current = true;
     void prepare();
   }, [status, server.status]);

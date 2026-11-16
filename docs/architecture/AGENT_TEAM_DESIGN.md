@@ -18,7 +18,7 @@ Positioning: **a secured agent team.** Anchi runs a team of Codex and Claude Cod
 4. Agents consume no resources when idle. A task starts a fresh cell, and the cell is destroyed when the task ends.
 5. An agent builder generates agent configurations, including the system prompt and cell image, through chat.
 
-The team runs on this computer with a Lima VM, or on a [remote server](../REMOTE_SERVER.md) whose daemon runs inside the guest. Non-goals: data isolation (an agent can send what it reads to the hosts it may reach). Privilege borrowing between agents is narrowed, not prevented (see [Known risks](#known-risks)).
+The team runs on a [remote server](../REMOTE_SERVER.md) whose daemon runs inside the guest; on the user's own computer the daemon is the [host placement](../HOST_PLACEMENT.md), which runs no agents. Non-goals: data isolation (an agent can send what it reads to the hosts it may reach). Privilege borrowing between agents is narrowed, not prevented (see [Known risks](#known-risks)).
 
 ## Architecture
 
@@ -26,11 +26,11 @@ The team runs on this computer with a Lima VM, or on a [remote server](../REMOTE
 TUI client ──┐
 (future GUI) ┴─ JSON-RPC + event stream over a Unix socket
                 │
-          anchi daemon (host, long-running)
+          anchi daemon (on the server, long-running)
           scheduler · orchestrator · task store · approval queue · agent registry
-                │  Lima SSH (trusted administration)
+                │  sudo -n, fixed commands (trusted administration)
                 ▼
-          anchi-vm (long-running Lima VM)
+          the guest (the remote server itself)
           ├─ trusted services: auth, policy, existing connectors, egress proxy
           └─ per-task cells (systemd-nspawn, created on demand, destroyed at task end)
                runtime SDK (Codex / Claude Code) + Anchi MCP server
@@ -38,13 +38,13 @@ TUI client ──┐
 
 ### Daemon
 
-The daemon is the control plane. Clients only render state and forward user input, so the UI can be closed while scheduled tasks keep running. Setup, OAuth loopback, vault unlock and VM administration, formerly in the Electron app, live in the daemon. The protocol is client-agnostic so a GUI client can be added later without changing the daemon.
+The daemon is the control plane. Clients only render state and forward user input, so the UI can be closed while scheduled tasks keep running. Setup, OAuth loopback, vault unlock and guest administration, formerly in the Electron app, live in the daemon. The protocol is client-agnostic so a GUI client can be added later without changing the daemon.
 
 The implementation ports parts of the `my-bot` daemon (queue, scheduler, notifications) and its Ink TUI, refactored to the boundaries below; see the [phase 1 plan](AGENT_TEAM_PHASE1_PLAN.md#porting-my-bot).
 
-### VM and cells
+### Guest and cells
 
-- The VM is **long-running**. Trusted services stay up, and the vault is unlocked once per VM boot, as it is today.
+- The guest is **long-running**. Trusted services stay up, and the vault is unlocked once per boot (the daemon does it with the key beside it).
 - Each task gets a **new nspawn cell** that is destroyed when the task ends. Cell images are layered: one shared base image plus a per-agent overlay, with a discarded tmpfs layer on top (`--volatile=overlay`). Starting a task never copies a rootfs. The PoC measured about 30 ms to start and exit such a cell; `--ephemeral` full copies on ext4 took 1.6–9.2 s.
 - Each cell has a **distinct identity**: its own proxy socket (and a bridge socket per connector service), in a directory bound only into that cell at `/run/anchi`. When a cell starts, the cell manager registers it with the proxy: its task, agent, connectors, egress list, approvals and origin; the registration goes when the cell is destroyed.
 - Before a cell is destroyed, the daemon scans it for real credential values.
@@ -54,7 +54,7 @@ The implementation ports parts of the `my-bot` daemon (queue, scheduler, notific
 
 | Runtime | Phase | Model authentication |
 |---|---|---|
-| Codex | 1 | The cell holds a placeholder `auth.json` that carries the real account id (an identifier) and placeholder tokens. The proxy injects the access token on `chatgpt.com`, including the WebSocket model stream. The refresh token stays with the Codex CLI on the host; the daemon re-imports the access token when the host's login refreshes. Verified end to end in the PoC, including tool calls. The image must install the full `codex-package-<target>`, not the bare binary. By default Codex runs with `--sandbox danger-full-access`, and the cell is the only isolation boundary; the VM keeps Ubuntu's restriction on unprivileged user namespaces. As a per-agent option, an AppArmor profile can grant `userns` to `/usr/bin/bwrap` so Codex's `workspace-write` sandbox works inside the cell; this also lets the agent create nested user namespaces through bwrap |
+| Codex | 1 | The cell holds a placeholder `auth.json` that carries the real account id (an identifier) and placeholder tokens. The proxy injects the access token on `chatgpt.com`, including the WebSocket model stream. The refresh token stays with the Codex CLI on the host; the daemon re-imports the access token when the host's login refreshes. Verified end to end in the PoC, including tool calls. The image must install the full `codex-package-<target>`, not the bare binary. By default Codex runs with `--sandbox danger-full-access`, and the cell is the only isolation boundary; the guest keeps Ubuntu's restriction on unprivileged user namespaces. As a per-agent option, an AppArmor profile can grant `userns` to `/usr/bin/bwrap` so Codex's `workspace-write` sandbox works inside the cell; this also lets the agent create nested user namespaces through bwrap |
 | Claude Code | 2 | Subscription by default via a `claude setup-token` token. The cell holds a placeholder `CLAUDE_CODE_OAUTH_TOKEN`; the proxy substitutes the real token on requests to Anthropic hosts. API key or Bedrock remain optional alternatives. Verified in the PoC with a `setup-token` token, including tool use; Claude Code performs no local token-format check and contacts only `api.anthropic.com` (plus credential-free telemetry). |
 
 Pi is replaced by the runtime SDKs. Connectors are exposed to both runtimes through a single **Anchi MCP server** inside the cell, which forwards to the existing connector services through a per-cell bridge that names the agent. Each connector is integrated once and both runtimes can use it.
@@ -67,7 +67,7 @@ Skills (`SKILL.md` directories) are managed centrally, sourced from GitHub or cr
 
 **Invariant: upstream credentials never enter the cell.** "Credential" means anything that authenticates (tokens, keys, refresh tokens). Account identifiers that clients check locally, such as the ChatGPT account id, may enter the cell. This includes model subscription tokens, GitHub tokens and AWS keys. Credentials that an API would mint for the agent are covered by the same invariant (see rule 4 below).
 
-This is a deliberate change from the current boundary: today the cell has **no IP egress**. Under this design, cells reach the network only through a trusted proxy, which runs as its own UID inside the VM.
+This is a deliberate change from the current boundary: today the cell has **no IP egress**. Under this design, cells reach the network only through a trusted proxy, which runs as its own UID inside the guest.
 
 ### Mechanism
 
@@ -80,7 +80,7 @@ This is a deliberate change from the current boundary: today the cell has **no I
 
 ### Destination filtering
 
-Passthrough must not turn the proxy into a path to private networks. The PoC showed the proxy reaching the VM's sshd and the Lima host gateway on the cell's behalf. The proxy therefore:
+Passthrough must not turn the proxy into a path to private networks. The PoC showed the proxy reaching the guest's sshd and its gateway on the cell's behalf. The proxy therefore:
 
 - refuses every destination whose resolved address is not public (loopback, RFC 1918, link-local, CGNAT, ULA);
 - connects to the exact address it checked, which closes DNS rebinding;
@@ -114,10 +114,10 @@ The cell holds a placeholder access key pair, and the AWS CLI signs requests wit
 
 ## Work directories
 
-- **Default:** a persistent home inside the VM, one per agent (`/var/lib/anchi/agents/<id>/home`, mounted at `/home/agent`). Repositories are cloned there and pushed through the proxy. Dependency caches (npm, pip, Go modules) also live there, isolated per agent and never shared with the host or other agents.
-- **Directories of the host (workspaces, macOS):** Lima mounts one host root, `~/AnchiWorkspaces`, into the VM once; each cell bind-mounts only the subdirectories its agent lists, read-only unless `rw`. See [Host directories](HOST_DIRECTORIES_PLAN.md).
+- **Default:** a persistent home inside the guest, one per agent (`/var/lib/anchi/agents/<id>/home`, mounted at `/home/agent`). Repositories are cloned there and pushed through the proxy. Dependency caches (npm, pip, Go modules) also live there, isolated per agent and never shared with the host or other agents.
+- **Directories of the host (workspaces):** one host root, `~/AnchiWorkspaces`, is mounted into the guest at `/mnt/anchi-host`; each cell bind-mounts only the subdirectories its agent lists, read-only unless `rw`. See [Host directories](HOST_DIRECTORIES_PLAN.md).
 - **Host-mount risk:** a writable directory lets the agent leave code that later runs on the host as the user. Cells mount git hooks, config and info, `.gitattributes`, `.envrc`, `.vscode/` and `.idea/` read-only, and the daemon audits each turn for new hooks, command-running git configuration, outside symlinks, new executables and editor configuration. Files run by design (`package.json` scripts, `Makefile`) remain the user's to review.
-- Deleting an agent removes its VM home but never workspace files: the binds exist only in a cell's own mount namespace.
+- Deleting an agent removes its guest home but never workspace files: the binds exist only in a cell's own mount namespace.
 
 ## Orchestration
 
@@ -138,7 +138,7 @@ The builder is itself an agent that runs in a cell. It produces a candidate conf
 
 Images are built in a separate build cell with proxy egress and no injection rules. A generated configuration grants capabilities, so **nothing takes effect until the user confirms it**. Any change to the image requires confirmation again. The builder cannot change its own configuration or the configuration of other agents.
 
-Each builder turn starts with an inventory of what exists (installed skills, connectors and whether they are connected, directories under the workspace root, agents, images); proposals are checked against it, and missing references block them. The user can adjust a proposal's skills, connectors and workspaces in the same settings panel used for existing agents, which changes only those fields of an agent file, after showing the diff. Deleting an agent removes its file, its tasks (with what they delegated), its place in other agents' `delegates`, and its home, skills and policy rules in the VM.
+Each builder turn starts with an inventory of what exists (installed skills, connectors and whether they are connected, directories under the workspace root, agents, images); proposals are checked against it, and missing references block them. The user can adjust a proposal's skills, connectors and workspaces in the same settings panel used for existing agents, which changes only those fields of an agent file, after showing the diff. Deleting an agent removes its file, its tasks (with what they delegated), its place in other agents' `delegates`, and its home, skills and policy rules in the guest.
 
 ## Tasks
 

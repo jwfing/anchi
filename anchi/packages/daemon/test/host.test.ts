@@ -6,23 +6,17 @@ import { homeLayout } from '@anchi/core';
 import { describe, expect, it } from 'vitest';
 import {
   appVersion,
+  HOST_SETUP_STEPS,
   IN_GUEST_SETUP_STEPS,
   installKind,
-  SETUP_STEPS,
   SetupRunner,
-  workspaceSteps,
 } from '../src/host.ts';
 import { launchdPlist, systemdUnit } from '../src/launch.ts';
 import { notifyCommand } from '../src/notify.ts';
-import { hostReadiness, limaMinimum, parseLimaVersion, versionAtLeast } from '../src/setup.ts';
+import { hostReadiness, versionAtLeast } from '../src/setup.ts';
 
 describe('host integration', () => {
-  it('compares the installed Lima with the version the VM template needs', () => {
-    expect(limaMinimum()).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(limaMinimum(join(tmpdir(), 'no-such-checkout'))).toBe('0.0.0');
-    expect(parseLimaVersion('limactl version 2.2.0')).toBe('2.2.0');
-    expect(parseLimaVersion('limactl version 2.10.1-1-gabcdef')).toBe('2.10.1');
-    expect(parseLimaVersion('')).toBeNull();
+  it('compares dotted versions numerically', () => {
     expect(versionAtLeast('2.2.0', '2.2.0')).toBe(true);
     // Numeric, not textual: 2.10 is newer than 2.2.
     expect(versionAtLeast('2.10.0', '2.2.0')).toBe(true);
@@ -36,9 +30,8 @@ describe('host integration', () => {
       install: [],
       'vault-init': [],
       'vault-unlock': [],
-      workspaces: [],
     };
-    const runner = new SetupRunner(steps, undefined, [], 300);
+    const runner = new SetupRunner(steps, undefined, 300);
     const lines: string[] = [];
     await expect(runner.run('vm-start', (l) => lines.push(l))).rejects.toThrow(
       /vm-start failed: .* did not finish within 1 s and was stopped \(last output: working\)/,
@@ -46,21 +39,28 @@ describe('host integration', () => {
     expect(lines[0]).toMatch(/^\$ /);
   });
 
-  it('never runs Lima steps, workspaces or a reset when the daemon is inside the guest', async () => {
-    expect(JSON.stringify(IN_GUEST_SETUP_STEPS)).not.toContain('limactl');
-    expect(IN_GUEST_SETUP_STEPS.workspaces).toBeUndefined();
-    const runner = new SetupRunner(IN_GUEST_SETUP_STEPS, undefined, null);
-    await expect(runner.run('workspaces', () => {})).rejects.toThrow(/does not apply to a remote/);
+  it('never starts a machine when the daemon is inside the guest: the server is always up', async () => {
+    expect(JSON.stringify([IN_GUEST_SETUP_STEPS, HOST_SETUP_STEPS])).not.toMatch(/limactl|lima/);
+    const runner = new SetupRunner(IN_GUEST_SETUP_STEPS);
     await expect(runner.run('vm-start', () => {})).rejects.toThrow(/does not apply to a remote/);
-    await expect(runner.run('reset', () => {})).rejects.toThrow(/delete or recreate its machine/);
     // A refused step leaves the runner free for the next one.
     expect(runner.running).toBeUndefined();
+    // The install runs the guest scripts on the machine itself, as the login user and root.
+    expect(IN_GUEST_SETUP_STEPS.install!.map((s) => s.join(' '))).toEqual([
+      'bash scripts/up.sh',
+      'bash scripts/install-anchi.sh',
+      'sudo -n anchi-image build codex base',
+    ]);
+    // Nothing to install or start as a command on the host placement.
+    expect(HOST_SETUP_STEPS.install).toEqual([]);
+    expect(HOST_SETUP_STEPS['vm-start']).toEqual([]);
   });
 
-  it('asks a guest-side daemon for Python and sudo, not Lima', () => {
+  it('asks a guest-side daemon for Python and sudo, and the host placement for openssl', () => {
     const host = hostReadiness('local');
-    expect(host.missing.filter((m) => /lima|qemu|kvm/i.test(m))).toEqual([]);
+    expect(host.missing.filter((m) => /lima|qemu|kvm|openssl/i.test(m))).toEqual([]);
     expect(host.installHint).toMatch(/passwordless sudo/);
+    expect(hostReadiness().installHint).toMatch(/openssl/);
   });
 
   it('reads this Anchi version from the release manifest, else the workspace package', () => {
@@ -101,7 +101,7 @@ describe('host integration', () => {
     expect(unit).toContain(
       'Environment="ANCHI_HOME=/home/u/my anchi%%dir" "PATH=/usr/bin:/opt/$x"\n',
     );
-    // A daemon on a remote server drives the guest it runs in, not a Lima VM.
+    // A daemon on a remote server drives the guest it runs in; the host placement has none.
     expect(systemdUnit(layout, '/usr/bin', 'local')).toContain(
       '"PATH=/usr/bin" "ANCHI_GUEST=local"\n',
     );
@@ -115,34 +115,18 @@ describe('host integration', () => {
     expect(launchdPlist(layout)).toContain('<string>/home/u/my anchi%dir</string>');
   });
 
-  it('shares workspaces over virtiofs on macOS, and over 9p mapped by the guest on Linux', () => {
-    const mac = workspaceSteps('darwin').map((s) => s.join(' '));
-    expect(mac.find((s) => s.startsWith('limactl edit'))).toContain(
-      '"mountPoint":"/mnt/anchi-host","writable":true}] --set .mountType="virtiofs"',
-    );
-    expect(mac.some((s) => s.includes('install-anchi'))).toBe(false);
-    const linux = workspaceSteps('linux').map((s) => s.join(' '));
-    expect(linux.find((s) => s.startsWith('limactl edit'))).toContain(
-      '"mountPoint":"/mnt/anchi-host-raw/share","writable":true}] --set .mountType="9p"',
-    );
-    // The guest pieces bring the bindfs mapping; then the vault, locked by the restart.
-    expect(linux.slice(-3)).toEqual([
-      'limactl start --tty=false anchi-vm',
-      'bash scripts/install-anchi.sh',
-      `/bin/sh -c ulimit -c 0 && exec "$0" "$@" ${process.execPath} scripts/vault.mjs unlock`,
-    ]);
-  });
-
   it("runs the vault key's process on this Node with core dumps off, without Python", () => {
-    for (const steps of [SETUP_STEPS, IN_GUEST_SETUP_STEPS]) {
+    for (const steps of [HOST_SETUP_STEPS, IN_GUEST_SETUP_STEPS]) {
       for (const action of ['vault-init', 'vault-unlock'] as const) {
         const [step] = steps[action]!;
         expect(step!.slice(3)).toEqual([process.execPath, 'scripts/vault.mjs', action.slice(6)]);
       }
     }
-    expect(JSON.stringify([SETUP_STEPS, IN_GUEST_SETUP_STEPS])).not.toMatch(/python|vault\.py/);
+    expect(JSON.stringify([HOST_SETUP_STEPS, IN_GUEST_SETUP_STEPS])).not.toMatch(
+      /python|vault\.py/,
+    );
     // The wrapper really turns core dumps off for what it runs.
-    const [sh, flag, script] = SETUP_STEPS['vault-unlock']![0]!;
+    const [sh, flag, script] = HOST_SETUP_STEPS['vault-unlock']![0]!;
     const out = spawnSync(sh!, [flag!, script!, '/bin/sh', '-c', 'ulimit -c'], {
       encoding: 'utf8',
     });

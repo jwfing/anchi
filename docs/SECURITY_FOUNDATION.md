@@ -6,7 +6,7 @@ These trusted services keep credentials, authorization and provider networking o
 
 A separate `secure-auth` UID owns OAuth client configuration, access/refresh tokens, temporary PKCE state, connector tokens and the Codex and Claude Code runtime tokens. `/var/lib/secure-auth/*.json.enc` uses AES-256-GCM with random twelve-byte nonces and the logical filename as AAD, preventing credential-file substitution. Directory mode is 0700; files are 0600 with atomic replacement and fsync.
 
-The 32-byte master key is `~/.config/anchi/vault.key` on the host, mode 0600, outside the repository and VM disk. Unlock sends it through Lima SSH stdin to guest-root administration and stores it only in tmpfs `/run/secure-vault/master.key`. VM swap and service/key-tool core dumps are disabled; on the host, `scripts/vault.mjs` reads the key in a short process of its own, started with `ulimit -c 0`, so the key is never in the long-running daemon's memory. Restart requires unlocking again. A daemon on a [remote server](REMOTE_SERVER.md), where the key file sits on the same machine as the vault, unlocks it itself when it starts.
+The 32-byte master key is `~/.config/anchi/vault.key` in the login user's home, mode 0600, outside the repository. Unlock sends it on stdin, through `sudo -n`, to guest-root administration, which stores it only in tmpfs `/run/secure-vault/master.key`. Service and key-tool core dumps are disabled; `scripts/vault.mjs` reads the key in a short process of its own, started with `ulimit -c 0`, so the key is never in the long-running daemon's memory. A restart requires unlocking again; a daemon on a [remote server](REMOTE_SERVER.md), where the key file sits on the same machine as the vault, unlocks it itself when it starts. The [host placement](HOST_PLACEMENT.md) keeps its own vault in the services process, with the same envelope format.
 
 ```bash
 anchi setup vault init     # Create once; reuses an existing key
@@ -25,7 +25,7 @@ This is credential-file encryption, not full-disk encryption. Mail workspaces, a
 
 ## Independent policy and approval
 
-`secure-policy` has its own UID/systemd service and no IP networking. Its socket is hidden from the cell. Connector identities may authorize and consume but cannot approve. Administration enters through trusted host Lima SSH and guest root, then drops to the policy identity.
+`secure-policy` has its own UID/systemd service and no IP networking. Its socket is hidden from the cell. Connector identities may authorize and consume but cannot approve. Administration enters through guest root (`sudo -n` by the server's login user), then drops to the policy identity.
 
 ```text
 Cell request -> gateway validates operation/parameters
@@ -83,6 +83,6 @@ make check
 bash scripts/verify.sh
 ```
 
-Offline tests cover service logic; VM checks exercise deployed identities, sockets, credentials, approvals and network isolation. Provider account lifecycle, malicious-content behavior and recovery need separate checks. Do not infer real-account readiness or complete prompt-injection protection from passing infrastructure tests.
+Offline tests cover service logic; the live checks on the server exercise deployed identities, sockets, credentials, approvals and network isolation. Provider account lifecycle, malicious-content behavior and recovery need separate checks. Do not infer real-account readiness or complete prompt-injection protection from passing infrastructure tests.
 
 Agents are started through `anchi` (`anchi` in a source checkout). Current limitations, including snapshot rollback, trusted administrators and cloud disclosure, are described in the [security model](../SECURITY.md).

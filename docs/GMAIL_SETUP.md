@@ -36,12 +36,12 @@ Select the account and consent in the system browser; the command waits up to ab
 
 Several Google accounts can be connected, each under a name of 1–32 lowercase letters, digits, `-` or `_` (at most eight per service). Without `--account` the name is `default`; an account connected before named accounts existed is `default`. Each account has its own tokens and account generation. An agent uses `default` unless its file says otherwise (`accounts: { gmail: work }`); the egress bridge pins that account to the agent's cells, and the Gmail service ignores any account a cell names.
 
-The VM's auth service can reach `oauth2.googleapis.com` only while a Google client is available and a sign-in is in progress, a token is stored or a revocation is pending. Starting a sign-in opens it at once, before you return from the browser.
+The server's auth service can reach `oauth2.googleapis.com` only while a Google client is available and a sign-in is in progress, a token is stored or a revocation is pending. Starting a sign-in opens it at once, before you return from the browser.
 
-- Client configuration goes to the VM over stdin, not shell arguments or logs.
-- The VM generates the PKCE verifier and OAuth state; the verifier stays in the VM.
+- Client configuration goes to the server over stdin, not shell arguments or logs.
+- The server generates the PKCE verifier and OAuth state; the verifier stays there.
 - The daemon's loopback callback on 127.0.0.1 checks state, Host and path, then sends the code over stdin to guest administration.
-- The VM exchanges and stores tokens; access and refresh tokens never reach the Mac or a cell.
+- The server exchanges and stores tokens; access and refresh tokens never reach the Mac or a cell.
 - Granted scopes must exactly match `gmail.readonly`; broader previous consent is rejected. Prefer a dedicated OAuth client.
 
 `anchi setup status` lists the services. `connected` means local credentials exist, not that Google still accepts them. Invalid refresh authorization sets `reauth_required` and stops Google calls until you sign in again. Only an actual read validates external authorization.
@@ -96,4 +96,4 @@ make check
 bash scripts/verify.sh
 ```
 
-Both run from a source checkout: the first runs the offline checks; the second checks the installed VM. Provider consent, mailbox reading, token refresh, reauthentication and remote revocation require separate real-account checks. Start with a test account and selected messages. Passing local tests does not establish that Google accepts the current credentials or that every recovery path works.
+Both run from a source checkout: the first runs the offline checks; the second checks the installed server. Provider consent, mailbox reading, token refresh, reauthentication and remote revocation require separate real-account checks. Start with a test account and selected messages. Passing local tests does not establish that Google accepts the current credentials or that every recovery path works.

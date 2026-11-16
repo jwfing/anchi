@@ -192,7 +192,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
     setBusy(false);
     onChange();
   };
-  const [typed, setTyped] = useState('');
   const [startup, setStartup] = useState<boolean>();
   useEffect(() => {
     if (server.name !== 'local') return;
@@ -205,14 +204,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
       current = false;
     };
   }, [server.name]);
-  const reset = async () => {
-    setBusy(true);
-    setLines([]);
-    const done = await act(() => call('setup.reset', { confirm: typed }), 'Anchi was reset');
-    setBusy(false);
-    setTyped('');
-    if (done) onChange();
-  };
   const running = status.vm === 'running' && status.installed;
   return (
     <>
@@ -246,14 +237,8 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
             {running ? 'Running' : sanitizeLine(status.vm)}
           </span>
         </div>
-        <p className="small muted">The sealed virtual computer agents run in, on {where}.</p>
+        <p className="small muted">The sealed space agents run in, on {where}.</p>
         <dl className="facts">
-          <dt>Size</dt>
-          <dd>
-            {status.vmSize?.current
-              ? `${status.vmSize.current.cpus} CPUs · ${status.vmSize.current.memoryGiB} GiB`
-              : 'not reported'}
-          </dd>
           <dt>Version</dt>
           <dd>
             app {status.appVersion ?? '?'} · secure room {status.guestVersion ?? '?'}
@@ -319,36 +304,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
         )}
       </section>
       <AccessReport />
-      <section className="card card-danger">
-        <h2>Reset Anchi on {where}</h2>
-        <p className="small">
-          Deletes the secure room with everything in it: every AI account and connection must be
-          connected again. Agent files, task history and the recovery key are kept, and shared
-          folders on disk are not touched. Refused while a task runs.
-        </p>
-        <form
-          className="row gap wrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (typed === 'reset' && !busy) void reset();
-          }}
-        >
-          <label className="field">
-            <span className="sr-only">Type reset to confirm</span>
-            <input
-              value={typed}
-              placeholder="Type reset to confirm"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => setTyped(e.target.value)}
-            />
-          </label>
-          <button type="submit" className="btn btn-danger" disabled={typed !== 'reset' || busy}>
-            Reset…
-          </button>
-          <span className="small muted">Anchi asks once more in a system dialog.</span>
-        </form>
-      </section>
     </>
   );
 }
@@ -929,7 +884,7 @@ export function ProbeNote({
   );
 }
 
-/** Refusal codes from the VM's admin scripts, in words; anything else shows as it came. */
+/** Refusal codes from the guest's admin scripts, in words; anything else shows as it came. */
 const REFUSALS: Record<string, string> = {
   HERMES_BASE_URL_INVALID:
     'Use an https address on a public host name, with no port, user, query or fragment.',

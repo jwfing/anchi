@@ -50,7 +50,7 @@ export function recoveryFor(message: string): Recovery {
       label: 'Review access',
       action: 'access',
     };
-  if (/vm|guest|base.image|lima|limactl|python|qemu|kvm|not installed|ENOENT/i.test(message))
+  if (/guest|base.image|python|openssl|not installed|ENOENT/i.test(message))
     return {
       title: 'Prepare the local environment',
       explanation:
@@ -70,11 +70,11 @@ export function setupPhase(action: SetupAction, line: string): string {
   if (/Preparing .* runtime image/.test(line)) return line;
   if (action === 'vault-init') return 'Initializing the vault';
   if (action === 'vault-unlock') return 'Unlocking credentials';
-  if (action === 'vm-start') return 'Starting the VM';
+  if (action === 'vm-start') return 'Starting the services';
   if (/anchi-image|base image|rootfs|debootstrap/i.test(line)) return 'Building the agent image';
   if (/install-anchi|bootstrap|trusted|egress|services/i.test(line)) return 'Installing services';
   if (/download|fetch|pulling/i.test(line)) return 'Downloading runtime components';
-  return action === 'workspaces' ? 'Sharing workspaces' : 'Preparing the VM';
+  return 'Preparing the guest';
 }
 export function teamActivity(
   agent: AgentSummary,

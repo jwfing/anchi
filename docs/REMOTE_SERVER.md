@@ -1,6 +1,6 @@
 # Remote server
 
-By default the Anchi daemon runs on your computer and drives a Lima VM there. A remote server runs the same daemon, trusted services and task cells on a Linux machine elsewhere, so agents and triggers keep running while your computer sleeps, as long as the machine runs (see [Keep an instabox server running](#keep-an-instabox-server-running)). The machine can be a VM from any provider that you reach with SSH. [instabox](https://instabox.sh) is the recommended provider: `scripts/remote.sh` creates the machine for you. The TUI and CLI stay on your computer and reach the server's daemon through SSH.
+On your computer the Anchi daemon runs as the [host placement](HOST_PLACEMENT.md), without agents. A remote server runs the daemon, the trusted services and the task cells on a Linux machine elsewhere: it is where the agent team runs, and agents and triggers keep running while your computer sleeps, as long as the machine runs (see [Keep an instabox server running](#keep-an-instabox-server-running)). The machine can be a VM from any provider that you reach with SSH. [instabox](https://instabox.sh) is the recommended provider: `scripts/remote.sh` creates the machine for you. The TUI and CLI stay on your computer and reach the server's daemon through SSH.
 
 ```text
 your computer                          remote server (Debian or Ubuntu, systemd, passwordless sudo)
@@ -8,7 +8,7 @@ anchi TUI / CLI ── SSH session ──► anchi-bridge ─► ~/.anchi/run/da
                                                    └─ sudo -n ─► vault, policy, connectors, egress, task cells
 ```
 
-On the server, the daemon runs inside the guest: it reaches guest root with `sudo -n` instead of `limactl shell`, and the machine itself takes the place of the VM. Cells, the egress proxy and the trusted services are the same as in the VM. `anchi-bridge` joins the SSH session's stdio to the daemon's socket. SSH authenticates you, the socket stays mode 0600, and nothing listens on the network.
+On the server, the daemon runs inside the guest: it reaches guest root with `sudo -n`, and the machine itself is the guest that holds the cells, the egress proxy and the trusted services. `anchi-bridge` joins the SSH session's stdio to the daemon's socket. SSH authenticates you, the socket stays mode 0600, and nothing listens on the network.
 
 ## Set up a server
 
@@ -200,17 +200,17 @@ recovery have not been tested live.
 
 ## Limits
 
-- Workspaces (`anchi setup workspaces`), `anchi setup reset` and `anchi daemon install` do not apply to a remote server. Delete or recreate the machine to reset it.
-- **Vault key.** The master key is in `~/.config/anchi/vault.key` on the server (0600, in a 0700 directory). Neither cells nor the trusted services can read it. The server's administrator, anyone who can SSH in as its login user, and for instabox the platform itself can. A snapshot or fork of the machine copies the key together with the encrypted vault. On a Lima host, by contrast, the key stays outside the VM.
-- **Restarts.** The unlocked master key lives in tmpfs, so a restart of the server (a reboot, a disk resize, an instabox stop and start, not a pause) locks the vault. Because the key is on the same machine, locking it there protects nothing, and the daemon unlocks it again when it starts, so triggers keep working after a restart. Its log says `unlocked the vault with the vault key on this server`. A Lima VM's vault stays locked after a restart until you unlock it (**Unlock** in the desktop app, Getting started in the TUI, or `anchi setup vault unlock`).
-- **DNS.** The egress proxy may query the resolvers `/etc/resolv.conf` names on port 53. Under Lima, that is the systemd-resolved stub, `127.0.0.53`. An instabox machine names public resolvers. The allowed resolvers are reread every two minutes, so when a VPN client rewrites `/etc/resolv.conf` (Tailscale names `100.100.100.100`), lookups through the proxy fail for up to two minutes and then use the new resolver.
+- `anchi daemon install` does not apply to a remote server (`scripts/server-install.sh` installs its systemd user unit). Delete or recreate the machine to reset it.
+- **Vault key.** The master key is in `~/.config/anchi/vault.key` on the server (0600, in a 0700 directory). Neither cells nor the trusted services can read it. The server's administrator, anyone who can SSH in as its login user, and for instabox the platform itself can. A snapshot or fork of the machine copies the key together with the encrypted vault.
+- **Restarts.** The unlocked master key lives in tmpfs, so a restart of the server (a reboot, a disk resize, an instabox stop and start, not a pause) locks the vault. Because the key is on the same machine, locking it there protects nothing, and the daemon unlocks it again when it starts, so triggers keep working after a restart. Its log says `unlocked the vault with the vault key on this server`.
+- **DNS.** The egress proxy may query the resolvers `/etc/resolv.conf` names on port 53. An instabox machine names public resolvers; a machine with systemd-resolved names its stub, `127.0.0.53`. The allowed resolvers are reread every two minutes, so when a VPN client rewrites `/etc/resolv.conf` (Tailscale names `100.100.100.100`), lookups through the proxy fail for up to two minutes and then use the new resolver.
 - **Separate storage.** Each server keeps its own agents, task copies and vault. A coordinator joins selected execution profiles into one team; merely switching servers does not merge their teams.
-- **Verified so far:** `instabox:` on Debian 13 x86_64 (`make verify-vm` and `make verify-anchi` with `ANCHI_GUEST=local` on the server). `ssh:` targets have not been tested live.
+- **Verified so far:** `instabox:` on Debian 13 x86_64 (`make verify-guest` and `make verify-anchi` with `ANCHI_GUEST=local` on the server). `ssh:` targets have not been tested live.
 
 ## Live checks on the server
 
 ```bash
-instabox ssh anchi-server -- 'cd ~/anchi && ANCHI_GUEST=local make verify-vm verify-anchi'
+instabox ssh anchi-server -- 'cd ~/anchi && ANCHI_GUEST=local make verify-guest verify-anchi'
 ```
 
 

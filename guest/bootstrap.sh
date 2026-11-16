@@ -10,8 +10,8 @@ base=/var/lib/secure-vm
 install -d -m 0700 "$base"
 install -d -m 0755 /opt/secure-vm
 install -m 0644 "$src/cell.env" /opt/secure-vm/cell.env
-# The guest's own prerequisites, so any Debian or Ubuntu machine can be the guest (Lima's image,
-# an instabox VM), not only one Lima provisioned.
+# The guest's own prerequisites, so any Debian or Ubuntu machine can be the guest (an instabox
+# VM, a server of your own).
 packages=(systemd-container debootstrap debian-archive-keyring python3 python3-cryptography nftables)
 if ! dpkg -s "${packages[@]}" >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive

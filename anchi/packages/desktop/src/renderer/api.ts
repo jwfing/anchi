@@ -38,7 +38,7 @@ export function message(err: unknown): string {
     /^Error invoking remote method '[^']+': (Error: )?/,
     '',
   );
-  // The daemon passes on what the VM tool printed, which tells the reader to run a command.
+  // The daemon passes on what the guest tool printed, which tells the reader to run a command.
   if (text.startsWith('GUEST_UNAVAILABLE')) {
     return 'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.';
   }

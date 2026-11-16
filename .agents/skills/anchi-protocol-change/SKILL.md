@@ -24,4 +24,4 @@ Frames in `src/cell.ts` cross the trust boundary: the runner is untrusted. Every
 
 ## Guest commands
 
-The daemon reaches the VM only through fixed `anchi-cell` / `anchi-image` commands (`daemon/src/guest.ts`, `guest/anchi_cell.py`). A new command validates every argument by regex in the guest, takes secrets on stdin, prints JSON, and is listed in the contracts table.
+The daemon reaches the guest only through fixed `anchi-cell` / `anchi-image` commands (`daemon/src/guest.ts`, `guest/anchi_cell.py`). A new command validates every argument by regex in the guest, takes secrets on stdin, prints JSON, and is listed in the contracts table.

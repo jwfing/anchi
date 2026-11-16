@@ -2,7 +2,7 @@
 """Trusted guest-root task-cell and image manager for the agent team. Never expose it to a cell.
 
 Installed as /usr/local/sbin/anchi-cell and /usr/local/sbin/anchi-image (the program name
-selects the command set). The daemon calls fixed subcommands over `limactl shell ... sudo`.
+selects the command set). The daemon calls fixed subcommands through `sudo -n`.
 Every command prints one JSON object; failures print {"error": CODE} and exit non-zero.
 `start` is the exception: its stdin and stdout belong to the cell runner.
 """
@@ -1207,7 +1207,7 @@ def cell_start(
     work = CELLS / task
     CELLS.mkdir(parents=True, exist_ok=True)
 
-    # From here on a signal (the daemon stopping, `limactl shell` dying) must release what the
+    # From here on a signal (the daemon stopping, the sudo session dying) must release what the
     # steps below create: the work directory, the overlay, the proxy registration. Python's
     # default action would kill the process without them; cleanup is idempotent.
     def stop(signum, frame):

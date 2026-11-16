@@ -2,7 +2,7 @@
 
 Anchi's `reddit` connector browses subreddits, searches and reads posts, reads comments,
 and publishes text posts or replies after approval. One Reddit account is connected at a
-time. Tokens stay in the VM vault; agents receive tools through their own connector bridge.
+time. Tokens stay in the server's vault; agents receive tools through their own connector bridge.
 
 ## Connect your account
 
@@ -27,7 +27,7 @@ time. Tokens stay in the VM vault; agents receive tools through their own connec
 Anchi uses Reddit's [installed-app authorization-code flow](https://github.com/reddit-archive/reddit/wiki/OAuth2)
 with a one-time state and `duration=permanent`, requesting exactly `identity`, `read`, and
 `submit`. The documented flow does not use PKCE. The host receives only the loopback code;
-token exchange and refresh run in the VM. Account verification with `/api/v1/me` must succeed
+token exchange and refresh run on the server. Account verification with `/api/v1/me` must succeed
 before the connection is stored. The callback port must be free. A failed sign-in leaves an
 existing connection intact; reauthorize if Reddit invalidates its refresh token.
 
@@ -71,7 +71,7 @@ that exact content and connection generation. Open the full approval dialog (**a
 keeps an agent asking. In `auto`, an agent publishes under your account without a person, also in
 tasks a trigger starts and that read untrusted content, so instructions in that content can make
 it post. The TUI asks you to confirm before it sets `auto`, and the CLI prints this warning. The
-policy service in the VM learns the new rule with `anchi setup install`.
+policy service on the server learns the new rule with `anchi setup install`.
 
 ## Limits and recovery
 
@@ -98,4 +98,4 @@ policy service in the VM learns the new rule with `anchi setup install`.
 
 Offline tests exercise OAuth, credential separation, input bounds, approval binding and replay
 protection. Real-account authorization, publishing, moderation and API eligibility still need
-provider-side validation. Live VM isolation checks run separately when explicitly requested.
+provider-side validation. Live isolation checks on the server run separately when explicitly requested.

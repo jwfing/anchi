@@ -414,7 +414,7 @@ describe('secure room notices', () => {
 
 it('says the secure room is not running instead of passing on a command to run', () => {
   const raw =
-    'Error invoking remote method \'anchi:call\': Error: GUEST_UNAVAILABLE: level=fatal msg="instance `anchi-vm` is stopped, run `limactl start anchi-vm`"';
+    "Error invoking remote method 'anchi:call': Error: GUEST_UNAVAILABLE: sudo: a password is required";
   expect(message(new Error(raw))).toBe(
     'The secure room is not running, so this cannot be read or changed now. Start it from Needs you.',
   );

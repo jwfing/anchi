@@ -1,6 +1,6 @@
 # Host placement: Anchi without a VM
 
-By default the Anchi daemon drives a Lima VM, where agents run in task cells. The host placement is for a different use: your own `claude` and `codex` sessions, on your own computer, with no VM. Anchi's egress proxy, vault and approvals run on the computer as you, in one process the daemon starts on its own Node; Claude Code's and Codex's own sandboxes keep each session's commands away from the vault and the network, so that every request leaves through the proxy, with placeholders where a credential would be. The design and what was verified are in [the plan](architecture/HOST_PLACEMENT_PLAN.md) and [the TypeScript services plan](architecture/HOST_SERVICES_TS_PLAN.md).
+The host placement is the daemon's default on your computer (`ANCHI_GUEST` unset or `host`): your own `claude` and `codex` sessions, with no VM and no agents. Agents run in task cells on a [remote server](REMOTE_SERVER.md) instead. Anchi's egress proxy, vault and approvals run on the computer as you, in one process the daemon starts on its own Node; Claude Code's and Codex's own sandboxes keep each session's commands away from the vault and the network, so that every request leaves through the proxy, with placeholders where a credential would be. The design and what was verified are in [the plan](architecture/HOST_PLACEMENT_PLAN.md) and [the TypeScript services plan](architecture/HOST_SERVICES_TS_PLAN.md).
 
 ```text
 your terminal / IDE
@@ -19,19 +19,19 @@ What you get:
 - the credentials you connect (GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord) stay in the vault; a session's commands see `anchi-placeholder` values and the proxy injects the real ones on matching requests only;
 - `push main`, secret endpoints and the other high-risk operations wait for your decision, as for agents; a connector in the profile's `ask` list holds every write;
 - the audit log of what sessions reached, in `~/.anchi/host/audit.jsonl`;
-- no Lima, no VM image, no Python, no change to how you start a session.
+- no VM, no Python, no change to how you start a session.
 
-What you do not get: agents, triggers, delegation and teams, which need a cell. A host-placement daemon refuses `tasks.create` (`HOST_PLACEMENT`). The boundary is also weaker than a VM's; read [Boundary](#boundary) before relying on it.
+What you do not get: agents, triggers, delegation and teams, which need a cell on a remote server. A host-placement daemon refuses `tasks.create` (`HOST_PLACEMENT`). The boundary is also weaker than a remote server's cells; read [Boundary](#boundary) before relying on it.
 
 ## Requirements
 
 - macOS or Linux with the `openssl` command line on `PATH` (macOS ships it; Debian and Ubuntu have the `openssl` package). The services sign the proxy's certificates with it; nothing else is needed beyond the Anchi daemon's own Node.
 - Claude Code 2.1.285 or newer, or Codex CLI 0.166 or newer, installed as you use them. Claude Code's sandbox needs `bubblewrap` and `socat` on Linux (see its `/sandbox` panel); on macOS it uses Seatbelt.
-- An Anchi checkout or release install, as for the VM placement.
+- An Anchi checkout or release install ([Getting started](GETTING_STARTED.md)).
 
 ## Set up
 
-The daemon chooses its placement from `ANCHI_GUEST` when it starts. Stop a running daemon first (`anchi daemon stop`); its Anchi home is shared, so connected accounts are kept, but the vault of the host placement is separate from the VM's.
+The daemon is the host placement unless `ANCHI_GUEST=local` names a remote server's guest; nothing has to be set on your computer. Its vault lives under `~/.anchi/host` and is separate from a remote server's.
 
 ```bash
 export ANCHI_GUEST=host
@@ -96,4 +96,4 @@ anchi daemon stop
 rm -rf ~/.anchi/host          # the proxy's CA, the audit log and the vault of this placement
 ```
 
-Start the daemon without `ANCHI_GUEST` (or `anchi daemon install` again without it) to go back to the VM placement.
+The daemon keeps running as the host placement with nothing enabled; to run agents, set up a [remote server](REMOTE_SERVER.md).

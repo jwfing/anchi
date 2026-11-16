@@ -13,9 +13,10 @@ import { join } from 'node:path';
 import { REPO_ROOT } from './host.ts';
 
 /**
- * Host tools Anchi downloads for itself when the computer lacks them (Lima, the Codex CLI that
- * signs in to ChatGPT). Each is pinned in host-tools.env with a SHA-256 per target, checked
- * before anything is extracted, and installed into a directory of its own under the Anchi home.
+ * Host tools Anchi downloads for itself when the computer lacks them (the Codex CLI that signs
+ * in to ChatGPT, the Claude Code that signs in to Claude). Each is pinned in host-tools.env with
+ * a SHA-256 per target, checked before anything is extracted, and installed into a directory of
+ * its own under the Anchi home.
  */
 
 /** `KEY=value` lines; comments and anything that does not look like a pin are ignored. */
@@ -37,19 +38,14 @@ export function readHostTools(root = REPO_ROOT): Record<string, string> {
 }
 
 /** The two hosts Anchi provides tools for, with each tool's name for them. */
-export const HOST_TARGETS: Record<
-  string,
-  { key: string; lima: string; codex: string; claude: string }
-> = {
+export const HOST_TARGETS: Record<string, { key: string; codex: string; claude: string }> = {
   'darwin-arm64': {
     key: 'DARWIN_ARM64',
-    lima: 'Darwin-arm64',
     codex: 'aarch64-apple-darwin',
     claude: 'darwin-arm64',
   },
   'linux-x64': {
     key: 'LINUX_X64',
-    lima: 'Linux-x86_64',
     codex: 'x86_64-unknown-linux-musl',
     claude: 'linux-x64',
   },
@@ -99,7 +95,7 @@ export async function download(url: string, max: number, code: string): Promise<
  * Checks `body` against the pin, extracts it into a temporary directory under `parent`, lets
  * `check` accept the tree (it throws otherwise), then renames the tree to `parent/<version>`.
  * A mismatch extracts nothing; an interrupted run leaves only a temporary directory, removed
- * here or replaced by the next run. Error codes start with `code` (LIMA, CODEX).
+ * here or replaced by the next run. Error codes start with `code` (CODEX, CLAUDE).
  */
 export function installArchive(
   body: Buffer,

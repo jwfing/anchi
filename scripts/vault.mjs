@@ -1,7 +1,9 @@
 // Keep the master key out of the guest's services and out of the long-running daemon: this short
-// process reads it and sends it on stdin to guest-root administration, which keeps it in tmpfs.
-// From a Lima host the key stays outside the VM; with Anchi inside the guest (ANCHI_GUEST=local)
-// it stays in the login user's home, which neither task cells nor trusted services read.
+// process reads it and sends it on stdin to vault administration, which keeps it in memory only.
+// On a remote server (ANCHI_GUEST=local) that is guest-root vault_admin.py through sudo, and the
+// key stays in the login user's home, which neither task cells nor trusted services read. On the
+// host placement (ANCHI_GUEST=host, the default) it is the host services process, on this
+// computer, as the user (anchi/packages/daemon/src/host-placement.ts).
 // The daemon runs it with its own Node under `ulimit -c 0` (anchi/packages/daemon/src/host.ts).
 //   node scripts/vault.mjs init|unlock|lock|status [--key-file <path>]
 import { spawnSync } from 'node:child_process';
@@ -13,12 +15,8 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VM = process.env.ANCHI_INSTALL_VM ?? 'anchi-vm';
-const GUEST = process.env.ANCHI_GUEST ?? 'lima';
+const GUEST = process.env.ANCHI_GUEST ?? 'host';
 const IN_GUEST = GUEST === 'local';
-// No VM (host placement): vault_admin.py runs on this computer, as the user, on the Python of
-// ~/.anchi/host/venv, with the vault under ~/.anchi/host/state (anchi/packages/daemon/src/host-placement.ts).
-const ON_HOST = GUEST === 'host';
 const ANCHI_HOME = process.env.ANCHI_HOME ?? join(homedir(), '.anchi');
 
 class Refused extends Error {}
@@ -38,23 +36,10 @@ function hostCli() {
 
 function remote(action, value) {
   const input = value === undefined ? '' : JSON.stringify(value);
-  const [bin, ...cli] = ON_HOST ? hostCli() : [];
-  const result = ON_HOST
-    ? spawnSync(bin, [...cli, '--root', join(ANCHI_HOME, 'host'), 'vault', action], {
-        input,
-        encoding: 'utf8',
-      })
-    : spawnSync(
-        IN_GUEST ? 'sudo' : 'limactl',
-        [
-          ...(IN_GUEST ? [] : ['shell', VM, '--', 'sudo']),
-          '-n',
-          '/usr/bin/python3',
-          '/opt/secure-vm/services/vault_admin.py',
-          action,
-        ],
-        { input, encoding: 'utf8' },
-      );
+  const [bin, ...args] = IN_GUEST
+    ? ['sudo', '-n', '/usr/bin/python3', '/opt/secure-vm/services/vault_admin.py', action]
+    : [...hostCli(), '--root', join(ANCHI_HOME, 'host'), 'vault', action];
+  const result = spawnSync(bin, args, { input, encoding: 'utf8' });
   let response;
   try {
     response = JSON.parse(result.stdout);
@@ -76,7 +61,7 @@ function readKey(file) {
       refuse(
         'VAULT_KEY_MISSING: no master key found. For a new or reset vault, run ' +
           '`anchi setup vault init` (source checkout: `./scripts/anchi setup vault init`). ' +
-          'Restore the original master key if the VM still contains encrypted credentials.',
+          'Restore the original master key if the vault still contains encrypted credentials.',
       );
     }
     refuse('Key file cannot be opened safely. Check its ownership, permissions and path.');
@@ -134,21 +119,7 @@ function main(argv) {
   if (argv[1] === '--key-file' && argv[2] && argv.length === 3) keyFile = argv[2];
   else if (argv.length !== 1)
     refuse('usage: vault.mjs init|unlock|lock|status [--key-file <path>]');
-  if (!/^anchi-vm(-[a-z0-9-]+)?$/.test(VM)) {
-    refuse('ANCHI_INSTALL_VM must look like anchi-vm or anchi-vm-<suffix>');
-  }
-  if (VM === 'anchi-vm' && !IN_GUEST && process.env.ANCHI_VM_MIGRATING !== '1') {
-    // Renames a VM created as secure-vm and moves its key here first (scripts/vm-name.sh).
-    // A failed migration stops us: the key and the VM may still carry their old names.
-    const script = join(dirname(fileURLToPath(import.meta.url)), 'vm-name.sh');
-    const migration = spawnSync('bash', [script, 'migrate'], {
-      stdio: 'inherit',
-      env: { ...process.env, ANCHI_VM_MIGRATING: '1' },
-    });
-    if (migration.status !== 0) {
-      refuse('The move from secure-vm to anchi-vm failed; see the messages above.');
-    }
-  }
+  if (!IN_GUEST && GUEST !== 'host') refuse(`ANCHI_GUEST must be local or host, not ${GUEST}`);
   if (action === 'status' || action === 'lock') {
     console.log(JSON.stringify(remote(action), null, 2));
     return;

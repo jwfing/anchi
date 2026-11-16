@@ -1,16 +1,16 @@
 # Agent team
 
-Anchi runs a secured team of Codex, Claude Code and Hermes agents. Each task runs in a disposable cell inside the `anchi-vm` VM, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the VM vault: an egress proxy adds GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion, Slack, X and Reddit. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
+Anchi runs a secured team of Codex, Claude Code and Hermes agents on a [remote server](REMOTE_SERVER.md). Each task runs in a disposable cell on that server, and each agent gets only the connectors, hosts, directories, skills and delegates in its configuration. Credentials stay in the server's vault: an egress proxy adds GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials to the agent's requests on the way out, and trusted services act for it on Gmail, Drive, Notion, Slack, X and Reddit. This guide covers installation, connecting accounts, creating agents and running tasks. The design is in [Agent team design](architecture/AGENT_TEAM_DESIGN.md), the interfaces are in [Agent team contracts](architecture/AGENT_TEAM_CONTRACTS.md), and the boundaries are in [Security](../SECURITY.md#agent-team-task-cells-and-the-egress-proxy).
 
 ## Install
 
-Install Anchi and prepare its VM with [Getting started](GETTING_STARTED.md). This guide uses
+Install Anchi with [Getting started](GETTING_STARTED.md) and set up a [remote server](REMOTE_SERVER.md); agent tasks are refused on your own computer, which runs the [host placement](HOST_PLACEMENT.md). This guide uses
 the installed `anchi` command. From a source checkout, use `scripts/anchi` instead; only source
 development needs Node and pnpm. With no arguments, `anchi` opens the TUI.
 
-`anchi setup install` creates or updates the VM and refuses while task cells are live (cells
-can remain alive for 10 minutes after a task turn; an image build under way counts too). `anchi setup vm` starts a stopped VM;
-`anchi setup vault unlock` unlocks it. Back up `~/.config/anchi/vault.key`: a replacement key
+`anchi setup install` installs or updates the server's components and refuses while task cells are live (cells
+can remain alive for 10 minutes after a task turn; an image build under way counts too).
+`anchi setup vault unlock` unlocks the vault after the server restarted. Back up `~/.config/anchi/vault.key`: a replacement key
 cannot recover stored credentials. `anchi daemon install` starts the daemon at login.
 
 ## Connect accounts
@@ -25,7 +25,7 @@ and enable `x` for the agent. Reading/search/mentions are bounded; publishing te
 waits for approval of the full text and verified account unless you set X writes to `auto`.
 
 Anchi detects local Codex and Claude Code subscription logins at startup and imports available
-access tokens automatically once the VM and vault are ready. Both are imported when present.
+access tokens automatically once the server and vault are ready. Both are imported when present.
 An installed CLI without a usable login still needs local sign-in. No model is called by import.
 
 Codex uses your ChatGPT subscription. Log in on the host with `codex login`. To import manually:
@@ -85,7 +85,7 @@ With `--profile`, the daemon exports the profile's temporary credentials with th
 
 Each command checks the credential with the service and prints the account it belongs to. A credential the service refuses is not kept. Run these commands in a terminal: they prompt for the secret without echo. They also read the secret from stdin when stdin is not a terminal. For AWS, stdin takes JSON: `{"accessKeyId", "secretAccessKey", "region", "sessionToken"?}`. In the TUI, the same setup is under **Connectors** and **Runtimes**.
 
-Gmail, Drive, Notion and Slack are trusted services in the VM. Agents with these connectors call them through Anchi tools; the services' own policy decides each request.
+Gmail, Drive, Notion and Slack are trusted services on the server. Agents with these connectors call them through Anchi tools; the services' own policy decides each request.
 
 ```bash
 anchi setup google-client ~/Downloads/client.json  # once, unless Anchi ships a built-in client
@@ -97,7 +97,7 @@ anchi setup service slack      # bot token
 anchi setup service-mode notion ask   # every Notion write waits for your approval
 ```
 
-Google tokens are obtained in the VM from the authorization code; they never reach the Mac. In the TUI, the **Services** part of **Connectors** does the same (`Enter` connect, `m` write mode, `d` disconnect).
+Google tokens are obtained on the server from the authorization code; they never reach the Mac. In the TUI, the **Services** part of **Connectors** does the same (`Enter` connect, `m` write mode, `d` disconnect).
 
 Gmail and Drive can each hold several Google accounts, by name (`default` unless you pass `--account`). An agent uses `default` unless its file names another one, for connectors it has:
 
@@ -106,7 +106,7 @@ connectors: [gmail, drive]
 accounts: { gmail: work }       # Drive stays on `default`
 ```
 
-The account is pinned to the agent's cells by the bridge in the VM; the agent cannot ask for another account, and approvals bind to the account they were given for. `anchi setup disconnect gmail --account work` disconnects one account.
+The account is pinned to the agent's cells by the bridge on the server; the agent cannot ask for another account, and approvals bind to the account they were given for. `anchi setup disconnect gmail --account work` disconnects one account.
 
 Grant only what agents need. [Token connectors](CONNECTORS.md#token-connectors) says where to create each credential and which scopes to give it.
 
@@ -231,12 +231,12 @@ At the bottom, the panel shows what it cannot change: template, image, sandbox, 
 ## Delete an agent
 
 In the desktop app, open the agent's **Settings → Delete agent…**. The preview names its
-machine and lists the affected tasks, delegated tasks, triggers, VM files and delegation
+machine and lists the affected tasks, delegated tasks, triggers, server files and delegation
 references. Type the exact agent id, choose **Continue to confirmation**, then confirm in the
 native dialog. Cancel leaves the agent unchanged. A disconnected or replaced connection, or
 changed deletion effects while the native dialog is open, requires a new review.
 
-The result stays open after the agent disappears from Team. If the VM could not remove its
+The result stays open after the agent disappears from Team. If the server could not remove its
 home or another cleanup step failed, the result shows the warning and offers **Review
 remaining cleanup**; this opens another preview and confirmation. The built-in builder cannot
 be deleted. Deletion uses the same daemon operations as the TUI and CLI below.
@@ -247,9 +247,9 @@ be deleted. Deletion uses the same daemon operations as the TUI and CLI below.
 - deletes all its tasks and transcripts, with the tasks they delegated to other agents; running and queued ones are cancelled first. A task of another agent that had delegated to it stays, with a note;
 - forgets its triggers and what its polls have seen;
 - removes it from other agents' `delegates` and from the `delegates` of templates in `~/.anchi/templates/`, keeping the rest of their files (an agent that only inherited it is not edited);
-- in the VM, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
+- on the server, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
 
-Directories of your computer in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the VM refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the VM is not running, the rest is done and the dialog says so; deleting the agent again later finishes the VM part. The builder cannot be deleted.
+Directories of your computer in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the cell manager refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the server cannot be asked, the rest is done and the dialog says so; deleting the agent again later finishes the server part. The builder cannot be deleted.
 
 ## Teams, approvals, triggers and skills
 
@@ -297,13 +297,7 @@ highRisk: { disable: [github-merge] }  # merging does not wait for you; no appro
 
 ## Directories of your computer (workspaces)
 
-Share `~/AnchiWorkspaces` with the VM once (it restarts the VM and unlocks the vault again; on Linux it also reinstalls the guest components, see [Linux differences](GETTING_STARTED.md#linux-differences)):
-
-```bash
-anchi setup workspaces      # or W on the Runtimes screen
-```
-
-Then give an agent directories under it:
+Give an agent directories under `~/AnchiWorkspaces`:
 
 ```yaml
 workspaces:
@@ -311,7 +305,7 @@ workspaces:
     mode: rw                # ro by default
 ```
 
-They appear in the agent's cells at `/home/agent/workspaces/<name>`; a cell sees no other directory of your computer. Writes to an `rw` workspace go straight to your computer and are owned by you. Anchi tells the agent where they are and what they map to, and that its own working directory, `/home/agent/work`, stays in the VM: files there are not on your computer. An agent that cloned a repository into `/home/agent/work` before it had a workspace may keep using that copy; ask it to work in the workspace, or to push its branch. A workspace is slower than `/home/agent/work` for many small files, much more so on Linux hosts (9p): agents are told to keep dependencies, virtual environments, caches and build output in `/home/agent/work`.
+They appear in the agent's cells at `/home/agent/workspaces/<name>`; a cell sees no other directory of your computer. Writes to an `rw` workspace go straight to your computer and are owned by you. Anchi tells the agent where they are and what they map to, and that its own working directory, `/home/agent/work`, stays on the server: files there are not on your computer. An agent that cloned a repository into `/home/agent/work` before it had a workspace may keep using that copy; ask it to work in the workspace, or to push its branch. A workspace is slower than `/home/agent/work` for many small files, much more so on Linux hosts (9p): agents are told to keep dependencies, virtual environments, caches and build output in `/home/agent/work`.
 
 A writable directory lets an agent leave code that your own tools later run. Anchi mounts git hooks, git configuration and info, `.gitattributes`, `.envrc`, `.vscode/` and `.idea/` read-only in the repositories near the top of an `rw` workspace. After each turn it compares the workspace with its state before the turn and notes in the task transcript any new git hook, git configuration that runs commands, symlink pointing outside the workspace, new executable file or changed editor or shell configuration. It never changes your files. Files that tools run by design, such as `package.json` scripts or a `Makefile`, cannot be masked: review an agent's changes before you run them.
 
@@ -344,11 +338,11 @@ anchi audit t-0123456789    # what the task reached outside, and with which cred
 anchi usage --since 7d --by model
 ```
 
-Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. It is mounted at `/home/agent` in the agent's cells and holds the work directory and Codex sessions. Everything else in a cell is discarded when the cell ends.
+Each agent has a persistent home on the server, `/var/lib/anchi/agents/<id>/home`. It is mounted at `/home/agent` in the agent's cells and holds the work directory and Codex sessions. Everything else in a cell is discarded when the cell ends.
 
 ## Access and usage
 
-**A task's access.** The egress proxy writes a row for every request a cell makes, every cell registration and every bridge call. **^X l** on a task (`anchi audit <task> [--json]`) reads the task's rows from the VM and shows:
+**A task's access.** The egress proxy writes a row for every request a cell makes, every cell registration and every bridge call. **^X l** on a task (`anchi audit <task> [--json]`) reads the task's rows from the server and shows:
 
 - A headline that checks the boundary, for example "42 requests; 17 with credentials injected by the proxy; the cell sent only placeholders or no credential; 2 refused or held; scan: clean". It turns red when a cell sent a credential of its own (something other than a placeholder) to a host.
 - The scope of the cell: connectors, bridge services, egress list and the writes it holds.
@@ -357,9 +351,9 @@ Each agent has a persistent home in the VM, `/var/lib/anchi/agents/<id>/home`. I
 - Gmail, Drive, Notion and Slack calls through the bridge.
 - The latest requests (method, host, path, decision). Query strings and header values are never recorded.
 
-Hosts and paths come from the agent's requests, so they are shown as agent text. The VM keeps the log up to 50 MB and one rotated file. The daemon saves a task's rows when each of its cells closes and whenever they are read (up to 5,000 per task), so a task's record outlives the rotation and goes when the task is deleted. If the VM cannot be read, the view shows the saved rows and says so.
+Hosts and paths come from the agent's requests, so they are shown as agent text. The server keeps the log up to 50 MB and one rotated file. The daemon saves a task's rows when each of its cells closes and whenever they are read (up to 5,000 per task), so a task's record outlives the rotation and goes when the task is deleted. If the server cannot be read, the view shows the saved rows and says so.
 
-**Every agent's access.** **Configure → Access** (`anchi access [--since 24h|7d|30d] [--json]`) sums up the saved rows of all tasks over a period: per agent its tasks, requests, hosts, refusals, held writes and the credentials the proxy injected by connector; the hosts most requested and by whom; every request where a cell sent a credential of its own; and the latest refusals. **p** changes the period and **r** refreshes. Rows of running tasks are read from the VM when the screen opens.
+**Every agent's access.** **Configure → Access** (`anchi access [--since 24h|7d|30d] [--json]`) sums up the saved rows of all tasks over a period: per agent its tasks, requests, hosts, refusals, held writes and the credentials the proxy injected by connector; the hosts most requested and by whom; every request where a cell sent a credential of its own; and the latest refusals. **p** changes the period and **r** refreshes. Rows of running tasks are read from the server when the screen opens.
 
 **A credential of the cell's own.** Anchi's credentials never enter a cell; the cell sends placeholders, and the proxy replaces them. When a cell sends something else in `Authorization` or `x-api-key` (a key from the task text or a file, for example), the proxy tells the daemon at once: the task gets a ⚠ note naming the host, and a desktop notification goes out, once per host and cell. Every such request is in the access view, and its headline turns red.
 
@@ -370,7 +364,7 @@ Hosts and paths come from the agent's requests, so they are shown as agent text.
 ## Limits
 
 - At most `maxCells` cells work at once (default 4; `maxCells: 1` to `16` in `~/.anchi/settings.yaml`), counting cells that are still closing. A cell whose turn waits for a task it delegated is not working: it stays alive but frees its place, so a lead waiting for its reviewer never keeps the reviewer from starting. At most 16 cells are alive, waiting ones included. When no cell is free, the longest-idle one is closed to make room; otherwise the task waits (the task notes it): delegated tasks first, deepest first, then in the order they came, and only for as long as the tasks before it would take every free cell; after 10 minutes it fails with `TOO_MANY_CELLS`. A changed `maxCells` applies at once; a value outside 1 to 16 becomes the nearest one allowed, and the daemon log says so.
-- Each working cell may use up to 2 GB of the VM's memory, and a cell waiting on a delegation keeps its runtime's memory (a few hundred MB). At the default `maxCells: 4` the 16 live cells are reached only by deep delegation — 4 working cells and 12 waiting on them — which is about 8 GB working plus a few GB waiting, more than a VM with half of a 16 GB computer has. Chains that deep are rare, but before raising `maxCells` or letting agents delegate several levels down, give the VM more memory: `limactl stop anchi-vm && limactl edit anchi-vm --memory 8 --cpus 6 && limactl start anchi-vm`, then `anchi setup vault unlock`.
+- Each working cell may use up to 2 GB of the server's memory, and a cell waiting on a delegation keeps its runtime's memory (a few hundred MB). At the default `maxCells: 4` the 16 live cells are reached only by deep delegation — 4 working cells and 12 waiting on them — which is about 8 GB working plus a few GB waiting, more than a small server has. Chains that deep are rare, but before raising `maxCells` or letting agents delegate several levels down, give the server more memory (resize the machine at its provider), then `anchi setup vault unlock` after the restart.
 - A turn that runs longer than 60 minutes is cancelled and the task fails.
 - Finished tasks are deleted after 90 days; set `retentionDays` in `~/.anchi/settings.yaml` to change it.
 - Polled items and delegated task text reach agents as task input. An agent with powerful connectors that is triggered by outside content (a Linear issue anyone can file) acts on that content. Listed high-risk operations wait by default whatever the origin, unless exempted with `highRisk.disable`; use `approvals` for its other writes, and `egress` to limit where it can send data.

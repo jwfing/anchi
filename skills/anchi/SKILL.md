@@ -1,11 +1,11 @@
 ---
 name: anchi
-description: Operate Anchi, a secured agent team on your own computer — set up its VM and vault, connect runtimes (Codex, Claude Code, Hermes) and accounts, define agents in YAML, run tasks, delegation, triggers, skills, workspaces, egress limits, approvals, audit and usage, from the `anchi` CLI or TUI. Use when the user mentions Anchi or 安栖, wants to create or change an Anchi agent, give one a task, see what an agent accessed, handle a held write, or fix an Anchi setup.
+description: Operate Anchi, a secured agent team on a remote server and a credential proxy for your own sessions on your computer — set up its guest and vault, connect runtimes (Codex, Claude Code, Hermes) and accounts, define agents in YAML, run tasks, delegation, triggers, skills, workspaces, egress limits, approvals, audit and usage, from the `anchi` CLI or TUI. Use when the user mentions Anchi or 安栖, wants to create or change an Anchi agent, give one a task, see what an agent accessed, handle a held write, or fix an Anchi setup.
 ---
 
 # Using Anchi
 
-Anchi runs a team of agents (Codex, Claude Code or Hermes) on the user's computer. Each task runs in a disposable cell inside a local Linux VM (`anchi-vm`, through Lima). Agents never hold credentials: an egress proxy in the VM injects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out, and trusted services in the VM act for agents on Gmail, Drive, Notion, Slack, X and Reddit. Each agent reaches only the connectors, hosts, directories, skills and delegates in its YAML file.
+Anchi runs a team of agents (Codex, Claude Code or Hermes) on a remote Linux server the user chose with `anchi server <name>`. Each task runs in a disposable cell on that server. Agents never hold credentials: an egress proxy on the server injects GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord and model credentials on the way out, and trusted services there act for agents on Gmail, Drive, Notion, Slack, X and Reddit. On the user's own computer the daemon is the host placement: no agents, but the same proxy and vault for the user's own `claude` and `codex` sessions (`anchi host status|enable|disable`). Each agent reaches only the connectors, hosts, directories, skills and delegates in its YAML file.
 
 Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for people, and the CLI (`anchi <command>`) for scripts and agents. From a source checkout the CLI is `scripts/anchi`.
 
@@ -16,7 +16,7 @@ Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for 
 3. **Never loosen an agent's boundaries on your own.** Agent files, templates and `~/.anchi/settings.yaml` take effect as soon as they are saved, without a dialog. Change these only when the user asked for that change, and show them the diff before you save it: `approvals`, `highRisk` (in `settings.yaml` it exempts **every** agent), `egress`, `connectors`, `delegates`, `accounts`, `workspaces` and `sandbox`. The same goes for `anchi setup service-mode <service> auto` and `anchi agents allow-host`. Removing `approvals: ask`, setting `approvals: {x: auto}` or `{reddit: auto}`, or adding a `highRisk` exemption is approving future writes for the user; making a task work is not a reason to do it.
 4. **Commands that take effect at once need the user's go-ahead in the conversation**; most do not ask for confirmation, so the CLI is no safety net:
    - `anchi rm <task>`, `anchi cancel <task>`, `anchi skills rm <id>` and `anchi setup disconnect <id>` act immediately.
-   - `anchi agents rm`, `anchi setup reset` and `anchi setup workspaces` (restarts the VM, ending running tasks) ask in a terminal; do not add `-y` unless the user asked for it.
+   - `anchi agents rm` and `anchi host enable` ask in a terminal; do not add `-y` unless the user asked for it.
    - Other edits to agent files (prompt, model, skills, triggers) are fine when they are what the user asked for; keep their comments. Edit files rather than the TUI when you work non-interactively.
 5. **Report what Anchi says.** Errors carry a hint (`cell start failed: HERMES_NOT_CONFIGURED — set its OpenAI-compatible endpoint …`); pass it on instead of guessing.
 
@@ -35,22 +35,22 @@ curl -fsSL https://anchi.elseward.xyz/install.sh | sh    # macOS (Apple Silicon)
 anchi                                                      # opens Getting started in the TUI
 ```
 
-Prerequisites: macOS needs `brew install lima python`; Linux needs Lima 2.2+, Python 3.11+, QEMU and access to `/dev/kvm`. Getting started prepares the environment and selected runtime after one confirmation, automatically connects available local Codex and Claude Code logins, then reviews a starter named `dev`. The CLI equivalent for preparation is:
+Prerequisites: this computer needs only the `openssl` command line (the host placement); a remote server needs Debian or Ubuntu with Python 3.11+ and passwordless sudo, set up with `scripts/remote.sh` or from the desktop app's Machines. Getting started prepares the environment and selected runtime after one confirmation, automatically connects available local Codex and Claude Code logins, then reviews a starter named `dev`. The CLI equivalent for preparation is:
 
 ```bash
 anchi setup prepare                   # detected login; --runtime overrides it
 ```
 
-This creates or starts the VM, initializes or unlocks the vault and prepares the selected image;
-it imports available local subscription access tokens and calls no model. Refresh tokens stay on the host. Existing keys are kept. The user must back up
+On a remote server this installs the guest's components, initializes or unlocks the vault and prepares the selected image; on the user's computer it starts the services and unlocks the vault. It
+imports available local subscription access tokens and calls no model. Refresh tokens stay on the host. Existing keys are kept. The user must back up
 `~/.config/anchi/vault.key`. Release packages download verified layers; source checkouts build
 locally. Individual steps remain available (also in the TUI's **Runtimes** screen):
 
 ```bash
-anchi setup install          # create the VM, install the trusted services, build the base image (minutes)
+anchi setup install          # remote server: install the trusted services, build the base image (minutes)
 anchi setup vault init       # first time: creates ~/.config/anchi/vault.key — the user must back it up
-anchi setup vault unlock     # after every VM start
-anchi setup status           # VM, vault, runtimes, connectors at a glance
+anchi setup vault unlock     # after the server or the services restarted
+anchi setup status           # guest, vault, runtimes, connectors at a glance
 ```
 
 If no local login was imported, connect at least one runtime. Automatic imports can be disabled
@@ -136,7 +136,7 @@ In the TUI, a held write is announced without stealing focus. **^X a** opens rev
 - **Delegation:** `delegates: [reviewer]` lets an agent hand subtasks to `reviewer` through its Anchi tools (`anchi_delegate_task`, `anchi_task_status`, `anchi_send_to_task`, `anchi_list_tasks`, `anchi_list_agents`, `anchi_whoami`). The TUI's Team overview (**^X 4**) shows the tree.
 - **Triggers:** `triggers: [{schedule: '0 9 * * 1-5', text: …}]` or a poll of Linear issues / a GitHub issue search that starts one task per new item. `anchi triggers` lists them with their next run.
 - **Skills:** `anchi skills add <dir | GitHub URL>` (a repository of skills adds each one, pinned to its commit), then `skills: [id]` in the agent file. `anchi skills update` shows what changed upstream before installing it.
-- **Workspaces:** directories under `~/AnchiWorkspaces` (shared once with `anchi setup workspaces`), given to an agent with `workspaces: [{path: projects/api, mode: rw}]`; they appear at `/home/agent/workspaces/<name>` in its cells.
+- **Workspaces:** directories under `~/AnchiWorkspaces`, given to an agent with `workspaces: [{path: projects/api, mode: rw}]`; they appear at `/home/agent/workspaces/<name>` in its cells.
 - **Images:** the base image has git, gh, build tools, Python, Node/pnpm, Go and Rust. Anything else goes in a recipe, `~/.anchi/images/<id>.yaml` with `packages:` and `run:`, used with `image: <id>`.
 
 ## What happened, and what it cost
@@ -156,10 +156,10 @@ In the TUI, **^X l** shows the access report of the task on screen. A host refus
 anchi daemon status | start | stop
 anchi daemon install          # start the daemon at login (launchd / systemd user unit)
 anchi update                  # install the latest release; --check only checks
-anchi setup vm                # start a stopped VM, then: anchi setup vault unlock
+anchi setup start             # start stopped services (host placement), then: anchi setup vault unlock
 ```
 
-`anchi setup install` is safe to run again (it updates the VM's components) but refuses while task cells are live. `anchi setup reset` deletes the VM and everything in it, and refuses while tasks run or wait; `--all` also deletes the vault key and `~/.anchi` (keeping `keybindings.json`).
+`anchi setup install` is safe to run again (it updates the guest's components) but refuses while task cells are live. There is no reset command: a remote server is reset by recreating the machine, this computer by deleting `~/.anchi` with the daemon stopped.
 
 ## More
 

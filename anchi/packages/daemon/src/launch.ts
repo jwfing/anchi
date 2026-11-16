@@ -68,9 +68,11 @@ export function launchdPlist(
   const args = daemonCommand()
     .map((a) => `    <string>${xml(a)}</string>`)
     .join('\n');
-  // A daemon without a VM (`host`) keeps its placement across logins; Lima is the default.
+  // The placement is kept across logins when it was set (`host` is the default anyway).
   const placement =
-    guest === 'host' ? `\n    <key>ANCHI_GUEST</key>\n    <string>host</string>` : '';
+    guest === 'local' || guest === 'host'
+      ? `\n    <key>ANCHI_GUEST</key>\n    <string>${guest}</string>`
+      : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

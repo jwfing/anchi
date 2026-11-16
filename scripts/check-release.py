@@ -1,4 +1,4 @@
-"""Exercise the public installer and packaged daemon without a checkout or a real VM.
+"""Exercise the public installer and packaged daemon without a checkout or a real guest.
 
 Usage: python3 scripts/check-release.py artifacts/releases/anchi-<target>.tar.gz
 """
@@ -54,9 +54,10 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
         "args[args.index('-o') + 1])\n"
     )
     curl.chmod(0o755)
-    lima = fakebin / "limactl"
-    lima.write_text("#!/bin/sh\nexit 1\n")
-    lima.chmod(0o755)
+    # Guest root on a remote server; the daemon's own checks run on the host placement.
+    sudo = fakebin / "sudo"
+    sudo.write_text("#!/bin/sh\nexit 1\n")
+    sudo.chmod(0o755)
     bindir = home / ".local/bin"
     bindir.mkdir(parents=True)
     env = {
@@ -146,31 +147,33 @@ with tempfile.TemporaryDirectory(prefix="anchi release '", dir="/tmp") as tempor
     install(custom_env=no_path)
     install(custom_env=no_path)
     assert (home / ".profile").read_text().count("# Anchi") == 1
-    # Verify packaged setup resources and prebuilt cell runners without touching a VM.
-    lima.write_text(
+    # Verify packaged setup resources and prebuilt cell runners as a remote server would, with
+    # guest root faked: the copies are real (a missing resource fails them), the installers are not.
+    sudo.write_text(
         f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
+        "import shutil, sys\n"
         "args = sys.argv[1:]\n"
-        # A Lima new enough for the VM template, so setup uses this one and downloads none.
-        "if args == ['--version']:\n"
-        "    print('limactl version 2.2.0')\n"
-        "    sys.exit(0)\n"
-        "if args[0] == 'copy':\n"
-        "    for source in args[1:-1]:\n"
-        "        if source != '-r' and not pathlib.Path(source).exists():\n"
-        "            raise SystemExit('Missing setup resource: ' + source)\n"
-        "if any('vault_admin.py' in arg for arg in args):\n"
-        "    print(json.dumps({'encrypted_files': 0, 'unlocked': True}))\n"
+        "assert args[0] == '-n', args\n"
+        "if args[1] == 'rm':\n"
+        "    shutil.rmtree(args[-1], ignore_errors=True)\n"
+        "elif args[1] not in ('bash', 'env', '/usr/bin/python3'):\n"
+        "    raise SystemExit('unexpected guest-root command: ' + ' '.join(args))\n"
     )
+    local = {**env, "ANCHI_GUEST": "local"}
     # The release path must never invoke pnpm, even with ANCHI_REBUNDLE=1.
-    run(["bash", str(current / "scripts/install-anchi.sh")], {**env, "ANCHI_REBUNDLE": "1"}, root)
+    run(["bash", str(current / "scripts/install-anchi.sh")], {**local, "ANCHI_REBUNDLE": "1"}, root)
     assert not (current / "anchi/node_modules").exists()
+    staged = Path("/tmp/anchi-bootstrap")
+    for name in ("install-anchi.sh", "anchi_cell.py", "cell.env", "anchi-cell/runner.mjs", "anchi-cell/mcp.mjs"):
+        assert (staged / name).exists(), f"setup resource not staged: {name}"
     runner = current / "anchi/packages/cell-runner/dist/mcp.mjs"
     runner.rename(runner.with_suffix(".saved"))
     try:
-        assert run(["bash", str(current / "scripts/install-anchi.sh")], env, root, ok=False).returncode
+        assert run(["bash", str(current / "scripts/install-anchi.sh")], local, root, ok=False).returncode
     finally:
         runner.with_suffix(".saved").rename(runner)
+    # Without a local guest the installers refuse rather than install onto this computer.
+    assert run(["bash", str(current / "scripts/install-anchi.sh")], env, root, ok=False).returncode
     try:
         run([cli, "daemon", "start"], env, root)
     except AssertionError:

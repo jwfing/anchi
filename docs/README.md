@@ -6,10 +6,10 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 
 | Document | Purpose |
 |---|---|
-| [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, unlock the vault, connect a runtime, and get a shell in the VM |
+| [Getting started](GETTING_STARTED.md) | Install on macOS or Linux, prepare the host placement or a remote server, unlock the vault and connect a runtime |
 | [Desktop app](DESKTOP.md) | The window client on macOS and Linux: team conversations, tasks, the builder, approvals, usage and settings |
-| [Remote server](REMOTE_SERVER.md) | Run the daemon and cells on an instabox VM or SSH host, with the TUI on your computer |
-| [Host placement](HOST_PLACEMENT.md) | Anchi's proxy, vault and approvals without a VM, for your own `claude` and `codex` sessions under their sandboxes; what holds and what does not |
+| [Remote server](REMOTE_SERVER.md) | Run the daemon, services and task cells (the agent team) on an instabox machine or SSH host, with the TUI on your computer |
+| [Host placement](HOST_PLACEMENT.md) | The default on your computer: Anchi's proxy, vault and approvals for your own `claude` and `codex` sessions under their sandboxes; what holds and what does not |
 | [First task](FIRST_TASK.md) | One connected runtime, one starter, one successful task; no business account needed |
 | [CLI reference](../skills/anchi/references/cli.md) | Every command and flag, generated from the implementation |
 | [Troubleshooting](../skills/anchi/references/troubleshooting.md) | Setup and runtime errors, recovery and limitations |

@@ -114,7 +114,7 @@ describe('host placement: guest commands on the host', () => {
     for (const args of [
       ['/usr/bin/python3', '/opt/secure-vm/services/policy_admin.py', 'show', 'x'],
       ['/usr/bin/python3', '/opt/secure-vm/services/../../etc/passwd', 'status'],
-      ['limactl', 'shell'],
+      ['sudo', '-n', 'anchi-cell', 'list'],
       ['anchi-image', 'remove', 'x'],
       ['anchi-cell', 'start', 't', 'a'],
       ['anchi-cell', 'poll'],
@@ -151,7 +151,6 @@ describe('host placement: guest commands on the host', () => {
     expect(transport.placement).toBe('host');
     expect(transport.running()).toBe(false);
     expect(await transport.vmStatus()).toBe('stopped');
-    expect((await transport.vmSize()).cpus).toBeGreaterThan(0);
     // Without the services, a call that needs them says so, and never hangs.
     const r = await transport.exec(['anchi-cell', 'version']);
     expect(r.code).toBe(1);
@@ -177,9 +176,9 @@ describe('host placement: guest commands on the host', () => {
     expect(opensslAvailable('/nonexistent')).toBe(false);
   });
 
-  it('asks a host-placement daemon for openssl, not Lima or Python', () => {
+  it('asks a host-placement daemon for openssl, not Python', () => {
     const host = hostReadiness('host');
-    expect(host.missing.filter((m) => /lima|qemu|kvm|python/i.test(m))).toEqual([]);
+    expect(host.missing.filter((m) => /python|sudo/i.test(m))).toEqual([]);
     expect(host.installHint).toMatch(/openssl/);
   });
 
@@ -190,7 +189,7 @@ describe('host placement: guest commands on the host', () => {
     );
     expect(launchdPlist(layout, '/usr/bin', undefined)).not.toContain('ANCHI_GUEST');
     expect(systemdUnit(layout, '/usr/bin', 'host')).toContain('"ANCHI_GUEST=host"');
-    expect(systemdUnit(layout, '/usr/bin', 'lima')).not.toContain('ANCHI_GUEST');
+    expect(systemdUnit(layout, '/usr/bin', 'ssh')).not.toContain('ANCHI_GUEST');
   });
 });
 

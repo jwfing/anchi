@@ -1,8 +1,9 @@
 name: Linux live validation
 
-# Creates the guest from scratch on an x86_64 runner with KVM, installs the trusted services
-# and the agent team, then runs the service and isolation checks. Synthetic credentials only:
-# no Codex or Claude login, no Google, no model calls.
+# Installs the guest from scratch on an x86_64 runner, the way a remote server is set up
+# (ANCHI_GUEST=local: the machine itself is the guest), installs the trusted services and the
+# agent team, then runs the service and isolation checks. Synthetic credentials only: no Codex or
+# Claude login, no Google, no model calls.
 on:
   workflow_dispatch:
   schedule:
@@ -11,7 +12,6 @@ on:
   push:
     paths:
       - '.github/workflows/linux-live.yml'
-      - 'lima/**'
       - 'guest/**'
       - 'scripts/**'
       - 'services/**'
@@ -22,13 +22,11 @@ permissions:
   contents: read
 
 jobs:
-  kvm-guest:
+  guest:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      ANCHI_INSTALL_VM: anchi-vm-live-test
-      LIMA_VERSION: 2.2.0
-      LIMA_SHA256: a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a
+      ANCHI_GUEST: local
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -41,31 +39,13 @@ jobs:
         with:
           package_json_file: anchi/package.json
       - run: pnpm --dir anchi install --frozen-lockfile
-      - name: Enable KVM for the runner user
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
-      - name: Install QEMU
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils
-          qemu-system-x86_64 --version | head -1
-      - name: Install Lima (pinned, checksum verified)
-        run: |
-          curl -fsSL -o lima.tgz "https://github.com/lima-vm/lima/releases/download/v$LIMA_VERSION/lima-$LIMA_VERSION-Linux-x86_64.tar.gz"
-          echo "$LIMA_SHA256  lima.tgz" | sha256sum -c -
-          mkdir -p "$HOME/.local/lima" && tar -xzf lima.tgz -C "$HOME/.local/lima"
-          echo "$HOME/.local/lima/bin" >> "$GITHUB_PATH"
-      - run: limactl --version
       - name: Build and check the Linux distribution
         run: |
           bash scripts/package-release.sh
           python3 scripts/check-release.py artifacts/releases/anchi-linux-x64.tar.gz
           mkdir -p /tmp/anchi-release-live
           tar -xzf artifacts/releases/anchi-linux-x64.tar.gz -C /tmp/anchi-release-live
-      - name: Create the guest using the packaged setup resources
+      - name: Install the guest onto this runner using the packaged setup resources
         run: |
           bash /tmp/anchi-release-live/anchi/scripts/up.sh
           bash /tmp/anchi-release-live/anchi/scripts/install-anchi.sh
@@ -76,8 +56,8 @@ jobs:
         # a model, and the proxy never forwards it anywhere they reach.
         run: |
           node scripts/vault.mjs init
-          limactl shell "$ANCHI_INSTALL_VM" -- sudo anchi-image build codex base
-          python3 - <<'PY' | limactl shell "$ANCHI_INSTALL_VM" -- sudo /usr/bin/python3 /opt/secure-vm/services/codex_admin.py import-token
+          sudo -n anchi-image build codex base
+          python3 - <<'PY' | sudo -n /usr/bin/python3 /opt/secure-vm/services/codex_admin.py import-token
           import base64, json, time
           b64 = lambda v: base64.urlsafe_b64encode(json.dumps(v).encode()).decode().rstrip('=')
           claims = {'exp': int(time.time()) + 7200, 'https://api.openai.com/auth': {'chatgpt_account_id': 'ci-synthetic'}}
@@ -85,19 +65,18 @@ jobs:
           print(json.dumps({'access_token': token, 'account_id': 'ci-synthetic'}))
           PY
       - name: Agent-team isolation checks
-        # Nested KVM on hosted runners is slower than a real host; the 100 ms target is for real hosts.
-        run: make verify-anchi VM="$ANCHI_INSTALL_VM" START_BUDGET_MS=250
-      - name: Collect Lima logs
+        # Hosted runners are slower than a real server; the 100 ms target is for real servers.
+        run: make verify-anchi START_BUDGET_MS=250
+      - name: Collect service logs
         if: always()
         run: |
           mkdir -p logs
-          cp "$HOME/.lima/$ANCHI_INSTALL_VM"/*.log logs/ 2>/dev/null || true
+          for unit in anchi-egress secure-auth secure-gmail; do
+            sudo -n journalctl -u "$unit" --no-pager > "logs/$unit.log" 2>/dev/null || true
+          done
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: lima-logs
+          name: guest-logs
           path: logs
           if-no-files-found: ignore
-      - name: Delete the guest
-        if: always()
-        run: limactl delete -f "$ANCHI_INSTALL_VM" || true

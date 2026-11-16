@@ -18,7 +18,7 @@ body:
     id: environment
     attributes:
       label: Host and runtime
-      placeholder: "OS version, CPU architecture, Lima version; Codex / Claude Code / Hermes"
+      placeholder: "OS version, CPU architecture; placement (host or remote server); Codex / Claude Code / Hermes"
     validations:
       required: true
   - type: textarea

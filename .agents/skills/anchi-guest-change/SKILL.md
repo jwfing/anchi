@@ -1,6 +1,6 @@
 ---
 name: anchi-guest-change
-description: Change the Anchi VM side — guest scripts, the cell manager (guest/anchi_cell.py), the base and runtime image layers (guest/anchi-build-base.sh, guest/anchi-build-runtime-*.sh), version pins in guest/cell.env, systemd units or the Lima config. Use when bumping Codex, Claude Code, Hermes, Node or a base-image toolchain, adding a tool to cells, or changing how cells start.
+description: Change the Anchi guest side (a remote server) — guest scripts, the cell manager (guest/anchi_cell.py), the base and runtime image layers (guest/anchi-build-base.sh, guest/anchi-build-runtime-*.sh), version pins in guest/cell.env or systemd units. Use when bumping Codex, Claude Code, Hermes, Node or a base-image toolchain, adding a tool to cells, or changing how cells start.
 ---
 
 # Changing the guest
@@ -23,7 +23,7 @@ A cell's root is an overlay of, top first: its runtime's layer (`runtime-codex`,
 
 Each layer is named by the hash of its build script and the `guest/cell.env` pins the script reads (`script_version()` in `guest/anchi_cell.py`), so an edit or a pin bump rebuilds that layer at the next task; a new base rebuilds every runtime and recipe layer on it. Mention the rebuild in the changelog.
 
-Test a build script change without a VM in a container that resembles the build cell:
+Test a build script change without a server in a container that resembles the build cell:
 
 ```bash
 docker run --rm -v "$PWD/guest:/g:ro" debian:bookworm sh -c '
@@ -38,9 +38,9 @@ Then run the tool as a non-root user, as cells do.
 
 ## Cell manager and guest commands
 
-`guest/anchi_cell.py` runs as root in the VM. Every argument from the daemon is validated by regex (ids match `^[a-z0-9][a-z0-9-]{0,39}$`); secrets arrive on stdin; output is JSON. Errors are stable codes (`Failure('BAD_…')`) that the daemon maps to hints in `daemon/src/cell.ts`. Document new commands in the guest command table of `docs/architecture/AGENT_TEAM_CONTRACTS.md`.
+`guest/anchi_cell.py` runs as root in the guest. Every argument from the daemon is validated by regex (ids match `^[a-z0-9][a-z0-9-]{0,39}$`); secrets arrive on stdin; output is JSON. Errors are stable codes (`Failure('BAD_…')`) that the daemon maps to hints in `daemon/src/cell.ts`. Document new commands in the guest command table of `docs/architecture/AGENT_TEAM_CONTRACTS.md`.
 
 ## Checks
 
 - Offline: `make check` (Ruff, shellcheck, syntax) and `tests/test_guest.py` for pure functions.
-- Live, when you have a VM: `scripts/anchi setup install`, then `make verify-anchi` (cells, proxy, isolation, no credentials). State in the PR whether you ran them.
+- Live, on a remote server: `scripts/anchi setup install`, then `make verify-anchi` (cells, proxy, isolation, no credentials). State in the PR whether you ran them.

@@ -63,14 +63,14 @@ The one-line text and secret dialogs (connector tokens, filters, paths, names) t
 ### Home
 
 Getting started offers one confirmed preparation operation: **Enter**, **↑ ↓** choose a runtime,
-**Enter** review the recommended resources, **y** prepare. It resumes the VM, credential storage
+**Enter** review, **y** prepare. It resumes the guest, credential storage
 and selected runtime without separate confirmations for each step. Installation continues when
 you leave the view; **^X L** opens its log and **^X !**, **r** retries failed preparation.
 Connect an account with **i** (Codex), **c** (Claude Code) or **h** (Hermes), then **Enter** reviews
 a starter named `dev` using a connected runtime. Saving it prefills a sample task; **Enter**
 reviews that request and a second **Enter** sends it. **Ctrl+X, N** keeps the custom starter
 flow, and **Runtimes**, **I** keeps advanced resource choices. After an Anchi update, preparation
-also updates the VM's components.
+also updates the guest's components.
 
 Team overview lists each agent’s current activity, pending approvals and delegated work. **↑ ↓** selects an agent; **Enter** opens it. Finished task details show the result and artifact links first, ending with the key that reveals the event history (**^X h**); a task you continued from its view keeps showing its transcript when the reply arrives.
 
@@ -86,7 +86,7 @@ Besides the input's keys: ^X c asks before cancelling the task, ^X r runs a fail
 
 ### Configure
 
-- **Runtimes:** s start the VM, I install, u unlock the vault, V initialize a new vault, W share workspaces, i import Codex, c connect Claude Code, h set Hermes's endpoint, r refresh.
+- **Runtimes:** s start the services, I install, u unlock the vault, V initialize a new vault, i import Codex, c connect Claude Code, h set Hermes's endpoint, r refresh.
 - **Skills:** ↑ ↓ (k j) choose, PgUp PgDn a page, Home End (g G) first and last, a add, u update to the latest commit of its URL, d remove.
 - **Connectors:** ↑ ↓ (k j) choose, Enter or c connect, g GitHub from gh, p AWS profile, m service writes automatic or ask, d disconnect, a another Google account (Gmail, Drive), o your Google OAuth client, x your X native app Client ID, **Shift+R** your Reddit installed app client, r refresh. Making X or Reddit writes automatic asks for confirmation (y) first: agents then post under your account without asking you.
 - **Usage:** p period (24 hours, 7 days, 30 days), b group by agent, model, runtime or day, r refresh, ↑ ↓ PgUp PgDn scroll.

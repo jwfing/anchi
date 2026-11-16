@@ -52,7 +52,7 @@ and return a nonzero exit code when the turn does not finish successfully.
 | Symptom | What to check |
 |---|---|
 | `unknown command 'create'` | Your installed binary predates the starter command: update it, or write the file by hand as in [Write an agent file](AGENT_TEAM.md#write-an-agent-file). |
-| Missing/stopped VM | `anchi setup status` summarizes the environment (`--json` for every field). Finish `anchi setup install` or start an existing VM with `anchi setup vm`. |
+| Not installed, or on the wrong machine | `anchi setup status` summarizes the environment (`--json` for every field). Tasks need a remote server (`anchi server <name>`); finish `anchi setup install` there. |
 | Locked vault | `anchi setup vault unlock`; keep the original vault key. Replacing it cannot decrypt stored accounts. |
 | Runtime not configured or expired | Connect the runtime named in `anchi agents`, in **Runtimes** or via `anchi setup`. A Claude/Hermes starter does not need Codex. |
 | Image build failed | **Ctrl+X, L** shows setup logs; inspect the task error. Retry after fixing the reported dependency or network problem. |
@@ -76,4 +76,4 @@ After this succeeds, choose one next step:
   collaboration. A name alone does not grant delegation access.
 
 Remove a trial agent with `anchi agents rm dev` after reviewing the deletion preview. It
-removes that agent's tasks and VM files; host workspace files are kept.
+removes that agent's tasks and its files on the server; host workspace files are kept.

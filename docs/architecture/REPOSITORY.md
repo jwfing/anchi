@@ -20,9 +20,9 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `services/drive.py`, `notion.py`, `slack.py`, `gmail.py`, `x_connector.py`, `reddit_connector.py` | Provider handlers |
 | `services/connector_admin.py` | Account probes and disconnect |
 | `services/auth.py`, `x_auth.py`, `reddit_auth.py`, `vault.py`, `policy.py`, `server.py` and `*_admin.py` | Vault, credential service, policy service and their administration |
-| `guest/` | VM bring-up (`bootstrap.sh`), service and agent-team installers, live checks; `cell.env` owns UID and version pins, `arch.sh` maps architecture |
-| `systemd/`, `lima/` | Service identities, sockets, resource limits and the outer VM |
-| `scripts/` | Host entry points (`anchi`, `up.sh`, `install-anchi.sh`, `vault.mjs`) and explicit live checks |
+| `guest/` | Guest bring-up on a remote server (`bootstrap.sh`), service and agent-team installers, live checks; `cell.env` owns UID and version pins, `arch.sh` maps architecture and holds the guest helpers |
+| `systemd/` | Service identities, sockets and resource limits |
+| `scripts/` | Host entry points (`anchi`, `remote.sh`, `server-install.sh`, `vault.mjs`), the guest installers run on a remote server (`up.sh`, `install-anchi.sh`) and explicit live checks (`verify.sh`, `verify-host.sh`, `anchi-acceptance.sh`) |
 | `tests/` | Offline tests of the trusted services |
 | `poc/` | Phase 0 spikes and their recorded results |
 | `landing/` | Static landing page, not part of the product |
@@ -30,21 +30,21 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 
 ## Call direction
 
-TUI, CLI or desktop app → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-image` and administration commands over `limactl shell … sudo` (or `sudo` when the daemon runs inside the guest on a remote server) → task cell runner (its stdio). A remote server's client reaches the socket through `anchi-bridge` over SSH (`daemon/src/remote.ts`).
+TUI, CLI or desktop app → daemon socket (0600) → daemon → fixed `anchi-cell`/`anchi-image` and administration commands over `sudo -n` on the remote server the daemon runs on (the host placement answers them from its own services process instead) → task cell runner (its stdio). A remote server's client reaches the socket through `anchi-bridge` over SSH (`daemon/src/remote.ts`).
 
 Cell runtime → in-cell MCP server → runner → daemon, for Anchi tools (delegation, task status). The daemon decides from the task and agent it attached to the cell.
 
 Cell → its proxy socket → `anchi-egress` → `secure-auth` (credentials) → upstream. Cell → its bridge sockets → `anchi-egress` (names the agent) → connector service → auth + policy (per agent) → upstream. Never expose service sockets, auth sockets, policy administration or other agents' sockets to a cell.
 
-Daemon → `anchi-cell approvals watch` ← proxy approval queue; decisions return through `anchi-cell approvals decide` or `policy_admin.py`. Google sign-in: daemon loopback callback → code over stdin → VM exchanges and stores the tokens.
+Daemon → `anchi-cell approvals watch` ← proxy approval queue; decisions return through `anchi-cell approvals decide` or `policy_admin.py`. Google sign-in: daemon loopback callback → code over stdin → the guest exchanges and stores the tokens.
 
 A dependency check (`anchi/scripts/check-deps.mjs`) keeps runtime SDKs and the cell runner out of host packages, and host packages out of the cell runner.
 
 ## Design decisions
 
 1. The cell runner, the MCP server, skills and everything the runtimes produce are untrusted. Frames are bounded and schema-checked; the first violation ends the cell.
-2. Secrets travel to the VM on stdin only, never in arguments or logs, and never return to the Mac.
-3. Default checks are offline. VM, account and model checks are explicit (`make verify-vm`, `make verify-anchi`, `scripts/anchi-acceptance.sh`).
+2. Secrets travel to the guest on stdin only, never in arguments or logs, and never return to the client.
+3. Default checks are offline. Guest, account and model checks are explicit (`make verify-guest`, `make verify-anchi`, `scripts/anchi-acceptance.sh` on a remote server; `scripts/verify-host.sh` on the host placement).
 4. `guest/cell.env` owns UID, Node, Codex, Claude Code and base-image toolchain pins; the cell runner's SDKs are pinned in `anchi/pnpm-lock.yaml`, never excluded from pnpm's release-age policy.
 5. Registry entries drive or consistency-check service modes, egress, credential scope, policy and installation. Connector writes reuse one-time policy grants and ledgers.
 6. Configuration and state files are written to a temporary file, then renamed; SQLite holds tasks, events and trigger state.

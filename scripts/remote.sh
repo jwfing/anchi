@@ -67,7 +67,7 @@ command -v pnpm >/dev/null || { echo 'pnpm is required to bundle the cell runner
 # artifacts or anything .gitignore keeps out.
 files=$(mktemp)
 trap 'rm -f "$files"' EXIT
-git ls-files -co --exclude-standard -- anchi guest services systemd scripts lima Makefile >"$files"
+git ls-files -co --exclude-standard -- anchi guest services systemd scripts Makefile >"$files"
 ls anchi/packages/cell-runner/dist/{runner,forward,mcp}.mjs >>"$files"
 echo "Copying this checkout to $target"
 COPYFILE_DISABLE=1 tar czf - --no-xattrs -T "$files" |

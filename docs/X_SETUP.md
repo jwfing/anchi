@@ -2,7 +2,7 @@
 
 Anchi's `x` connector reads posts, searches recent posts, reads mentions of the connected
 account and publishes text posts or replies after approval. One X account is connected at a
-time. Access and refresh tokens stay in the VM vault; agents receive structured tools through
+time. Access and refresh tokens stay in the server's vault; agents receive structured tools through
 their own connector bridge, without a token or browser session.
 
 ## Connect your account
@@ -27,7 +27,7 @@ their own connector bridge, without a token or browser session.
 Anchi requests exactly `tweet.read`, `tweet.write`, `users.read` and `offline.access` using
 [OAuth 2.0 PKCE](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code).
 The host handles only the loopback authorization code; token exchange, account verification
-and refresh happen in the VM. Anchi verifies the account with `/2/users/me` before saving it.
+and refresh happen on the server. Anchi verifies the account with `/2/users/me` before saving it.
 The callback port must be free; only one sign-in can use it at a time. A browser error or a
 failed exchange leaves an existing connection intact. Reconnect if X revokes the refresh token.
 
@@ -65,7 +65,7 @@ ten minutes.
 an agent asking. In `auto`, an agent posts publicly under your account without a person, also in
 tasks a trigger starts and that read untrusted content such as mentions, so instructions in that
 content can make it post. The TUI asks you to confirm before it sets `auto` (**m** on `x` in
-**Connectors**), and the CLI prints this warning. The policy service in the VM learns the new
+**Connectors**), and the CLI prints this warning. The policy service on the server learns the new
 rule with `anchi setup install`.
 
 Successful retries with the same request id return the recorded result. An uncertain result

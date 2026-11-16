@@ -1,7 +1,7 @@
 import { homeLayout } from '@anchi/core';
 import { Daemon } from './daemon.ts';
 
-const daemon = new Daemon({ layout: homeLayout(), migrateVm: true, manageLima: true });
+const daemon = new Daemon({ layout: homeLayout() });
 try {
   await daemon.start();
 } catch (err) {

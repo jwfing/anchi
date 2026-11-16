@@ -111,7 +111,7 @@ describe('settings panel', () => {
       '[  ] web ',
     ]);
     expect(rows.find((r) => r.kind === 'header' && r.text.startsWith('WORKSPACES'))).toMatchObject({
-      text: expect.stringContaining('not shared with the VM yet'),
+      text: expect.stringContaining('not shared with the guest yet'),
     });
   });
 

@@ -1,7 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import { cpus, totalmem } from 'node:os';
 import type { ConnectorId, ConnectorSecret, RuntimeId } from '@anchi/protocol';
-import { VM_NAME } from './host.ts';
 
 /** What the proxy kept of a runtime's limits (snake case, seconds). */
 interface GuestQuota {
@@ -19,8 +17,8 @@ interface GuestQuota {
 }
 
 /**
- * The daemon's only path into the guest: fixed guest-root commands over `limactl shell ... sudo`,
- * or plain `sudo` when the daemon runs inside the guest.
+ * The daemon's only path into the guest: fixed guest-root commands through `sudo -n` on the
+ * remote server the daemon runs on, or the host placement's services process on this computer.
  * Arguments are validated before they get here; secrets go on stdin, never in arguments.
  */
 
@@ -50,17 +48,16 @@ export interface GuestTransport {
   spawn(args: string[]): ChildProcessWithoutNullStreams;
 }
 
-/** Where the guest is: a Lima VM on this computer, this machine itself, or no guest at all. */
+/** Where the guest is: this machine itself (a remote server), or no guest at all. */
 export interface VmTransport extends GuestTransport {
   /**
-   * `lima`: a VM this computer runs; `local`: the daemon runs inside the guest (a remote
-   * server); `host`: no VM, the proxy and the vault run on this computer as the user, for the
-   * user's own sandboxed runtimes (host-placement.ts).
+   * `local`: the daemon runs inside the guest (a remote server with cells); `host`: no guest,
+   * the proxy and the vault run on this computer as the user, for the user's own sandboxed
+   * runtimes (host-placement.ts).
    */
-  readonly placement: 'lima' | 'local' | 'host';
+  readonly placement: 'local' | 'host';
+  /** Whether the guest's services can be asked (`stopped`: the host services are not running). */
   vmStatus(): Promise<'missing' | 'stopped' | 'running' | 'unknown'>;
-  /** The guest's CPUs and memory, for the Runtimes screen. */
-  vmSize(): Promise<{ cpus: number; memoryGiB: number } | undefined>;
 }
 
 /** Runs `child` to completion with `stdin`, keeping at most MAX_OUTPUT bytes of its output. */
@@ -100,59 +97,9 @@ export function collect(
   });
 }
 
-export class LimaTransport implements VmTransport {
-  readonly placement = 'lima';
-
-  constructor(
-    readonly vm = process.env.ANCHI_VM ?? VM_NAME,
-    private limactl = process.env.ANCHI_LIMACTL ?? 'limactl',
-  ) {
-    if (!/^anchi-vm(-[a-z0-9-]+)?$/.test(vm)) throw new Error(`invalid VM name ${vm}`);
-  }
-
-  private argv(args: string[]): string[] {
-    return ['shell', this.vm, '--', 'sudo', '-n', ...args];
-  }
-
-  spawn(args: string[]): ChildProcessWithoutNullStreams {
-    return spawn(this.limactl, this.argv(args), { stdio: ['pipe', 'pipe', 'pipe'] });
-  }
-
-  exec(args: string[], stdin = '', timeoutMs = 120_000): Promise<ExecResult> {
-    return collect(this.spawn(args), stdin, timeoutMs);
-  }
-
-  /** The VM's line of `limactl list` in `format`, or undefined when there is none. */
-  private list(format: string): Promise<string | undefined> {
-    return new Promise((resolve) => {
-      const child = spawn(this.limactl, ['list', '--format', format], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      let out = '';
-      child.stdout.on('data', (b: Buffer) => (out += b.toString('utf8')));
-      child.on('error', () => resolve(undefined));
-      child.on('close', () => resolve(out.split('\n').find((l) => l.split(' ')[0] === this.vm)));
-    });
-  }
-
-  async vmStatus(): Promise<'missing' | 'stopped' | 'running' | 'unknown'> {
-    const line = await this.list('{{.Name}} {{.Status}}');
-    if (line === undefined) return 'missing';
-    return line.includes('Running') ? 'running' : 'stopped';
-  }
-
-  /** The VM's CPUs and memory as Lima reports them (memory in bytes), for the Runtimes screen. */
-  async vmSize(): Promise<{ cpus: number; memoryGiB: number } | undefined> {
-    const line = await this.list('{{.Name}} {{.CPUs}} {{.Memory}}');
-    const [, cpus, bytes] = (line ?? '').split(' ');
-    if (!/^\d+$/.test(cpus ?? '') || !/^\d+$/.test(bytes ?? '')) return undefined;
-    return { cpus: Number(cpus), memoryGiB: Math.round(Number(bytes) / 2 ** 30) };
-  }
-}
-
 /**
- * The daemon running inside the guest itself (a remote server such as an instabox VM): the same
- * fixed guest-root commands through `sudo -n`, with no VM to start or size.
+ * The daemon running inside the guest itself (a remote server such as an instabox VM): the
+ * fixed guest-root commands through `sudo -n`. The machine is always running.
  */
 export class InGuestTransport implements VmTransport {
   readonly placement = 'local';
@@ -170,17 +117,17 @@ export class InGuestTransport implements VmTransport {
   async vmStatus(): Promise<'running'> {
     return 'running';
   }
-
-  async vmSize(): Promise<{ cpus: number; memoryGiB: number }> {
-    return { cpus: cpus().length, memoryGiB: Math.round(totalmem() / 2 ** 30) };
-  }
 }
 
-/** The guest this daemon drives: `ANCHI_GUEST=local` when it runs inside the guest. */
-export function vmTransport(placement = process.env.ANCHI_GUEST ?? 'lima'): VmTransport {
-  if (placement === 'local') return new InGuestTransport();
-  if (placement === 'lima') return new LimaTransport();
-  throw new Error(`ANCHI_GUEST must be lima or local, not ${placement}`);
+/**
+ * The placement `ANCHI_GUEST` names: `local` (the daemon runs inside the guest, a remote server)
+ * or `host` (no guest, the default). Anything else is refused rather than guessed.
+ */
+export function guestPlacement(
+  value = process.env.ANCHI_GUEST ?? 'host',
+): VmTransport['placement'] {
+  if (value === 'local' || value === 'host') return value;
+  throw new Error(`ANCHI_GUEST must be local or host, not ${value}`);
 }
 
 export class GuestError extends Error {
@@ -314,7 +261,7 @@ export class Guest {
     parse(await this.transport.exec(['anchi-cell', 'stop', check(task, 'task')]));
   }
 
-  /** Cells in the VM; an image build under way is listed with `kind: 'build'`. */
+  /** Cells in the guest; an image build under way is listed with `kind: 'build'`. */
   async listCells(): Promise<{ task: string; agent: string; active: boolean; kind?: string }[]> {
     return parse(await this.transport.exec(['anchi-cell', 'list'])).cells as {
       task: string;
@@ -338,7 +285,7 @@ export class Guest {
   }
 
   /**
-   * Removes a deleted agent's home, skills bundle and policy rules in the VM. The guest refuses
+   * Removes a deleted agent's home, skills bundle and policy rules in the guest. The guest refuses
    * while the agent has a cell, and never crosses a mount (workspaces stay untouched).
    */
   async purgeAgent(agent: string): Promise<{ home: boolean; skills: boolean; policy: string[] }> {
@@ -465,7 +412,7 @@ export class Guest {
     ) as { configured: boolean; account_id: string | null; expires_at: number | null };
   }
 
-  /** Replaces an agent's skill bundle in the VM (files base64-encoded, on stdin). */
+  /** Replaces an agent's skill bundle in the guest (files base64-encoded, on stdin). */
   async setSkills(agent: string, files: Record<string, string>): Promise<void> {
     check(agent, 'agent');
     parse(
@@ -520,7 +467,7 @@ export class Guest {
     );
   }
 
-  /** Whether ~/AnchiWorkspaces is mounted in the VM. */
+  /** Whether ~/AnchiWorkspaces is mounted in the guest. */
   async workspacesMounted(): Promise<boolean> {
     const r = await this.transport.exec(['mountpoint', '-q', '/mnt/anchi-host']);
     return r.code === 0;

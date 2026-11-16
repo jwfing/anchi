@@ -850,7 +850,7 @@ export class Hub extends EventEmitter<HubEvents> {
     }
   }
 
-  /** Sends the agent's skills to the VM when they changed since the last cell. */
+  /** Sends the agent's skills to the guest when they changed since the last cell. */
   private async syncSkills(agent: ResolvedAgent): Promise<void> {
     if (!this.opts.skills) return;
     if (!agent.skills.length && !this.skillDigests.has(agent.id)) return;
