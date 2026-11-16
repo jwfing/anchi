@@ -41,7 +41,7 @@ const spec = {
   port: 18180,
   caBundle: '/h/.anchi/host/ca-bundle.pem',
   caCert: '/h/.anchi/host/state/ca/ca.pem',
-  denyRead: ['/h/.anchi/host', '/h/.ssh'],
+  denyRead: ['/h/.anchi/host/state', '/h/.ssh'],
 };
 
 describe('host placement: guest commands on the host', () => {
@@ -212,7 +212,8 @@ describe("host placement: the runtimes' settings", () => {
     expect(value.env).toMatchObject({
       EDITOR: 'vim',
       SSL_CERT_FILE: spec.caBundle,
-      NODE_EXTRA_CA_CERTS: spec.caCert,
+      // The bundle for Node too: the CA certificate alone lies under the denied state directory.
+      NODE_EXTRA_CA_CERTS: spec.caBundle,
       GIT_SSL_CAINFO: spec.caBundle,
     });
     expect(excludedCommands).toEqual([]);
@@ -250,9 +251,13 @@ describe("host placement: the runtimes' settings", () => {
       true,
     );
     expect(text).toContain(
-      '[permissions.anchi.filesystem]\n"/h/.anchi/host" = "deny"\n"/h/.ssh" = "deny"',
+      '[permissions.anchi.filesystem]\n"/h/.anchi/host/state" = "deny"\n"/h/.ssh" = "deny"',
     );
-    expect(text).toContain('[permissions.anchi.network]\nenabled = true\nenable_socks5 = false');
+    expect(text).toContain(
+      '[permissions.anchi.network]\nenabled = true\nenable_socks5 = false\nallow_upstream_proxy = true\nallow_local_binding = true',
+    );
+    // Without a global allow rule Codex's proxy refuses every destination before Anchi's sees it.
+    expect(text).toContain('[permissions.anchi.network.domains]\n"*" = "allow"');
     expect(text).toContain('[features.network_proxy]\nenabled = true');
     expect(text.indexOf('[mcp_servers.x]')).toBeLessThan(
       text.indexOf('# >>> anchi host placement >>>'),
@@ -316,6 +321,18 @@ describe("host placement: the runtimes' settings", () => {
     const claude = JSON.parse(readFileSync(files.claudeSettings, 'utf8'));
     expect(claude.sandbox.network.httpProxyPort).toBe(HOST_PORT_DEFAULT);
     expect(claude.sandbox.filesystem.denyRead).toEqual(denyReadPaths(paths, root));
+    // The sandboxed tools must be able to read the bundle they verify the proxy with, and the
+    // shims: only the state directory (vault, CA key, control token) is denied.
+    expect(claude.sandbox.filesystem.denyRead).toContain(paths.state);
+    expect(claude.sandbox.filesystem.denyRead).not.toContain(paths.root);
+    for (const denied of claude.sandbox.filesystem.denyRead as string[]) {
+      for (const readable of [paths.caBundle, paths.bin, paths.profile]) {
+        expect(readable.startsWith(`${denied}/`), `${readable} under denied ${denied}`).toBe(false);
+      }
+    }
+    for (const value of Object.values(claude.env as Record<string, string>)) {
+      expect(value.startsWith(`${paths.state}/`), `${value} under the denied state`).toBe(false);
+    }
     expect(claude.env.SSL_CERT_FILE).toBe(paths.caBundle);
     expect(readFileSync(files.codexConfig, 'utf8')).toMatch(/^default_permissions = "anchi"/);
     for (const name of ['claude', 'codex']) {

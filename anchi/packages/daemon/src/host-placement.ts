@@ -428,10 +428,15 @@ export interface HostSpec {
   denyRead: string[];
 }
 
-/** The files a session's commands must not read: the vault, keys and credential stores. */
+/**
+ * The files a session's commands must not read: the vault, the CA key and the control token
+ * (all under `state`), the vault key and credential stores. The rest of `~/.anchi/host` stays
+ * readable: the trust bundle, which the sandboxed tools verify the proxy's certificates with,
+ * the shims, the profile and the audit log.
+ */
 export function denyReadPaths(paths: HostPaths, home = homedir()): string[] {
   return [
-    paths.root,
+    paths.state,
     join(home, '.config/anchi'),
     join(home, '.ssh'),
     join(home, '.aws'),
@@ -450,10 +455,10 @@ const CA_KEYS = [
   'NODE_EXTRA_CA_CERTS',
 ] as const;
 
+// Every tool gets the bundle (the system roots plus the proxy's CA): the CA certificate alone
+// lies under the denied state directory.
 const CA_ENV = (spec: HostSpec): Record<string, string> =>
-  Object.fromEntries(
-    CA_KEYS.map((k) => [k, k === 'NODE_EXTRA_CA_CERTS' ? spec.caCert : spec.caBundle]),
-  );
+  Object.fromEntries(CA_KEYS.map((k) => [k, spec.caBundle]));
 
 /** What Anchi set in a settings file, with what was there before, so it can be undone. */
 export interface ClaudeManaged {
@@ -583,6 +588,16 @@ export function codexConfigText(existing: string | undefined, spec: HostSpec): s
     '[permissions.anchi.network]',
     'enabled = true',
     'enable_socks5 = false',
+    'allow_upstream_proxy = true',
+    // The upstream is Anchi's proxy on loopback, which Codex's policy otherwise refuses as a
+    // local address (verified with Codex 0.169); Anchi's proxy still refuses every non-public
+    // destination, so a sandboxed command gains no private address through this.
+    'allow_local_binding = true',
+    '',
+    // Codex's own proxy allows no destination until a rule exists; Anchi's proxy, the upstream
+    // every request chains to, applies the egress list and the address check itself.
+    '[permissions.anchi.network.domains]',
+    '"*" = "allow"',
     CODEX_END,
     '',
   ].join('\n');
