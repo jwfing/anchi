@@ -64,14 +64,14 @@ with tempfile.TemporaryDirectory(prefix="anchi-desktop-release-", dir="/tmp") as
         "shutil.copyfile(source, args[args.index('-o') + 1])\n"
     )
     curl.chmod(0o755)
-    (fakebin / "limactl").write_text("#!/bin/sh\nexit 1\n")
-    (fakebin / "limactl").chmod(0o755)
     bindir = home / ".local/bin"
     bindir.mkdir(parents=True)
     apps = home / "Applications"
     env = {
         **os.environ,
         "HOME": str(home),
+        # The default placement on a computer, whatever the CI job sets for its guest steps.
+        "ANCHI_GUEST": "host",
         "ANCHI_HOME": str(home / ".anchi"),
         "ANCHI_INSTALL_ROOT": str(home / ".local/share/anchi"),
         "ANCHI_BIN_DIR": str(bindir),

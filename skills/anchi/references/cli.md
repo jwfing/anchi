@@ -55,6 +55,9 @@ Commands:
   team                             Manage peer teams and legacy remote execution
                                    members
   setup                            Runtime and connector setup
+  host                             The host placement: Anchi without a VM, for
+                                   your own claude and codex sessions
+                                   (ANCHI_GUEST=host)
   daemon                           Manage the background daemon
 ```
 
@@ -350,7 +353,7 @@ Commands:
   create [options] <id>     Review and create a starter agent without a model
                             call
   rm [options] <id>         Delete an agent with its tasks and its files in the
-                            VM (workspaces are kept)
+                            guest
   allow-host <id> <host>    Add one host to an agent's egress list (a host its
                             cells were refused)
 ```
@@ -388,7 +391,7 @@ Options:
 ```text
 Usage: anchi agents rm [options] <id>
 
-Delete an agent with its tasks and its files in the VM (workspaces are kept)
+Delete an agent with its tasks and its files in the guest
 
 Options:
   -y, --yes   delete without typing the id
@@ -500,21 +503,19 @@ Runtime and connector setup
 
 Commands:
   prepare [options]                               Prepare the environment, credential storage and one runtime; resume completed steps
-  status [options]                                VM, vault, runtimes, connectors and services at a glance
-  codex [options]                                 Import the Codex login from ~/.codex/auth.json into the VM vault, or sign in to ChatGPT without the Codex CLI (--sign-in)
-  claude [options]                                Store a `claude setup-token` token or an Anthropic API key in the VM vault, or sign in to Claude in a browser (--sign-in)
-  hermes [options]                                Store Hermes's OpenAI-compatible endpoint, API key and default model in the VM vault
-  workspaces [options]                            Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)
-  vm                                              Start the VM
-  install [options]                               Create or update the VM, install the services and build the base image
-  vault <action>                                  init or unlock the VM vault with the key in ~/.config/anchi/vault.key
+  status [options]                                Guest, vault, runtimes, connectors and services at a glance
+  codex [options]                                 Import the Codex login from ~/.codex/auth.json into the vault, or sign in to ChatGPT without the Codex CLI (--sign-in)
+  claude [options]                                Store a `claude setup-token` token or an Anthropic API key in the vault, or sign in to Claude in a browser (--sign-in)
+  hermes [options]                                Store Hermes's OpenAI-compatible endpoint, API key and default model in the vault
+  start                                           Start the guest's services (host placement: the proxy and the vault)
+  install [options]                               Install or update the services on a remote server and build the base image
+  vault <action>                                  init or unlock the vault with the key in ~/.config/anchi/vault.key
   connector [options] <id>                        Connect github, aws, linear, posthog, sentry, firecrawl, figma or discord (secrets are read without echo)
   disconnect [options] <id>                       Remove a connector or service credential from the vault (Google accounts are revoked too)
   service [options] <id>                          Connect gmail, drive, x or reddit (browser sign-in), or notion or slack (token, without echo)
   reddit-client <client-id> <developer-username>  Store an approved Reddit installed app client; callback http://127.0.0.1:48174/callback
   x-client <client-id>                            Store an X native app Client ID; register http://127.0.0.1:48173/callback in X
   google-client [options] [path]                  Store your own Google Cloud Desktop app OAuth client JSON (Gmail and Drive); it overrides the built-in client
-  reset [options]                                 Back to a first launch: delete the VM with everything in it (--all: also the vault key and the Anchi home)
   service-mode <id> <mode>                        Writes of a service: auto, or ask (X and Reddit ask until set to auto)
 ```
 
@@ -528,9 +529,7 @@ steps
 
 Options:
   --runtime <runtime>  codex, claude-code or hermes (default: detected login)
-  -y, --yes            confirm preparation using recommended resources
-  --cpus <n>           CPUs for a new VM (advanced)
-  --memory <gib>       memory for a new VM in GiB (advanced)
+  -y, --yes            do not ask for confirmation
 ```
 
 #### `anchi setup status`
@@ -538,7 +537,7 @@ Options:
 ```text
 Usage: anchi setup status [options]
 
-VM, vault, runtimes, connectors and services at a glance
+Guest, vault, runtimes, connectors and services at a glance
 
 Options:
   --json      the full status as JSON
@@ -549,7 +548,7 @@ Options:
 ```text
 Usage: anchi setup codex [options]
 
-Import the Codex login from ~/.codex/auth.json into the VM vault, or sign in to
+Import the Codex login from ~/.codex/auth.json into the vault, or sign in to
 ChatGPT without the Codex CLI (--sign-in)
 
 Options:
@@ -563,8 +562,8 @@ Options:
 ```text
 Usage: anchi setup claude [options]
 
-Store a `claude setup-token` token or an Anthropic API key in the VM vault, or
-sign in to Claude in a browser (--sign-in)
+Store a `claude setup-token` token or an Anthropic API key in the vault, or sign
+in to Claude in a browser (--sign-in)
 
 Options:
   --sign-in   sign in in a browser; Anchi creates and stores a one-year token
@@ -575,7 +574,7 @@ Options:
 ```text
 Usage: anchi setup hermes [options]
 
-Store Hermes's OpenAI-compatible endpoint, API key and default model in the VM
+Store Hermes's OpenAI-compatible endpoint, API key and default model in the
 vault
 
 Options:
@@ -583,23 +582,12 @@ Options:
   --model <model>   the default model, e.g. nousresearch/hermes-4-405b
 ```
 
-#### `anchi setup workspaces`
+#### `anchi setup start`
 
 ```text
-Usage: anchi setup workspaces [options]
+Usage: anchi setup start [options]
 
-Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)
-
-Options:
-  -y, --yes   do not ask for confirmation
-```
-
-#### `anchi setup vm`
-
-```text
-Usage: anchi setup vm [options]
-
-Start the VM
+Start the guest's services (host placement: the proxy and the vault)
 ```
 
 #### `anchi setup install`
@@ -607,12 +595,10 @@ Start the VM
 ```text
 Usage: anchi setup install [options]
 
-Create or update the VM, install the services and build the base image
+Install or update the services on a remote server and build the base image
 
 Options:
-  -y, --yes       do not ask for confirmation
-  --cpus <n>      CPUs of a new VM (default: half of this computer's)
-  --memory <gib>  memory of a new VM in GiB (default: half of this computer's)
+  -y, --yes   do not ask for confirmation
 ```
 
 #### `anchi setup vault`
@@ -620,7 +606,7 @@ Options:
 ```text
 Usage: anchi setup vault [options] <action>
 
-init or unlock the VM vault with the key in ~/.config/anchi/vault.key
+init or unlock the vault with the key in ~/.config/anchi/vault.key
 ```
 
 #### `anchi setup connector`
@@ -692,26 +678,60 @@ Options:
   --remove    remove your client and use the built-in one, when Anchi ships one
 ```
 
-#### `anchi setup reset`
-
-```text
-Usage: anchi setup reset [options]
-
-Back to a first launch: delete the VM with everything in it (--all: also the
-vault key and the Anchi home)
-
-Options:
-  --all       also delete the vault key and ~/.anchi (agents, tasks, settings,
-              logs)
-  -y, --yes   do not ask for confirmation
-```
-
 #### `anchi setup service-mode`
 
 ```text
 Usage: anchi setup service-mode [options] <id> <mode>
 
 Writes of a service: auto, or ask (X and Reddit ask until set to auto)
+```
+
+### `anchi host`
+
+```text
+Usage: anchi host [options] [command]
+
+The host placement: Anchi without a VM, for your own claude and codex sessions
+(ANCHI_GUEST=host)
+
+Commands:
+  status [options]  Whether the host placement is installed, running and written
+                    into the runtimes
+  enable [options]  Write Claude Code's and Codex's sandbox and trust settings
+                    and the shims (undo: anchi host disable)
+  disable           Restore the runtime settings Anchi changed and remove the
+                    shims
+```
+
+#### `anchi host status`
+
+```text
+Usage: anchi host status [options]
+
+Whether the host placement is installed, running and written into the runtimes
+
+Options:
+  --json      the full status as JSON
+```
+
+#### `anchi host enable`
+
+```text
+Usage: anchi host enable [options]
+
+Write Claude Code's and Codex's sandbox and trust settings and the shims (undo:
+anchi host disable)
+
+Options:
+  -y, --yes   skip the confirmation
+```
+
+#### `anchi host disable`
+
+```text
+Usage: anchi host disable [options]
+
+Restore the runtime settings Anchi changed and remove the shims
 ```
 
 ### `anchi daemon`

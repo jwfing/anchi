@@ -1,5 +1,5 @@
 import { Document, isMap, isNode, isScalar, parseDocument, Scalar, type YAMLMap } from 'yaml';
-import type { ApprovalMode, Connector, HighRiskId, Runtime, Trigger, Workspace } from './schema.ts';
+import type { ApprovalMode, Connector, HighRiskId, Runtime, Trigger } from './schema.ts';
 
 /** Where new scalar keys go: after the last of these that precede them. */
 const ORDER = ['id', 'name', 'description', 'extends', 'runtime', 'model', 'effort', 'prompt'];
@@ -16,7 +16,6 @@ export interface AgentPatch {
   prompt?: { mode?: 'append' | 'replace'; text?: string };
   skills?: string[];
   connectors?: Connector[];
-  workspaces?: Workspace[];
   /** Written as `highRisk: { disable: [...] }`; an empty list removes it. */
   highRisk?: { disable: HighRiskId[] };
   /** Replaces the delegation allowlist, including when inherited from a template. */
@@ -145,15 +144,5 @@ export function patchAgentYaml(text: string, patch: AgentPatch): string {
     else replace(['approvals'], doc.createNode(patch.approvals, { flow: true }));
   }
   set('triggers', patch.triggers, false);
-  // `ro` is the default mode; name only when it differs from the path's last segment.
-  set(
-    'workspaces',
-    patch.workspaces?.map((w) => ({
-      path: w.path,
-      ...(w.mode === 'rw' ? { mode: 'rw' } : {}),
-      ...(w.name ? { name: w.name } : {}),
-    })),
-    false,
-  );
   return doc.toString({ flowCollectionPadding: false });
 }

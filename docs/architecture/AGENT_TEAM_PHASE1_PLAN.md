@@ -1,5 +1,7 @@
 # Agent team phase 1 implementation plan
 
+*Historical. The Lima VM placement this plan describes was removed on 2026-11-16, and the workspaces feature (directories of the user's computer mounted into cells) was removed with it; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
+
 **Status: implemented; live acceptance in progress** (see [Status](#status)). This plan implements phase 1 of the [agent team design](AGENT_TEAM_DESIGN.md). The technical unknowns were retired by the [PoC](../../poc/README.md); this plan builds on those results.
 
 ## Goal and scope
@@ -36,7 +38,7 @@ Phase 1 is done when all of the following pass on a fresh macOS install. Each mu
 2. **DevOps agent.** An agent with the AWS connector (a dedicated least-privilege principal) reads CloudWatch logs and files a GitHub issue summarizing the errors.
 3. **Linear agent.** An agent reads a Linear ticket and comments on it.
 4. **Credential invariant check.** After each task above, a trusted VM script searches the destroyed cell's captured environment, process list and writable layer for the real credential values, and finds none. The scan is taken just before destruction.
-5. **Isolation regression.** `make verify-vm` and the new cell/proxy checks pass:
+5. **Isolation regression.** `make verify-vm` (now `make verify-guest`) and the new cell/proxy checks pass:
    - no direct egress;
    - SSRF refused, including DNS rebinding;
    - minting APIs denied;
@@ -74,7 +76,7 @@ M0 ─┬─ M1 cells ────┬─ M3 Codex runtime ─┬─ M5 TUI ─�
   - the bounded JSON-lines codec, used by every socket.
 - Write down the contracts that later milestones code against, as types plus zod schemas in `@anchi/protocol`:
   1. **Daemon ⇄ client:** JSON-RPC plus an event stream over a Unix socket.
-  2. **Daemon ⇄ guest administration:** fixed, allowlisted commands over Lima SSH, as today.
+  2. **Daemon ⇄ guest administration:** fixed, allowlisted commands over the guest administration channel, as today.
   3. **Cell runner ⇄ daemon:** runtime events as JSON lines, validated, with per-frame and per-turn byte limits.
 
 **Acceptance:**
@@ -210,7 +212,7 @@ All milestones are implemented on the `feat/agent-team-phase1` branch. The [agen
 
 Decisions taken during implementation:
 
-- **Runner control channel (M1, M3):** the runner's stdin and stdout, carried by `anchi-cell start` over `limactl shell`, replace a per-cell control socket. This is the same pattern as the Pi bridge. Closing the channel ends the cell, so a lost daemon cannot leave a runner waiting.
+- **Runner control channel (M1, M3):** the runner's stdin and stdout, carried by `anchi-cell start` over the guest administration channel, replace a per-cell control socket. This is the same pattern as the Pi bridge. Closing the channel ends the cell, so a lost daemon cannot leave a runner waiting.
 - **Cell identity (M2):** the proxy hosts each cell's socket itself. Its in-process bridge binds a loopback port, maps the port to the cell, and only then connects to mitmproxy, so every client connection is attributed before its first byte. Connections that do not come from a bridge are refused.
 - **Codex account (M3):** the vault receives the access token and the account id only. The refresh token stays with the Codex CLI on the Mac, which refreshes it. When the vault's token expires, the user imports it again, and the proxy refuses to serve an expired token. This keeps a rotating refresh token from being shared by two refreshers.
 - **Linear client (M6):** agents call the GraphQL API with `curl`, using the placeholder `LINEAR_API_KEY`; the environment note in every agent's instructions explains this. There is no extra package to pin.
@@ -258,7 +260,7 @@ Ported files keep a note of their my-bot origin in the commit message, not in th
 
 ## Cross-cutting work
 
-- **Tests.** Offline unit tests for every trust-boundary decision: rules, deny lists, destination filtering, schema validation, escape stripping and protocol limits. Live checks go into `scripts/verify.sh` and `make verify-vm`, kept separate from `make check`.
+- **Tests.** Offline unit tests for every trust-boundary decision: rules, deny lists, destination filtering, schema validation, escape stripping and protocol limits. Live checks go into `scripts/verify.sh` and `make verify-vm` (now `make verify-guest`), kept separate from `make check`.
 - **Documentation.** As milestones land, move content from the design document into `SECURITY.md`, `docs/SECURITY_FOUNDATION.md` and `docs/architecture/REPOSITORY.md`. In particular, `SECURITY.md` must state that unmatched egress means **credential isolation is not data isolation**.
 - **Migration.** Existing users keep the desktop app until M4 reaches setup parity. The VM gains the new services without removing the existing ones in phase 1.
 

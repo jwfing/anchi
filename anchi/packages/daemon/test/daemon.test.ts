@@ -30,14 +30,14 @@ import {
   type ExecResult,
   Guest,
   type GuestTransport,
-  LimaTransport,
+  type VmTransport,
   lineDiff,
   parseBlocks,
   summarizeAudit,
   auditHeadline,
 } from '../src/index.ts';
 import { AUDIT_SAVED_MAX, extractLinks, Store } from '../src/store.ts';
-import { defaultVmSize, hostResources } from '../src/host.ts';
+import { HOST_PORT_DEFAULT, hostPaths, HostTransport } from '../src/host-placement.ts';
 
 const RUNNER = join(import.meta.dirname, 'fixtures/fake-runner.mjs');
 
@@ -319,35 +319,38 @@ const hostRun = async (cmd: string, args: string[]) => {
 const SETUP_STEPS = {
   'vm-start': [[process.execPath, '-e', 'console.log("vm started")']],
   install: [
-    [
-      process.execPath,
-      '-e',
-      'console.log("step one", process.env.ANCHI_VM_CPUS ?? "-", process.env.ANCHI_VM_MEMORY_GIB ?? "-")',
-    ],
+    [process.execPath, '-e', 'console.log("step one")'],
     [process.execPath, '-e', 'console.error("broken"); process.exit(3)'],
   ],
   'vault-init': [],
-  workspaces: [],
   'vault-unlock': [[process.execPath, '-e', 'console.log("{\\"unlocked\\": true}")']],
 };
 
-/** A Lima that reports the fake VM running, for the setup status that asks the guest. */
-class RunningLima extends LimaTransport {
-  override async vmStatus(): Promise<'running'> {
-    return 'running';
+/**
+ * The fake guest as a remote server's own machine (`placement: 'local'`), reported `missing`
+ * until a test says it runs, so the setup status that asks the guest can be exercised both ways.
+ */
+let vmRunning = false;
+class FakeVm implements VmTransport {
+  constructor(readonly placement: 'local' | 'host' = 'local') {}
+  async vmStatus() {
+    return vmRunning ? ('running' as const) : ('missing' as const);
+  }
+  exec(args: string[], stdin?: string) {
+    return transport.exec(args, stdin);
+  }
+  spawn(args: string[]) {
+    return transport.spawn(args);
   }
 }
-let vmRunning = false;
 
 async function start(
   idleMs = 60_000,
   turnTimeoutMs?: number,
-  workspaceRoot?: string,
   extra: Partial<ConstructorParameters<typeof Daemon>[0]> = {},
 ) {
   const layout = homeLayout(root);
   const d = new Daemon({
-    workspaceRoot: workspaceRoot ?? join(root, 'no-workspaces'),
     turnTimeoutMs,
     // Tests drive triggers with their own clock through daemon.triggers.tick().
     triggers: false,
@@ -360,12 +363,12 @@ async function start(
     }),
     hostRun,
     setupSteps: SETUP_STEPS,
-    // Never the real `limactl delete`.
-    resetSteps: [['echo', 'deleted']],
+    // Never this machine's own vault key: a remote server unlocks its vault at start with it.
+    vaultKeyFile: join(root, 'no-vault-key'),
     layout,
     guest: new Guest(transport),
-    // No limactl: the tests never depend on a VM of the machine they run on.
-    vm: new (vmRunning ? RunningLima : LimaTransport)('anchi-vm', join(root, 'no-limactl')),
+    // The tests never depend on the machine they run on.
+    vm: new FakeVm(),
     log: (m) => void logs.push(m),
     quiet: true,
     idleMs,
@@ -397,20 +400,17 @@ afterEach(async () => {
 });
 
 describe('vault after a restart', () => {
-  /** The fake guest as a remote server's own machine: `placement: 'local'`. */
-  const inGuest = () => ({
-    placement: 'local' as const,
-    vmStatus: async () => 'running' as const,
-    vmSize: async () => undefined,
-    exec: (args: string[], stdin?: string) => transport.exec(args, stdin),
-    spawn: (args: string[]) => transport.spawn(args),
-  });
+  /** The fake guest as a remote server that is up. */
+  const inGuest = () => {
+    vmRunning = true;
+    return new FakeVm();
+  };
   /** Starts a daemon whose vault-unlock step leaves a marker file, and says whether it ran. */
   const unlockRan = async (extra: Partial<ConstructorParameters<typeof Daemon>[0]>) => {
     const marker = join(root, 'unlock-ran');
     const keyFile = join(root, 'vault.key');
     writeFileSync(keyFile, 'k');
-    await start(60_000, undefined, undefined, {
+    await start(60_000, undefined, {
       vaultKeyFile: keyFile,
       setupSteps: {
         ...SETUP_STEPS,
@@ -431,13 +431,8 @@ describe('vault after a restart', () => {
     expect(logs).toContain('unlocked the vault with the vault key on this server');
   });
 
-  it("leaves the Lima VM's vault locked, and a server without the key or already unlocked alone", async () => {
+  it('leaves a server without the key or already unlocked alone', async () => {
     transport.vaultUnlocked = false;
-    vmRunning = true;
-    expect(await unlockRan({}), 'Lima VM').toBe(false);
-    await daemon?.stop();
-    client?.close();
-
     expect(
       await unlockRan({ vm: inGuest(), vaultKeyFile: join(root, 'no-such-key') }),
       'no key on the server',
@@ -568,7 +563,6 @@ describe('daemon tasks', () => {
       '-',
       '-',
       '-',
-      '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([
@@ -612,18 +606,6 @@ describe('daemon tasks', () => {
     expect((await client.call('tasks.get', { taskId: task.id })).status).toBe('done');
   });
 
-  it('resets only when confirmed and nothing runs', async () => {
-    const { client } = await start();
-    const preview = await client.call('setup.resetPreview');
-    expect(preview).toMatchObject({ busy: 0, cells: 0, home: root });
-    expect(preview.vaultKey).toMatch(/\.config\/anchi\/vault\.key$/);
-    await expect(client.call('setup.reset', { confirm: 'yes' })).rejects.toThrow(/type reset/);
-    const lines: string[] = [];
-    client.on('reset', (n) => lines.push(n.line));
-    await client.call('setup.reset', { confirm: 'reset' });
-    expect(lines).toEqual(['$ echo deleted', 'deleted']);
-  });
-
   it("pins the agent's Google accounts to its cell", async () => {
     write('agents/mail.yaml', 'runtime: codex\nconnectors: [gmail]\naccounts: { gmail: work }\n');
     const { client } = await start();
@@ -633,7 +615,6 @@ describe('daemon tasks', () => {
       'gmail',
       'cell',
       'codex',
-      '-',
       '-',
       '-',
       'gmail=work',
@@ -1022,7 +1003,7 @@ describe('daemon tasks', () => {
     await expect(client.call('setup.run', { action: 'install' })).rejects.toThrow(
       /install failed: .* exited with 3: broken/,
     );
-    expect(lines).toContain('step one - -');
+    expect(lines).toContain('step one');
     await expect(client.call('setup.run', { action: 'nope' as never })).rejects.toThrow(
       /unknown setup step/,
     );
@@ -1037,13 +1018,13 @@ describe('daemon tasks', () => {
       { runtime: 'codex', confirm: false },
       { runtime: 'unknown', confirm: true },
       { runtime: 'codex', confirm: true, token: 'unexpected' },
-      { runtime: 'codex', confirm: true, vmSize: { cpus: 0, memoryGiB: 2 } },
+      { runtime: 'codex', confirm: true, vmSize: { cpus: 1, memoryGiB: 2 } },
     ])
       await expect(client.call('setup.prepare', params as never)).rejects.toThrow();
     expect(lines).toEqual([]);
   });
 
-  it('prepares only the selected runtime and refuses concurrent setup and reset', async () => {
+  it('prepares only the selected runtime and refuses concurrent setup', async () => {
     vmRunning = true;
     // Credentials are read only from an unlocked vault.
     transport.vaultUnlocked = true;
@@ -1087,7 +1068,6 @@ describe('daemon tasks', () => {
       for (const [method, params] of [
         ['setup.prepare', { runtime: 'codex', confirm: true }],
         ['setup.run', { action: 'install' }],
-        ['setup.reset', { confirm: 'reset' }],
       ] as const)
         await expect(client.call(method, params as never)).rejects.toThrow(/already running/);
       release();
@@ -1107,39 +1087,20 @@ describe('daemon tasks', () => {
     }
   });
 
-  it('creates the VM with the size picked, half of this computer by default', async () => {
+  it('runs the install steps in order and reports the step that failed', async () => {
     const { client } = await start();
-    const host = hostResources();
     const status = await client.call('setup.status');
-    expect(status.vmSize).toEqual({ default: defaultVmSize(host), host });
-    // Without a VM there is nothing to compare this version with.
+    // Before the guest is up there is nothing to compare this version with.
     expect(status.appVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(status.guestVersion).toBeNull();
     expect(status.guestOutdated).toBe(false);
     const lines: string[] = [];
     client.on('setup', ({ line }) => lines.push(line));
-    await expect(
-      client.call('setup.run', { action: 'install', vmSize: { cpus: 1, memoryGiB: 2 } }),
-    ).rejects.toThrow(/exited with 3/);
-    expect(lines).toContain('step one 1 2');
-    for (const vmSize of [
-      { cpus: 0, memoryGiB: 2 },
-      { cpus: host.cpus + 1, memoryGiB: 2 },
-      { cpus: 1, memoryGiB: 1 },
-      { cpus: 1, memoryGiB: host.memoryGiB + 1 },
-      { cpus: 1.5, memoryGiB: 2 },
-      { cpus: '1', memoryGiB: 2 },
-      { cpus: 1, memoryGiB: 2, disk: 100 },
-      null,
-    ]) {
-      await expect(
-        client.call('setup.run', { action: 'install', vmSize: vmSize as never }),
-      ).rejects.toThrow(/BAD_VM_SIZE/);
-    }
-    await expect(
-      client.call('setup.run', { action: 'vm-start', vmSize: { cpus: 1, memoryGiB: 2 } }),
-    ).rejects.toThrow(/BAD_VM_SIZE: only install/);
-    expect(lines.filter((l) => l.startsWith('step one'))).toEqual(['step one 1 2']);
+    await expect(client.call('setup.run', { action: 'install' })).rejects.toThrow(/exited with 3/);
+    expect(lines.filter((l) => l.startsWith('step one'))).toEqual(['step one']);
+    await expect(client.call('setup.run', { action: 'reset' as never })).rejects.toThrow(
+      /unknown setup step/,
+    );
   });
 
   it('answers Anchi tool calls as the task and agent of the cell', async () => {
@@ -1301,7 +1262,7 @@ describe('daemon tasks', () => {
     const notify = async (title: string, message: string) => void shown.push([title, message]);
     transport.approvalLines = [held('a'.repeat(16))];
     // `start` connects a client, as an open TUI would.
-    const { client } = await start(60_000, undefined, undefined, { quiet: false, notify });
+    const { client } = await start(60_000, undefined, { quiet: false, notify });
     await new Promise((r) => setTimeout(r, 300));
     expect(await client.call('approvals.list')).toHaveLength(1);
     expect(shown).toEqual([
@@ -1314,7 +1275,7 @@ describe('daemon tasks', () => {
     await daemon!.stop();
     write('settings.yaml', 'desktopNotifications: false\n');
     transport.approvalLines = [held('b'.repeat(16))];
-    await start(60_000, undefined, undefined, { quiet: false, notify });
+    await start(60_000, undefined, { quiet: false, notify });
     await new Promise((r) => setTimeout(r, 300));
     expect(shown).toHaveLength(1);
   });
@@ -1478,49 +1439,6 @@ describe('daemon tasks', () => {
     });
   });
 
-  it('binds workspaces and reports code-running paths a turn adds to writable ones', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
-    mkdirSync(join(ws, 'app', '.git', 'hooks'), { recursive: true });
-    mkdirSync(join(ws, 'docs'));
-    write(
-      'agents/coder.yaml',
-      'runtime: codex\nworkspaces: [{ path: app, mode: rw }, { path: docs }]\n',
-    );
-    const { client } = await start(60_000, undefined, ws);
-    const t = await client.call('tasks.create', {
-      agentId: 'coder',
-      text: `write ${join(ws, 'app', '.git', 'hooks', 'post-checkout')}`,
-    });
-    await client.call('tasks.wait', { taskId: t.id });
-    const arg = transport.starts.at(-1)!.at(-3)!;
-    expect(JSON.parse(Buffer.from(arg, 'base64url').toString())).toEqual([
-      { name: 'app', path: 'app', mode: 'rw' },
-      { name: 'docs', path: 'docs', mode: 'ro' },
-    ]);
-    const notices = (await client.call('tasks.events', { taskId: t.id }))
-      .filter((e) => e.event.type === 'notice')
-      .map((e) => (e.event as { text: string }).text);
-    expect(notices).toEqual([
-      `⚠ workspace app: ${join('.git', 'hooks', 'post-checkout')}: git hook added or changed`,
-    ]);
-  });
-
-  it('runs the turn when an rw workspace holds a file the daemon cannot read', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
-    mkdirSync(join(ws, 'app'));
-    writeFileSync(join(ws, 'app', 'built-tool'), 'binary');
-    // Executable but unreadable, like a root-owned 0700 file left by a Docker bind mount.
-    chmodSync(join(ws, 'app', 'built-tool'), 0o311);
-    write('agents/coder.yaml', 'runtime: codex\nworkspaces: [{ path: app, mode: rw }]\n');
-    const { client } = await start(60_000, undefined, ws);
-    const t = await client.call('tasks.create', { agentId: 'coder', text: 'go' });
-    const done = await client.call('tasks.wait', { taskId: t.id });
-    expect(done.status).toBe('done');
-    // The audit after the turn reports nothing: the unreadable file was already there.
-    const events = (await client.call('tasks.events', { taskId: t.id })).map((e) => e.event);
-    expect(events.filter((e) => e.type === 'notice' || e.type === 'error')).toEqual([]);
-  });
-
   it("passes an agent's high-risk exceptions to its cells, and nothing extra otherwise", async () => {
     write(
       'agents/merger.yaml',
@@ -1532,7 +1450,7 @@ describe('daemon tasks', () => {
     expect(transport.starts.at(-1)!.slice(-2)).toEqual(['-', 'github-merge']);
     const plain = await client.call('tasks.create', { agentId: 'dev', text: 'hi' });
     await client.call('tasks.wait', { taskId: plain.id });
-    expect(transport.starts.at(-1)).toHaveLength(13);
+    expect(transport.starts.at(-1)).toHaveLength(12);
   });
 
   it("makes an agent's X and Reddit posts automatic only where its approvals say auto", async () => {
@@ -1550,7 +1468,7 @@ describe('daemon tasks', () => {
     expect(started.slice(-2)).toEqual(['-', 'x']);
     const plain = await client.call('tasks.create', { agentId: 'asker', text: 'draft it' });
     await client.call('tasks.wait', { taskId: plain.id });
-    expect(transport.starts.at(-1)).toHaveLength(13);
+    expect(transport.starts.at(-1)).toHaveLength(12);
   });
 
   it('scans every cell before closing it and reports findings', async () => {
@@ -1646,7 +1564,7 @@ describe('daemon tasks', () => {
       binary: async () => fake.binary,
     });
     write('settings.yaml', 'codexAutoImport: false\n');
-    const { daemon, client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const { daemon, client } = await start(60_000, undefined, { codexSignIn });
     const ended = new Promise((resolve) => client.on('codexSignIn', resolve));
     expect(await client.call('setup.codexSignIn')).toEqual({
       verificationUrl: 'https://auth.openai.com/codex/device',
@@ -1669,7 +1587,7 @@ describe('daemon tasks', () => {
       log: () => {},
       binary: async () => fake.binary,
     });
-    const { client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const { client } = await start(60_000, undefined, { codexSignIn });
     const heard: unknown[] = [];
     client.on('codexSignIn', (n) => heard.push(n));
     await client.call('setup.codexSignIn');
@@ -1682,8 +1600,10 @@ describe('daemon tasks', () => {
 
   it('signs in to Claude only into an unlocked vault, and stores the token it printed', async () => {
     const fake = fakeClaude('auto');
-    const { client } = await start(60_000, undefined, undefined, {
+    // A daemon on the user's own computer (the host placement): the browser is here.
+    const { client } = await start(60_000, undefined, {
       claudeBinary: async () => fake.binary,
+      vm: new FakeVm('host'),
     });
     await expect(client.call('setup.claudeSignIn')).rejects.toThrow(
       /Prepare the environment first/,
@@ -1691,7 +1611,7 @@ describe('daemon tasks', () => {
     expect(transport.claudeImports).toEqual([]);
     transport.vaultUnlocked = true;
     const ended = new Promise((resolve) => client.on('claudeSignIn', resolve));
-    // This daemon runs beside the browser (Lima): the localhost page finishes by itself.
+    // This daemon runs beside the browser (host placement): the localhost page finishes by itself.
     expect(await client.call('setup.claudeSignIn')).toEqual({ url: LOCAL, codeRequired: false });
     expect(await ended).toEqual({ state: 'done' });
     expect(transport.claudeImports).toEqual([{ token: TOKEN }]);
@@ -1713,7 +1633,7 @@ describe('daemon tasks', () => {
       log: () => {},
       binary: async () => fake.binary,
     });
-    const { client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const { client } = await start(60_000, undefined, { codexSignIn });
     const ended = new Promise((resolve) => client.on('codexSignIn', resolve));
     await client.call('setup.codexSignIn');
     expect(await ended).toEqual({
@@ -1786,7 +1706,7 @@ describe('daemon tasks', () => {
         }),
       );
     local();
-    const { daemon, client } = await start(60_000, undefined, undefined, { hostLoginSync: true });
+    const { daemon, client } = await start(60_000, undefined, { hostLoginSync: true });
     expect((await client.call('setup.status')).claude.connected).toBe(true);
     expect(transport.claudeImports).toHaveLength(1);
     expires += 3_600_000;
@@ -1897,7 +1817,6 @@ describe('builder', () => {
       expect(agents.find((a) => a.id === agentId)).toMatchObject({ runtime, connectors: [] });
       const yaml = readFileSync(file, 'utf8');
       expect(yaml).toContain('connectors: []');
-      expect(yaml).toContain('workspaces: []');
       // No egress list (an empty one would cut the agent off from every host but its
       // runtime's) and no maxTasks: both stay at their defaults.
       expect(yaml).not.toMatch(/egress|maxTasks|highRisk|delegates|triggers/);
@@ -2135,7 +2054,7 @@ describe('builder', () => {
     ).toHaveLength(4);
   });
 
-  it('reports a VM that runs but cannot be asked instead of showing nothing installed', async () => {
+  it('reports a guest that runs but cannot be asked instead of showing nothing installed', async () => {
     vmRunning = true;
     transport.guestFails = true;
     const { client } = await start();
@@ -2144,13 +2063,11 @@ describe('builder', () => {
     expect(status.error).toMatch(/GUEST_SUDO_FAILED/);
     expect(status.installed).toBe(false);
     expect(status.guestOutdated).toBe(false);
-    // No limactl here: the VM's size is unknown, not invented.
-    expect(status.vmSize?.current).toBeUndefined();
     transport.guestFails = false;
     expect((await client.call('setup.status')).error).toBeUndefined();
   });
 
-  it('tells the user when another Anchi version installed the VM components', async () => {
+  it('tells the user when another Anchi version installed the guest components', async () => {
     vmRunning = true;
     transport.guestVersion = '0.0.1';
     const { client } = await start();
@@ -2570,14 +2487,9 @@ describe('deleting agents', () => {
 
   it('deletes an agent with its task trees, cancelling running work, and edits its delegators', async () => {
     write('agents/lead.yaml', '# the lead\nruntime: codex\ndelegates: [dev, qa] # team\n');
-    write(
-      'agents/dev.yaml',
-      'runtime: codex\ndelegates: [qa]\nworkspaces: [{ path: projects/web, mode: rw }]\n',
-    );
+    write('agents/dev.yaml', 'runtime: codex\ndelegates: [qa]\n');
     write('agents/qa.yaml', 'runtime: codex\n');
-    mkdirSync(join(root, 'ws/projects/web'), { recursive: true });
-    writeFileSync(join(root, 'ws/projects/web/keep.txt'), 'mine');
-    const { client } = await start(60_000, undefined, join(root, 'ws'));
+    const { client } = await start();
     const turn = async (agentId: string, text: string) => {
       const task = await client.call('tasks.create', { agentId, text });
       return client.call('tasks.wait', { taskId: task.id });
@@ -2600,7 +2512,6 @@ describe('deleting agents', () => {
       delegatedBy: ['lead'],
       delegatedByTemplates: [],
       triggers: 0,
-      workspaces: ['projects/web'],
     });
     await expect(client.call('agents.delete', { agentId: 'dev', confirm: 'yes' })).rejects.toThrow(
       /type the agent id "dev"/,
@@ -2635,17 +2546,15 @@ describe('deleting agents', () => {
     expect(transport.execs.some((e) => e.args.join(' ') === 'anchi-cell purge-agent dev')).toBe(
       true,
     );
-    // The Mac's directory was only ever bound into cells; it is left as it was.
-    expect(readFileSync(join(root, 'ws/projects/web/keep.txt'), 'utf8')).toBe('mine');
   });
 
-  it('finishes the VM part on a later run when the VM is down, and refuses the builder', async () => {
+  it('finishes the guest part on a later run when the guest is down, and refuses the builder', async () => {
     write('agents/qa.yaml', 'runtime: codex\n');
     const { client } = await start();
     transport.purgeFails = true;
     const first = await client.call('agents.delete', { agentId: 'qa', confirm: 'qa' });
     expect(first.vm).toBeNull();
-    expect(first.warnings[0]).toMatch(/the VM kept @qa's home and skills .*delete @qa again/);
+    expect(first.warnings[0]).toMatch(/the guest kept @qa's home and skills .*delete @qa again/);
     expect(existsSync(join(root, 'agents/qa.yaml'))).toBe(false);
     transport.purgeFails = false;
     expect(await client.call('agents.deletePreview', { agentId: 'qa' })).toMatchObject({
@@ -2664,12 +2573,8 @@ describe('deleting agents', () => {
 });
 
 describe('agent settings', () => {
-  function workspaceTree() {
-    const ws = join(root, 'ws');
-    for (const d of ['projects/webapp/src', 'docs', '.hidden'])
-      mkdirSync(join(ws, d), { recursive: true });
+  function withSkill() {
     write('skills/review/SKILL.md', '---\nname: review\ndescription: Reviews pull requests\n---\n');
-    return ws;
   }
 
   it("adds a refused host to an agent's egress list, and nothing else", async () => {
@@ -2809,7 +2714,8 @@ describe('agent settings', () => {
 
   it('shows settings and what exists, previews a patch and applies only the reviewed one', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
-    const { client } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client } = await start();
     const settings = await client.call('agents.settings', { agentId: 'dev' });
     expect(settings.current).toEqual({
       name: 'dev',
@@ -2820,7 +2726,6 @@ describe('agent settings', () => {
       prompt: { mode: 'append', text: '' },
       skills: [],
       connectors: ['github'],
-      workspaces: [],
       highRisk: { disable: [] },
       delegates: [],
       approvals: {},
@@ -2829,13 +2734,9 @@ describe('agent settings', () => {
     });
     expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
-    expect(settings.inventory.workspaces.dirs).toEqual(['docs', 'projects', 'projects/webapp']);
     expect(settings.inventory.agents).toEqual(['dev']);
 
-    const patch = {
-      skills: ['review'],
-      workspaces: [{ path: 'projects/webapp', mode: 'rw' as const }],
-    };
+    const patch = { skills: ['review'] };
     const preview = await client.call('agents.update', { agentId: 'dev', patch });
     expect(preview).toMatchObject({ applied: false, errors: [] });
     expect(preview.diff).toMatch(/^\+ skills: \[review\]$/m);
@@ -2852,7 +2753,6 @@ describe('agent settings', () => {
     expect(text).toMatch(/^# my developer/);
     expect(text).toMatch(/connectors: \[github\] # pushes/);
     const agents = await client.call('agents.list');
-    expect(agents.find((a) => a.id === 'dev')?.workspaces).toEqual(['webapp (rw)']);
     // The diff was made against the old file: applying it again is refused.
     await expect(
       client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base }),
@@ -3012,15 +2912,13 @@ describe('agent settings', () => {
   });
 
   it('blocks references to what does not exist and refuses invalid patches', async () => {
-    const { client } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client } = await start();
     const bad = await client.call('agents.update', {
       agentId: 'dev',
-      patch: { skills: ['missing'], workspaces: [{ path: 'nowhere', mode: 'ro' }] },
+      patch: { skills: ['missing'] },
     });
-    expect(bad.errors).toEqual([
-      'skill "missing" is not installed',
-      'workspace "nowhere" is not a directory under ~/AnchiWorkspaces',
-    ]);
+    expect(bad.errors).toEqual(['skill "missing" is not installed']);
     await expect(
       client.call('agents.update', {
         agentId: 'dev',
@@ -3044,7 +2942,8 @@ describe('agent settings', () => {
   });
 
   it('gives the builder the inventory each turn and checks and revises its proposals', async () => {
-    const { client, daemon } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client, daemon } = await start();
     const task = await client.call('tasks.create', { agentId: 'builder', text: 'hello' });
     await client.call('tasks.wait', { taskId: task.id });
     const events = await client.call('tasks.events', { taskId: task.id });
@@ -3053,7 +2952,6 @@ describe('agent settings', () => {
     const said = events.find((e) => e.event.type === 'message')?.event as { text: string };
     expect(said.text).toContain('<anchi-inventory>');
     expect(said.text).toContain('- review: Reviews pull requests');
-    expect(said.text).toContain('projects/webapp');
     expect(said.text).toMatch(/Runtimes \(runtime: \.\.\.\): codex \(\w[\w ]*\), claude-code \(/);
 
     const missing = daemon.proposals.add(
@@ -3191,7 +3089,8 @@ describe('agent settings', () => {
 
   it('shows the builder agent files the user names and turns its patches into update proposals', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex # rt\nconnectors: [github]\n');
-    const { client, daemon } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client, daemon } = await start();
     const said = async (text: string) => {
       const task = await client.call('tasks.create', { agentId: 'builder', text });
       await client.call('tasks.wait', { taskId: task.id });
@@ -3628,5 +3527,43 @@ describe('review gaps: approvals decided late, RPC lookup, template delegates', 
     expect((await client.call('agents.settings', { agentId: 'lead' })).fixed.delegates).toEqual([
       'qa',
     ]);
+  });
+});
+
+describe('host placement', () => {
+  /** A daemon without a VM: the proxy would be its child, but nothing is installed here. */
+  const onHost = () => {
+    const transport = new HostTransport(hostPaths(homeLayout(root)));
+    return { vm: transport, guest: new Guest(transport), hostServices: false as const };
+  };
+
+  it('reports its placement, refuses tasks and asks for the install before enabling', async () => {
+    const { client } = await start(60_000, undefined, onHost());
+    const status = await client.call('setup.status');
+    expect(status.placement).toBe('host');
+    expect(status.vm).toBe('stopped');
+    expect(status.host?.installHint).toMatch(/openssl/);
+    await expect(client.call('tasks.create', { agentId: 'dev', text: 'hi' })).rejects.toThrow(
+      /HOST_PLACEMENT/,
+    );
+    const host = await client.call('host.status');
+    expect(host).toMatchObject({
+      placement: 'host',
+      running: false,
+      enabled: false,
+    });
+    expect(host.port).toBe(HOST_PORT_DEFAULT);
+    await expect(client.call('host.enable')).rejects.toThrow(/HOST_NOT_RUNNING/);
+    expect((await client.call('host.disable')).enabled).toBe(false);
+    // No trigger runs and there is no cell to reap without a VM: the reap answers empty.
+    expect(logs.filter((l) => /cell reap|reaped orphaned/.test(l))).toEqual([]);
+  });
+
+  it('is refused on a daemon that runs on a remote server', async () => {
+    const { client } = await start();
+    expect((await client.call('setup.status')).placement).toBe('local');
+    for (const method of ['host.status', 'host.enable', 'host.disable'] as const) {
+      await expect(client.call(method)).rejects.toThrow(/HOST_PLACEMENT_ONLY/);
+    }
   });
 });

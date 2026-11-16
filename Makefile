@@ -1,23 +1,21 @@
 PYTHON ?= python3
-VM ?= anchi-vm
-# Guest root: through Lima, or sudo on a remote server where Anchi runs in the guest (ANCHI_GUEST=local).
-GUEST_ROOT = $(if $(filter local,$(ANCHI_GUEST)),sudo -n,limactl shell $(VM) -- sudo)
 PY_SOURCES = services scripts guest tests
 SHELL_SOURCES = scripts/*.sh guest/*.sh guest/cell-run landing/dist/install.sh
 
-.PHONY: help check lint test format verify-vm verify-anchi
+.PHONY: help check lint test format verify-guest verify-anchi
 help:
-	@echo 'make check         Offline syntax, lint, formatting and unit tests (no VM/account access)'
+	@echo 'make check         Offline syntax, lint, formatting and unit tests (no guest/account access)'
 	@echo 'make lint          Ruff, shellcheck (when installed) and Prettier checks only'
 	@echo 'make test          Python services and anchi unit tests'
 	@echo 'make format        Format Python (ruff) and anchi sources (prettier)'
-	@echo 'make verify-vm     Explicit live isolation verification against anchi-vm'
-	@echo 'make verify-anchi  Live agent-team cell and egress proxy checks (no credentials used)'
+	@echo 'make verify-guest  Explicit live isolation verification on a remote server (ANCHI_GUEST=local)'
+	@echo 'make verify-anchi  Live agent-team cell and egress proxy checks on a remote server (no credentials used)'
 
 check: lint
 	$(PYTHON) scripts/check-source.py
 	pnpm --dir anchi run check
 	$(PYTHON) scripts/gen-skill-cli.py --check
+	$(PYTHON) scripts/gen-egress-fixtures.py --check
 	$(PYTHON) -m unittest discover -s tests -q
 
 lint:
@@ -35,8 +33,9 @@ format:
 	$(PYTHON) -m ruff format $(PY_SOURCES)
 	pnpm --dir anchi run format
 
-verify-vm:
+# Both run on the guest itself: a remote server where Anchi runs with ANCHI_GUEST=local.
+verify-guest:
 	bash scripts/verify.sh
 
 verify-anchi:
-	$(GUEST_ROOT) /usr/bin/python3 /opt/secure-vm/check-anchi.py $(START_BUDGET_MS)
+	sudo -n /usr/bin/python3 /opt/secure-vm/check-anchi.py $(START_BUDGET_MS)

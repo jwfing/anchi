@@ -13,7 +13,7 @@ checks = []
 
 
 def gateway():
-    """The guest's default gateway, the host side of its network (192.168.5.2 under Lima)."""
+    """The guest's default gateway: the network a cell must not reach through the proxy."""
     for line in Path('/proc/net/route').read_text().splitlines()[1:]:
         fields = line.split()
         if fields[1] == '00000000' and int(fields[3], 16) & 2:

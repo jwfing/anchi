@@ -345,7 +345,7 @@ ipcMain.handle('anchi:upgradeServer', async (event, target: unknown) => {
     const { response } = await dialog.showMessageBox({
       type: 'info',
       message: 'Reopen Anchi to use the new version',
-      detail: 'The daemon and the VM are upgraded. The app you are using is still the old one.',
+      detail: 'The daemon and the guest are upgraded. The app you are using is still the old one.',
       buttons: ['Later', 'Reopen now'],
       defaultId: 1,
       cancelId: 0,

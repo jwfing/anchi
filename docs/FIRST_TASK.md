@@ -17,7 +17,7 @@ anchi agents create dev --runtime claude-code --preview
 anchi agents create dev --runtime claude-code
 ```
 
-Review the YAML and confirm. The starter grants no connectors or workspaces; it reaches any public host (no `egress`
+Review the YAML and confirm. The starter grants no connectors; it reaches any public host (no `egress`
 list) and runs up to three tasks at a time. An existing `dev` is never overwritten; choose
 another id. In the TUI, **Ctrl+X, N** selects a runtime and name, then shows the proposal;
 **y** saves, **n** discards. **Esc** closes the dialog without saving.
@@ -52,7 +52,7 @@ and return a nonzero exit code when the turn does not finish successfully.
 | Symptom | What to check |
 |---|---|
 | `unknown command 'create'` | Your installed binary predates the starter command: update it, or write the file by hand as in [Write an agent file](AGENT_TEAM.md#write-an-agent-file). |
-| Missing/stopped VM | `anchi setup status` summarizes the environment (`--json` for every field). Finish `anchi setup install` or start an existing VM with `anchi setup vm`. |
+| Not installed, or on the wrong machine | `anchi setup status` summarizes the environment (`--json` for every field). Tasks need a remote server (`anchi server <name>`); finish `anchi setup install` there. |
 | Locked vault | `anchi setup vault unlock`; keep the original vault key. Replacing it cannot decrypt stored accounts. |
 | Runtime not configured or expired | Connect the runtime named in `anchi agents`, in **Runtimes** or via `anchi setup`. A Claude/Hermes starter does not need Codex. |
 | Image build failed | **Ctrl+X, L** shows setup logs; inspect the task error. Retry after fixing the reported dependency or network problem. |
@@ -68,12 +68,10 @@ or private task content.
 
 After this succeeds, choose one next step:
 
-- [Share a project folder](AGENT_TEAM.md#directories-of-your-computer-workspaces). Start with
-  `ro` for review. `rw` edits real host files; review them before executing code on the host.
 - [Connect GitHub or another service](AGENT_TEAM.md#connect-accounts) and grant that connector
   to the agent. For GitHub writes requiring your review, set `approvals: {github: ask}`.
 - [Create another agent](AGENT_TEAM.md#create-agents) and explicitly configure `delegates` for
   collaboration. A name alone does not grant delegation access.
 
 Remove a trial agent with `anchi agents rm dev` after reviewing the deletion preview. It
-removes that agent's tasks and VM files; host workspace files are kept.
+removes that agent's tasks and its files on the server; audit logs are kept.

@@ -38,6 +38,17 @@ for (const [name, entry] of [
     external: ['./devtools.js'],
   });
 }
+// The host placement's services and their CLI, beside the daemon in lib/.
+for (const [name, entry] of [
+  ['host-services', 'main'],
+  ['host-vault', 'cli'],
+]) {
+  await bundle({
+    ...common,
+    entryPoints: [`packages/host-services/src/${entry}.ts`],
+    outfile: `${out}/lib/${name}.mjs`,
+  });
+}
 for (const [name, entry] of [
   ['runner', 'main'],
   ['forward', 'forward-main'],

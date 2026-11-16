@@ -35,13 +35,11 @@ fi
 # Pi was retired with the desktop app; remove what it left in the cell rootfs.
 rm -rf "$rootfs/opt/secure-pi" /opt/secure-vm/pi-build "$rootfs/opt/secure-vm/check-pi.py" \
   "$rootfs/opt/secure-vm/agent.py" "$rootfs/opt/secure-vm/check-inference.py"
-for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_cell.py anchi-build-base.sh anchi-build-runtime-codex.sh anchi-build-runtime-claude-code.sh anchi-build-runtime-hermes.sh check-anchi.py anchi-workspaces.sh; do
+for f in anchi-cell/runner.mjs anchi-cell/forward.mjs anchi-cell/mcp.mjs anchi_cell.py anchi-build-base.sh anchi-build-runtime-codex.sh anchi-build-runtime-claude-code.sh anchi-build-runtime-hermes.sh check-anchi.py; do
   [[ -f $src/$f ]] || { echo "missing $f in bootstrap bundle" >&2; exit 1; }
 done
-# bindfs maps the workspaces share of a Linux host to the cell agent (anchi-workspaces.sh).
 packages=()
 python3 -c 'import venv, ensurepip' 2>/dev/null || packages+=(python3-venv)
-command -v bindfs >/dev/null || packages+=(bindfs)
 if ((${#packages[@]})); then
   export DEBIAN_FRONTEND=noninteractive
   apt-get -o DPkg::Lock::Timeout=600 update
@@ -79,28 +77,18 @@ else
   rm -f /opt/secure-vm/anchi/prebuilt.json
 fi
 install -m 0755 "$src/check-anchi.py" /opt/secure-vm/check-anchi.py
-install -m 0755 "$src/anchi-workspaces.sh" /opt/secure-vm/anchi/workspaces.sh
 ln -sf /opt/secure-vm/anchi/anchi_cell.py /usr/local/sbin/anchi-cell
 ln -sf /opt/secure-vm/anchi/anchi_cell.py /usr/local/sbin/anchi-image
 install -d -m 0700 /var/lib/anchi
 install -d -m 0755 /var/lib/anchi/layers /var/lib/anchi/agents
 
-install -m 0644 "$src/systemd/anchi-egress.service" "$src/systemd/anchi-workspaces.service" /etc/systemd/system/
-systemctl daemon-reload
-# Mounts the workspaces share of a Linux host, if there is one; a no-op otherwise. The unit may
-# have run at boot before cloud-init mounted a share just added: then it runs again.
-systemctl enable anchi-workspaces.service
-if mountpoint -q /mnt/anchi-host-raw/share && ! mountpoint -q /mnt/anchi-host; then
-  systemctl restart anchi-workspaces.service
-elif mountpoint -q /mnt/anchi-host-raw/share && mountpoint -q /mnt/anchi-host &&
-  ! pgrep -f -- '^bindfs .*--multithreaded.* /mnt/anchi-host$' >/dev/null; then
-  # Linux, mounted by an earlier version with single-threaded bindfs: mount it again (macOS
-  # mounts virtiofs at /mnt/anchi-host and has no raw share). Installing refuses while tasks
-  # run, so no running task loses its workspace.
-  systemctl restart anchi-workspaces.service
-else
-  systemctl start anchi-workspaces.service
+install -m 0644 "$src/systemd/anchi-egress.service" /etc/systemd/system/
+# The workspaces share of earlier releases (a host directory mounted into the guest) is gone.
+if systemctl list-unit-files anchi-workspaces.service >/dev/null 2>&1; then
+  systemctl disable --now anchi-workspaces.service 2>/dev/null || true
+  rm -f /etc/systemd/system/anchi-workspaces.service /opt/secure-vm/anchi/workspaces.sh
 fi
+systemctl daemon-reload
 # Network rules include the proxy user's backstop once the user exists.
 systemctl restart secure-egress.service
 systemctl enable anchi-egress.service

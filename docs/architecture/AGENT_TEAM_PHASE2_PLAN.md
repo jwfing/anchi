@@ -1,5 +1,7 @@
 # Agent team phase 2 implementation plan
 
+*Historical. The Lima VM placement this plan describes was removed on 2026-11-16, and the workspaces feature (directories of the user's computer mounted into cells) was removed with it; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
+
 Phase 1 is merged (PR #27): daemon, TUI, task cells, the egress proxy, the Codex runtime, GitHub/AWS/Linear connectors and the agent builder. Its live acceptance with real accounts is still open and is tracked in the [phase 1 plan](AGENT_TEAM_PHASE1_PLAN.md#status). This plan covers phase 2 of the [design](AGENT_TEAM_DESIGN.md#phases).
 
 ## Goal and scope
@@ -167,7 +169,7 @@ N0 ─┬─ N1 Claude Code ─────────────────�
 | N6 | Done | Search, tree, usage, delete and retention with tests; TUI filter and task detail |
 | N7 | Done | Live: a per-minute schedule started a task each minute; poll baseline and exactly-once in tests |
 | N8 | Done | Live: Codex found and used a skill from `~/.codex/skills` |
-| N9 | Done | Google sign-in, Notion/Slack tokens and write modes in the daemon, CLI and TUI; `desktop/`, `pi/` and the inference gateway removed; live `make verify-vm` 102/102 and `make verify-anchi` 23/23 after the removal |
+| N9 | Done | Google sign-in, Notion/Slack tokens and write modes in the daemon, CLI and TUI; `desktop/`, `pi/` and the inference gateway removed; live `make verify-vm` (now `make verify-guest`) 102/102 and `make verify-anchi` 23/23 after the removal |
 
 Decisions taken during implementation:
 

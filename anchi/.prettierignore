@@ -1,1 +1,3 @@
 dist/
+# Written by scripts/gen-egress-fixtures.py from the Python rules; compared byte for byte.
+packages/host-services/test/fixtures/

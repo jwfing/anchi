@@ -41,9 +41,6 @@ class CellEnvTests(unittest.TestCase):
         self.assertNotEqual(run('node_arch', 'riscv64').returncode, 0)
         values = common.load_cell_env([ROOT / 'guest/cell.env'])
         self.assertEqual(run('node_sha256', 'x64').stdout.strip(), values['SECURE_NODE_SHA256_X64'])
-        self.assertEqual(run('host_vm_type', 'Darwin').stdout.strip(), 'vz')
-        self.assertEqual(run('host_vm_type', 'Linux').stdout.strip(), 'qemu')
-        self.assertNotEqual(run('host_vm_type', 'Windows_NT').returncode, 0)
 
     def test_no_hardcoded_cell_uids_outside_env(self):
         pattern = re.compile(r'\b52[45]288\b')
@@ -55,30 +52,18 @@ class CellEnvTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
-class LimaTemplateTests(unittest.TestCase):
-    def test_single_template_lists_both_architectures_without_fixed_driver(self):
-        text = (ROOT / 'lima/anchi-vm.yaml').read_text()
-        top_level = [
-            line.split(':')[0]
-            for line in text.splitlines()
-            if line and not line[0].isspace() and not line.startswith('#')
-        ]
-        self.assertNotIn('vmType', top_level)
-        self.assertNotIn('arch', top_level)
-        self.assertIn('sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc', text)
-        self.assertIn('sha256:ffe6203da54deeb6db5d2a98a83f9ec8e55f149d3f7ba622e1abe5fa966ee3d6', text)
-        self.assertIn('arch: aarch64', text)
-        self.assertIn('arch: x86_64', text)
-        self.assertIn('mounts: []', text)
+class HostScriptTests(unittest.TestCase):
+    """The guest scripts install onto the machine they run on (a remote server, ANCHI_GUEST=local)."""
 
-    def test_up_script_passes_explicit_vm_type(self):
-        text = (ROOT / 'scripts/up.sh').read_text()
-        self.assertIn('host_vm_type', text)
-        self.assertIn('--vm-type="$vm_type"', text)
-        # Every host script takes the VM name, ANCHI_INSTALL_VM included, from vm-name.sh.
-        self.assertIn('ANCHI_INSTALL_VM', (ROOT / 'scripts/vm-name.sh').read_text())
-        for script in ('up.sh', 'install-anchi.sh', 'verify.sh', 'cell.sh', 'policy.sh'):
-            self.assertIn('anchi_vm_name', (ROOT / 'scripts' / script).read_text(), script)
+    def test_guest_scripts_refuse_without_a_local_guest(self):
+        for script in ('up.sh', 'install-anchi.sh', 'verify.sh'):
+            self.assertIn('require_guest_local', (ROOT / 'scripts' / script).read_text(), script)
+        arch = (ROOT / 'guest/arch.sh').read_text()
+        self.assertIn('guest_local() { [[ ${ANCHI_GUEST:-host} == local ]]; }', arch)
+        self.assertNotIn('limactl', arch)
+        for script in ('up.sh', 'install-anchi.sh', 'verify.sh', 'vault.mjs', 'package-release.sh', 'remote.sh'):
+            text = (ROOT / 'scripts' / script).read_text()
+            self.assertNotRegex(text, r'limactl|anchi-vm|vm-name\.sh|vm-size\.sh', script)
 
     def test_release_archive_has_every_script_its_scripts_source(self):
         # A packaged script that sources one left out fails only after installing the release.
@@ -90,14 +75,14 @@ class LimaTemplateTests(unittest.TestCase):
                 continue
             for sourced in re.findall(r'^\s*source scripts/(\S+)', (ROOT / 'scripts' / name).read_text(), re.M):
                 self.assertIn(sourced, packaged, f'{name} sources scripts/{sourced}')
-        self.assertIn('vm-size.sh', packaged)
+        self.assertEqual(packaged, {'up.sh', 'install-anchi.sh', 'vault.mjs'})
 
     def test_installers_clear_their_staging_directory_before_copying(self):
-        # A VM keeps /tmp between releases; a stale copy would reinstall files a release removed.
+        # A server keeps /tmp between releases; a stale copy would reinstall files a release removed.
         for script, stage in (('up.sh', '/tmp/secure-vm-bootstrap'), ('install-anchi.sh', '"$stage')):
             text = (ROOT / 'scripts' / script).read_text()
-            clear = text.index(f'guest_root "$vm_name" rm -rf {stage}')
-            self.assertLess(clear, text.index(f'guest_sh "$vm_name" mkdir -p {stage}'), script)
+            clear = text.index(f'guest_root rm -rf {stage}')
+            self.assertLess(clear, text.index(f'guest_sh mkdir -p {stage}'), script)
             self.assertLess(clear, text.index('guest_copy '), script)
 
     def test_guest_installer_names_a_wrong_cell_peer_gid(self):

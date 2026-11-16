@@ -41,12 +41,12 @@ Report the result as it is. If a check fails for a reason unrelated to your chan
 |---|---|
 | Schemas, codec (`protocol`) | `anchi/packages/protocol/test/` |
 | Agent, image, trigger config (`core`) | `anchi/packages/core/test/config.test.ts` |
-| Daemon behavior | `anchi/packages/daemon/test/`; `daemon.test.ts` runs the real daemon with `FakeTransport` and `fixtures/fake-runner.mjs` instead of a VM |
+| Daemon behavior | `anchi/packages/daemon/test/`; `daemon.test.ts` runs the real daemon with `FakeTransport` and `fixtures/fake-runner.mjs` instead of a guest |
 | TUI rendering and keys | `anchi/packages/tui/test/` with `ink-testing-library` (`tui.test.tsx`, `keys.test.ts`) |
 | Cell runner | `anchi/packages/cell-runner/test/runner.test.ts` |
-| Trusted VM services, egress rules | `tests/test_*.py` (mocked network and policy) |
+| Trusted guest services, egress rules | `tests/test_*.py` (mocked network and policy) |
 | Cell manager pure functions | `tests/test_guest.py` loads `guest/anchi_cell.py` directly |
 
 ## Live checks (only when asked)
 
-`make verify-vm`, `make verify-anchi` and `scripts/anchi-acceptance.sh` need a running `anchi-vm`; the last uses real accounts. They refuse while task cells are live. If a change affects the VM and you could not run them, say which live check would cover it.
+`make verify-guest`, `make verify-anchi` and `scripts/anchi-acceptance.sh` run on a remote server with the guest installed (`ANCHI_GUEST=local`); the last uses real accounts. They refuse while task cells are live. `scripts/verify-host.sh` is the host placement's live check. If a change affects the guest and you could not run them, say which live check would cover it.

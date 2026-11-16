@@ -43,8 +43,8 @@ the user reviews your proposal in a confirmation dialog, and only then is it wri
 An agent is a YAML file. Fields:
 - name: display name; description: one line.
 - execution: {server: saved server alias, agent: existing agent id on that server}. Optional;
-  this member executes on that node, using its runtime, prompt, skills, connectors, workspaces
-  and security policy. Only the member's name, description, delegates, maxTasks and triggers
+  this member executes on that node, using its runtime, prompt, skills, connectors and
+  security policy. Only the member's name, description, delegates, maxTasks and triggers
   are managed here. Never invent server aliases or remote agent ids; ask the user for the
   target agent. Delegation must be granted in both this member and the execution profile.
 - runtime: codex, claude-code or hermes (required). Use claude-code when the user asks for
@@ -73,7 +73,7 @@ An agent is a YAML file. Fields:
   { gmail: work }; the inventory lists them. Without it, the account named default.
 - skills: ids of installed skills the agent can use (optional), e.g. [code-review]. Each turn
   starts with an <anchi-inventory> block listing the runtimes and connectors (and whether
-  they are connected), installed skills, directories under ~/AnchiWorkspaces, agents and images. Propose only
+  they are connected), installed skills, agents and images. Propose only
   what it lists; if something is missing, tell the user how to add it instead.
 - triggers: start tasks without the user (optional): { schedule: '0 9 * * 1-5', text: ... }
   (cron, local time), or { poll: { type: linear-issues, team?, label?, state? } or
@@ -92,9 +92,6 @@ An agent is a YAML file. Fields:
   { disable: [github-merge] } for an agent whose job is merging pull requests. Ids:
   ${HIGH_RISK_IDS.join(', ')}. Only when the user asks for it. approvals for the same connector
   hold those operations anyway, so do not give an agent both for one connector.
-- workspaces: directories of the user's computer under ~/AnchiWorkspaces, e.g.
-  [{ path: projects/webapp, mode: rw }] (mode ro by default; they appear at
-  /home/agent/workspaces/<name>). Use rw only when the agent must change files there.
 - egress: hosts the agent may reach besides its runtime and connectors, e.g.
   [registry.npmjs.org, '*.pypi.org']. Omit the field unless the user asks to limit the hosts:
   without it the agent reaches any public host. Never write egress: [] on your own: it is an
@@ -138,7 +135,7 @@ skills: [code-review, test]
 \`\`\`
 
 A patch may set name, description, runtime, model, effort, prompt ({ mode, text }), skills,
-connectors, delegates, workspaces and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
+connectors, delegates and highRisk ({ disable: [...] }). Lists replace the whole list: repeat
 the entries to keep. An empty model, effort or description ('') removes it. For any other field
 (triggers, approvals, egress, image), send a complete anchi-agent block with the
 whole agent instead.
@@ -218,10 +215,9 @@ function read(file: string): string {
 
 const MAX_YAML = 100_000;
 
-/** What proposals are checked against: installed skills, agents, connectors, directories. */
+/** What proposals are checked against: installed skills, agents and connectors. */
 export interface ProposalRefs {
   inventory: ReferenceInventory;
-  workspaceRoot: string;
 }
 
 /** Validates builder output against the schemas and what exists; nothing is written. */
@@ -267,7 +263,7 @@ export function makeProposal(
         }
       }
       if (refs) {
-        const found = checkReferences(resolved.data, refs.inventory, refs.workspaceRoot);
+        const found = checkReferences(resolved.data, refs.inventory);
         errors.push(...found.errors);
         warnings.push(...found.warnings);
       }
@@ -421,7 +417,7 @@ export class Proposals {
     private refs?: () => ProposalRefs,
   ) {}
 
-  /** A local starter: no model call, connector, workspace, or extra network grant. */
+  /** A local starter: no model call, connector, or extra network grant. */
   starter(params: unknown): BuilderProposal {
     const { agentId, runtime } = z
       .strictObject({ agentId: idSchema, runtime: runtimeSchema })
@@ -436,7 +432,6 @@ export class Proposals {
           `name: ${JSON.stringify(agentId)}`,
           `runtime: ${runtime}`,
           'connectors: []',
-          'workspaces: []',
           'prompt:',
           '  mode: append',
           '  text: Help with the requested task. Explain missing access instead of trying to bypass it.',

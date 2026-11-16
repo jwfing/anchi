@@ -16,7 +16,7 @@ export interface AccessLine {
 export function plainWords(
   values: Pick<
     AgentSettingValues,
-    'connectors' | 'workspaces' | 'delegates' | 'highRisk' | 'approvals' | 'triggers' | 'egress'
+    'connectors' | 'delegates' | 'highRisk' | 'approvals' | 'triggers' | 'egress'
   >,
   fixed: Pick<FixedSettings, 'approvals' | 'egress' | 'sandbox' | 'delegates' | 'highRiskGlobal'>,
   name: (connector: string) => string = (id) => id,
@@ -31,13 +31,6 @@ export function plainWords(
         mode === 'ask'
           ? `Acts through ${name(id)}; anything that writes waits for you`
           : `Acts through ${name(id)}; high-risk operations wait for you`,
-    });
-  }
-  for (const w of values.workspaces) {
-    lines.push({
-      can: true,
-      text: `${w.mode === 'rw' ? 'Reads and changes' : 'Reads'} files in ${sanitizeLine(w.path)}`,
-      warn: w.mode === 'rw',
     });
   }
   const delegates = values.delegates ?? fixed.delegates;
@@ -71,12 +64,7 @@ export function plainWords(
       text: `Does without asking: ${exempt.map(sanitizeLine).join(', ')}`,
     });
   }
-  lines.push({
-    can: false,
-    text: values.workspaces.length
-      ? 'Cannot read files outside the shared folders'
-      : 'Cannot read any file on this computer',
-  });
+  lines.push({ can: false, text: 'Cannot read any file on this computer' });
   lines.push({
     can: false,
     text: values.connectors.length

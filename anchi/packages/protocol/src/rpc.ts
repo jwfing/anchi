@@ -97,8 +97,6 @@ export interface AgentSummary {
   queued: number;
   /** How many of the agent's tasks run at the same time. */
   maxTasks: number;
-  /** Directories of the Mac bound into the agent's cells, as `name (ro|rw)`. */
-  workspaces?: string[];
   /** Number of schedule and polling triggers. */
   triggers?: number;
   delegates?: string[];
@@ -142,25 +140,19 @@ export interface ConnectorStatus {
 }
 
 /**
- * Setup steps the daemon runs for the user, each a fixed host command from the checkout:
- * `vm-start` starts the existing VM; `install` creates or updates the VM, installs the trusted
- * services and the agent team, and builds the base image; `vault-init` and `vault-unlock` use
- * the host-held vault key (read by `scripts/vault.mjs` in its own process, never by the daemon).
+ * Setup steps the daemon runs for the user: `vm-start` starts a stopped guest (the host
+ * placement's services process; a remote server is always running); `install` installs the
+ * trusted services and the agent team on a remote server and builds the base image (nothing to
+ * install on the host placement); `vault-init` and `vault-unlock` use the vault key on the
+ * daemon's machine (read by `scripts/vault.mjs` in its own process, never by the daemon).
  */
-export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock' | 'workspaces';
+export type SetupAction = 'vm-start' | 'install' | 'vault-init' | 'vault-unlock';
 export const SETUP_ACTIONS: readonly SetupAction[] = [
   'vm-start',
   'install',
   'vault-init',
   'vault-unlock',
-  'workspaces',
 ];
-
-/** CPUs and memory (whole GiB) of a VM. */
-export interface VmSize {
-  cpus: number;
-  memoryGiB: number;
-}
 
 export interface RuntimeAccountStatus {
   runtime: 'codex';
@@ -223,17 +215,6 @@ export interface ServiceConnectorStatus {
 /** `user`: imported by the user (takes precedence); `builtin`: shipped with Anchi. */
 export type GoogleClientSource = 'user' | 'builtin' | null;
 
-/** What `setup.reset` deletes; `--all` (CLI only) also deletes the vault key and Anchi home. */
-export interface ResetPreview {
-  vm: SetupStatus['vm'];
-  /** Running or queued tasks; reset refuses while there are any. */
-  busy: number;
-  /** Live (idle) cells; closed first. */
-  cells: number;
-  home: string;
-  vaultKey: string;
-}
-
 export interface HostLoginStatus {
   installed: boolean;
   state: 'ready' | 'missing' | 'expired' | 'unavailable' | 'disabled';
@@ -251,6 +232,16 @@ export interface SetupStatus {
   /** Host-only readiness; optional for clients connected to an older daemon. */
   vaultKeyPresent?: boolean;
   host?: { platform: string; missing: string[]; installHint: string };
+  /**
+   * Where the guest is: `local` (the daemon is on a remote server with cells) or `host` (no
+   * guest; the proxy and the vault run on this computer, see `host.status`). Optional for
+   * clients connected to an older daemon.
+   */
+  placement?: 'local' | 'host';
+  /**
+   * Whether the guest answers: a remote server is always `running`; the host placement is
+   * `running` while its services process is, `stopped` otherwise.
+   */
   vm: 'missing' | 'stopped' | 'running' | 'unknown';
   vaultUnlocked: boolean;
   installed: boolean;
@@ -268,16 +259,8 @@ export interface SetupStatus {
   redditClient?: boolean;
   /** Where that client comes from; optional for clients connected to an older daemon. */
   googleClientSource?: GoogleClientSource;
-  /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
-  workspaces: boolean;
   /**
-   * Size choices for the VM `install` creates: half of this computer by default, at most all of
-   * it; `current` is the existing VM's size as Lima reports it. Optional for clients connected
-   * to an older daemon.
-   */
-  vmSize?: { default: VmSize; host: VmSize; current?: VmSize };
-  /**
-   * The VM runs but could not be asked (the message of the first guest command that failed);
+   * The guest runs but could not be asked (the message of the first guest command that failed);
    * the fields that come from the guest are then unknown, not false.
    */
   error?: string;
@@ -293,6 +276,35 @@ export interface SetupStatus {
    * `anchi setup install` to update them.
    */
   guestOutdated?: boolean;
+}
+
+/**
+ * The host placement: no VM; Anchi's proxy, vault and approvals on this computer for the
+ * user's own Claude Code and Codex, under their sandboxes (docs/HOST_PLACEMENT.md).
+ */
+export interface HostStatus {
+  placement: 'host';
+  /** This computer can run the services (the `openssl` command line is present). */
+  installed: boolean;
+  /** The services process (proxy, vault, approvals) is up. */
+  running: boolean;
+  /** The runtimes' settings and the shims are written (`host.enable`). */
+  enabled: boolean;
+  /** The loopback port the sessions' commands reach the proxy at. */
+  port: number;
+  /** Connectors whose every write waits for approval. */
+  ask: string[];
+  /** Where the `claude` and `codex` shims are; the user puts it first on PATH. */
+  shimDir: string;
+  shimOnPath: boolean;
+  /** System roots plus the proxy's CA, which the sessions' tools are told to trust. */
+  caBundle: string;
+  claude: { file: string; managed: boolean; excludedCommands: string[] };
+  codex: { file: string; managed: boolean };
+  /** What this computer lacks to run the services (`openssl`), empty when nothing. */
+  missing: string[];
+  /** Connectors the proxy injects credentials for in host sessions. */
+  connectors: string[];
 }
 
 /** Secret-bearing connector input. Values travel only daemon → guest stdin → vault. */
@@ -382,13 +394,6 @@ export interface BuilderProposal {
   base?: string;
 }
 
-/** A directory of ~/AnchiWorkspaces bound into an agent's cells. */
-export interface WorkspaceSetting {
-  path: string;
-  mode: 'ro' | 'rw';
-  name?: string;
-}
-
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
 
 /**
@@ -406,7 +411,6 @@ export interface AgentPatch {
   connectors?: string[];
   /** Replaces this agent's delegation allowlist; [] revokes all delegation. */
   delegates?: string[];
-  workspaces?: WorkspaceSetting[];
   /**
    * High-risk operations this agent does without approval, by id (`github-merge`), as in its
    * file. The list replaces the file's; `[]` removes it. Unknown ids are refused.
@@ -444,7 +448,6 @@ export interface AgentSettingValues {
   connectors: string[];
   /** Delegation allowlist; absent on daemons that cannot edit it through settings. */
   delegates?: string[];
-  workspaces: WorkspaceSetting[];
   /** High-risk operations this agent does without approval (`highRisk.disable`), by id. */
   highRisk: { disable: string[] };
   /** Per-connector approval modes and triggers; absent on daemons that cannot edit them. */
@@ -493,8 +496,6 @@ export interface Inventory {
   }[];
   /** Runtimes an agent can run on; `connected` is null when the VM could not be asked. */
   runtimes: { id: RuntimeId; connected: boolean | null }[];
-  /** Directories under ~/AnchiWorkspaces (two levels); `shared` once the VM mounts it. */
-  workspaces: { shared: boolean | null; dirs: string[] };
   agents: string[];
   peerAgents?: { id: string; name: string; machine: string; online: boolean }[];
   images: string[];
@@ -673,8 +674,6 @@ export interface AgentDeletionPreview {
   /** Templates in ~/.anchi/templates whose `delegates` list it; it is removed from them too. */
   delegatedByTemplates: string[];
   triggers: number;
-  /** Its workspaces: directories of the Mac, left as they are. */
-  workspaces: string[];
 }
 
 export interface AgentDeletion {
@@ -735,7 +734,7 @@ export interface Methods {
   'daemon.status': [Record<string, never>, DaemonStatus];
   'daemon.shutdown': [Record<string, never>, null];
   'agents.list': [Record<string, never>, AgentSummary[]];
-  /** Local starter with no connector or workspace; egress and maxTasks at their defaults (any public host, 3). Confirm via builder.apply. */
+  /** Local starter with no connector; egress and maxTasks at their defaults (any public host, 3). Confirm via builder.apply. */
   'agents.createPreview': [{ agentId: string; runtime: RuntimeId }, BuilderProposal];
   'agents.reload': [Record<string, never>, AgentSummary[]];
   /** Current settings and what is available, for an agent or a pending builder proposal. */
@@ -783,8 +782,8 @@ export interface Methods {
   /** Waits until the task's current turn ends (CLI). */
   'tasks.wait': [{ taskId: string }, TaskRow];
   'setup.status': [Record<string, never>, SetupStatus];
-  /** Prepare VM, vault and one runtime, then import available host logins. Never starts a task. */
-  'setup.prepare': [{ runtime: RuntimeId; confirm: true; vmSize?: VmSize }, SetupStatus];
+  /** Prepare the guest, vault and one runtime, then import available host logins. Never starts a task. */
+  'setup.prepare': [{ runtime: RuntimeId; confirm: true }, SetupStatus];
   /** Imports the host Codex login into the vault; the caller has the user's consent. */
   'setup.importCodex': [Record<string, never>, RuntimeAccountStatus];
   /**
@@ -813,17 +812,16 @@ export interface Methods {
   /** Stores Hermes's OpenAI-compatible endpoint (base URL, API key, default model) in the vault. */
   'setup.importHermes': [{ baseUrl: string; apiKey: string; model: string }, HermesAccountStatus];
   /** Runs a setup step; the caller has the user's consent. Progress arrives as `setup`. */
-  /** `vmSize` (install only) sizes a VM the step creates; an existing VM keeps its size. */
-  'setup.run': [{ action: SetupAction; vmSize?: VmSize }, SetupStatus];
-  /** What `setup.reset` would delete and whether anything blocks it; changes nothing. */
-  'setup.resetPreview': [Record<string, never>, ResetPreview];
+  'setup.run': [{ action: SetupAction }, SetupStatus];
+  /** The host placement (`placement: host` daemons only; others refuse all three). */
+  'host.status': [Record<string, never>, HostStatus];
   /**
-   * Deletes the anchi-vm VM with everything in it (vault contents included), for a
-   * first-launch state; refused while tasks run. `confirm` is `reset`, typed by the user.
-   * Progress arrives as `reset`. The vault key and Anchi home stay (the CLI's `--all` deletes
-   * them after stopping the daemon).
+   * Writes the sandbox and trust settings of Claude Code and Codex and the shims, after the
+   * user confirmed in a dialog; refuses settings Anchi did not write. Needs the proxy running.
    */
-  'setup.reset': [{ confirm: string }, SetupStatus];
+  'host.enable': [Record<string, never>, HostStatus];
+  /** Restores the settings Anchi changed and removes the shims. */
+  'host.disable': [Record<string, never>, HostStatus];
   'connectors.set': [ConnectorSecret, ConnectorStatus];
   /** Imports the token of the host GitHub CLI (`gh auth token`); the caller has consent. */
   'connectors.importGh': [Record<string, never>, ConnectorStatus];
@@ -843,7 +841,7 @@ export interface Methods {
   /**
    * Deletes the agent: its file, its tasks (cancelled first) with what they delegated, its
    * trigger state, its entry in other agents' delegates, and its home, skills and policy rules
-   * in the VM. Workspaces on the Mac are not touched. `confirm` is the id the user typed.
+   * in the guest. `confirm` is the id the user typed.
    */
   'agents.delete': [{ agentId: string; confirm: string }, AgentDeletion];
   /** The proposal with a settings patch applied (checked again); replaces the old one. */
@@ -913,8 +911,6 @@ export interface Notifications {
   claudeSignIn: { state: 'done' | 'failed'; message?: string };
   /** A Google, X or Reddit sign-in finished. */
   oauth: { id: ServiceConnectorId; account?: string; ok: boolean; error?: string };
-  /** One line of `setup.reset` output (host command output; sanitize for display). */
-  reset: { line: string };
   /** Tasks were deleted; clients reload their task list. */
   tasksDeleted: Record<string, never>;
   /** The pending approvals, whenever they change. */

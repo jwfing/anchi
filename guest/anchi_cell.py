@@ -2,12 +2,11 @@
 """Trusted guest-root task-cell and image manager for the agent team. Never expose it to a cell.
 
 Installed as /usr/local/sbin/anchi-cell and /usr/local/sbin/anchi-image (the program name
-selects the command set). The daemon calls fixed subcommands over `limactl shell ... sudo`.
+selects the command set). The daemon calls fixed subcommands through `sudo -n`.
 Every command prints one JSON object; failures print {"error": CODE} and exit non-zero.
 `start` is the exception: its stdin and stdout belong to the cell runner.
 """
 
-import ctypes
 import fcntl
 import hashlib
 import json
@@ -97,7 +96,6 @@ SCAN_SKIP = (
     'usr/lib',
     'usr/share',
     'usr/local',
-    'home/agent/workspaces',
 )
 # Where the scan stops and reports itself partial, so a cell cannot make it run forever.
 SCAN_MAX_FILES = 200_000
@@ -633,11 +631,10 @@ def mounts_under(path, mountinfo):
 
 
 def agent_purge(agent):
-    """Removes what the VM keeps for a deleted agent: its home (work directory, runtime
-    sessions), its skills bundle and its policy rules. Workspaces are directories of the user's
-    Mac bound only inside a cell's own mount namespace; to never reach them, this refuses while
-    the agent has a cell, refuses if anything below its home is a mount point, and does not
-    cross file systems while removing."""
+    """Removes what the guest keeps for a deleted agent: its home (work directory, runtime
+    sessions), its skills bundle and its policy rules. To never reach anything mounted below the
+    home, this refuses while the agent has a cell, refuses if anything below its home is a mount
+    point, and does not cross file systems while removing."""
     name(agent, 'BAD_AGENT')
     if any(m.get('agent') == agent for m in cell_metas()):
         raise Failure('AGENT_HAS_CELLS')
@@ -838,8 +835,8 @@ def cleanup(task):
         egress({'op': 'unregister', 'task': task})
     except Failure:
         pass
-    # The overlay root and the staged workspaces; the directory goes only once nothing is
-    # mounted below it (a live workspace bind would hand its files to rmtree).
+    # The overlay root; the directory goes only once nothing is mounted below it (a live bind
+    # would hand its files to rmtree).
     if unmount_below(work):
         shutil.rmtree(work, ignore_errors=True)
 
@@ -849,53 +846,6 @@ CLAUDE_PLACEHOLDERS = {
     'oauth': ('CLAUDE_CODE_OAUTH_TOKEN', 'sk-ant-oat01-anchi-placeholder-' + '0' * 40),
     'api_key': ('ANTHROPIC_API_KEY', 'sk-ant-api03-anchi-placeholder-' + '0' * 40),
 }
-
-
-WORKSPACE_ROOT = Path('/mnt/anchi-host')
-WORKSPACE_SEGMENT = re.compile(r'^[A-Za-z0-9._ -]{1,100}$')
-# Paths in a writable workspace that make the Mac run code later; mounted read-only over it.
-WORKSPACE_MASKS = ('.gitattributes', '.envrc', '.vscode', '.idea')
-GIT_MASKS = ('hooks', 'config', 'info')
-MAX_REPO_DEPTH = 4
-
-
-def parse_workspaces(arg):
-    """[(name, absolute host path in the VM, mode)] from base64url JSON, checked again here: the
-    daemon is trusted, but this command is the boundary the cell's mounts depend on."""
-    import base64
-
-    if arg == '-':
-        return []
-    try:
-        items = json.loads(base64.urlsafe_b64decode(arg + '=' * (-len(arg) % 4)))
-    except ValueError:
-        raise Failure('BAD_WORKSPACES') from None
-    if not isinstance(items, list) or len(items) > 10:
-        raise Failure('BAD_WORKSPACES')
-    if items and not os.path.ismount(WORKSPACE_ROOT):
-        raise Failure('WORKSPACES_NOT_MOUNTED')
-    out, names = [], set()
-    for item in items:
-        if not isinstance(item, dict) or set(item) != {'name', 'path', 'mode'}:
-            raise Failure('BAD_WORKSPACES')
-        name, path, mode = item['name'], item['path'], item['mode']
-        parts = path.split('/') if isinstance(path, str) else []
-        if (
-            not isinstance(name, str)
-            or not NAME.fullmatch(name)
-            or name in names
-            or mode not in ('ro', 'rw')
-            or not parts
-            or any(p in ('.', '..') or not WORKSPACE_SEGMENT.fullmatch(p) for p in parts)
-        ):
-            raise Failure('BAD_WORKSPACES')
-        full = WORKSPACE_ROOT.joinpath(*parts)
-        # No symlink anywhere on the way: the real path must be the path as written.
-        if os.path.realpath(full) != str(full) or not full.is_dir():
-            raise Failure(f'WORKSPACE_NOT_A_DIRECTORY:{name}')
-        names.add(name)
-        out.append((name, full, mode))
-    return out
 
 
 def sync_policy_modes(agent, services, ask, auto=()):
@@ -945,193 +895,6 @@ def parse_accounts(arg, connectors):
     return accounts
 
 
-# Mounts made from open descriptors (Linux 5.12+, glibc 2.36+): the mount API takes the open
-# directory or file itself, so names on the way, which the Mac side or a cell can change at any
-# moment, never decide what is mounted.
-OPEN_TREE_CLONE, AT_EMPTY_PATH = 1, 0x1000
-MOVE_MOUNT_F_EMPTY_PATH, MOVE_MOUNT_T_EMPTY_PATH = 0x4, 0x40
-MOUNT_ATTR_RDONLY = 1
-O_PATH = getattr(os, 'O_PATH', os.O_RDONLY | os.O_NONBLOCK)  # the unit tests also run on macOS
-MAX_MASKS = 1000  # a writable workspace with more masked paths than this refuses the cell
-_libc = None
-
-
-class MountAttr(ctypes.Structure):
-    _fields_ = [(f, ctypes.c_uint64) for f in ('attr_set', 'attr_clr', 'propagation', 'userns_fd')]
-
-
-def libc():
-    global _libc
-    if _libc is None:
-        lib = ctypes.CDLL(None, use_errno=True)
-        lib.open_tree.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-        lib.move_mount.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-        lib.mount_setattr.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_size_t)
-        _libc = lib
-    return _libc
-
-
-def checked(result):
-    if result < 0:
-        errno = ctypes.get_errno()
-        raise OSError(errno, os.strerror(errno))
-    return result
-
-
-def bind_tree(source_fd, read_only):
-    """A detached bind mount of the open directory or file `source_fd`, read-only when asked."""
-    tree = checked(libc().open_tree(source_fd, b'', OPEN_TREE_CLONE | AT_EMPTY_PATH | os.O_CLOEXEC))
-    try:
-        if read_only:
-            attr = MountAttr(attr_set=MOUNT_ATTR_RDONLY)
-            checked(libc().mount_setattr(tree, b'', AT_EMPTY_PATH, ctypes.byref(attr), ctypes.sizeof(attr)))
-    except OSError:
-        os.close(tree)
-        raise
-    return tree
-
-
-def attach(tree, target_fd):
-    """Mounts the detached tree over the open directory or file `target_fd`."""
-    checked(libc().move_mount(tree, b'', target_fd, b'', MOVE_MOUNT_F_EMPTY_PATH | MOVE_MOUNT_T_EMPTY_PATH))
-
-
-def open_nofollow(dir_fd, name, directory=True):
-    """A descriptor for `name` in the directory `dir_fd` opened without following links, or
-    None when it is a link, missing or not of the kind asked for. A directory to walk is opened
-    for reading (an O_PATH descriptor cannot be listed); a mask, file or directory, only as a
-    path, so a special file is never opened."""
-    if directory:
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-    else:
-        flags = O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
-    try:
-        fd = os.open(name, flags, dir_fd=dir_fd)
-    except OSError:
-        return None
-    mode = os.fstat(fd).st_mode
-    if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or (not directory and stat.S_ISREG(mode))):
-        os.close(fd)
-        return None
-    return fd
-
-
-def workspace_masks(root_fd, found):
-    """Calls `found(relative path, descriptor)` for each path in a writable workspace to mount
-    read-only: git hooks, config and info of repositories near the top, and editor and shell
-    configuration that runs commands; `found` owns the descriptor. Returns how many there were,
-    stopping at MAX_MASKS. Every component is opened from the workspace's own descriptor without
-    following links, and the descriptors, not the names, are what the mounts use afterwards: a
-    cell that renames or links directories meanwhile changes nothing."""
-    count = 0
-
-    def take(dir_fd, rel, name):
-        nonlocal count
-        if count >= MAX_MASKS:
-            return
-        fd = open_nofollow(dir_fd, name, directory=False)
-        if fd is not None:
-            count += 1
-            found(f'{rel}/{name}' if rel else name, fd)
-
-    def walk(dir_fd, rel, depth):
-        try:
-            with os.scandir(dir_fd) as entries:
-                names = sorted(e.name for e in entries if e.is_dir(follow_symlinks=False))
-        except OSError:
-            return
-        if '.git' in names:
-            git = open_nofollow(dir_fd, '.git')
-            if git is not None:
-                try:
-                    for m in GIT_MASKS:
-                        take(git, f'{rel}/.git' if rel else '.git', m)
-                finally:
-                    os.close(git)
-        for m in WORKSPACE_MASKS:
-            take(dir_fd, rel, m)
-        if depth >= MAX_REPO_DEPTH:
-            return
-        for name in names:
-            if count >= MAX_MASKS:
-                return
-            if name.startswith('.') or name == 'node_modules':
-                continue
-            child = open_nofollow(dir_fd, name)
-            if child is None:
-                continue
-            try:
-                walk(child, f'{rel}/{name}' if rel else name, depth + 1)
-            finally:
-                os.close(child)
-
-    walk(root_fd, '', 0)
-    return count
-
-
-def open_beneath(root, parts):
-    """A descriptor for `root/parts…`, each component opened without following links."""
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        for name in parts:
-            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-            os.close(fd)
-            fd = child
-    except OSError:
-        os.close(fd)
-        raise
-    return fd
-
-
-def stage_workspaces(task, workspaces):
-    """nspawn bind arguments for the agent's workspaces. Each is bound first under the cell's
-    own work directory, which root owns, from a descriptor resolved component by component
-    under /mnt/anchi-host; the read-only masks of a writable one are then mounted onto that
-    staged tree by descriptor. nspawn binds the staged tree with its masks recursively, so the
-    names a cell can change inside a workspace never decide what gets mounted."""
-    binds = []
-    for name, full, mode in workspaces:
-        stage = CELLS / task / 'ws' / name
-        stage.mkdir(parents=True)
-        try:
-            source = open_beneath(WORKSPACE_ROOT, full.relative_to(WORKSPACE_ROOT).parts)
-        except OSError:
-            raise Failure(f'WORKSPACE_NOT_A_DIRECTORY:{name}') from None
-        try:
-            target = os.open(stage, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-            try:
-                tree = bind_tree(source, read_only=mode != 'rw')
-                try:
-                    attach(tree, target)
-                finally:
-                    os.close(tree)
-            finally:
-                os.close(target)
-        finally:
-            os.close(source)
-        binds.append(f'--bind{"" if mode == "rw" else "-ro"}={stage}:/home/agent/workspaces/{name}')
-        if mode != 'rw':
-            continue
-
-        def mask(_rel, fd):
-            try:
-                tree = bind_tree(fd, read_only=True)
-                try:
-                    attach(tree, fd)
-                finally:
-                    os.close(tree)
-            finally:
-                os.close(fd)
-
-        root_fd = os.open(stage, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-        try:
-            if workspace_masks(root_fd, mask) >= MAX_MASKS:
-                raise Failure(f'WORKSPACE_TOO_MANY_MASKS:{name}')
-        finally:
-            os.close(root_fd)
-    return binds
-
-
 def mount_points(below, table='/proc/self/mounts'):
     """Mount points at or below `below`, deepest first."""
     prefix = str(below)
@@ -1145,8 +908,8 @@ def mount_points(below, table='/proc/self/mounts'):
 
 def unmount_below(work):
     """Unmounts everything at or below `work`, deepest first, lazily when busy. The work
-    directory may be removed only once this returns True: removing files through a staged
-    workspace bind would remove them where they came from."""
+    directory may be removed only once this returns True: removing files through a live bind
+    would remove them where they came from."""
     for _ in range(5):
         points = mount_points(work)
         if not points:
@@ -1168,7 +931,6 @@ def cell_start(
     sandbox,
     runtime='codex',
     ask_arg='-',
-    workspaces_arg='-',
     egress_arg='-',
     accounts_arg='-',
     high_risk_arg='-',
@@ -1186,7 +948,6 @@ def cell_start(
         raise Failure('BAD_SANDBOX')
     if runtime not in RUNTIMES or (runtime != 'codex' and sandbox != 'cell'):
         raise Failure('BAD_RUNTIME')
-    workspaces = parse_workspaces(workspaces_arg)
     egress_hosts = parse_egress(egress_arg)
     ask = [] if ask_arg == '-' else ask_arg.split(',')
     if not all(c in connectors for c in ask) or len(set(ask)) != len(ask):
@@ -1207,7 +968,7 @@ def cell_start(
     work = CELLS / task
     CELLS.mkdir(parents=True, exist_ok=True)
 
-    # From here on a signal (the daemon stopping, `limactl shell` dying) must release what the
+    # From here on a signal (the daemon stopping, the sudo session dying) must release what the
     # steps below create: the work directory, the overlay, the proxy registration. Python's
     # default action would kill the process without them; cleanup is idempotent.
     def stop(signum, frame):
@@ -1234,7 +995,6 @@ def cell_start(
                     'connectors': connectors,
                     'sandbox': sandbox,
                     'runtime': runtime,
-                    'workspaces': [{'name': n, 'path': str(f), 'mode': m} for n, f, m in workspaces],
                     'accounts': accounts,
                     'started_at': time.time(),
                 }
@@ -1277,11 +1037,6 @@ def cell_start(
         if sandbox == 'codex-workspace-write':
             ensure_bwrap_profile()
         cell = cell_environment(task, agent, connectors, identifiers, runtime)
-        if workspaces:
-            # virtiofs shows files as owned by their reader; git would refuse every workspace.
-            # The check protects a trusting user from an untrusted repository, and here the agent
-            # is the untrusted side.
-            cell.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='safe.directory', GIT_CONFIG_VALUE_0='*')
         command = [
             'systemd-run',
             '--quiet',
@@ -1324,8 +1079,6 @@ def cell_start(
                 if (SKILLS / agent / 'skills').is_dir()
                 else []
             ),
-            # The agent's directories of the Mac, with the code-running paths of rw ones read-only.
-            *stage_workspaces(task, workspaces),
             '--tmpfs=/tmp:mode=1777,size=512M',
             '--tmpfs=/var/tmp:mode=1777,size=512M',
             '--system-call-filter=~io_uring_setup io_uring_enter io_uring_register bpf perf_event_open',
@@ -1621,7 +1374,7 @@ def main(argv):
         if command == 'remove' and len(rest) == 1:
             return image_remove(*rest)
         raise Failure('USAGE')
-    if command == 'start' and 6 <= len(rest) <= 13:
+    if command == 'start' and 6 <= len(rest) <= 12:
         return cell_start(*rest)
     if command == 'egress-settings' and not rest:
         # {"high_risk_disabled": [ids], "approval_timeout_s"?: seconds} on stdin, from the

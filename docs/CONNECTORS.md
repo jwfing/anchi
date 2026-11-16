@@ -3,7 +3,7 @@
 Anchi has two kinds of connectors. Each section below says where to get the credential, what to grant and how to enter it. The desktop app links each connector in **Settings** to its section here.
 
 - **Token connectors** (GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord): the egress proxy adds the credential to the agent's requests to that service's API. Agents see a placeholder.
-- **Account connectors** (Gmail, Google Drive, Notion, Slack, X, Reddit): trusted services in the VM act for agents through structured Anchi tools.
+- **Account connectors** (Gmail, Google Drive, Notion, Slack, X, Reddit): trusted services on the server act for agents through structured Anchi tools.
 
 ## Token connectors
 
@@ -89,7 +89,7 @@ in small terminals. Press **↑/↓** or **j/k** in the main pane to reach X and
 
 After current tasks finish, run `anchi daemon stop`, then `anchi setup install` from the updated
 installation and reopen Anchi. The install command starts the updated daemon and copies the
-current connector services into the VM; agents, tasks and stored credentials are preserved.
+current connector services onto the server; agents, tasks and stored credentials are preserved.
 From a source checkout, use `./scripts/anchi` in place of `anchi` for these commands. Confirm
 that `anchi setup status` lists both `x` and `reddit` under Services. Their CLI identifiers are
 `x` and `reddit`, rather than their website domain names.
@@ -154,12 +154,12 @@ The desktop app's **Settings → Services** does the same with **Disconnect** (p
 
 ## CLI and validation
 
-From a source checkout (`scripts/policy.sh` is not in the release archive; the TUI's approval dialog and `anchi approvals` cover the same decisions):
+On the server, as its login user (the TUI's approval dialog and `anchi approvals` cover the same decisions):
 
 ```bash
-bash scripts/policy.sh read drive allow  # Compatibility alias: allow=auto (includes writes), deny=ask
-bash scripts/policy.sh pending
-limactl shell anchi-vm -- sudo /usr/bin/python3 /opt/secure-vm/services/connector_admin.py slack probe
+sudo /usr/bin/python3 /opt/secure-vm/services/policy_admin.py read drive allow  # Compatibility alias: allow=auto (includes writes), deny=ask
+sudo /usr/bin/python3 /opt/secure-vm/services/policy_admin.py pending
+sudo /usr/bin/python3 /opt/secure-vm/services/connector_admin.py slack probe
 ```
 
 Real-account validation remains a maintainer task: connect, search, read, create, update/append/post, inspect and approve full write content in `ask` mode, then disconnect. Local tests do not replace provider-specific account checks.

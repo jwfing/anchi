@@ -2,6 +2,7 @@ import { peerNetworkConfigSchema, peerRecordSchema, peerNodeSchema } from '@anch
 import { autoPublishWarning } from '@anchi/core/publish';
 import { agentLayerSchema, idSchema, parseYamlAs, sanitizeLine } from '@anchi/core';
 import type {
+  HostStatus,
   AgentPatch,
   AgentDeletionPreview,
   AgentSettings,
@@ -10,7 +11,6 @@ import type {
   MethodName,
   Notifications,
   PeerDirectory,
-  ResetPreview,
   RuntimeId,
   ServiceConnectorId,
   SetupStatus,
@@ -60,8 +60,9 @@ export const DESKTOP_METHODS: ReadonlySet<MethodName> = new Set<MethodName>([
   'setup.importClaude',
   'setup.importHermes',
   'setup.prepare',
-  'setup.resetPreview',
-  'setup.reset',
+  'host.status',
+  'host.enable',
+  'host.disable',
   'connectors.set',
   'connectors.importGh',
   'connectors.awsProfile',
@@ -98,7 +99,6 @@ export const NOTIFICATIONS: readonly (keyof Notifications)[] = [
   'oauth',
   'codexSignIn',
   'claudeSignIn',
-  'reset',
   'tasksDeleted',
   'approvals',
   'setup',
@@ -141,10 +141,6 @@ const PARAMS: Partial<Record<MethodName, (params: object) => void>> = {
   },
   'peers.remove': (p) => {
     peerNodeSchema.parse((p as { node?: unknown }).node);
-  },
-  'setup.reset': (p) => {
-    // The word is typed by the user; anything else never reaches the dialog.
-    if ((p as { confirm?: unknown }).confirm !== 'reset') throw new Error('type reset to confirm');
   },
   'connectors.awsProfile': (p) => {
     const profile = (p as { profile?: unknown }).profile;
@@ -228,7 +224,7 @@ export interface Confirmation {
 
 export type Read = (method: MethodName, params: object) => Promise<unknown>;
 
-/** What an agent-file patch adds to the agent's reach: connectors, directories, write access. */
+/** What an agent-file patch adds to the agent's reach: connectors, delegation, exemptions. */
 export function widening(current: AgentSettings['current'], patch: AgentPatch): string[] {
   const out: string[] = [];
   for (const id of patch.connectors ?? []) {
@@ -236,11 +232,6 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
   }
   for (const id of patch.delegates ?? []) {
     if (!current.delegates?.includes(id)) out.push(`delegate tasks to @${id}`);
-  }
-  for (const w of patch.workspaces ?? []) {
-    const before = current.workspaces.find((c) => c.path === w.path);
-    if (!before) out.push(`workspace ${w.path} (${w.mode === 'rw' ? 'read-write' : 'read-only'})`);
-    else if (w.mode === 'rw' && before.mode !== 'rw') out.push(`write access to ${w.path}`);
   }
   for (const id of patch.highRisk?.disable ?? []) {
     if (!current.highRisk?.disable.includes(id)) out.push(`${id} without asking you`);
@@ -331,7 +322,7 @@ export async function confirmation(
         : undefined;
     return {
       message: `Run @${proposal.agentId} on ${execution.server}?`,
-      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors, workspaces and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.${delegation ? `\n\n${delegation}` : ''}`,
+      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.${delegation ? `\n\n${delegation}` : ''}`,
       button: 'Use execution node',
     };
   }
@@ -388,7 +379,7 @@ export async function confirmation(
     return {
       message: 'Prepare the Anchi environment?',
       detail:
-        `This starts or installs the Anchi VM on the server, its services and the ${runtime} runtime image, then unlocks the vault. The first install takes several minutes.\n\n` +
+        `This installs Anchi's services on the server and the ${runtime} runtime image, then unlocks the vault. The first install takes several minutes.\n\n` +
         'The vault key (~/.config/anchi/vault.key on the server) is the only way to read the credentials you store. Back it up once it exists.',
       button: 'Prepare',
     };
@@ -399,6 +390,18 @@ export async function confirmation(
       message: `Let @${agentId} reach ${host.trim().toLowerCase()}?`,
       detail: `The host is added to the websites @${agentId} may reach. Its tasks can then send it anything they hold, including the contents of shared folders. Only add a host you trust.`,
       button: 'Allow this host',
+    };
+  }
+  if (call.method === 'host.enable') {
+    // What is written and where comes from the daemon, never from the window.
+    const status = (await read('host.status', {})) as HostStatus;
+    return {
+      message: 'Write Anchi’s sandbox settings into Claude Code and Codex on this computer?',
+      detail:
+        `Anchi edits ${status.claude.file} and ${status.codex.file} (undo: Disable), and puts claude and codex shims in ${status.shimDir}. ` +
+        `Sessions then reach the network through Anchi on port ${status.port}, with placeholders instead of your connected credentials. ` +
+        'Settings of your own in those files are refused, not merged.',
+      button: 'Write settings',
     };
   }
   if (call.method === 'connectors.importGh') {
@@ -499,7 +502,7 @@ export async function guardedCall(
     if (
       !(await confirm({
         message: `Delete @${p.agentId}?`,
-        detail: `Permanently delete its agent file, ${preview.tasks} tasks and ${preview.delegated} delegated tasks with their transcripts, ${preview.triggers} triggers, and its VM home, sessions, skills and policy rules.\n\n${preview.running} running or queued tasks will be cancelled.${references.length ? `\nRemove its delegation grants from: ${references.map(sanitizeLine).join(', ')}.` : ''}\n\nWorkspaces and audit logs are kept. This cannot be undone.`,
+        detail: `Permanently delete its agent file, ${preview.tasks} tasks and ${preview.delegated} delegated tasks with their transcripts, ${preview.triggers} triggers, and its home, sessions, skills and policy rules in the guest.\n\n${preview.running} running or queued tasks will be cancelled.${references.length ? `\nRemove its delegation grants from: ${references.map(sanitizeLine).join(', ')}.` : ''}\n\nAudit logs are kept. This cannot be undone.`,
         button: 'Delete agent',
       }))
     )
@@ -507,26 +510,6 @@ export async function guardedCall(
     const latest = await read('agents.deletePreview', { agentId: p.agentId });
     if (JSON.stringify(latest) !== JSON.stringify(preview))
       throw new Error('Agent or tasks changed during confirmation; review deletion again.');
-    return read(call.method, call.params);
-  }
-  if (call.method === 'setup.reset') {
-    const preview = (await read('setup.resetPreview', {})) as ResetPreview;
-    if (preview.busy) {
-      throw new Error(
-        `${preview.busy} task${preview.busy === 1 ? ' is' : 's are'} running or queued; cancel them or wait first`,
-      );
-    }
-    if (
-      !(await confirm({
-        message: 'Reset Anchi on this machine?',
-        detail: `Deletes the Anchi VM with everything in it: the vault’s contents (every AI account and connection must be connected again), the installed components and the agents’ files in the VM.${preview.cells ? ` ${preview.cells} idle task cell${preview.cells === 1 ? ' is' : 's are'} closed first.` : ''}\n\nKept: the vault key (${sanitizeLine(preview.vaultKey)}) and ${sanitizeLine(preview.home)} with the agent files and task history. Shared folders on disk are not touched. Its place in a team of machines is kept too.\n\nThis cannot be undone.`,
-        button: 'Reset',
-      }))
-    )
-      throw new Error('cancelled');
-    // A task started while the dialog was open would be lost with the VM.
-    const latest = (await read('setup.resetPreview', {})) as ResetPreview;
-    if (latest.busy) throw new Error('A task started during confirmation; review the reset again.');
     return read(call.method, call.params);
   }
   const question = await confirmation(call, read);

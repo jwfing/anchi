@@ -1,6 +1,8 @@
 # Agent team phase 3 plan
 
-**Status: implemented except P7 (Linux workspaces) and P9 (live acceptance with real accounts); see [Status](#status).** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status), [host directories](HOST_DIRECTORIES_PLAN.md)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
+*Historical. The Lima VM placement this plan describes was removed on 2026-11-16, and the workspaces feature (directories of the user's computer mounted into cells) was removed with it; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
+
+**Status: implemented except P7 (Linux workspaces) and P9 (live acceptance with real accounts); see [Status](#status).** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
 
 ## Goal and scope
 
@@ -87,13 +89,13 @@
 
 Added on 2026-10-07 at your request: run the whole agent team on a Linux host first, then P7.
 
-- The VM side already runs on Linux (QEMU/KVM; the `linux-live` workflow runs `make verify-anchi`).
-- Host side: notifications through `notify-send`, Google sign-in through `xdg-open`, `daemon install` as a systemd user unit, a `/dev/kvm` and QEMU check in `up.sh`, Linux notes in Getting started.
+- The guest side already runs on Linux (the `linux-live` workflow runs `make verify-anchi`).
+- Host side: notifications through `notify-send`, Google sign-in through `xdg-open`, `daemon install` as a systemd user unit, Linux notes in Getting started.
 - Confirmation on your Linux machine: `pnpm --dir anchi install`, `scripts/anchi setup install`, `setup vault init`, `setup codex`, `make verify-anchi`, a task in the TUI, a notification (an approval), `daemon install` and a reboot, Google sign-in.
 
 ### P7 — Linux workspaces (M)
 
-- Spike on 9p in Lima/QEMU: ownership mapping into the user-namespaced cell, performance of `git status` on a large repository. If 9p fails the checks, try virtiofs on Linux hosts.
+- Spike on the share: ownership mapping into the user-namespaced cell, performance of `git status` on a large repository.
 - Same binds, masks and post-turn audit as macOS.
 
 ### P8 — CLI parity and CI (S)

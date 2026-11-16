@@ -220,14 +220,7 @@ main() {
       ;;
   esac
   printf '\nFirst use: follow Getting started in the TUI to prepare your environment.\n'
-  # Lima is not checked: setup downloads the pinned release when none new enough is installed.
-  # macOS needs nothing else; Linux needs QEMU and KVM.
-  case "$target" in
-    linux-*)
-      command -v qemu-system-x86_64 >/dev/null 2>&1 ||
-        printf 'VM prerequisites: QEMU and access to /dev/kvm.\n'
-      ;;
-  esac
+  # Nothing else is checked: the host placement needs only openssl, which setup reports itself.
   printf 'To update, run anchi update (or rerun this installer). After tasks finish, run anchi daemon stop.\nIf login startup is enabled, also rerun anchi daemon install.\n'
   printf '\nRun: anchi\n'
 }

@@ -18,7 +18,7 @@ Push the branch to your fork and open a PR describing the concrete problem, resu
 
 ## Development environment
 
-macOS on Apple Silicon is the primary target; Linux x86_64 support is experimental. Offline checks run on Linux and macOS. Install Node 22+, pnpm, Python 3.11+ and, for live checks, Lima; CI uses `.nvmrc` and Python 3.13.
+macOS on Apple Silicon is the primary target; Linux x86_64 support is experimental. Offline checks run on Linux and macOS. Install Node 22+, pnpm and Python 3.11+; live checks need a remote server with the guest installed; CI uses `.nvmrc` and Python 3.13.
 
 ```bash
 python3 -m venv .venv
@@ -35,12 +35,12 @@ Coding agents (Codex, Claude Code and others) read [AGENTS.md](AGENTS.md) and th
 
 ## Daily workflow
 
-- Run `make check` before submitting: Ruff, shellcheck when installed, Prettier, the trust-zone dependency check, syntax checks and all offline tests. It does not operate the VM, access accounts or call models. Some tests open loopback listeners.
+- Run `make check` before submitting: Ruff, shellcheck when installed, Prettier, the trust-zone dependency check, syntax checks and all offline tests. It does not operate a guest, access accounts or call models. Some tests open loopback listeners.
 - `make format` uses Ruff for Python and Prettier for `anchi/`; see `ruff.toml` and `anchi/.prettierrc.json`. Avoid unrelated repository-wide formatting in security changes.
 - Keep cell UIDs and the Node, Codex, Claude Code and base-image toolchain (pnpm, Go, Rust) pins in `guest/cell.env`; do not duplicate these literals elsewhere.
 - Host packages (`protocol`, `core`, `daemon`, `tui`) must not import a runtime SDK or the cell runner; the cell runner must not import host packages. `anchi/scripts/check-deps.mjs` enforces it.
-- Everything a cell sends is untrusted. New runner frames, tools or guest commands need schema validation, bounds and tests of the refusal paths. Secrets go to the VM on stdin only.
-- Live checks are explicit: `make verify-vm`, `make verify-anchi` (no credentials) and `scripts/anchi-acceptance.sh` (real accounts).
+- Everything a cell sends is untrusted. New runner frames, tools or guest commands need schema validation, bounds and tests of the refusal paths. Secrets go to the guest on stdin only.
+- Live checks are explicit: `make verify-guest`, `make verify-anchi` (no credentials) and `scripts/anchi-acceptance.sh` (real accounts) on a remote server; `scripts/verify-host.sh` on the host placement.
 - New agent configuration fields need a schema, validation and documentation in the [contracts](docs/architecture/AGENT_TEAM_CONTRACTS.md).
 - Update capability documentation when behavior changes. Distinguish prototypes, implemented features and future plans.
 
@@ -56,7 +56,7 @@ Keep commands, paths, protocol fields and configuration keys exact. UI labels in
 |---|---|---|
 | Service boundaries | `tests/` | Python + cryptography + botocore; mocked networking and policy |
 | Agent team | `anchi/packages/*/test/` | Node; schemas, runner protocol, daemon with a fake guest, TUI rendering and keys |
-| Live isolation | `guest/check-*.py`, `scripts/verify.sh`, `guest/check-anchi.py` | Deployed VM; OS, service and cell boundaries; no credentials |
+| Live isolation | `guest/check-*.py`, `scripts/verify.sh`, `guest/check-anchi.py` | A deployed remote server; OS, service and cell boundaries; no credentials |
 | Live acceptance | `scripts/anchi-acceptance.sh` | Real accounts; scenarios with credential scans |
 
 ## Releases

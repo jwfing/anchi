@@ -25,7 +25,7 @@ describe('automatic preparation', () => {
   it('refuses unknown VM state and missing prerequisites before changing anything', async () => {
     for (const status of [
       { ...ready, vm: 'unknown' },
-      { ...ready, host: { missing: ['limactl'], installHint: 'Install Lima' } },
+      { ...ready, host: { missing: ['openssl'], installHint: 'Install openssl' } },
       { ...ready, error: 'guest unavailable' },
     ]) {
       const calls: string[] = [];

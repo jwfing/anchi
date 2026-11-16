@@ -1,13 +1,18 @@
 # Getting started
 
-Anchi runs its agents in a Lima VM on your machine. You install the desktop app and `anchi`
-command, prepare the VM's prerequisites, then let Getting started prepare the environment,
-connect one account and review a starter agent.
+Anchi runs in one of two placements:
 
-| Host | Status | VM layer |
-|---|---|---|
-| macOS on Apple Silicon | Supported | Lima + Virtualization.framework |
-| Linux x86_64 with glibc (Ubuntu 22.04+ / Debian 12+) | Experimental; KVM CI uses Ubuntu 24.04 | Lima + QEMU/KVM |
+| Placement | Where | What you get | Guide |
+|---|---|---|---|
+| Host placement (the default on your computer) | Your macOS or Linux machine, no VM | Anchi's egress proxy, vault and approvals for your own `claude` and `codex` sessions, under their runtimes' own sandboxes | [Host placement](HOST_PLACEMENT.md) |
+| Remote server | A Linux server (Debian or Ubuntu, for example an instabox VM) that is the guest | The agent team: agents in disposable task cells, triggers, delegation and teams | [Remote server](REMOTE_SERVER.md) |
+
+On your computer, the daemon starts as the host placement unless `ANCHI_GUEST=local` is set; agent tasks are refused there and need a remote server. This page covers installing Anchi on your computer, preparing the host placement and reaching a remote server from it.
+
+| Host | Status |
+|---|---|
+| macOS on Apple Silicon | Supported |
+| Linux x86_64 with glibc (Ubuntu 22.04+ / Debian 12+) | Experimental |
 
 Arch, Fedora and other distributions may work but are not covered by CI.
 
@@ -20,20 +25,15 @@ Choose one way to install:
 | Open | Anchi desktop app; `anchi` for the TUI | `scripts/anchi-desktop`; `scripts/anchi` for the TUI |
 | Updates | `anchi update` | `git pull`, then reinstall dependencies |
 
-Both ways need the same VM prerequisites, which differ per platform. A new VM defaults to half the host's CPUs and memory
-(minimum 1 CPU and 2 GiB); setup lets you choose other values. Its disk grows up to 30 GB;
-keep at least 8 GB free for installation, and more for runtime images and projects.
+The host placement needs the `openssl` command line on `PATH` (macOS ships it; Debian and Ubuntu have the `openssl` package). Nothing else has to be installed before Anchi: the release bundles its own Node, and the host needs no Python.
 
 ## Install the binary release
 
 The release installer downloads Anchi and its bundled Node runtime, verifies the archive's
 SHA-256 checksum, and installs the desktop app and an `anchi` command with `--desktop`.
-Git, Node and pnpm are not required. It does not need sudo or modify your vault, agents or VM.
+Git, Node and pnpm are not required. It does not need sudo or modify your vault or agents.
 
 ### macOS
-
-Nothing needs to be installed first: preparing the environment downloads the Lima Anchi pins
-(see [Lima](#lima)), and the host needs no Python.
 
 1. Install the app:
 
@@ -47,19 +47,19 @@ Nothing needs to be installed first: preparing the environment downloads the Lim
 
 ### Linux
 
-1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-   Anchi downloads [Lima](#lima) itself, and the host needs no Python.
-2. Install the app:
+1. Install the app:
 
    ```bash
    curl -fsSL https://anchi.elseward.xyz/install.sh | sh -s -- --desktop
    ```
 
-3. If the installer says your bin directory is missing from PATH, open a new terminal or run
+2. If the installer says your bin directory is missing from PATH, open a new terminal or run
    the `export PATH=…` line it prints.
-4. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
+3. Open **Anchi** from the applications menu or run `anchi-desktop`, then follow
    [guided desktop setup](#guided-setup-in-the-desktop-app). Ubuntu 23.10 and later need the
    [desktop sandbox profile](DESKTOP.md#linux-sandbox).
+4. Optionally install `notify-send` for desktop notifications (Debian/Ubuntu `libnotify-bin`,
+   Arch `libnotify`); without it notifications are skipped.
 
 ### Installer options
 
@@ -81,8 +81,7 @@ the parent terminal's environment.
 ## Install from source
 
 A source checkout runs the TypeScript sources directly through `scripts/anchi`. Use
-`scripts/anchi` wherever this guide says `anchi`. `scripts/anchi setup install` also builds the
-cell runner from the checkout.
+`scripts/anchi` wherever this guide says `anchi`.
 
 ### macOS
 
@@ -92,9 +91,8 @@ cell runner from the checkout.
    brew install git node pnpm
    ```
 
-   Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Anchi
-   downloads [Lima](#lima) itself. Python 3.11+ is needed only for the
-   [development checks](#development-checks).
+   Node must be 22 or newer (`node --version`); `.nvmrc` names the version CI uses. Python 3.11+
+   is needed only for the [development checks](#development-checks).
 2. Clone the repository and install the workspace dependencies:
 
    ```bash
@@ -109,16 +107,15 @@ cell runner from the checkout.
    scripts/anchi --help
    ```
 
-4. Continue with [Set up the VM and your first agent](#set-up-the-vm-and-your-first-agent),
-   running `scripts/anchi` from the checkout.
+4. Continue with [Set up your computer](#set-up-your-computer), running `scripts/anchi` from
+   the checkout.
 
 ### Linux
 
-1. Install QEMU and make sure you can use KVM. Follow [Linux prerequisites](#linux-prerequisites).
-2. Install Git and Node 22+ with your package manager or a version manager such as nvm or
+1. Install Git and Node 22+ with your package manager or a version manager such as nvm or
    mise. `.nvmrc` names the Node version CI uses. Python 3.11+ is needed only for the
    [development checks](#development-checks).
-3. Install pnpm. Node 25 and newer no longer bundle corepack, so install pnpm directly with one of:
+2. Install pnpm. Node 25 and newer no longer bundle corepack, so install pnpm directly with one of:
 
    ```bash
    npm install -g pnpm                # any Node install
@@ -127,7 +124,7 @@ cell runner from the checkout.
    ```
 
    `anchi/package.json` names the pnpm version the project pins in `packageManager`.
-4. Clone the repository and install the workspace dependencies:
+3. Clone the repository and install the workspace dependencies:
 
    ```bash
    git clone https://github.com/jwfing/anchi.git
@@ -137,14 +134,14 @@ cell runner from the checkout.
 
    If `scripts/anchi` later fails with `Cannot find module …/node_modules/tsx/dist/loader.mjs`,
    this step has not run.
-5. Check that the launcher starts:
+4. Check that the launcher starts:
 
    ```bash
    scripts/anchi --help
    ```
 
-6. Continue with [Set up the VM and your first agent](#set-up-the-vm-and-your-first-agent),
-   running `scripts/anchi` from the checkout.
+5. Continue with [Set up your computer](#set-up-your-computer), running `scripts/anchi` from
+   the checkout.
 
 ### Development checks
 
@@ -156,8 +153,9 @@ python3 -m venv .venv
 make check PYTHON=.venv/bin/python
 ```
 
-`make check` does not access a VM, an account or a model. Once the VM is installed,
-`make verify-vm` and `make verify-anchi` run the live isolation checks (no credentials used).
+`make check` does not access a guest, an account or a model. On a remote server with the guest
+installed, `make verify-guest` and `make verify-anchi` run the live isolation checks there (no
+credentials used); `scripts/verify-host.sh` is the host placement's live check.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the daily workflow.
 
 ### Update a source checkout
@@ -165,87 +163,39 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the daily workflow.
 ```bash
 git pull
 pnpm --dir anchi install
-scripts/anchi setup install    # when the change touches the VM, services or cell runner
+scripts/anchi setup install    # on a remote server, when the change touches the guest, services or cell runner
 ```
 
 `anchi update` does not modify a checkout.
 
-## Linux prerequisites
-
-The host needs x86_64 CPU virtualization and a readable and writable `/dev/kvm`.
-
-1. Install QEMU:
-
-   | Distribution | Command |
-   |---|---|
-   | Debian / Ubuntu | `sudo apt-get install -y qemu-system-x86 qemu-utils` |
-   | Arch | `sudo pacman -S --needed qemu-base` |
-   | Fedora | `sudo dnf install -y qemu-system-x86 qemu-img` |
-
-2. Check KVM access:
-
-   ```bash
-   ls -l /dev/kvm
-   ```
-
-   If it is missing, enable virtualization (VT-x or AMD-V) in the firmware settings. If your
-   user cannot read and write it, run `sudo usermod -aG kvm "$USER"` and log in again.
-3. Optionally install `notify-send` for desktop notifications (Debian/Ubuntu `libnotify-bin`,
-   Arch `libnotify`); without it notifications are skipped.
-
-`anchi setup install` stops early if `/dev/kvm` or QEMU is missing.
-
-## Lima
-
-Anchi runs its VM with [Lima](https://lima-vm.io) 2.2.0 or newer. When preparing the
-environment (or `anchi setup install`) finds none on PATH, or only an older one, it downloads
-the Lima release pinned in `host-tools.env` for Apple Silicon macOS or Linux x86_64, checks the
-archive's SHA-256 before extracting anything, and installs it into `~/.anchi/lima/<version>`.
-The daemon then puts that directory first on PATH for the commands it runs. A Lima of the
-required version that is already installed, for example with Homebrew, is used as it is. The
-VM itself stays in `~/.lima/anchi-vm` either way.
-
-To install Lima yourself instead, for example to use it outside Anchi, verify the archive against
-the release's `SHA256SUMS`. On Linux, without sudo, into `~/.local`:
-
-```bash
-VER=2.2.0
-cd "$(mktemp -d)"
-curl -fsSLO "https://github.com/lima-vm/lima/releases/download/v$VER/lima-$VER-Linux-x86_64.tar.gz"
-curl -fsSLO "https://github.com/lima-vm/lima/releases/download/v$VER/SHA256SUMS"
-sha256sum --check --ignore-missing SHA256SUMS
-mkdir -p ~/.local/lima ~/.local/bin
-tar -xzf "lima-$VER-Linux-x86_64.tar.gz" -C ~/.local/lima
-ln -sf ~/.local/lima/bin/limactl ~/.local/lima/bin/lima ~/.local/bin/
-limactl --version
-```
-
-`~/.local/bin` must be on PATH.
-
-## Set up the VM and your first agent
+## Set up your computer
 
 These steps are the same for both installation methods and both platforms. From a source
-checkout, replace `anchi` with `scripts/anchi`.
+checkout, replace `anchi` with `scripts/anchi`. They prepare the host placement; to run agents,
+set up a [remote server](REMOTE_SERVER.md) and choose it with `anchi server <name>` or in the
+desktop app's **Settings → Machines**, then prepare that machine the same way.
 
 ### Guided setup in the desktop app
 
-Open **Anchi** and follow **Getting started** to choose a machine, prepare its environment,
-connect a runtime and review a starter agent. Once setup is complete, select an agent in
-**Team** and send a task. Click a task to open its conversation and results.
+Open **Anchi** and follow **Getting started** to choose a machine, prepare its environment and
+connect a runtime. On this computer, **Settings → Security & recovery** shows the card **This
+computer, no secure room** with **Enable** and **Disable** for your own `claude` and `codex`
+sessions ([Host placement](HOST_PLACEMENT.md)). On a remote server, review a starter agent, then
+select an agent in **Team** and send a task. Click a task to open its conversation and results.
 Use **Agent builder** to create more agents; **Settings** configures each machine's runtimes,
 connectors, services and skills. See [Desktop app](DESKTOP.md) for the full guide.
 
 ### Guided setup in the TUI
 
-Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**:
+Run `anchi`. First launch opens **Getting started**:
 
 1. **Prepare your environment.** Anchi detects installed Codex and Claude Code CLIs and
-   usable local subscription logins. Press **Enter** to review the recommended resources.
-   With a detected login, Anchi skips runtime selection; when both are present, it imports
-   both and prepares Codex by default. Without a usable login, choose a runtime.
-   Confirm once to create or start the VM, install its components, initialize or unlock
-   credential storage and prepare the runtime image. Completed steps are reused on retry.
-   No model is called. Back up `~/.config/anchi/vault.key`; existing keys are never replaced.
+   usable local subscription logins. With a detected login, Anchi skips runtime selection; when
+   both are present, it imports both and prepares Codex by default. Without a usable login,
+   choose a runtime. Confirm once to start the services, initialize or unlock credential
+   storage and, on a remote server, install the guest's components and prepare the runtime
+   image. Completed steps are reused on retry. No model is called. Back up
+   `~/.config/anchi/vault.key`; existing keys are never replaced.
 2. **Connect your account automatically.** Once the vault is ready, Anchi imports available
    Codex and Claude Code access tokens without a separate account selection or import dialog.
    Codex uses `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Claude Code uses the macOS
@@ -253,31 +203,30 @@ Run `anchi`. The TUI opens without a VM. First launch opens **Getting started**:
    `CLAUDE_CONFIG_DIR` selects another configuration directory. macOS may ask for Keychain access.
    Refresh tokens stay on the host. If no usable login exists, sign in locally or use the
    manual runtime dialog; Hermes still needs an endpoint, model and key.
-3. **Review your starter and try a task.** Press **Enter** to review `dev` with a connected
-   runtime, then **y** to save. The input contains a small sample code-review request: edit it
-   or press **Enter** to review it, then **Enter** to send. Only sending calls a model.
+3. **Review your starter and try a task** (remote server only). Press **Enter** to review `dev`
+   with a connected runtime, then **y** to save. The input contains a small sample code-review
+   request: edit it or press **Enter** to review it, then **Enter** to send. Only sending calls
+   a model.
 
 **Ctrl+X, L** shows preparation logs and **Ctrl+X, !** opens persistent error details and a
-retry action. Advanced CPU/memory choices remain under **Runtimes**, **I**; **Ctrl+X, N**
-chooses a custom agent name and runtime. The CLI preparation equivalent is:
+retry action. **Ctrl+X, N** chooses a custom agent name and runtime. The CLI preparation
+equivalent is:
 
 ```bash
 anchi setup prepare                    # use the detected login; review and confirm
 anchi setup prepare --runtime claude-code  # explicitly choose a runtime
 ```
 
-`--yes` accepts the recommended resources; `--cpus` and `--memory` override them for a new VM.
-Preparation also imports available local logins. Review and create the agent afterwards.
-Anchi checks refreshed logins on file changes and every five minutes. Existing manual Claude
-tokens/API keys are kept. Set `codexAutoImport: false` or `claudeAutoImport: false` in
-`~/.anchi/settings.yaml` to disable that runtime's automatic import.
+`--yes` skips the confirmation. Preparation also imports available local logins. Anchi checks
+refreshed logins on file changes and every five minutes. Existing manual Claude tokens/API keys
+are kept. Set `codexAutoImport: false` or `claudeAutoImport: false` in `~/.anchi/settings.yaml`
+to disable that runtime's automatic import.
 
-Release installations download prebuilt base and selected runtime layers. Their SHA-256,
-architecture and recipe compatibility are checked against the manifest bundled in the app
-before extraction. A failed download or verification stops preparation and can be retried;
-it does not silently switch to a local build. Source checkouts and locally packaged apps without
-a prebuilt manifest build the layers locally. VM provisioning and trusted-service installation
-still run locally, so download size, network speed and host resources affect setup time.
+On a remote server, release installations download prebuilt base and selected runtime layers.
+Their SHA-256, architecture and recipe compatibility are checked against the manifest bundled
+in the app before extraction. A failed download or verification stops preparation and can be
+retried; it does not silently switch to a local build. Source checkouts and locally packaged
+apps without a prebuilt manifest build the layers locally.
 
 Any one connected runtime is enough: Agent builder runs on the
 first connected of Codex, Claude Code and Hermes (`builderRuntime` in `~/.anchi/settings.yaml`
@@ -286,24 +235,23 @@ picks one). Teams with setup and a first task complete open on **Team overview**
 
 ### Step by step
 
-1. **Install the VM and services.** In **Runtimes**, press `I`, or run:
+1. **Start the services and initialize the vault.** On this computer the services (the proxy
+   and the vault) start with the daemon; `anchi setup start` (or `s` in **Runtimes**) starts
+   them again if they stopped. On a remote server, install the guest's components first, in
+   **Runtimes** with `I`, or:
 
    ```bash
-   anchi setup install          # asks for confirmation; add --yes to skip it
+   anchi setup install          # remote server: asks for confirmation; add --yes to skip it
    ```
 
-   Installation creates the `anchi-vm` VM, installs the trusted services and prebuilt cell
-   runners, and installs the base image (from the release or a local build). It takes several minutes and can be rerun to update;
-   completed steps are reused. A new VM gets half of this computer's CPUs and memory by
-   default; the TUI and `anchi setup install` ask before creating it, with half filled in
-   (`anchi setup install --cpus 6 --memory 16` skips the questions). An existing VM keeps its
-   size: `limactl stop anchi-vm && limactl edit anchi-vm --cpus 6 --memory 16 && limactl start
-   anchi-vm`, then `anchi setup vault unlock`.
+   Installation installs the trusted services and prebuilt cell runners and builds the base
+   image (from the release or a local build). It takes several minutes and can be rerun to
+   update; completed steps are reused.
 2. **Initialize and unlock the vault:**
 
    ```bash
    anchi setup vault init       # first time only
-   anchi setup vault unlock     # after each VM start
+   anchi setup vault unlock     # after the services restarted
    ```
 
    The master key is `~/.config/anchi/vault.key`. Back it up; a replacement key cannot
@@ -323,13 +271,18 @@ picks one). Teams with setup and a first task complete open on **Team overview**
      `anchi setup claude` and paste the token.
    - Hermes: `anchi setup hermes --base-url https://openrouter.ai/api/v1 --model <model>` and
      paste the endpoint's API key (or **h** in Runtimes). Any OpenAI-compatible API works; the key
-     stays in the VM vault.
+     stays in the vault.
 
-   Guided preparation installs the selected runtime before the first task. With the manual
-   steps here, its image is installed on first use; runtimes you never select or use are not downloaded.
-4. **Create an agent and run a first task.** Continue in **Getting started**, or press
-   **Ctrl+X, N**, choose your connected runtime and name the agent. Review the YAML and press
-   **y** to save. The CLI equivalent (substitute your connected runtime) is:
+   On the host placement your own sessions keep their own logins; the runtimes connected here
+   are for agents on a remote server. Guided preparation installs the selected runtime before
+   the first task. With the manual steps here, its image is installed on first use; runtimes
+   you never select or use are not downloaded.
+4. **Use the host placement, or create an agent.** On this computer, `anchi host enable`
+   writes Claude Code's and Codex's sandbox settings so your own sessions go through Anchi's
+   proxy ([Host placement](HOST_PLACEMENT.md#set-up)). On a remote server, continue in
+   **Getting started**, or press **Ctrl+X, N**, choose your connected runtime and name the
+   agent. Review the YAML and press **y** to save. The CLI equivalent (substitute your
+   connected runtime) is:
 
    ```bash
    anchi agents create dev --runtime claude-code
@@ -337,7 +290,7 @@ picks one). Teams with setup and a first task complete open on **Team overview**
    anchi tasks --agent dev
    ```
 
-   The starter has no connectors, shared folders or extra network destinations. Creation
+   The starter has no connectors or extra network destinations. Creation
    calls no model; the task does. Expect a response and a `done` status. See [First task](FIRST_TASK.md)
    for recovery and next steps. Use **Agent builder** for a custom role with any connected runtime.
 5. **Optionally start the daemon at login:** `anchi daemon install`. On macOS this is a launch
@@ -349,19 +302,12 @@ and any destination its configuration permits; omitting `egress` allows public I
 
 ## Linux differences
 
-- **Workspaces** (`~/AnchiWorkspaces`) are shared over 9p instead of virtiofs. The VM maps the
-  share with `bindfs`, so in a cell the agent owns its files, files it creates are yours on the
-  host, and no other user in the VM can write to the share. Sharing (W on the Runtimes screen)
-  also reinstalls the guest components, which bring `bindfs` and the mapping. 9p is far slower
-  than the VM's disk for many small files (about 100 times for listing a `node_modules` tree):
-  agents are told to install dependencies and build in their own work directory and keep only
-  sources and results in a workspace.
 - **Notifications** use `notify-send`; without it they are skipped.
 - **Google sign-in** opens the browser with `xdg-open` and also prints the URL. Google redirects
   to a port on `127.0.0.1`, so the browser must run on the same machine; over SSH, forward the
   printed port or sign in on a desktop session.
-- **The VM** lives in `~/.lima/anchi-vm`, as on macOS. Where guides say "the Mac", read "this
-  machine".
+- **Claude Code's sandbox** needs `bubblewrap` and `socat` for the host placement (see its
+  `/sandbox` panel). Where guides say "the Mac", read "this machine".
 
 ## Update or remove the app
 
@@ -378,65 +324,56 @@ the installer to obtain a managed installation; self-update does not modify a ch
 Existing daemon processes keep using the old version
 so installation does not interrupt running tasks. Once tasks finish, run `anchi daemon stop`,
 then reopen `anchi`. If you enabled login startup, rerun `anchi daemon install` too so its
-service points to the new version. Then run `anchi setup install` once to update the VM's
-components: Anchi compares the version that installed them (`/opt/secure-vm/installed.json`)
-with its own, and until they match **Getting started** opens on its environment step with
-**Enter** running the update, **Runtimes** shows both versions in red with `I`, and every
-new task carries a notice. Older packages remain under `~/.local/share/anchi/versions` and
-can be removed once no daemon or login service uses them; `anchi update` and the installer
-print the removable directories with the `rm -rf` command, and never delete them on their own.
+service points to the new version. On a remote server, then run `anchi setup install` once to
+update the guest's components: Anchi compares the version that installed them
+(`/opt/secure-vm/installed.json`) with its own, and until they match **Getting started** opens
+on its environment step with **Enter** running the update, **Runtimes** shows both versions in
+red with `I`, and every new task carries a notice. Older packages remain under
+`~/.local/share/anchi/versions` and can be removed once no daemon or login service uses them;
+`anchi update` and the installer print the removable directories with the `rm -rf` command, and
+never delete them on their own.
 
-To remove the app, first run `anchi daemon uninstall` and `anchi daemon stop`, then delete
-only the installed `anchi` launcher and the install root. Your `~/.anchi` data, vault and Lima
-VM are separate and retained. Remove the installer's PATH line from your shell config if desired.
+To remove the app, first run `anchi host disable` if the host placement is enabled, then
+`anchi daemon uninstall` and `anchi daemon stop`, then delete only the installed `anchi`
+launcher and the install root. Your `~/.anchi` data and vault are separate and retained
+(`~/.anchi/host` holds the host placement's state). Remove the installer's PATH line from your
+shell config if desired.
 
-### Start over (reset)
+### Start over
 
-`anchi setup reset` returns the machine to a first launch, for example to try the guided setup
-again. It refuses while tasks are running or queued, lists what it deletes and asks you to type
-`reset` (`--yes` skips the question). It deletes the `anchi-vm` VM with everything in it:
-the vault's encrypted credentials (Codex, Claude Code, Google, Notion, Slack and the proxy
-connectors), agent homes, built images and the audit log. Idle cells are closed first.
-
-| | `anchi setup reset` | `anchi setup reset --all` |
-|---|---|---|
-| The VM and the vault contents | deleted | deleted |
-| `~/.config/anchi/vault.key` | kept | deleted |
-| `~/.anchi` (or `ANCHI_HOME`): agents, templates, images, skills, `settings.yaml`, the task database, logs | kept | deleted (the daemon is stopped first) |
-| `~/.anchi/keybindings.json` | kept | kept (a preference, not setup state) |
-| `~/AnchiWorkspaces`, the installed app, Google/GitHub/AWS accounts themselves | kept | kept |
-
-Without `--all`, your agents survive: run `anchi setup install` and `anchi setup vault init`,
-which creates a new, empty vault with the same key, then connect accounts again. Credentials
-are deleted locally only; revoke them at the provider if you no longer want them to exist
-(disconnect Google accounts before resetting to revoke their tokens). A login service from
-`anchi daemon install` stays installed and starts the daemon again at the next login.
-
+To return your computer to a first launch, stop the daemon (`anchi daemon stop`), run
+`anchi host disable` if the host placement was enabled, then delete `~/.anchi` (or
+`ANCHI_HOME`), which holds agents, templates, images, skills, `settings.yaml`, the task database,
+logs and the host placement's vault and audit log, and `~/.config/anchi/vault.key` if you want a
+new, empty vault. Credentials are deleted locally only; revoke them at the provider if you no
+longer want them to exist (disconnect Google accounts before deleting to revoke their tokens).
+A login service from `anchi daemon install` stays installed and starts the daemon again at the
+next login. A remote server is reset by deleting or recreating the machine.
 
 ## Recovery
 
-- **Installation failed:** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; workspaces and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
+- **Installation failed (remote server):** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; agents and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
 - **Prebuilt layer download or verification failed:** retry preparation after checking the network and disk space. A checksum or compatibility failure never extracts the archive. Reinstall the matching app release if it persists; source installations use local builds.
-- **"The VM runs but could not be asked":** a guest command failed (shown with the message in Getting started, Runtimes and `anchi setup status`); the rest of the status is unknown, not reset. Press **r** to try again; if it keeps failing, `anchi setup install` reinstalls the guest components, keeping agents and credentials.
-- **Lima download failed:** the setup log names the URL and the error (`LIMA_DOWNLOAD_FAILED`, or `LIMA_CHECKSUM_MISMATCH` when the archive is not the pinned one, which is then never extracted). Check the network and retry, or [install Lima yourself](#lima).
-- **Lima too old:** with an older Lima on PATH, setup downloads the pinned one and uses it instead. On a computer Anchi has no Lima for, Getting started and `anchi setup status` list `Lima 2.2.0+ (found …)` under what is missing.
+- **"The guest runs but could not be asked":** a guest command failed (shown with the message in Getting started, Runtimes and `anchi setup status`); the rest of the status is unknown, not reset. Press **r** to try again; if it keeps failing, `anchi setup install` reinstalls the guest components, keeping agents and credentials.
+- **Missing `openssl`:** Getting started and `anchi setup status` list it under what is missing on this computer; install it, then prepare again.
 - **Installation refused because tasks are running:** installing restarts the egress proxy, which would end them. Wait for them (`anchi tasks`) or cancel them, then run it again; `ANCHI_FORCE_RESTART=1` installs anyway. `make verify-anchi` refuses for the same reason (`ANCHI_CHECK_WITH_TASKS=1` runs it beside them, leaving their cells alone).
 - **Interrupted installation:** run it again. Installer-marked incomplete root filesystems are kept as `rootfs-incomplete-*` before rebuilding; unmarked ones are never modified automatically.
-- **Stopped VM:** `anchi setup vm`, then `anchi setup vault unlock`.
+- **Services stopped (host placement):** `anchi setup start`, then `anchi setup vault unlock`. `anchi host status` says whether they run.
 - **`VAULT_KEY_MISSING` when unlocking:** `unlock` requires an existing master key. For a new
-  VM or after `setup reset --all`, run `anchi setup vault init` (from source:
+  vault, run `anchi setup vault init` (from source:
   `./scripts/anchi setup vault init`) to create the key and unlock the empty vault. Initialization
   refuses to generate a replacement when encrypted credentials exist; restore the original key
   from backup in that case. Back up the new `~/.config/anchi/vault.key` after initialization.
 - **Vault cannot unlock with an existing key:** restore the original master key.
 - **Expired Codex token:** run `codex` on this machine once, then `anchi setup codex` again.
 - **Google requires sign-in again:** `anchi setup service gmail` (or `drive`; add `--account <name>` for a named account). Testing-mode OAuth refresh tokens commonly expire after seven days.
-- **Start from scratch:** `anchi setup reset` (see [Start over](#start-over-reset)).
+- **Start from scratch:** see [Start over](#start-over).
 - **Approval refused or timed out:** the agent sees the refusal; send the task a follow-up once the cause is fixed.
 
-## Inside the VM
+## Inside the guest
 
-`limactl shell anchi-vm` opens a shell in the VM over Lima's SSH, which listens on `127.0.0.1` only, with a key in `~/.lima/_config`. You get your own user with passwordless sudo: this is the trusted side, at the level of the host administrator. Useful places:
+On a remote server, SSH in as its login user (for instabox, `instabox ssh <machine>`). You get
+passwordless sudo: this is the trusted side, at the level of the host administrator. Useful places:
 
 - `sudo anchi-cell list`: the running cells.
 - `sudo ls /var/lib/anchi/agents/<agent>/home`: an agent's persistent home, with its work directory and Codex and Claude sessions.
@@ -445,13 +382,13 @@ are deleted locally only; revoke them at the provider if you no longer want them
 Agent cells have no SSH and no interactive shell: nothing runs an SSH server in them, and they reach the network only through the egress proxy. For a look inside a running cell, `anchi-cell exec` runs one command as the agent user, without input:
 
 ```bash
-limactl shell anchi-vm -- sudo anchi-cell exec <task> -- /bin/sh -c 'ls -la; env | sort'
+sudo anchi-cell exec <task> -- /bin/sh -c 'ls -la; env | sort'
 ```
 
 A cell lives until 10 minutes after its task's last turn; after that, look in the agent's home instead.
 
-As root in the VM:
+As root on the server:
 
 - Treat an agent's files as untrusted: do not run its scripts or source its configuration as root.
 - Do not restart `anchi-egress` or other services, or run `anchi-cell reap`, while tasks run: like installing, it cuts their cells off.
-- Do not paste credentials into the VM's shell; they go to the vault through `anchi setup` or the TUI (Runtimes, Connectors).
+- Do not paste credentials into the server's shell; they go to the vault through `anchi setup` or the TUI (Runtimes, Connectors).

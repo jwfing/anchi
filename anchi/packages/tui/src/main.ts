@@ -1,15 +1,6 @@
 #!/usr/bin/env -S node --import tsx
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { styleText } from 'node:util';
 import { homeLayout } from '@anchi/core';
@@ -38,10 +29,9 @@ import type {
   Notifications,
   SetupAction,
   TaskRow,
-  VmSize,
 } from '@anchi/protocol';
 import { TOKEN_CONNECTOR_IDS, type TokenConnectorId } from '@anchi/protocol';
-import type { RuntimeId } from '@anchi/protocol';
+import type { HostStatus, RuntimeId } from '@anchi/protocol';
 import { Command } from 'commander';
 import { TerminalRenderer } from './render.ts';
 import { sanitizeJson, sanitizeLine, sanitizeLines } from '@anchi/core';
@@ -834,7 +824,7 @@ agentsCmd
   );
 agentsCmd
   .command('rm <id>')
-  .description('Delete an agent with its tasks and its files in the VM (workspaces are kept)')
+  .description('Delete an agent with its tasks and its files in the guest')
   .option('-y, --yes', 'delete without typing the id')
   .action((id: string, opts: { yes?: boolean }) => deleteAgentCli(id, opts.yes === true));
 agentsCmd
@@ -873,18 +863,13 @@ async function deleteAgentCli(id: string, yes: boolean) {
       console.log(styleText('yellow', `  ${p.running} running or queued: cancelled first`));
     if (p.triggers) console.log(`  ${p.triggers} trigger(s)`);
     console.log(
-      '  in the VM: its home (work directory, sessions), its skills and its policy rules',
+      '  in the guest: its home (work directory, sessions), its skills and its policy rules',
     );
     if (p.delegatedBy.length || p.delegatedByTemplates.length)
       console.log(
         `It is removed from the delegates of ${[...p.delegatedBy.map((a) => `@${a}`), ...p.delegatedByTemplates.map((t) => `template ${t}`)].join(', ')}.`,
       );
-    console.log(
-      styleText(
-        'green',
-        `Kept: ${p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') || 'directories of your computer'} and the audit logs.`,
-      ),
-    );
+    console.log(styleText('green', 'Kept: the audit logs.'));
     if (!yes && (await ask(`Type ${p.agentId} to confirm: `)).trim() !== p.agentId) {
       return console.log('not deleted');
     }
@@ -905,53 +890,42 @@ setup
     'Prepare the environment, credential storage and one runtime; resume completed steps',
   )
   .option('--runtime <runtime>', 'codex, claude-code or hermes (default: detected login)')
-  .option('-y, --yes', 'confirm preparation using recommended resources')
-  .option('--cpus <n>', 'CPUs for a new VM (advanced)')
-  .option('--memory <gib>', 'memory for a new VM in GiB (advanced)')
-  .action(
-    (opts: {
-      runtime?: 'codex' | 'claude-code' | 'hermes';
-      yes?: boolean;
-      cpus?: string;
-      memory?: string;
-    }) =>
-      withClient(async (client) => {
-        const runtime = opts.runtime ?? suggestedRuntime(await client.call('setup.status'));
-        if (!['codex', 'claude-code', 'hermes'].includes(runtime)) fail('unknown runtime');
-        const vmSize = await newVmSize(client, { ...opts, yes: true });
-        const consent =
-          `Prepare ${runtime}, create or start the isolated environment and initialize or unlock credential storage? ` +
-          (vmSize ? `A new VM uses ${vmSize.cpus} CPUs and ${vmSize.memoryGiB} GiB. ` : '') +
-          'Available local Codex and Claude Code logins connect automatically. Existing keys are kept; no model is called. Back up ~/.config/anchi/vault.key.';
-        if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
-        const off = client.on('setup', ({ line }) => console.log(sanitizeLine(line)));
-        try {
-          const status = await client.call('setup.prepare', { runtime, confirm: true, vmSize });
-          console.log(
-            runtimeReady(status, runtime)
-              ? `${runtime} connected. Review your starter in anchi.`
-              : `Environment ready. Sign in to ${runtime} on this computer or connect it in anchi.`,
-          );
-        } finally {
-          off();
-        }
-      }),
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action((opts: { runtime?: 'codex' | 'claude-code' | 'hermes'; yes?: boolean }) =>
+    withClient(async (client) => {
+      const runtime = opts.runtime ?? suggestedRuntime(await client.call('setup.status'));
+      if (!['codex', 'claude-code', 'hermes'].includes(runtime)) fail('unknown runtime');
+      const consent =
+        `Prepare ${runtime}, install or start the isolated environment and initialize or unlock credential storage? ` +
+        'Available local Codex and Claude Code logins connect automatically. Existing keys are kept; no model is called. Back up ~/.config/anchi/vault.key.';
+      if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+      const off = client.on('setup', ({ line }) => console.log(sanitizeLine(line)));
+      try {
+        const status = await client.call('setup.prepare', { runtime, confirm: true });
+        console.log(
+          runtimeReady(status, runtime)
+            ? `${runtime} connected. Review your starter in anchi.`
+            : `Environment ready. Sign in to ${runtime} on this computer or connect it in anchi.`,
+        );
+      } finally {
+        off();
+      }
+    }),
   );
 
 setup
   .command('status')
-  .description('VM, vault, runtimes, connectors and services at a glance')
+  .description('Guest, vault, runtimes, connectors and services at a glance')
   .option('--json', 'the full status as JSON')
   .action((opts: { json?: boolean }) =>
     withClient(async (client) => {
       const s = await client.call('setup.status');
       if (opts.json) return console.log(jsonOut(s));
-      const size = s.vmSize?.current;
       const lines = [
-        `VM: ${s.vm}${size ? ` (${size.cpus} CPUs, ${size.memoryGiB} GiB)` : ''} · vault: ${
+        `${s.placement === 'host' ? 'Services' : 'Guest'}: ${s.vm} · vault: ${
           s.vaultUnlocked ? 'unlocked' : s.vaultKeyPresent === false ? 'no key yet' : 'locked'
         } · base image: ${s.installed ? 'built' : 'not built'}`,
-        s.error ? `Could not ask the VM: ${s.error}` : '',
+        s.error ? `Could not ask the guest: ${s.error}` : '',
         s.host?.missing.length
           ? `Missing on this computer: ${s.host.missing.join(', ')} — ${s.host.installHint}`
           : '',
@@ -979,7 +953,6 @@ setup
                 `Local ${name}: ${login.installed ? 'installed' : 'CLI not found'} · login ${login.state}`,
             )
           : []),
-        `Workspaces: ${s.workspaces ? '~/AnchiWorkspaces is shared with the VM' : 'not shared'}`,
         `Connectors: ${s.connectors.map((c) => `${c.id} ${c.connected ? '●' : '○'}`).join('  ')}`,
         `Services: ${(s.services ?? [])
           .map(
@@ -996,7 +969,7 @@ setup
 setup
   .command('codex')
   .description(
-    'Import the Codex login from ~/.codex/auth.json into the VM vault, or sign in to ChatGPT without the Codex CLI (--sign-in)',
+    'Import the Codex login from ~/.codex/auth.json into the vault, or sign in to ChatGPT without the Codex CLI (--sign-in)',
   )
   .option('-y, --yes', 'do not ask for confirmation')
   .option(
@@ -1032,7 +1005,7 @@ setup
       }
       if (!opts.yes) {
         const answer = await ask(
-          'Read the access token and account id from ~/.codex/auth.json and store them in the VM vault? [y/N] ',
+          'Read the access token and account id from ~/.codex/auth.json and store them in the vault? [y/N] ',
         );
         if (answer.toLowerCase() !== 'y') fail('cancelled');
       }
@@ -1046,25 +1019,16 @@ setup
   );
 
 /** Runs a setup step in the daemon and prints its output as it arrives. */
-function runSetup(
-  action: SetupAction,
-  yes: boolean,
-  consent: string,
-  size?: (client: DaemonClient) => Promise<VmSize | undefined>,
-) {
+function runSetup(action: SetupAction, yes: boolean, consent: string) {
   return withClient(async (client) => {
-    const vmSize = await size?.(client);
-    const what = vmSize
-      ? `${consent} A new VM gets ${vmSize.cpus} CPUs and ${vmSize.memoryGiB} GiB of memory.`
-      : consent;
-    if (!yes && (await ask(`${what} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+    if (!yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
     const off = client.on('setup', (n) => {
       if (n.action === action) console.log(sanitizeLine(n.line));
     });
-    const s = await client.call('setup.run', { action, vmSize });
+    const s = await client.call('setup.run', { action });
     off();
     console.log(
-      `VM ${s.vm} · vault ${s.vaultUnlocked ? 'unlocked' : 'locked'} · base image ${s.installed ? 'built' : 'not built'}`,
+      `guest ${s.vm} · vault ${s.vaultUnlocked ? 'unlocked' : 'locked'} · base image ${s.installed ? 'built' : 'not built'}`,
     );
   });
 }
@@ -1072,7 +1036,7 @@ function runSetup(
 setup
   .command('claude')
   .description(
-    'Store a `claude setup-token` token or an Anthropic API key in the VM vault, or sign in to Claude in a browser (--sign-in)',
+    'Store a `claude setup-token` token or an Anthropic API key in the vault, or sign in to Claude in a browser (--sign-in)',
   )
   .option('--sign-in', 'sign in in a browser; Anchi creates and stores a one-year token')
   .action((opts: { signIn?: boolean }) =>
@@ -1113,9 +1077,7 @@ setup
 
 setup
   .command('hermes')
-  .description(
-    "Store Hermes's OpenAI-compatible endpoint, API key and default model in the VM vault",
-  )
+  .description("Store Hermes's OpenAI-compatible endpoint, API key and default model in the vault")
   .requiredOption('--base-url <url>', 'e.g. https://openrouter.ai/api/v1')
   .requiredOption('--model <model>', 'the default model, e.g. nousresearch/hermes-4-405b')
   .action((opts: { baseUrl: string; model: string }) =>
@@ -1135,77 +1097,25 @@ setup
   );
 
 setup
-  .command('workspaces')
-  .description('Share ~/AnchiWorkspaces with the VM (macOS and Linux; restarts the VM once)')
-  .option('-y, --yes', 'do not ask for confirmation')
-  .action((opts: { yes?: boolean }) =>
-    runSetup(
-      'workspaces',
-      Boolean(opts.yes),
-      'Mount ~/AnchiWorkspaces into the VM? The VM restarts: running tasks stop, and the vault is unlocked again afterwards.',
-    ),
-  );
-
-setup
-  .command('vm')
-  .description('Start the VM')
+  .command('start')
+  .description("Start the guest's services (host placement: the proxy and the vault)")
   .action(() => runSetup('vm-start', true, ''));
-
-/**
- * The size of the VM `setup install` creates: --cpus and --memory, else asked with half of this
- * computer as the default (taken as is with --yes or without a terminal). None when a VM exists.
- */
-async function newVmSize(
-  client: DaemonClient,
-  opts: { yes?: boolean; cpus?: string; memory?: string },
-): Promise<VmSize | undefined> {
-  const s = await client.call('setup.status');
-  if (s.vm !== 'missing' || !s.vmSize) {
-    if (opts.cpus || opts.memory) fail('the VM exists; change its size with limactl edit anchi-vm');
-    return undefined;
-  }
-  const { default: half, host } = s.vmSize;
-  const interactive = !opts.yes && process.stdin.isTTY;
-  const pick = async (given: string | undefined, prompt: string, fallback: number) =>
-    given ?? (interactive ? (await ask(prompt)) || String(fallback) : String(fallback));
-  const whole = (raw: string, min: number, max: number, what: string) => {
-    if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max) {
-      fail(`${what} must be a whole number from ${min} to ${max}`);
-    }
-    return Number(raw);
-  };
-  const cpus = await pick(
-    opts.cpus,
-    `CPUs for the VM (this computer: ${host.cpus}) [${half.cpus}]: `,
-    half.cpus,
-  );
-  const cpuCount = whole(cpus, 1, host.cpus, 'CPUs');
-  const memory = await pick(
-    opts.memory,
-    `Memory in GiB (this computer: ${host.memoryGiB}) [${half.memoryGiB}]: `,
-    half.memoryGiB,
-  );
-  return { cpus: cpuCount, memoryGiB: whole(memory, 2, host.memoryGiB, 'Memory') };
-}
 
 setup
   .command('install')
-  .description('Create or update the VM, install the services and build the base image')
+  .description('Install or update the services on a remote server and build the base image')
   .option('-y, --yes', 'do not ask for confirmation')
-  .option('--cpus <n>', "CPUs of a new VM (default: half of this computer's)")
-  .option('--memory <gib>', "memory of a new VM in GiB (default: half of this computer's)")
-  .action((opts: { yes?: boolean; cpus?: string; memory?: string }) =>
+  .action((opts: { yes?: boolean }) =>
     runSetup(
       'install',
       Boolean(opts.yes),
-      'Create or update the anchi-vm VM, install the trusted services and the agent team, and build the base image (several minutes)?',
-      (client) => newVmSize(client, opts),
+      'Install or update the trusted services and the agent team on this server, and build the base image (several minutes)?',
     ),
   );
 
 setup
   .command('vault <action>')
-  .description('init or unlock the VM vault with the key in ~/.config/anchi/vault.key')
+  .description('init or unlock the vault with the key in ~/.config/anchi/vault.key')
   .action((action: string) => {
     if (action !== 'init' && action !== 'unlock') fail('vault action must be init or unlock');
     return runSetup(action === 'init' ? 'vault-init' : 'vault-unlock', true, '');
@@ -1224,7 +1134,7 @@ setup
       if (opts.fromGh) {
         if (id !== 'github') fail('--from-gh applies to github');
         const consent =
-          'Read the token of the gh CLI (`gh auth token`) and store it in the VM vault? ' +
+          'Read the token of the gh CLI (`gh auth token`) and store it in the vault? ' +
           'It carries all the scopes of your gh login; a fine-grained token is narrower.';
         if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
         const status = await client.call('connectors.importGh');
@@ -1413,86 +1323,6 @@ setup
     }),
   );
 
-/** Deletes the Anchi home for `setup reset --all`, keeping keybindings.json (a preference). */
-function deleteHome(root: string) {
-  const full = resolvePath(root);
-  if (full === '/' || full === resolvePath(homedir()) || !existsSync(full)) return;
-  for (const name of readdirSync(full)) {
-    if (name !== 'keybindings.json') rmSync(join(full, name), { recursive: true, force: true });
-  }
-}
-
-setup
-  .command('reset')
-  .description(
-    'Back to a first launch: delete the VM with everything in it (--all: also the vault key and the Anchi home)',
-  )
-  .option('--all', 'also delete the vault key and ~/.anchi (agents, tasks, settings, logs)')
-  .option('-y, --yes', 'do not ask for confirmation')
-  .action(async (opts: { all?: boolean; yes?: boolean }) => {
-    if (opts.all) localOnly('reset --all');
-    let home = '';
-    let vaultKey = '';
-    await withClient(async (client) => {
-      const p = await client.call('setup.resetPreview');
-      if (p.busy) fail(`${p.busy} task(s) running or queued; cancel them or let them finish first`);
-      ({ home, vaultKey } = p);
-      console.log('Reset deletes, and nothing can bring back:');
-      console.log(
-        `  the anchi-vm VM (${p.vm}) and everything in it: the vault's credentials (Codex, ` +
-          'Claude Code, Google, Notion, Slack and the proxy connectors), agent homes, images and the audit log',
-      );
-      if (p.cells) console.log(`  ${p.cells} idle cell(s): closed first`);
-      if (opts.all) {
-        console.log(`  the vault key ${vaultKey}`);
-        console.log(
-          `  ${home}: agents, templates, images, skills, settings, the task database and logs`,
-        );
-        console.log(styleText('green', `Kept: ${join(home, 'keybindings.json')}.`));
-        // The home holds this machine's team identity. The other members keep the directory.
-        const team = await client.call('peers.directory').catch(() => undefined);
-        const others = team?.nodes?.filter((n) => n.node !== team.self) ?? [];
-        if (others.length) {
-          console.log(
-            styleText(
-              'yellow',
-              `This machine leaves its team for good, but ${others.map((n) => sanitizeLine(n.label)).join(', ')} ` +
-                `keep${others.length === 1 ? 's' : ''} listing its agents as offline. Revoke it there: ` +
-                `anchi --server <that machine> team revoke ${team!.self}`,
-            ),
-          );
-        }
-      } else {
-        console.log(
-          styleText(
-            'green',
-            `Kept: the vault key and ${home} (agents, tasks, settings). After \`anchi setup install\` ` +
-              'and `anchi setup vault init`, the vault is new and empty, with the same key.',
-          ),
-        );
-      }
-      if (!opts.yes && (await ask('Type reset to confirm: ')) !== 'reset') fail('not reset');
-      const off = client.on('reset', (n) => console.log(sanitizeLine(n.line)));
-      await client.call('setup.reset', { confirm: 'reset' });
-      off();
-      if (opts.all) await client.call('daemon.shutdown');
-    });
-    if (!opts.all) {
-      return console.log('VM deleted. Next: `anchi setup install`, then `anchi setup vault init`.');
-    }
-    // The daemon holds the database; its home goes only once it has exited.
-    for (let i = 0; i < 100; i++) {
-      const c = await tryConnect(layout);
-      if (!c) break;
-      c.close();
-      if (i === 99) fail('the daemon did not stop; run `anchi daemon stop` and reset again');
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    rmSync(vaultKey, { force: true });
-    deleteHome(home);
-    console.log('Reset done. The next `anchi` starts from the first launch.');
-  });
-
 setup
   .command('service-mode <id> <mode>')
   .description('Writes of a service: auto, or ask (X and Reddit ask until set to auto)')
@@ -1515,6 +1345,67 @@ async function readStdin(): Promise<string> {
   if (!text) fail('no secret on stdin: run this in a terminal to be prompted, or redirect a file');
   return text;
 }
+
+const host = program
+  .command('host')
+  .description(
+    'The host placement: Anchi without a VM, for your own claude and codex sessions (ANCHI_GUEST=host)',
+  );
+
+function printHostStatus(s: HostStatus) {
+  const lines = [
+    `installed: ${s.installed ? 'yes' : 'no (anchi setup install)'} · services: ${s.running ? 'running' : 'stopped'} · settings: ${s.enabled ? 'written' : 'not written'}`,
+    `proxy port: ${s.port} · connectors: ${s.connectors.join(', ') || 'none'} · ask: ${s.ask.join(', ') || 'none'}`,
+    `shims: ${s.shimDir}${s.shimOnPath ? '' : ' (put it first on PATH: export PATH="' + s.shimDir + ':$PATH")'}`,
+    `Claude Code: ${s.claude.file}${s.claude.managed ? ' (managed)' : ''}${s.claude.excludedCommands.length ? ` · excludedCommands run outside the sandbox: ${s.claude.excludedCommands.join(', ')}` : ''}`,
+    `Codex: ${s.codex.file}${s.codex.managed ? ' (managed)' : ''}`,
+    `trust bundle: ${s.caBundle}`,
+    s.missing.length ? `missing on this computer: ${s.missing.join(', ')}` : '',
+  ];
+  for (const line of lines) if (line) console.log(line);
+}
+
+host
+  .command('status')
+  .description('Whether the host placement is installed, running and written into the runtimes')
+  .option('--json', 'the full status as JSON')
+  .action((opts: { json?: boolean }) =>
+    withClient(async (client) => {
+      const s = await client.call('host.status');
+      if (opts.json) return console.log(jsonOut(s));
+      printHostStatus(s);
+    }),
+  );
+
+host
+  .command('enable')
+  .description(
+    "Write Claude Code's and Codex's sandbox and trust settings and the shims (undo: anchi host disable)",
+  )
+  .option('-y, --yes', 'skip the confirmation')
+  .action((opts: { yes?: boolean }) =>
+    withClient(async (client) => {
+      const before = await client.call('host.status');
+      const consent =
+        `Write sandbox settings into ${before.claude.file} and ${before.codex.file}, and shims into ${before.shimDir}? ` +
+        'Your own sandbox settings are refused rather than merged. Sessions then reach the network through Anchi on port ' +
+        `${before.port} with placeholders instead of credentials; see docs/HOST_PLACEMENT.md.`;
+      if (!opts.yes && (await ask(`${consent} [y/N] `)).toLowerCase() !== 'y') fail('cancelled');
+      const s = await client.call('host.enable');
+      printHostStatus(s);
+      if (!s.shimOnPath)
+        console.log(`Add the shims first on PATH in your shell: export PATH="${s.shimDir}:$PATH"`);
+    }),
+  );
+
+host
+  .command('disable')
+  .description('Restore the runtime settings Anchi changed and remove the shims')
+  .action(() =>
+    withClient(async (client) => {
+      printHostStatus(await client.call('host.disable'));
+    }),
+  );
 
 const daemon = program.command('daemon').description('Manage the background daemon');
 daemon

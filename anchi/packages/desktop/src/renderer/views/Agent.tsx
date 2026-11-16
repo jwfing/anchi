@@ -69,12 +69,7 @@ export function reachChips(agent: AgentSummary): { text: string; tone: 'off' | '
   const chips: { text: string; tone: 'off' | 'ok' }[] = [];
   if (agent.runtime) chips.push({ text: accountName(agent.runtime), tone: 'off' });
   for (const id of agent.connectors) chips.push({ text: connectorName(id), tone: 'ok' });
-  const folders = agent.workspaces?.length ?? 0;
-  chips.push(
-    folders
-      ? { text: count(folders, 'shared folder'), tone: 'ok' }
-      : { text: 'No access to your files', tone: 'off' },
-  );
+  chips.push({ text: 'No access to your files', tone: 'off' });
   return chips;
 }
 

@@ -200,7 +200,6 @@ const status: SetupStatus = {
   googleClient: true,
   xClient: false,
   redditClient: false,
-  workspaces: false,
 };
 const skills: SkillInfo[] = [];
 
@@ -346,7 +345,6 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
       skills: ['code-review'],
       connectors: ['github'],
       delegates: ['reviewer'],
-      workspaces: [{ path: 'shop', mode: 'ro' }],
       highRisk: { disable: [] },
       approvals: { github: 'ask' as const },
       triggers: [],
@@ -381,7 +379,6 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
         { id: 'claude-code', connected: true },
         { id: 'hermes', connected: true },
       ],
-      workspaces: { dirs: ['shop', 'notes'], shared: true },
       agents: ['developer', 'reviewer', 'ops'],
       images: [],
       highRisk: ['github.merge', 'github.push-default-branch'],
@@ -405,14 +402,6 @@ if (custom) {
     'tasks.search': () => [],
     'tasks.send': (p: { taskId: string }) => tasks.find((t) => t.id === p.taskId)!,
     'tasks.create': () => tasks[0]!,
-    'setup.resetPreview': () => ({
-      vm: 'running',
-      busy: 0,
-      cells: 0,
-      home,
-      vaultKey: join(home, 'vault.key'),
-    }),
-    'setup.reset': () => status,
     'setup.prepare': () => Object.assign(status, { vm: 'running', installed: true }),
     'connectors.importGh': () => ({ id: 'github', connected: true, account: 'example' }),
     'connectors.awsProfile': () => ({ id: 'aws', connected: true, account: '123456789012' }),

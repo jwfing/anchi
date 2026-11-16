@@ -11,7 +11,6 @@ const preview: AgentDeletionPreview = {
   delegatedBy: ['lead'],
   delegatedByTemplates: ['team'],
   triggers: 1,
-  workspaces: ['project'],
 };
 const params = { agentId: 'reviewer', confirm: 'reviewer' };
 

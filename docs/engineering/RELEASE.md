@@ -2,8 +2,8 @@
 
 Anchi releases include standalone archives for Apple Silicon macOS and glibc Linux x86_64.
 Each archive contains the Node runtime, bundled TUI and daemon, prebuilt cell runners, the
-Anchi skill for host-side agents (`skills/anchi`), VM
-installation resources, and license notices. Users need neither a checkout nor pnpm.
+Anchi skill for host-side agents (`skills/anchi`), the guest
+installation resources for a remote server (`guest/`, `services/`, `systemd/`, `scripts/up.sh`, `scripts/install-anchi.sh`, `scripts/vault.mjs`), and license notices. Users need neither a checkout nor pnpm.
 Each platform also has a desktop app archive, `anchi-desktop-<target>.tar.gz`, which the
 installer adds with `--desktop` (see [Desktop app](../DESKTOP.md#install)).
 A release is a commit on `main` with a version, a changelog entry and the checks below.
@@ -62,15 +62,15 @@ See [Getting started](../GETTING_STARTED.md) for the exact commands.
 
 ## Version
 
-The version is `version` in `anchi/package.json`. `scripts/up.sh` and `scripts/install-anchi.sh` record it (through `guest/install-gmail.sh`) in the VM's `/opt/secure-vm/installed.json` with the install time.
+The version is `version` in `anchi/package.json`. `scripts/up.sh` and `scripts/install-anchi.sh` record it (through `guest/install-gmail.sh`) in the server's `/opt/secure-vm/installed.json` with the install time.
 
 ## Release gates
 
 Current releases are development builds. Before tagging:
 
 - `make check` passes on macOS and Linux (CI runs it on every push).
-- On a VM installed from the release commit: `make verify-vm` and `make verify-anchi` pass.
-- The Linux live workflow (`linux-live`) passes: a fresh VM installs and passes the service checks.
+- On a remote server installed from the release commit: `make verify-guest` and `make verify-anchi` pass; `scripts/verify-host.sh` passes on the host placement.
+- The Linux live workflow (`linux-live`) passes: the guest installs onto a fresh runner with `ANCHI_GUEST=local` and passes the service checks.
 - Changes to boundaries, credentials, approvals or guest commands have live evidence, and `scripts/anchi-acceptance.sh` has been run for the affected scenarios with real accounts.
 - `CHANGELOG.md` describes user-visible changes and anything users must do (re-import a token, rebuild images, rerun `scripts/anchi setup install`).
 
@@ -83,9 +83,7 @@ Public preview binaries and checksum-verified updates are available. A completed
 | Node, Codex, Claude Code in cells | `guest/cell.env` | Download the exact artifact for both architectures, recompute SHA-256, rebuild the base image (`anchi-image build codex base`) and run `make verify-anchi` and a live turn per runtime |
 | mitmproxy, botocore in the egress service | `guest/cell.env` | Reinstall with `scripts/install-anchi.sh`; run `tests/test_egress.py` and `make verify-anchi` |
 | Codex and Claude Agent SDKs, other workspace packages | `anchi/pnpm-lock.yaml` | Choose versions older than pnpm's minimum release age; keep the SDK and the CLI in the image on matching versions |
-| Lima Anchi downloads on hosts without one | `host-tools.env` | Change `ANCHI_LIMA_VERSION` and both SHA-256 values together, from Lima's published `SHA256SUMS`; keep `minimumLimaVersion` in `lima/anchi-vm.yaml` at or below it; run `anchi setup install` on a host without Lima |
 | Codex CLI the daemon signs in to ChatGPT with | `host-tools.env` (`ANCHI_HOST_CODEX_*`) | Use the `rust-v<version>` release's `codex-aarch64-apple-darwin.tar.gz` and `codex-x86_64-unknown-linux-musl.tar.gz` digests; check that `codex app-server` still offers `account/login/start` with `chatgptDeviceCode` and `account/read` with `refreshToken`; sign in once with `anchi setup codex --sign-in` |
 | Claude Code the daemon signs in to Claude with | `host-tools.env` (`ANCHI_HOST_CLAUDE_*`) | Hash `@anthropic-ai/claude-code-darwin-arm64` and `-linux-x64` tarballs of the version from the npm registry (check them against the registry's `dist.integrity`); check that `claude setup-token` still prints the token after `valid for 1 year):` and the code page link; sign in once with `anchi setup claude --sign-in` |
-| Lima for Linux CI | `.github/workflows/linux-live.yml` | Change version and SHA-256 together; compare with Lima's published `SHA256SUMS` |
 
-Only SHA-256 is checked; publisher signatures (Lima GPG, Codex sigstore) are not verified.
+Only SHA-256 is checked; publisher signatures (Codex sigstore, npm) are not verified.

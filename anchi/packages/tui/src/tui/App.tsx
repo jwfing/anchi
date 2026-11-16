@@ -18,7 +18,6 @@ import type {
   SetupStatus,
   SetupAction,
   RuntimeId,
-  VmSize,
   StoredEvent,
   TaskRow,
   TaskStatus,
@@ -193,7 +192,7 @@ const SECRET_FIELDS: Record<SecretTarget, SecretField[]> = {
       label: 'Base URL of an OpenAI-compatible API, e.g. https://openrouter.ai/api/v1',
       masked: false,
     },
-    { key: 'apiKey', label: 'API key for that endpoint (stays in the VM vault)', masked: true },
+    { key: 'apiKey', label: 'API key for that endpoint (stays in the vault)', masked: true },
     { key: 'model', label: 'Default model, e.g. nousresearch/hermes-4-405b', masked: false },
   ],
   github: [{ key: 'token', label: 'GitHub fine-grained token (github_pat_…)', masked: true }],
@@ -1024,7 +1023,7 @@ export function App({
   const skillPage = skillListRows(bodyHeight - 4);
   const connectorIds = CONNECTOR_IDS;
 
-  const performSetup = async (step: SetupAction, vmSize?: VmSize) => {
+  const performSetup = async (step: SetupAction) => {
     if (setupRunning.current)
       throw new Error('Environment setup is already running. Open installation progress.');
     setupRunning.current = true;
@@ -1032,13 +1031,13 @@ export function App({
     const startedAt = Date.now();
     setSetupProgress({ action: step, phase: setupPhase(step, ''), running: true, startedAt });
     try {
-      const status = await client.call('setup.run', { action: step, vmSize });
+      const status = await client.call('setup.run', { action: step });
       setSetup(status);
       setSetupProgress({ action: step, phase: 'Completed', running: false, startedAt });
       setProblem(null);
     } catch (e) {
       setSetupProgress((p) => p && { ...p, running: false, failed: true });
-      reportProblem(e, () => performSetup(step, vmSize));
+      reportProblem(e, () => performSetup(step));
       throw e;
     } finally {
       setupRunning.current = false;
@@ -1083,87 +1082,39 @@ export function App({
     }
   };
   const confirmPrepare = (runtime: RuntimeId) => {
-    const size = setup?.vm === 'missing' ? setup.vmSize?.default : undefined;
     setModal({
       kind: 'confirm',
       title: `Prepare ${runtime}`,
       body:
-        `Prepare an isolated local environment and ${runtime}, and initialize or unlock credential storage. ` +
-        (size
-          ? `Recommended resources: ${size.cpus} CPUs and ${size.memoryGiB} GiB of memory. `
-          : '') +
+        `Prepare the isolated environment and ${runtime}, and initialize or unlock credential storage. ` +
         'Available Codex and Claude Code logins on this computer are imported automatically into the vault. ' +
         'Existing keys are kept. Back up ~/.config/anchi/vault.key. No folders are shared and no model is called. ' +
-        'Completed steps are reused if you retry. Advanced resource settings are available in Runtimes (I).',
+        'Completed steps are reused if you retry.',
       action: () => prepare(runtime),
-    });
-  };
-  /** A new VM's CPUs, then its memory: half of this computer, changed before it is created. */
-  const askVmSize = ({ default: suggested, host }: NonNullable<SetupStatus['vmSize']>) => {
-    const whole = (raw: string, min: number, max: number, what: string) => {
-      const n = Number(raw.trim());
-      if (!/^\d+$/.test(raw.trim()) || n < min || n > max) {
-        throw new Error(`${what} must be a whole number from ${min} to ${max}`);
-      }
-      return n;
-    };
-    setModal({
-      kind: 'text',
-      title: 'New VM: CPUs',
-      label: `CPUs for the anchi-vm VM. This computer has ${host.cpus}; half is ${suggested.cpus}.`,
-      input: String(suggested.cpus),
-      submit: async (rawCpus) => {
-        const cpus = whole(rawCpus, 1, host.cpus, 'CPUs');
-        setModal({
-          kind: 'text',
-          title: 'New VM: memory',
-          label: `Memory in GiB for the anchi-vm VM. This computer has ${host.memoryGiB} GiB; half is ${suggested.memoryGiB}. Each working cell may use up to 2 GB.`,
-          input: String(suggested.memoryGiB),
-          submit: async (rawGiB) => {
-            const memoryGiB = whole(rawGiB, 2, host.memoryGiB, 'Memory');
-            setModal({
-              kind: 'confirm',
-              title: 'Install',
-              body:
-                `Create the anchi-vm VM with ${cpus} CPUs and ${memoryGiB} GiB of memory, install ` +
-                'the trusted services and the agent team, and build the base image. This downloads ' +
-                'the VM image, Debian packages and the base image tools: several minutes, up to half ' +
-                'an hour on a slow network. Later changes: limactl edit anchi-vm --cpus N --memory N.',
-              action: () => performSetup('install', { cpus, memoryGiB }),
-            });
-          },
-        });
-      },
     });
   };
   const setupStep = (step: SetupAction) => {
     if (setupRunning.current) return setModal({ kind: 'setupLog', scroll: 0 });
-    if (step === 'install' && setup?.vm === 'missing' && setup.vmSize) {
-      return askVmSize(setup.vmSize);
-    }
     const [title, body] = (
       {
         'vault-init': [
           'Initialize the vault',
           'Create the local master key and unlock the vault. Back up ~/.config/anchi/vault.key. Existing encrypted accounts require their original key.',
         ],
-        'vm-start': ['Start the VM', 'Start the anchi-vm VM.'],
+        'vm-start': [
+          'Start the services',
+          "Start the guest's services: on this computer, Anchi's proxy and vault.",
+        ],
         install: [
           'Install or update',
-          'Create or update the anchi-vm VM, install the trusted services and the agent ' +
-            'team, and build the base image. A first installation downloads the VM image, Debian ' +
-            'packages and the base image tools: several minutes, up to half an hour on a slow ' +
-            'network; an update reuses what is done.',
-        ],
-        workspaces: [
-          'Share ~/AnchiWorkspaces',
-          'Mount ~/AnchiWorkspaces into the VM so agents can be given directories of this computer ' +
-            '(workspaces: in an agent). The VM restarts: running tasks stop, and the vault is ' +
-            'unlocked again afterwards.',
+          'Install or update the trusted services and the agent team on this server, and build ' +
+            'the base image. A first installation downloads Debian packages and the base image ' +
+            'tools: several minutes, up to half an hour on a slow network; an update reuses what ' +
+            'is done.',
         ],
         'vault-unlock': [
           'Unlock the vault',
-          'Send the vault key from ~/.config/anchi/vault.key on this computer to the VM, ' +
+          'Send the vault key from ~/.config/anchi/vault.key on this computer to the vault, ' +
             'where it is kept in memory only.',
         ],
       } as const
@@ -1699,8 +1650,6 @@ export function App({
         return setupStep('install');
       case 'setup:unlock':
         return setupStep(setup?.vaultKeyPresent === false ? 'vault-init' : 'vault-unlock');
-      case 'setup:workspaces':
-        return setupStep('workspaces');
       case 'setup:codex':
         return setModal({
           kind: 'confirm',
@@ -1901,7 +1850,7 @@ export function App({
           title: 'Import the gh CLI token',
           body:
             'Read the token the GitHub CLI on this computer is logged in with (`gh auth token`) and store ' +
-            'it in the VM vault. It carries every scope of your gh login, usually broader than a ' +
+            'it in the vault. It carries every scope of your gh login, usually broader than a ' +
             'fine-grained token limited to the repositories the agents need.',
           action: () => client.call('connectors.importGh'),
         });
@@ -2508,8 +2457,6 @@ export function App({
     : agent
       ? `@${agent.peer?.agent ?? agent.id} · ${sanitizeLine(agent.name)}  ${agent.execution ? `on ${agent.execution.server}/@${agent.execution.agent}` : `${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}`}${
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
-        }${
-          agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
         }${agent.skills?.length ? ` · 🧩 ${agent.skills.join(', ')}` : ''}${chatMode ? (task ? ` · ${task.id} (${task.status})` : ' · new task') : ''}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
@@ -2609,10 +2556,9 @@ export function App({
                             ['focus:sidebar', 'sidebar'],
                           ]
                         : [
-                            ['setup:vmStart', 'start VM'],
+                            ['setup:vmStart', 'start services'],
                             ['setup:install', 'install'],
                             ['setup:unlock', 'unlock'],
-                            ['setup:workspaces', 'workspaces'],
                             ['setup:codexSignIn', 'ChatGPT'],
                             ['setup:codex', 'Codex login'],
                             ['setup:claudeSignIn', 'Claude sign-in'],
@@ -3167,7 +3113,7 @@ function ConnectorsView({
         wrap="truncate"
       >{`${Math.min(cursor + 1, count)}/${count} connectors · ↑↓ choose · Enter connect`}</Text>
       <Text dimColor wrap="truncate">
-        Credentials stay in the VM vault.
+        Credentials stay in the vault.
       </Text>
     </Box>
   );
@@ -3262,16 +3208,11 @@ function RuntimesView({
   if (!setup) return <Text dimColor>Loading…</Text>;
   const c = setup.codex;
   const expired = c.expiresAt !== null && c.expiresAt < Date.now();
-  const size = setup.vmSize?.current;
   return (
     <Box flexDirection="column">
       <Text>
-        VM:{' '}
-        <Text color={setup.vm === 'running' ? 'green' : 'red'}>
-          {setup.vm}
-          {size ? ` (${size.cpus} CPUs, ${size.memoryGiB} GiB)` : ''}
-        </Text>{' '}
-        · vault:{' '}
+        {setup.placement === 'host' ? 'Services' : 'Guest'}:{' '}
+        <Text color={setup.vm === 'running' ? 'green' : 'red'}>{setup.vm}</Text> · vault:{' '}
         <Text color={setup.vaultUnlocked ? 'green' : 'red'}>
           {setup.vaultUnlocked ? 'unlocked' : 'locked'}
         </Text>{' '}
@@ -3282,7 +3223,7 @@ function RuntimesView({
       </Text>
       {setup.error ? (
         <Text color="red">
-          {`The VM runs but could not be asked: ${sanitizeLine(setup.error)} · r to check again; I reinstalls its components if it keeps failing`}
+          {`The guest runs but could not be asked: ${sanitizeLine(setup.error)} · r to check again; I reinstalls its components if it keeps failing`}
         </Text>
       ) : null}
       {setup.vm === 'running' && setup.installed && setup.guestOutdated !== undefined ? (
@@ -3309,14 +3250,6 @@ function RuntimesView({
           <Text color="yellow">
             not connected — run `codex login` on this computer, then press i
           </Text>
-        )}
-      </Text>
-      <Text>
-        Workspaces:{' '}
-        {setup.workspaces ? (
-          <Text color="green">~/AnchiWorkspaces is shared with the VM</Text>
-        ) : (
-          <Text dimColor>not set up — press W to share ~/AnchiWorkspaces</Text>
         )}
       </Text>
       <Text>
@@ -3823,7 +3756,7 @@ function ModalView({
             ? [{ text: `  ${plural(p.triggers, 'trigger')} and what they have seen` }]
             : []),
           {
-            text: '  in the VM: its home (work directory, Codex and Claude sessions), its skills and its policy rules',
+            text: '  in the guest: its home (work directory, Codex and Claude sessions), its skills and its policy rules',
           },
           ...(p.delegatedBy.length || p.delegatedByTemplates.length
             ? [
@@ -3834,7 +3767,7 @@ function ModalView({
             : []),
           { text: '' },
           {
-            text: `Kept: ${p.workspaces.length ? p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') : 'directories of your computer'} (workspaces are never touched), and the audit logs.`,
+            text: 'Kept: the audit logs.',
             color: 'green',
           },
         ]
@@ -3876,7 +3809,7 @@ function ModalView({
       ? [{ text: sanitizeLine(modal.error), color: 'red' }]
       : modal.data
         ? accessLines(modal.data, inner)
-        : [{ text: 'Reading the audit log in the VM…', dim: true }];
+        : [{ text: 'Reading the audit log in the guest…', dim: true }];
     const room = Math.max(3, height - 4);
     return (
       <Box

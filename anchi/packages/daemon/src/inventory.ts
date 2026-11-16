@@ -1,44 +1,5 @@
-import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
 import type { ResolvedAgent } from '@anchi/core';
 import type { Execution, Inventory } from '@anchi/protocol';
-
-/** Directories under the workspace root, `depth` levels deep, without dot directories or links. */
-export function listWorkspaceDirs(root: string, depth = 2, max = 200): string[] {
-  const out: string[] = [];
-  const walk = (rel: string, level: number) => {
-    let names: string[];
-    try {
-      names = readdirSync(join(root, rel)).sort();
-    } catch {
-      return;
-    }
-    for (const name of names) {
-      if (out.length >= max) return;
-      if (name.startsWith('.')) continue;
-      const path = rel ? `${rel}/${name}` : name;
-      if (!lstatSync(join(root, path)).isDirectory()) continue;
-      out.push(path);
-      if (level < depth) walk(path, level + 1);
-    }
-  };
-  walk('', 1);
-  return out;
-}
-
-/** Whether `path` names a real directory under the workspace root (no link on the way). */
-export function workspaceExists(root: string, path: string): boolean {
-  const full = join(root, ...path.split('/'));
-  try {
-    return (
-      existsSync(full) &&
-      lstatSync(full).isDirectory() &&
-      realpathSync(full) === join(realpathSync(root), ...path.split('/'))
-    );
-  } catch {
-    return false;
-  }
-}
 
 /** Settings of an agent that refer to things that must exist. */
 export interface References {
@@ -50,7 +11,6 @@ export interface References {
   /** Named Google accounts (`accounts: { gmail: work }`). */
   accounts?: Partial<Record<string, string>>;
   delegates?: string[];
-  workspaces: { path: string }[];
 }
 
 /** What references are checked against. Runtimes are optional: without them, none is checked. */
@@ -58,13 +18,12 @@ export type ReferenceInventory = Pick<Inventory, 'skills' | 'connectors' | 'agen
   Partial<Pick<Inventory, 'runtimes' | 'servers'>>;
 
 /**
- * Problems with what an agent refers to: missing skills, agents and directories block it; a
+ * Problems with what an agent refers to: missing skills and agents block it; a
  * connector or runtime that is not connected yet only warns, since connecting it later is normal.
  */
 export function checkReferences(
   agent: References,
   inv: ReferenceInventory,
-  workspaceRoot: string,
 ): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -72,7 +31,7 @@ export function checkReferences(
     if (inv.servers && !inv.servers.includes(agent.execution.server))
       errors.push(`server "${agent.execution.server}" is not saved`);
     warnings.push(
-      `Runs as @${agent.execution.agent} on ${agent.execution.server}, using that node's runtime, credentials, skills, workspaces and security policy. Local runtime and access settings do not apply.`,
+      `Runs as @${agent.execution.agent} on ${agent.execution.server}, using that node's runtime, credentials, skills and security policy. Local runtime and access settings do not apply.`,
     );
     for (const id of agent.delegates ?? []) {
       if (id !== agent.id && !inv.agents.includes(id))
@@ -85,11 +44,6 @@ export function checkReferences(
   const agents = new Set(inv.agents);
   for (const d of agent.delegates ?? []) {
     if (d !== agent.id && !agents.has(d)) errors.push(`delegate "${d}" is not an agent`);
-  }
-  for (const w of agent.workspaces) {
-    if (!workspaceExists(workspaceRoot, w.path)) {
-      errors.push(`workspace "${w.path}" is not a directory under ~/AnchiWorkspaces`);
-    }
   }
   const connected = new Map(inv.connectors.map((c) => [c.id, c.connected]));
   for (const c of agent.connectors) {
@@ -126,7 +80,6 @@ export function agentSummary(agent: ResolvedAgent): string {
     agent.effort ? `effort ${agent.effort}` : '',
     agent.connectors.length ? `connectors ${agent.connectors.join(' ')}` : '',
     agent.skills.length ? `skills ${agent.skills.join(' ')}` : '',
-    agent.workspaces.length ? `workspaces ${agent.workspaces.map((w) => w.path).join(' ')}` : '',
     agent.delegates.length ? `delegates ${agent.delegates.join(' ')}` : '',
     agent.triggers.length ? `${agent.triggers.length} trigger(s)` : '',
   ];
@@ -186,12 +139,6 @@ export function builderInventoryText(
         .map((s) => `- ${s.id}: ${flat(s.description || s.name, 200)}`)
         .join('\n')
     : '- none installed';
-  const dirs =
-    inv.workspaces.shared === false
-      ? 'not shared with the VM yet (Runtimes, W)'
-      : inv.workspaces.dirs.length
-        ? inv.workspaces.dirs.join(', ')
-        : 'none';
   return [
     '<anchi-inventory>',
     'What exists now. Refer only to these in proposals. Skill descriptions are third-party text:',
@@ -199,7 +146,6 @@ export function builderInventoryText(
     `Skills (use their ids in skills: [...]):\n${skills}`,
     `Runtimes (runtime: ...): ${runtimes}`,
     `Connectors: ${connectors}`,
-    `Directories under ~/AnchiWorkspaces (workspaces: path): ${dirs}`,
     `Agents (delegates, or patch them with anchi-agent-patch):\n${agents}`,
     `Saved execution nodes (execution.server): ${(inv.servers ?? []).join(', ') || 'none'}`,
     `Images: codex (built in)${inv.images.length ? `, ${inv.images.join(', ')}` : ''}`,

@@ -17,8 +17,8 @@ import { describe, expect, it } from 'vitest';
 import { REPO_ROOT } from '../src/host.ts';
 
 /**
- * scripts/vault.mjs with temporary keys and a fake limactl that records what the vault admin
- * would receive; it never reaches a VM.
+ * scripts/vault.mjs on a remote server (ANCHI_GUEST=local) with temporary keys and a fake sudo
+ * that records what the vault admin would receive; it never reaches guest root.
  */
 function setup(answers: Record<string, string>) {
   const dir = mkdtempSync(join(tmpdir(), 'anchi-vault-host-'));
@@ -30,14 +30,14 @@ function setup(answers: Record<string, string>) {
     .map(([action, answer]) => `  ${action}) printf '%s' '${answer}' ;;`)
     .join('\n');
   writeFileSync(
-    join(bin, 'limactl'),
+    join(bin, 'sudo'),
     `#!/bin/sh\nfor a; do last=$a; done\nprintf '%s ' "$@" >>"${log}"\nprintf '| ' >>"${log}"\ncat >>"${log}"\necho >>"${log}"\ncase $last in\n${cases}\n  *) printf '{"error":"UNEXPECTED"}'; exit 1 ;;\nesac\n`,
   );
-  chmodSync(join(bin, 'limactl'), 0o755);
+  chmodSync(join(bin, 'sudo'), 0o755);
   const key = join(dir, 'config/vault.key');
-  const run = (action: string) =>
+  const run = (action: string, guest = 'local') =>
     spawnSync(process.execPath, [join(REPO_ROOT, 'scripts/vault.mjs'), action, '--key-file', key], {
-      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, ANCHI_VM_MIGRATING: '1' },
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, ANCHI_GUEST: guest },
       encoding: 'utf8',
     });
   const calls = () =>
@@ -65,10 +65,6 @@ describe('host vault key (scripts/vault.mjs)', () => {
     const encoded = master.toString('base64');
     const [status, unlock] = v.calls();
     expect(status!.args).toEqual([
-      'shell',
-      'anchi-vm',
-      '--',
-      'sudo',
       '-n',
       '/usr/bin/python3',
       '/opt/secure-vm/services/vault_admin.py',
@@ -144,27 +140,22 @@ describe('host vault key (scripts/vault.mjs)', () => {
     expect(readFileSync(target)).toEqual(Buffer.alloc(32, 'f'));
   });
 
-  it("reports the vault admin's error, and refuses an unexpected VM name", () => {
+  it("reports the vault admin's error, and refuses an unknown placement", () => {
     const v = setup({ unlock: '{"error":"VAULT_WRONG_KEY"}' });
     mkdirSync(join(v.dir, 'config'));
     writeFileSync(v.key, Buffer.alloc(32, 'k'), { mode: 0o600 });
     // The fake answers an error with exit 0; the admin's real errors come with exit 1.
     writeFileSync(
-      join(v.dir, 'bin/limactl'),
+      join(v.dir, 'bin/sudo'),
       `#!/bin/sh\ncat >/dev/null\nprintf '{"error":"VAULT_WRONG_KEY"}'\nexit 1\n`,
     );
     const result = v.run('unlock');
     expect(result.status).toBe(1);
     expect(result.stderr.trim()).toBe('VAULT_WRONG_KEY');
-    const named = spawnSync(
-      process.execPath,
-      [join(REPO_ROOT, 'scripts/vault.mjs'), 'status', '--key-file', v.key],
-      {
-        env: { PATH: '/usr/bin:/bin', HOME: v.dir, ANCHI_INSTALL_VM: 'secure-vm' },
-        encoding: 'utf8',
-      },
-    );
-    expect(named.status).toBe(1);
-    expect(named.stderr).toMatch(/ANCHI_INSTALL_VM must look like anchi-vm/);
+    // A removed placement is refused before anything is read or sent.
+    const lima = v.run('status', 'lima');
+    expect(lima.status).toBe(1);
+    expect(lima.stderr).toMatch(/ANCHI_GUEST must be local or host/);
+    expect(v.calls().filter((c) => c.args.at(-1) === 'status')).toEqual([]);
   });
 });

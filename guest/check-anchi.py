@@ -48,10 +48,10 @@ def check(name, ok, detail=''):
     print(f'{"PASS" if ok else "FAIL"}  {name}{f"  ({detail})" if detail else ""}', flush=True)
 
 
-def start(task, agent, connectors='-', workspaces='-', egress='-'):
+def start(task, agent, connectors='-', egress='-'):
     """Starts a cell whose runner idles on an open stdin."""
     proc = subprocess.Popen(
-        ['anchi-cell', 'start', task, agent, 'codex', 'base', connectors, 'cell', 'codex', '-', workspaces, egress],
+        ['anchi-cell', 'start', task, agent, 'codex', 'base', connectors, 'cell', 'codex', '-', egress],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -322,7 +322,7 @@ def main():
 
     since = time.time()
     allow = base64.urlsafe_b64encode(json.dumps(['example.com']).encode()).decode().rstrip('=')
-    e, ready_e = start('chk-e', 'chk-alpha', '-', '-', allow)
+    e, ready_e = start('chk-e', 'chk-alpha', '-', allow)
     try:
         allowed = proxied('chk-e', 'https://example.com/') if ready_e else ''
         refused = proxied('chk-e', 'https://example.org/') if ready_e else ''
@@ -428,12 +428,8 @@ def main():
         f'{bad.strip()[:40]} / {quota.strip()[:60]}',
     )
 
-    # ── deleting an agent removes its VM files and never reaches a workspace ──
+    # ── deleting an agent removes its guest files and nothing mounted below them ──
     check_purge()
-
-    # ── host workspaces (macOS, when ~/AnchiWorkspaces is shared) ──
-    if os.path.ismount('/mnt/anchi-host'):
-        check_workspaces()
 
     # ── M1: start-up time ──
     import importlib.util
@@ -492,24 +488,12 @@ def main():
 
 
 def check_purge():
-    import base64
     import shutil
 
     homes = Path('/var/lib/anchi/agents/chk-purge')
     admin = ['/usr/bin/python3', '/opt/secure-vm/services/policy_admin.py']
-    shared = os.path.ismount('/mnt/anchi-host')
-    spec = '-'
-    keep = None
-    if shared:
-        base = Path('/mnt/anchi-host/.anchi-check-purge')
-        shutil.rmtree(base, ignore_errors=True)
-        base.mkdir(parents=True)
-        keep = base / 'keep.txt'
-        keep.write_text('the Mac keeps this')
-        items = [{'name': 'w', 'path': '.anchi-check-purge', 'mode': 'rw'}]
-        spec = base64.urlsafe_b64encode(json.dumps(items).encode()).decode().rstrip('=')
     subprocess.run([*admin, 'mode', 'notion:chk-purge', 'ask'], capture_output=True)
-    proc, ready = start('chk-p', 'chk-purge', '-', spec)
+    proc, ready = start('chk-p', 'chk-purge')
     try:
         r = subprocess.run(['anchi-cell', 'purge-agent', 'chk-purge'], capture_output=True, text=True)
         check(
@@ -544,77 +528,15 @@ def check_purge():
     except ValueError:
         removed = {}
     check(
-        'purging removes the home and policy rules, and leaves workspaces as they were',
+        'purging removes the home and policy rules, and nothing mounted below them',
         removed.get('home') is True
         and removed.get('policy') == ['notion:chk-purge']
         and not homes.exists()
         and 'notion:chk-purge' not in rules
-        and (trap / 'canary').exists()
-        and (keep is None or keep.read_text() == 'the Mac keeps this'),
-        f'{r.stdout.strip()[:80]}{" · workspace kept" if keep and keep.exists() else ""}',
+        and (trap / 'canary').exists(),
+        r.stdout.strip()[:80],
     )
     shutil.rmtree(trap, ignore_errors=True)
-    if keep:
-        shutil.rmtree(keep.parent, ignore_errors=True)
-
-
-def check_workspaces():
-    import base64
-    import shutil
-
-    base = Path('/mnt/anchi-host/.anchi-check')
-    shutil.rmtree(base, ignore_errors=True)
-    for d in ('rw/repo/.git/hooks', 'ro', 'secret'):
-        (base / d).mkdir(parents=True)
-    (base / 'rw/repo/.git/config').write_text('[core]\n')
-    (base / 'ro/doc.txt').write_text('read me')
-    (base / 'secret/key.txt').write_text('not for this agent')
-    (base / 'link').symlink_to('rw')
-
-    def arg(items):
-        return base64.urlsafe_b64encode(json.dumps(items).encode()).decode().rstrip('=')
-
-    spec = arg(
-        [
-            {'name': 'rw', 'path': '.anchi-check/rw', 'mode': 'rw'},
-            {'name': 'ro', 'path': '.anchi-check/ro', 'mode': 'ro'},
-        ]
-    )
-    proc, ready = start('chk-w', 'chk-alpha', '-', spec)
-    try:
-        check('workspace cell starts', ready)
-        _, seen = sh('chk-w', 'ls /home/agent/workspaces')
-        check('a cell sees only its workspaces', seen.split() == ['ro', 'rw'], seen)
-        _, ro = sh('chk-w', 'cat ~/workspaces/ro/doc.txt; echo x > ~/workspaces/ro/new.txt 2>&1 || echo RO')
-        check('ro workspaces are readable and refuse writes', 'read me' in ro and 'RO' in ro, ro[:120])
-        _, rw = sh('chk-w', 'echo agent > ~/workspaces/rw/out.txt && echo RW')
-        check('rw workspaces accept writes', 'RW' in rw and (base / 'rw/out.txt').exists(), rw[:120])
-        _, masked = sh(
-            'chk-w',
-            'cd ~/workspaces/rw/repo; echo x > .git/hooks/post-checkout 2>&1 || echo HOOKS; '
-            'echo x >> .git/config 2>&1 || echo CONFIG',
-        )
-        check('git hooks and config are read-only in rw workspaces', 'HOOKS' in masked and 'CONFIG' in masked, masked)
-        _, escape = sh(
-            'chk-w',
-            'ln -s ../secret ~/workspaces/rw/up; cat ~/workspaces/rw/up/key.txt 2>&1; ls ~/workspaces/rw/up 2>&1',
-        )
-        check('symlinks cannot reach other directories of the Mac', 'not for this agent' not in escape, escape[:120])
-    finally:
-        stop(proc)
-    bad = {
-        'dotdot': arg([{'name': 'x', 'path': '.anchi-check/../.anchi-check/secret', 'mode': 'ro'}]),
-        'via symlink': arg([{'name': 'x', 'path': '.anchi-check/link', 'mode': 'rw'}]),
-    }
-    for label, spec in bad.items():
-        out = subprocess.run(
-            ['anchi-cell', 'start', 'chk-x', 'chk-alpha', 'codex', 'base', '-', 'cell', 'codex', '-', spec],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-        ).stdout
-        check(f'workspace refused: {label}', '"error"' in out and 'WORKSPACE' in out.upper(), out[:80])
-    shutil.rmtree(base, ignore_errors=True)
 
 
 def measure_nspawn():

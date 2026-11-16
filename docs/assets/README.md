@@ -14,7 +14,7 @@ node --import ./anchi/node_modules/tsx/dist/loader.mjs anchi/packages/desktop/sc
 ```
 
 The script listens on the daemon socket of a new temporary `ANCHI_HOME`, drives the app with
-`scripts/drive.mjs` at 1440 × 900 (2×) and never contacts a daemon, VM or account.
+`scripts/drive.mjs` at 1440 × 900 (2×) and never contacts a daemon, server or account.
 
 ## TUI
 
@@ -28,5 +28,5 @@ Regenerate from the repository root after installing workspace development depen
 node --import ./anchi/node_modules/tsx/dist/loader.mjs anchi/packages/tui/test/render-demo.tsx
 ```
 
-The generator uses an in-memory fake client and never contacts the daemon, VM or an account.
+The generator uses an in-memory fake client and never contacts the daemon, a server or an account.
 Review the rendered SVG after changes to the TUI layout.

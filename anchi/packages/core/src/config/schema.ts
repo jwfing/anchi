@@ -134,39 +134,6 @@ const egressPattern = z
     'use a host name such as registry.npmjs.org or *.pypi.org',
   );
 
-/** A path segment under ~/AnchiWorkspaces: no separators, no `.` or `..`, no control characters. */
-const segment = z
-  .string()
-  .regex(/^[A-Za-z0-9._ -]{1,100}$/)
-  .refine((s) => s !== '.' && s !== '..' && s.trim() === s, 'invalid path segment');
-
-/** A directory of the Mac (under ~/AnchiWorkspaces) bound into the agent's cells. */
-export const workspaceSchema = z.strictObject({
-  /** Relative to ~/AnchiWorkspaces, such as `projects/webapp`. */
-  path: z
-    .string()
-    .max(500)
-    .refine((p) => p.split('/').every((s) => segment.safeParse(s).success), {
-      message: 'use a path relative to ~/AnchiWorkspaces, without "..", leading "/" or empty parts',
-    }),
-  /** `ro` (default) or `rw`: writes go straight to the Mac. */
-  mode: z.enum(['ro', 'rw']).default('ro'),
-  /** Name under /home/agent/workspaces; the last path segment by default. */
-  name: idSchema.optional(),
-});
-export type Workspace = z.infer<typeof workspaceSchema>;
-export const WORKSPACE_ROOT = '~/AnchiWorkspaces';
-export const workspaceName = (w: { path: string; name?: string }) =>
-  w.name ??
-  (w.path
-    .split('/')
-    .at(-1)!
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/^-+/, '')
-    .slice(0, 40) ||
-    'workspace');
-
 /** `cell`: the cell is the only boundary. `codex-workspace-write` adds Codex's own sandbox. */
 export const sandboxSchema = z.enum(['cell', 'codex-workspace-write']);
 export type Sandbox = z.infer<typeof sandboxSchema>;
@@ -240,7 +207,6 @@ export const agentLayerSchema = z.strictObject({
    * otherwise. Pinned to the agent's cells by the trusted bridge; the agent cannot switch.
    */
   accounts: accountsSchema.optional(),
-  workspaces: z.array(workspaceSchema).max(10).optional(),
   /** Tasks of this agent that run at the same time; the others queue (default 3). */
   maxTasks: z.number().int().min(1).max(10).optional(),
   /** Hosts the agent's cells may reach (plus its runtime and connectors); omitted: any. */
@@ -276,13 +242,8 @@ export const resolvedAgentSchema = z
     highRisk: z
       .strictObject({ disable: z.array(highRiskIdSchema).max(30).default([]) })
       .default({ disable: [] }),
-    workspaces: z.array(workspaceSchema).max(10).default([]),
     maxTasks: z.number().int().min(1).max(10).default(DEFAULT_MAX_TASKS),
     egress: z.array(egressPattern).max(100).optional(),
-  })
-  .refine((a) => new Set(a.workspaces.map(workspaceName)).size === a.workspaces.length, {
-    message: 'workspaces need distinct names; set name: for one of them',
-    path: ['workspaces'],
   })
   .refine((a) => a.runtime === 'codex' || a.sandbox === 'cell', {
     message: 'sandbox codex-workspace-write needs runtime codex',

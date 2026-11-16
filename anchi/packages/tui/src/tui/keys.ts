@@ -89,12 +89,12 @@ export const ACTIONS = {
   'task:delete': { title: 'Delete the task and the tasks it delegated', contexts: ['task'] },
   'approvals:open': { title: 'Review a write waiting for approval', contexts: ['global'] },
   'agent:delete': {
-    title: 'Delete the agent with its tasks and its files in the VM',
+    title: 'Delete the agent with its tasks and its files in the guest',
     contexts: ['global'],
   },
   'sidebar:delete': { title: 'Delete the selected agent or task', contexts: ['sidebar'] },
   'agent:settings': {
-    title: 'Agent settings: skills, connectors, workspaces',
+    title: 'Agent settings: skills, connectors, delegation',
     contexts: ['global'],
   },
   'builder:proposal': { title: 'Reopen the pending builder proposal', contexts: ['global'] },
@@ -123,13 +123,9 @@ export const ACTIONS = {
   'list:pageDown': { title: 'Move down a page', contexts: ['skills'] },
   'list:first': { title: 'Move to the first', contexts: ['skills'] },
   'list:last': { title: 'Move to the last', contexts: ['skills'] },
-  'setup:vmStart': { title: 'Start the VM', contexts: ['runtimes', 'welcome'] },
+  'setup:vmStart': { title: 'Start the services', contexts: ['runtimes', 'welcome'] },
   'setup:install': { title: 'Install or update', contexts: ['runtimes', 'welcome'] },
   'setup:unlock': { title: 'Unlock the vault', contexts: ['runtimes', 'welcome'] },
-  'setup:workspaces': {
-    title: 'Share ~/AnchiWorkspaces with the VM',
-    contexts: ['runtimes', 'welcome'],
-  },
   'setup:codex': { title: 'Import the Codex login', contexts: ['runtimes', 'welcome'] },
   'setup:codexSignIn': {
     title: 'Sign in to ChatGPT for Codex in any browser (no Codex CLI needed)',
@@ -302,7 +298,6 @@ export const DEFAULT_BINDINGS: Record<Context, Record<string, ActionId>> = {
     I: 'setup:install',
     u: 'setup:unlock',
     V: 'setup:init',
-    W: 'setup:workspaces',
     i: 'setup:codex',
     g: 'setup:codexSignIn',
     c: 'setup:claude',

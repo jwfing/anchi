@@ -811,7 +811,7 @@ describe('App', () => {
     await tick();
     ui.stdin.write('\u001b[C'); // → opens it
     await tick();
-    expect(ui.lastFrame()).toContain('VM: running');
+    expect(ui.lastFrame()).toContain('Guest: running');
     ui.stdin.write('\t'); // Tab back to the sidebar
     await tick();
     ui.stdin.write('?');
@@ -932,7 +932,7 @@ describe('App', () => {
     await tick();
     for (const _ of [1, 2, 3, 4, 5]) ui.stdin.write('\u0010'); // ^P ×5 → runtimes
     await tick();
-    expect(ui.lastFrame()).toContain('start VM');
+    expect(ui.lastFrame()).toContain('start services');
     ui.stdin.write('u');
     await tick();
     expect(ui.lastFrame()).toContain('vault.key');
@@ -1249,7 +1249,6 @@ describe('agent settings panel', () => {
       prompt: { mode: 'append', text: '' },
       skills: [],
       connectors: ['github'],
-      workspaces: [],
       highRisk: { disable: [] },
       ...over,
     },
@@ -1268,7 +1267,6 @@ describe('agent settings panel', () => {
         { id: 'github', connected: true },
         { id: 'notion', connected: false },
       ],
-      workspaces: { shared: true, dirs: ['projects/webapp'] },
       runtimes: [],
       agents: ['dev'],
       images: [],
@@ -1283,7 +1281,7 @@ describe('agent settings panel', () => {
     applied: false,
   };
 
-  it('selects skills, connectors and workspaces, shows the change and saves only after y', async () => {
+  it('selects skills and connectors, shows the change and saves only after y', async () => {
     const { client, calls } = fakeClient(
       {},
       {
@@ -1303,13 +1301,9 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write(' '); // the first skill: review
     await tick();
-    for (let i = 0; i < 15; i++) ui.stdin.write('j'); // down to the workspace
+    for (let i = 0; i < 14; i++) ui.stdin.write('j'); // down to the last connector
     await tick();
-    ui.stdin.write(' ');
-    await tick();
-    ui.stdin.write(' '); // ro → rw
-    frame = await frameWith(ui, '[rw]');
-    expect(frame).toContain('writes go straight to your computer');
+    frame = await frameWith(ui, '[x]  review');
     expect(frame).toMatch(/\[ \] +notion +not connected/); // scrolled into view
     ui.stdin.write('\r');
     frame = await frameWith(ui, 'save these settings?');
@@ -1319,7 +1313,7 @@ describe('agent settings panel', () => {
         'agents.update',
         {
           agentId: 'dev',
-          patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+          patch: { skills: ['review'] },
         },
       ],
     ]);
@@ -1329,7 +1323,7 @@ describe('agent settings panel', () => {
       'agents.update',
       {
         agentId: 'dev',
-        patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+        patch: { skills: ['review'] },
         apply: true,
         base: 'b1',
       },
@@ -1359,8 +1353,8 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write('s');
     await frameWith(ui, 'Reviews pull requests');
-    // Past 7 fields, 1 skill, 14 connectors and 1 workspace: github's, not aws's.
-    for (let i = 0; i < 23; i++) ui.stdin.write('j');
+    // Past 7 fields, 1 skill and 14 connectors: github's, not aws's.
+    for (let i = 0; i < 22; i++) ui.stdin.write('j');
     await tick();
     ui.stdin.write(' ');
     const frame = await frameWith(ui, '[x]  github-merge');
@@ -1672,7 +1666,6 @@ describe('deleting agents', () => {
     delegatedBy: ['lead'],
     delegatedByTemplates: [],
     triggers: 0,
-    workspaces: ['projects/web'],
   };
   const answers = {
     'agents.deletePreview': () => preview,
@@ -1699,7 +1692,7 @@ describe('deleting agents', () => {
     expect(frame).toContain('3 tasks and their transcripts, with 1 task other agents did for them');
     expect(frame).toContain('1 running or queued: cancelled first');
     expect(frame).toContain('Changed: removed from the delegates of @lead');
-    expect(frame).toContain('Kept: ~/AnchiWorkspaces/projects/web (workspaces are never touched)');
+    expect(frame).toContain('Kept: the audit logs.');
     ui.stdin.write('\r'); // nothing typed yet
     await tick();
     ui.stdin.write('de');
@@ -1737,7 +1730,6 @@ describe('deleting agents', () => {
             prompt: { mode: 'append', text: '' },
             skills: [],
             connectors: [],
-            workspaces: [],
             highRisk: { disable: [] },
           },
           inherited: [],
@@ -1752,7 +1744,6 @@ describe('deleting agents', () => {
           inventory: {
             skills: [],
             connectors: [],
-            workspaces: { shared: true, dirs: [] },
             runtimes: [],
             agents: [],
             images: [],
@@ -2160,81 +2151,7 @@ describe('usability workflows', () => {
     ui.unmount();
   });
 
-  it('asks the size of a new VM, half of this computer by default, before creating it', async () => {
-    const { client, calls } = fakeClient(
-      {},
-      {
-        'setup.status': () => ({
-          vm: 'missing',
-          installed: false,
-          vaultUnlocked: false,
-          vaultKeyPresent: false,
-          codex: { connected: false, expiresAt: null },
-          vmSize: { default: { cpus: 5, memoryGiB: 12 }, host: { cpus: 10, memoryGiB: 24 } },
-        }),
-      },
-    );
-    const ui = render(
-      <App
-        client={client}
-        initialView="welcome"
-        initialAgents={[agent('builder')]}
-        initialTasks={[]}
-      />,
-    );
-    await frameWith(ui, 'Prepare local environment');
-    ui.stdin.write('\r');
-    expect(await frameWith(ui, 'New VM: CPUs')).toContain('This computer has 10; half is 5.');
-    ui.stdin.write('\u007f');
-    ui.stdin.write('6');
-    await tick();
-    ui.stdin.write('\r');
-    expect(await frameWith(ui, 'New VM: memory')).toContain('12');
-    ui.stdin.write('\r');
-    expect(await frameWith(ui, 'with 6 CPUs and 12 GiB')).toContain('Install');
-    expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
-    ui.stdin.write('y');
-    await tick();
-    expect(calls.find(([m]) => m === 'setup.run')?.[1]).toEqual({
-      action: 'install',
-      vmSize: { cpus: 6, memoryGiB: 12 },
-    });
-    ui.unmount();
-  });
-
-  it('refuses a VM size this computer cannot give', async () => {
-    const { client, calls } = fakeClient(
-      {},
-      {
-        'setup.status': () => ({
-          vm: 'missing',
-          installed: false,
-          vaultUnlocked: false,
-          codex: { connected: false, expiresAt: null },
-          vmSize: { default: { cpus: 5, memoryGiB: 12 }, host: { cpus: 10, memoryGiB: 24 } },
-        }),
-      },
-    );
-    const ui = render(
-      <App
-        client={client}
-        initialView="welcome"
-        initialAgents={[agent('builder')]}
-        initialTasks={[]}
-      />,
-    );
-    await frameWith(ui, 'Prepare local environment');
-    ui.stdin.write('\r');
-    await frameWith(ui, 'New VM: CPUs');
-    ui.stdin.write('1');
-    await tick();
-    ui.stdin.write('\r'); // 51 CPUs
-    expect(await frameWith(ui, 'from 1 to 10')).toContain('CPUs must be a whole number');
-    expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
-    ui.unmount();
-  });
-
-  it('asks to update the VM components installed by another Anchi version', async () => {
+  it('asks to update the guest components installed by another Anchi version', async () => {
     const outdated = {
       vm: 'running',
       installed: true,
@@ -2258,7 +2175,7 @@ describe('usability workflows', () => {
       '→ Prepare local environment',
     );
     ui.stdin.write('\r');
-    expect(await frameWith(ui, 'Install or update')).toContain('update the anchi-vm VM');
+    expect(await frameWith(ui, 'Install or update')).toContain('update the trusted services');
     expect(calls.some(([m]) => m === 'setup.run')).toBe(false);
     ui.stdin.write('y');
     await tick();
@@ -2382,18 +2299,14 @@ describe('usability workflows', () => {
     ui.unmount();
   });
 
-  it('shows the VM size, and says when the VM runs but could not be asked', async () => {
+  it('says when the guest runs but could not be asked', async () => {
     const status = {
       vm: 'running',
+      placement: 'local',
       installed: false,
       vaultUnlocked: false,
       vaultKeyPresent: true,
       codex: { connected: false, expiresAt: null },
-      vmSize: {
-        default: { cpus: 5, memoryGiB: 12 },
-        host: { cpus: 10, memoryGiB: 24 },
-        current: { cpus: 5, memoryGiB: 10 },
-      },
       error: 'GUEST_UNAVAILABLE: sudo: a password is required',
       guestOutdated: false,
     };
@@ -2407,7 +2320,7 @@ describe('usability workflows', () => {
       />,
     );
     const frame = await frameWith(ui, 'could not be asked');
-    expect(frame).toContain('running (5 CPUs, 10 GiB)');
+    expect(frame).toContain('Guest: running');
     // The message wraps at the pane's width; its start is on the first line.
     expect(frame).toContain('could not be asked: GUEST_UNAVAILABLE');
     ui.unmount();
@@ -2646,7 +2559,6 @@ describe('onboarding and team state', () => {
         vm: 'missing' as 'missing' | 'running',
         installed: false,
         vaultUnlocked: false,
-        vmSize: { default: { cpus: 4, memoryGiB: 8 }, host: { cpus: 8, memoryGiB: 16 } },
       };
       const { client, calls } = fakeClient(
         {},
@@ -2660,14 +2572,14 @@ describe('onboarding and team state', () => {
       );
       await frameWith(ui, 'local login detected');
       ui.stdin.write('\r');
-      expect(await frameWith(ui, 'Recommended resources')).toContain('4 CPUs and 8 GiB');
+      expect(await frameWith(ui, 'initialize or unlock credential storage')).toContain('Prepare');
       expect(ui.lastFrame()).not.toContain('Choose your runtime');
       expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
       ui.stdin.write('n');
       await tick();
       expect(calls.some(([m]) => m === 'setup.prepare')).toBe(false);
       ui.stdin.write('\r');
-      await frameWith(ui, 'Recommended resources');
+      await frameWith(ui, 'initialize or unlock credential storage');
       ui.stdin.write('y');
       await frameWith(ui, 'review your starter');
       expect(calls.find(([m]) => m === 'setup.prepare')?.[1]).toEqual({ runtime, confirm: true });
@@ -2716,7 +2628,7 @@ describe('onboarding and team state', () => {
       id: 'p-quick',
       agentId: 'dev',
       kind: 'create',
-      agentYaml: 'runtime: codex\nconnectors: []\nworkspaces: []',
+      agentYaml: 'runtime: codex\nconnectors: []',
       agentDiff: '+ runtime: codex',
       imageYaml: null,
       imageDiff: '',
@@ -2841,7 +2753,7 @@ describe('onboarding and team state', () => {
     expect(
       nextSetupAction({
         ...ready,
-        host: { platform: 'linux', missing: ['limactl'], installHint: 'Install Lima' },
+        host: { platform: 'linux', missing: ['openssl'], installHint: 'Install openssl' },
       }),
     ).toBeUndefined();
     expect(welcomeStep({ ...ready, codex: { ...ready.codex, expiresAt: 1 } }, [], [])).toBe(

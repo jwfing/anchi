@@ -9,7 +9,7 @@ import { homeLayout } from '@anchi/core';
 import type { TaskRow, TeamRun } from '@anchi/protocol';
 import { Daemon } from '../src/daemon.ts';
 import { DaemonClient } from '../src/rpc.ts';
-import { Guest, LimaTransport, type GuestTransport } from '../src/guest.ts';
+import { Guest, InGuestTransport, type GuestTransport } from '../src/guest.ts';
 import { addServer } from '../src/remote.ts';
 import { HostLogins } from '../src/host-logins.ts';
 
@@ -68,7 +68,7 @@ async function start(
   const daemon = new Daemon({
     layout,
     guest: new Guest(cells),
-    vm: new LimaTransport('anchi-vm-test', join(layout.root, 'no-limactl')),
+    vm: new InGuestTransport(join(layout.root, 'no-sudo')),
     hostLogins: new HostLogins({
       codexFile: join(layout.root, 'no-auth'),
       claudeDir: layout.root,
@@ -80,7 +80,6 @@ async function start(
     hostLoginSync: false,
     quiet: true,
     log: () => {},
-    workspaceRoot: join(layout.root, 'workspaces'),
     teamPollMs: 10,
     ...extra,
   });

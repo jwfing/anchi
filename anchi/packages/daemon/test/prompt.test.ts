@@ -13,51 +13,24 @@ function agent(yaml: string) {
 }
 
 describe('environment note', () => {
-  it("tells an agent where the user's shared directories are and that ~/work stays in the VM", () => {
-    const note = environmentNote(
-      agent(
-        'runtime: claude-code\nworkspaces:\n  - { path: projects, mode: rw }\n' +
-          '  - { path: docs/specs, mode: ro, name: specs }\n',
-      ),
-    );
-    expect(note).toContain(
-      'files elsewhere (except in the shared directories below) are discarded',
-    );
-    expect(note).toContain('/home/agent/work stays inside');
-    expect(note).toContain(
-      "- /home/agent/workspaces/projects: the user's ~/AnchiWorkspaces/projects, read-write;",
-    );
-    expect(note).toContain(
-      "- /home/agent/workspaces/specs: the user's ~/AnchiWorkspaces/docs/specs, read-only.",
-    );
-    expect(note).toMatch(/clone .* in a read-write one, not in \/home\/agent\/work/);
-    // Dependencies and builds stay off the slow shared directories.
-    expect(note).toMatch(
-      /Keep dependencies, virtual environments, caches and build output in \/home\/agent\/work/,
-    );
-  });
-
-  it('keeps work in ~/work when every shared directory is read-only', () => {
-    const note = environmentNote(agent('runtime: codex\nworkspaces: [{ path: specs }]\n'));
-    expect(note).toContain('read-only.');
-    expect(note).toContain('keep your own work in /home/agent/work');
-    expect(note).not.toContain('read-write');
-  });
-
-  it('says nothing about shared directories when the agent has none', () => {
+  it('names the working directory and says that files elsewhere are discarded', () => {
     const note = environmentNote(agent('runtime: codex\n'));
     expect(note).toContain('Your persistent working directory is /home/agent/work');
-    expect(note).not.toContain('/home/agent/workspaces');
-    expect(note).not.toContain('Shared directories are much slower');
+    expect(note).toContain('files elsewhere are discarded when the task ends');
+    expect(note).toContain('No services are connected');
+  });
+
+  it('lists the connected services with how to use them', () => {
+    const note = environmentNote(agent('runtime: codex\nconnectors: [github, linear]\n'));
+    expect(note).toContain('Connected services:');
+    expect(note).toMatch(/- GitHub: `git` over HTTPS/);
+    expect(note).toMatch(/- Linear: call the GraphQL API/);
   });
 
   it("comes after the agent's own prompt", () => {
-    const { text } = instructions(
-      agent(
-        'runtime: codex\nprompt: { text: Review code. }\nworkspaces: [{ path: p, mode: rw }]\n',
-      ),
-    );
+    const { text, mode } = instructions(agent('runtime: codex\nprompt: { text: Review code. }\n'));
     expect(text.indexOf('Review code.')).toBe(0);
-    expect(text).toContain('/home/agent/workspaces/p');
+    expect(text).toContain('## Environment');
+    expect(mode).toBe('append');
   });
 });

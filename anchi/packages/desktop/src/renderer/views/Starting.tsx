@@ -15,7 +15,7 @@ export interface Check {
 }
 
 /**
- * What has to be up before agents can work, in the order it comes up: the daemon, the VM, the
+ * What has to be up before agents can work, in the order it comes up: the daemon, the guest, the
  * vault, then the agents. Nothing below a part that is not up yet can be known, so it waits.
  */
 export function startChecklist(

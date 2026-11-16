@@ -199,10 +199,7 @@ export function DeletionDetails({ preview: p }: { preview: AgentDeletionPreview 
           .
         </p>
       )}
-      <p>
-        Shared folders{p.workspaces.length ? ` (${p.workspaces.map(sanitizeLine).join(', ')})` : ''}{' '}
-        and audit logs are kept. This cannot be undone.
-      </p>
+      <p>Audit logs are kept. This cannot be undone.</p>
     </>
   );
 }

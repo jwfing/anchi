@@ -4,6 +4,7 @@ import {
   type AccessSummary,
   CONNECTOR_IDS,
   type ConnectorId,
+  type HostStatus,
   type Notifications,
   type ServiceConnectorId,
   type ServiceConnectorStatus,
@@ -191,7 +192,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
     setBusy(false);
     onChange();
   };
-  const [typed, setTyped] = useState('');
   const [startup, setStartup] = useState<boolean>();
   useEffect(() => {
     if (server.name !== 'local') return;
@@ -204,14 +204,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
       current = false;
     };
   }, [server.name]);
-  const reset = async () => {
-    setBusy(true);
-    setLines([]);
-    const done = await act(() => call('setup.reset', { confirm: typed }), 'Anchi was reset');
-    setBusy(false);
-    setTyped('');
-    if (done) onChange();
-  };
   const running = status.vm === 'running' && status.installed;
   return (
     <>
@@ -235,28 +227,23 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
           </dl>
         </section>
       )}
-      <section className="card">
+      {status.placement === 'host' ? (
+        <HostPlacementCard status={status} busy={busy} onRepair={repair} lines={lines} />
+      ) : null}
+      <section className="card" hidden={status.placement === 'host'}>
         <div className="row between">
           <h2>Secure room</h2>
           <span className={`tag ${running ? 'tag-ok' : 'tag-off'}`}>
             {running ? 'Running' : sanitizeLine(status.vm)}
           </span>
         </div>
-        <p className="small muted">The sealed virtual computer agents run in, on {where}.</p>
+        <p className="small muted">The sealed space agents run in, on {where}.</p>
         <dl className="facts">
-          <dt>Size</dt>
-          <dd>
-            {status.vmSize?.current
-              ? `${status.vmSize.current.cpus} CPUs · ${status.vmSize.current.memoryGiB} GiB`
-              : 'not reported'}
-          </dd>
           <dt>Version</dt>
           <dd>
             app {status.appVersion ?? '?'} · secure room {status.guestVersion ?? '?'}
             {status.guestOutdated ? ' · needs an update: use Check & repair' : ''}
           </dd>
-          <dt>Shared folders</dt>
-          <dd>{status.workspaces ? 'available' : 'not available on this machine'}</dd>
         </dl>
         <div className="row gap">
           <button
@@ -315,36 +302,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
         )}
       </section>
       <AccessReport />
-      <section className="card card-danger">
-        <h2>Reset Anchi on {where}</h2>
-        <p className="small">
-          Deletes the secure room with everything in it: every AI account and connection must be
-          connected again. Agent files, task history and the recovery key are kept, and shared
-          folders on disk are not touched. Refused while a task runs.
-        </p>
-        <form
-          className="row gap wrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (typed === 'reset' && !busy) void reset();
-          }}
-        >
-          <label className="field">
-            <span className="sr-only">Type reset to confirm</span>
-            <input
-              value={typed}
-              placeholder="Type reset to confirm"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => setTyped(e.target.value)}
-            />
-          </label>
-          <button type="submit" className="btn btn-danger" disabled={typed !== 'reset' || busy}>
-            Reset…
-          </button>
-          <span className="small muted">Anchi asks once more in a system dialog.</span>
-        </form>
-      </section>
     </>
   );
 }
@@ -925,7 +882,7 @@ export function ProbeNote({
   );
 }
 
-/** Refusal codes from the VM's admin scripts, in words; anything else shows as it came. */
+/** Refusal codes from the guest's admin scripts, in words; anything else shows as it came. */
 const REFUSALS: Record<string, string> = {
   HERMES_BASE_URL_INVALID:
     'Use an https address on a public host name, with no port, user, query or fragment.',
@@ -1803,6 +1760,125 @@ export function Services({
 }
 
 /** A card with its heading, or only its rows when another card holds them. */
+/**
+ * A daemon without a VM (`ANCHI_GUEST=host`): Anchi's proxy, vault and approvals for the user's
+ * own Claude Code and Codex sessions. Enabling writes their settings after a system dialog.
+ */
+export function HostPlacementCard({
+  status,
+  busy,
+  onRepair,
+  lines,
+}: {
+  status: SetupStatus;
+  busy: boolean;
+  onRepair: () => Promise<void>;
+  lines: string[];
+}) {
+  const { act, call } = useApp();
+  const [host, setHost] = useState<HostStatus>();
+  const [working, setWorking] = useState(false);
+  const refresh = useCallback(
+    () => call('host.status').then(setHost, () => setHost(undefined)),
+    [call],
+  );
+  useEffect(() => {
+    void refresh();
+  }, [refresh, status.installed, status.vaultUnlocked]);
+  const toggle = async () => {
+    setWorking(true);
+    const result = await act(
+      () => call(host?.enabled ? 'host.disable' : 'host.enable'),
+      host?.enabled ? 'Runtime settings restored' : 'Runtime settings written',
+    );
+    setWorking(false);
+    if (result) setHost(result);
+  };
+  const ready = !!host?.installed && !!host.running;
+  return (
+    <section className="card">
+      <div className="row between">
+        <h2>This computer, no secure room</h2>
+        <span className={`tag ${host?.enabled && ready ? 'tag-ok' : 'tag-off'}`}>
+          {!host
+            ? '…'
+            : !host.installed
+              ? 'Not installed'
+              : !host.running
+                ? 'Stopped'
+                : host.enabled
+                  ? 'Protecting your sessions'
+                  : 'Ready'}
+        </span>
+      </div>
+      <p className="small muted">
+        Your own claude and codex sessions reach the network through Anchi, inside their sandboxes:
+        connected credentials stay in the vault and high-risk writes wait for you. Nothing runs in a
+        virtual machine, so no agent tasks start here.
+      </p>
+      {host ? (
+        <dl className="facts">
+          <dt>Proxy port</dt>
+          <dd>{host.port}</dd>
+          <dt>Connections</dt>
+          <dd>{host.connectors.length ? host.connectors.join(', ') : 'none yet'}</dd>
+          <dt>Claude Code</dt>
+          <dd>
+            <span className="mono">{sanitizeLine(host.claude.file)}</span>
+            {host.claude.managed ? ' · written by Anchi' : ''}
+            {host.claude.excludedCommands.length
+              ? ` · excludedCommands run outside the sandbox: ${sanitizeLine(host.claude.excludedCommands.join(', '))}`
+              : ''}
+          </dd>
+          <dt>Codex</dt>
+          <dd>
+            <span className="mono">{sanitizeLine(host.codex.file)}</span>
+            {host.codex.managed ? ' · written by Anchi' : ''}
+          </dd>
+          <dt>Shims</dt>
+          <dd>
+            <span className="mono">{sanitizeLine(host.shimDir)}</span>
+            {host.shimOnPath ? ' · first on PATH' : ' · put it first on PATH in your shell'}
+          </dd>
+          {host.missing.length ? (
+            <>
+              <dt>Missing</dt>
+              <dd>{sanitizeLine(host.missing.join(', '))}</dd>
+            </>
+          ) : null}
+        </dl>
+      ) : null}
+      <div className="row gap">
+        <button
+          type="button"
+          className="btn"
+          disabled={busy || !!status.preparing}
+          onClick={() => void onRepair()}
+        >
+          {busy || status.preparing ? 'Checking…' : 'Check & repair'}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={working || !host || (!host.enabled && !ready)}
+          onClick={() => void toggle()}
+        >
+          {host?.enabled ? 'Disable' : 'Enable'}
+        </button>
+        <span className="small muted">
+          Installs the proxy and unlocks the vault; Enable writes the sessions’ settings. Asks
+          first.
+        </span>
+      </div>
+      {(busy || lines.length > 0) && (
+        <pre className="setup-log mono small" aria-live="polite">
+          {lines.slice(-12).join('\n') || 'Starting…'}
+        </pre>
+      )}
+    </section>
+  );
+}
+
 function Group({
   bare,
   title,

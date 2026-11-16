@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONNECTOR_IDS } from '@anchi/protocol';
 import type {
@@ -12,8 +11,8 @@ import type {
   SetupStatus,
 } from '@anchi/protocol';
 import type { Guest, VmTransport } from './guest.ts';
-import { APP_VERSION, defaultVmSize, hostResources, REPO_ROOT, VAULT_KEY } from './host.ts';
-import { limaPin, type LimaPin } from './lima.ts';
+import { APP_VERSION, VAULT_KEY } from './host.ts';
+import { opensslAvailable } from './host-placement.ts';
 import type { ServiceSetup } from './services.ts';
 
 export { CONNECTOR_IDS };
@@ -65,46 +64,8 @@ export function versionAtLeast(a: string, b: string): boolean {
   return true;
 }
 
-/** The Lima the VM template needs (`minimumLimaVersion` in lima/anchi-vm.yaml). */
-export function limaMinimum(root = REPO_ROOT): string {
-  try {
-    const text = readFileSync(join(root, 'lima/anchi-vm.yaml'), 'utf8');
-    return /^minimumLimaVersion:\s*(\d+\.\d+\.\d+)/m.exec(text)?.[1] ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
-
-/** The dotted version in `limactl --version` output (`limactl version 2.2.0`), or null. */
-export function parseLimaVersion(output: string): string | null {
-  return /(\d+\.\d+\.\d+)/.exec(output)?.[1] ?? null;
-}
-
-let limaVersionCache: { at: number; version: string } | undefined;
-/**
- * The installed Lima's version, asked at most once a minute; null when it cannot say, which is
- * not remembered: a Lima the daemon has just downloaded answers on the next status.
- */
-function limaVersion(): string | null {
-  if (limaVersionCache && Date.now() - limaVersionCache.at < 60_000) {
-    return limaVersionCache.version;
-  }
-  let version: string | null = null;
-  try {
-    version = parseLimaVersion(
-      execFileSync('limactl', ['--version'], { timeout: 5000 }).toString(),
-    );
-  } catch {
-    // Not installed or not answering: `missing` already names limactl.
-  }
-  if (version) limaVersionCache = { at: Date.now(), version };
-  return version;
-}
-
 export function hostReadiness(
-  placement: VmTransport['placement'] = 'lima',
-  /** Null where Anchi has no Lima of its own for this computer. */
-  pin: LimaPin | null = limaPin() ?? null,
+  placement: VmTransport['placement'] = 'host',
 ): NonNullable<SetupStatus['host']> {
   const executable = (name: string) =>
     (process.env.PATH ?? '').split(':').some((dir) => {
@@ -123,30 +84,14 @@ export function hostReadiness(
       installHint: 'This server needs Python 3.11+ and passwordless sudo for its login user.',
     };
   }
-  // Where Anchi has a pinned Lima, setup downloads it when PATH has none new enough (lima.ts).
-  // The host needs no Python: the vault key goes in with scripts/vault.mjs on this Node, and
-  // everything else in Python runs in the guest.
-  const downloadable = pin !== null;
-  const missing = downloadable || executable('limactl') ? [] : ['limactl'];
-  // An older Lima fails only at `limactl start`, deep in the installation log; say it here.
-  const minimum = limaMinimum();
-  const found = downloadable || missing.includes('limactl') ? null : limaVersion();
-  if (found && !versionAtLeast(found, minimum)) missing.push(`Lima ${minimum}+ (found ${found})`);
-  if (process.platform === 'linux') {
-    if (!executable('qemu-system-x86_64')) missing.push('qemu-system-x86_64');
-    try {
-      accessSync('/dev/kvm', constants.R_OK | constants.W_OK);
-    } catch {
-      missing.push('/dev/kvm access');
-    }
-  }
+  // No guest: the services run on the daemon's own Node; openssl signs the proxy's certificates.
   return {
     platform: process.platform,
-    missing,
+    missing: opensslAvailable() ? [] : ['openssl'],
     installHint:
       process.platform === 'darwin'
-        ? 'brew install lima (brew upgrade lima for a newer Lima)'
-        : `Install ${downloadable ? '' : `Lima ${minimum}+ (https://lima-vm.io) and `}QEMU. Ubuntu/Debian: sudo apt-get install qemu-system-x86 qemu-utils. Enable KVM access, then reopen Anchi.`,
+        ? 'macOS ships openssl; put /usr/bin on PATH, then prepare again.'
+        : 'Install the openssl command line (Debian/Ubuntu: sudo apt-get install openssl), then prepare again.',
   };
 }
 
@@ -156,7 +101,6 @@ export async function setupStatus(
   services?: ServiceSetup,
 ): Promise<SetupStatus> {
   const vm = await transport.vmStatus();
-  const host = hostResources();
   const empty: SetupStatus = {
     quickSetup: true,
     preparedRuntimes: [],
@@ -173,9 +117,7 @@ export async function setupStatus(
     xClient: false,
     redditClient: false,
     googleClientSource: null,
-    workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
-    vmSize: { default: defaultVmSize(host), host },
     appVersion: APP_VERSION,
     guestVersion: null,
     guestOutdated: false,
@@ -184,9 +126,6 @@ export async function setupStatus(
   // A remote server runs before its first install: its missing services are not an error, and
   // preparing it installs them. One that cannot be asked falls through to the error below.
   if (!(await guest.servicesInstalled().catch(() => true))) return empty;
-  // Shown on the Runtimes screen; a Lima that cannot say leaves it out.
-  const current = await transport.vmSize().catch(() => undefined);
-  if (current) empty.vmSize = { ...empty.vmSize!, current };
   try {
     // The credential reads fail while the vault is locked (a restarted guest). That is a state of
     // its own, not an error: the credentials are still there, and preparing unlocks it.
@@ -196,18 +135,16 @@ export async function setupStatus(
         failures.push(err);
         return undefined;
       });
-    const [vault, codex, claude, hermes, connectors, base, workspaces, guestVersion] =
-      await Promise.all([
-        guest.vaultStatus(),
-        credentials(codexStatus(guest)),
-        credentials(claudeStatus(guest)),
-        // A guest installed before Hermes support has no hermes_admin.py.
-        hermesStatus(guest).catch(() => empty.hermes!),
-        credentials(connectorStatuses(guest)),
-        guest.imageStatus('codex', 'base').catch(() => false),
-        guest.workspacesMounted().catch(() => false),
-        guest.version().catch(() => null),
-      ]);
+    const [vault, codex, claude, hermes, connectors, base, guestVersion] = await Promise.all([
+      guest.vaultStatus(),
+      credentials(codexStatus(guest)),
+      credentials(claudeStatus(guest)),
+      // A guest installed before Hermes support has no hermes_admin.py.
+      hermesStatus(guest).catch(() => empty.hermes!),
+      credentials(connectorStatuses(guest)),
+      guest.imageStatus('codex', 'base').catch(() => false),
+      guest.version().catch(() => null),
+    ]);
     const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
     const prepared = base
       ? await Promise.all(
@@ -222,7 +159,6 @@ export async function setupStatus(
       preparedRuntimes: prepared.filter((runtime): runtime is RuntimeId => runtime !== null),
       vm,
       installed: base,
-      workspaces,
       guestVersion,
       // Until the base image is built, installing is the next step anyway. A guest too old to
       // say its version is older than this Anchi.
@@ -252,8 +188,8 @@ export async function setupStatus(
       googleClientSource: svc.googleClientSource,
     };
   } catch (err) {
-    // The VM runs but a guest command failed (sudo, a missing script, an SSH hiccup): say so
-    // instead of showing everything as not installed.
+    // The guest runs but a command failed (sudo, a missing script): say so instead of showing
+    // everything as not installed.
     return { ...empty, error: (err as Error).message.slice(0, 300) };
   }
 }
@@ -270,7 +206,7 @@ export async function prepareEnvironment(
     throw new Error(`Missing: ${current.host.missing.join(', ')}. ${current.host.installHint}`);
   }
   if (current.vm === 'unknown')
-    throw new Error('Cannot determine VM state; check setup status and retry.');
+    throw new Error('Cannot determine the guest state; check setup status and retry.');
   if (current.vm === 'stopped') {
     await run('vm-start');
     current = await status();

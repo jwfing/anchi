@@ -227,6 +227,9 @@ importers:
       '@anchi/core':
         specifier: workspace:*
         version: link:../core
+      '@anchi/host-services':
+        specifier: workspace:*
+        version: link:../host-services
       '@anchi/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -267,6 +270,15 @@ importers:
       esbuild:
         specifier: ^0.28.0
         version: 0.28.2
+
+  packages/host-services:
+    dependencies:
+      '@anchi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.6
 
   packages/protocol:
     dependencies:

@@ -108,12 +108,7 @@ describe('bridge', () => {
       'agents.deletePreview',
       'agents.delete',
       'tasks.delete',
-      'setup.resetPreview',
-      'setup.reset',
     ]);
-    // The word that resets is typed by the user and checked before anything is asked or sent.
-    expect(() => checkCall('setup.reset', {})).toThrow(/type reset/);
-    expect(() => checkCall('setup.reset', { confirm: 'Reset' })).toThrow(/type reset/);
     for (const profile of ['', 'a b', '../x', 'x'.repeat(65), 7]) {
       expect(() => checkCall('connectors.awsProfile', { profile }), String(profile)).toThrow(
         /AWS profile/,
@@ -158,49 +153,6 @@ describe('bridge', () => {
     await expect(
       guardedCall('tasks.delete', { taskId: 't-gone' }, read, async () => true),
     ).rejects.toThrow('task not found');
-  });
-
-  it('resets only when no task runs, after a dialog that says what is deleted and kept', async () => {
-    const preview = { vm: 'running', busy: 0, cells: 2, home: '/h/.anchi', vaultKey: '/h/key' };
-    const sent: string[] = [];
-    const reader = (states: object[]) => async (method: string) => {
-      sent.push(method);
-      return method === 'setup.resetPreview' ? states.shift() : { vm: 'missing' };
-    };
-    await expect(
-      guardedCall(
-        'setup.reset',
-        { confirm: 'reset' },
-        reader([{ ...preview, busy: 1 }]),
-        async () => {
-          throw new Error('asked while a task runs');
-        },
-      ),
-    ).rejects.toThrow('1 task is running or queued');
-    await expect(
-      guardedCall('setup.reset', { confirm: 'reset' }, reader([preview]), async (q) => {
-        expect(q.detail).toContain('every AI account and connection must be connected again');
-        expect(q.detail).toContain('2 idle task cells are closed first');
-        expect(q.detail).toContain('Kept: the vault key (/h/key) and /h/.anchi');
-        return false;
-      }),
-    ).rejects.toThrow('cancelled');
-    await expect(
-      guardedCall(
-        'setup.reset',
-        { confirm: 'reset' },
-        reader([preview, { ...preview, busy: 1 }]),
-        async () => true,
-      ),
-    ).rejects.toThrow('A task started during confirmation');
-    expect(sent, 'refused every time: the reset was never sent').not.toContain('setup.reset');
-    await guardedCall(
-      'setup.reset',
-      { confirm: 'reset' },
-      reader([preview, preview]),
-      async () => true,
-    );
-    expect(sent.at(-1)).toBe('setup.reset');
   });
 
   it('imports the gh login or an AWS profile only after a dialog that says what agents get', async () => {
@@ -264,7 +216,6 @@ describe('bridge', () => {
   it('asks before an agent stops asking for its writes or starts tasks by itself', async () => {
     const current = {
       connectors: ['github', 'x'],
-      workspaces: [],
       delegates: [],
       highRisk: { disable: [] },
       approvals: { github: 'ask' },
@@ -310,7 +261,7 @@ describe('bridge', () => {
 
   it('asks before an agent reaches more hosts, not before it reaches fewer', async () => {
     const settings = (egress: string[] | null) => ({
-      current: { connectors: [], workspaces: [], delegates: [], highRisk: { disable: [] }, egress },
+      current: { connectors: [], delegates: [], highRisk: { disable: [] }, egress },
     });
     const asked: string[] = [];
     const apply = (egress: string[] | null, now: string[] | null) =>
@@ -703,9 +654,10 @@ describe('agent conversation', () => {
       'GitHub',
       'No access to your files',
     ]);
-    expect(
-      reachChips({ ...agent, connectors: [], workspaces: ['shop (ro)'] }).map((c) => c.text),
-    ).toEqual(['ChatGPT', '1 shared folder']);
+    expect(reachChips({ ...agent, connectors: [] }).map((c) => c.text)).toEqual([
+      'ChatGPT',
+      'No access to your files',
+    ]);
   });
 
   it('counts what each host was asked and what was refused in the task record', () => {
@@ -752,7 +704,7 @@ describe('new agent templates', () => {
 
 describe('access in plain words', () => {
   const fixed = { approvals: {}, egress: null, sandbox: 'cell', delegates: [] };
-  const none = { connectors: [], workspaces: [], delegates: [], highRisk: { disable: [] } };
+  const none = { connectors: [], delegates: [], highRisk: { disable: [] } };
   const text = (lines: ReturnType<typeof plainWords>, can: boolean) =>
     lines.filter((l) => l.can === can).map((l) => l.text);
 
@@ -767,14 +719,10 @@ describe('access in plain words', () => {
     ]);
   });
 
-  it('names each grant, and marks write access and skipped approvals', () => {
+  it('names each grant, and marks skipped approvals', () => {
     const lines = plainWords(
       {
         connectors: ['github', 'gmail'],
-        workspaces: [
-          { path: 'shop', mode: 'ro' },
-          { path: 'notes\u001b[31m', mode: 'rw' },
-        ],
         delegates: ['reviewer'],
         highRisk: { disable: ['github.merge'] },
       },
@@ -789,18 +737,15 @@ describe('access in plain words', () => {
     expect(text(lines, true)).toEqual([
       'Acts through GITHUB; anything that writes waits for you',
       'Acts through GMAIL; high-risk operations wait for you',
-      'Reads files in shop',
-      'Reads and changes files in notes',
       'Hands work to @reviewer',
       'Reaches only github.com',
       'Does without asking: github.merge, x.post',
     ]);
     expect(lines.filter((l) => l.warn).map((l) => l.text)).toEqual([
-      'Reads and changes files in notes',
       'Does without asking: github.merge, x.post',
     ]);
     expect(text(lines, false)).toEqual([
-      'Cannot read files outside the shared folders',
+      'Cannot read any file on this computer',
       'Cannot use an account that is not switched on here',
       'Never sees a password or token: Anchi adds them outside its cell',
     ]);
@@ -985,12 +930,7 @@ describe('settings', () => {
 });
 
 describe('confirmations', () => {
-  const settings = {
-    current: {
-      connectors: ['github'],
-      workspaces: [{ path: 'notes', mode: 'ro' }],
-    },
-  };
+  const settings = { current: { connectors: ['github'], delegates: [] } };
   const daemon = () => {
     const sent: string[] = [];
     const read = async (method: string) => {
@@ -1001,17 +941,8 @@ describe('confirmations', () => {
   };
   const update = (patch: object, apply = true) => ({ agentId: 'dev', patch, apply, base: 'b' });
 
-  it('asks before an agent gets a new connector, directory or write access', async () => {
-    for (const patch of [
-      { connectors: ['github', 'gmail'] },
-      { workspaces: [{ path: 'notes', mode: 'rw' }] },
-      {
-        workspaces: [
-          { path: 'notes', mode: 'ro' },
-          { path: 'code', mode: 'ro' },
-        ],
-      },
-    ]) {
+  it('asks before an agent gets a new connector or teammate', async () => {
+    for (const patch of [{ connectors: ['github', 'gmail'] }, { delegates: ['qa'] }]) {
       const { sent, read } = daemon();
       const asked: string[] = [];
       await expect(
@@ -1035,7 +966,6 @@ describe('confirmations', () => {
     for (const params of [
       update({ model: 'gpt-5' }),
       update({ connectors: [] }),
-      update({ workspaces: [{ path: 'notes', mode: 'ro' }] }),
       update({ connectors: ['gmail'] }, false),
     ]) {
       await expect(
@@ -1055,7 +985,6 @@ describe('agent settings', () => {
     prompt: { mode: 'append', text: 'Be brief.' },
     skills: ['a'],
     connectors: ['github'],
-    workspaces: [{ path: 'notes', mode: 'ro' }],
   } as AgentSettingValues;
 
   it('sends only what changed', () => {
@@ -1065,12 +994,12 @@ describe('agent settings', () => {
         ...current,
         model: 'gpt-5',
         prompt: { mode: 'append', text: 'Be thorough.' },
-        workspaces: [{ path: 'notes', mode: 'rw' }],
+        connectors: ['github', 'linear'],
       }),
     ).toEqual({
       model: 'gpt-5',
       prompt: { mode: 'append', text: 'Be thorough.' },
-      workspaces: [{ path: 'notes', mode: 'rw' }],
+      connectors: ['github', 'linear'],
     });
   });
 });
@@ -1288,9 +1217,9 @@ describe('getting started', () => {
     ).rejects.toThrow('cancelled');
     expect(asked).toContain('vault.key');
     expect(sent, 'refused: only the status was read').toEqual(['setup.status']);
-    // Single setup steps stay out of reach; a reset needs its typed word and its own dialog.
+    // Single setup steps stay out of reach of the app.
     expect(() => checkCall('setup.run', {})).toThrow(/does not call/);
-    expect(() => checkCall('setup.reset', {})).toThrow(/type reset to confirm/);
+    expect(() => checkCall('setup.reset', {})).toThrow(/does not call/);
   });
 
   it('asks to unlock, not to install, when unlocking is all preparing does', async () => {
@@ -1409,7 +1338,7 @@ describe('approval choices', () => {
     const sent: string[] = [];
     const read = async (method: string) => {
       sent.push(method);
-      return { current: { delegates: ['dev'], connectors: [], workspaces: [] } };
+      return { current: { delegates: ['dev'], connectors: [] } };
     };
     await expect(
       guardedCall(
@@ -1450,7 +1379,7 @@ describe('approval choices', () => {
       read: async (method: string) => {
         sent.push(method);
         return method === 'agents.settings'
-          ? { current: { connectors: [], workspaces: [], highRisk: { disable: ['github-merge'] } } }
+          ? { current: { connectors: [], highRisk: { disable: ['github-merge'] } } }
           : null;
       },
     };

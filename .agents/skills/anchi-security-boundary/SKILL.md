@@ -1,6 +1,6 @@
 ---
 name: anchi-security-boundary
-description: Rules and checklist for changes that touch an Anchi security boundary — credentials, the vault, task cells, the egress proxy, connector services, approvals, policy, workspaces, skills or anything the cell runner sends. Use whenever a change could let a cell see a secret, reach something new, or skip an approval.
+description: Rules and checklist for changes that touch an Anchi security boundary — credentials, the vault, task cells, the egress proxy, connector services, approvals, policy, skills or anything the cell runner sends. Use whenever a change could let a cell see a secret, reach something new, or skip an approval.
 ---
 
 # Changing a security boundary
@@ -9,7 +9,7 @@ Read `SECURITY.md` (trust zones and the agent-team section) first. The invariant
 
 - Upstream credentials never enter a task cell. Cells hold placeholders; the egress proxy (`services/egress_proxy.py`, rules in `services/egress_rules.py`) injects or re-signs on matching requests only, and never adds a credential to a request that did not carry a placeholder.
 - Everything in a cell is untrusted: the runtime, its tools, the cell runner, the in-cell MCP server, skills, session files and model output.
-- Secrets reach the VM on stdin only. Never in argv, host environment, logs, errors or fixtures, and they never come back to the host.
+- Secrets reach the guest on stdin only. Never in argv, host environment, logs, errors or fixtures, and they never come back to the host.
 - A cell reaches only its own proxy socket and its agent's bridge sockets. It never sees a service socket, the auth socket, policy administration or another agent's socket.
 - The daemon decides what an Anchi tool call may do from the task and agent bound to the cell's runner channel, never from what the cell says about itself.
 - Writes through connectors follow the configured authorization mode and the per-agent `approvals`; an approval binds to the exact content shown.
@@ -30,4 +30,4 @@ Read `SECURITY.md` (trust zones and the agent-team section) first. The invariant
 - Passing a value from a cell into a shell command or a guest command line; guest commands take fixed arguments validated by regex in `guest/anchi_cell.py`.
 - Logging a request or an environment for debugging.
 - Making a test pass by widening an allowlist, or by mocking away the check under test.
-- Bind-mounting a new host path into cells; workspaces are checked in the daemon and again in the cell manager (no `..`, no symlinks on the way).
+- Bind-mounting a new host path into cells: a cell gets only its agent's home and skills, never a directory of the user's; the cell manager refuses to remove a home with a mount below it.

@@ -13,6 +13,9 @@ const FORBIDDEN = {
   tui: [/^@anchi\/cell-runner$/, ...RUNTIME],
   desktop: [/^@anchi\/(cell-runner|tui)$/, ...RUNTIME],
   'cell-runner': [/^@anchi\/(core|daemon|tui)$/],
+  // The host placement's proxy and vault: a trusted process beside the daemon, on the
+  // protocol package only, so it holds no path into cells, runtimes or the daemon's state.
+  'host-services': [/^@anchi\/(?!protocol$)/, ...RUNTIME],
 };
 
 function files(dir) {

@@ -60,10 +60,19 @@ export async function connectOrStart(
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function launchdPlist(layout: HomeLayout, path = process.env.PATH ?? ''): string {
+export function launchdPlist(
+  layout: HomeLayout,
+  path = process.env.PATH ?? '',
+  guest = process.env.ANCHI_GUEST,
+): string {
   const args = daemonCommand()
     .map((a) => `    <string>${xml(a)}</string>`)
     .join('\n');
+  // The placement is kept across logins when it was set (`host` is the default anyway).
+  const placement =
+    guest === 'local' || guest === 'host'
+      ? `\n    <key>ANCHI_GUEST</key>\n    <string>${guest}</string>`
+      : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -79,7 +88,7 @@ ${args}
     <key>ANCHI_HOME</key>
     <string>${xml(layout.root)}</string>
     <key>PATH</key>
-    <string>${xml(path)}</string>
+    <string>${xml(path)}</string>${placement}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -121,7 +130,7 @@ Description=Anchi daemon
 ExecStart=${daemonCommand()
     .map((a) => unitWord(a).replace(/\$/g, '$$$$'))
     .join(' ')}
-Environment=${unitWord(`ANCHI_HOME=${layout.root}`)} ${unitWord(`PATH=${path}`)}${guest === 'local' ? ' "ANCHI_GUEST=local"' : ''}
+Environment=${unitWord(`ANCHI_HOME=${layout.root}`)} ${unitWord(`PATH=${path}`)}${guest === 'local' || guest === 'host' ? ` "ANCHI_GUEST=${guest}"` : ''}
 Restart=on-failure
 StandardOutput=append:${layout.logFile.replace(/%/g, '%%')}
 StandardError=append:${layout.logFile.replace(/%/g, '%%')}

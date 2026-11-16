@@ -18,7 +18,6 @@ The file name is the id: 1–40 lowercase letters, digits or `-`. Unknown fields
 | `approvals` | `{}` | `{github: ask}` holds every write of that connector for the user. `{x: auto}` or `{reddit: auto}` lets this agent post without approval, even while the service asks |
 | `highRisk` | none | `{disable: [github-merge]}`: these high-risk operations no longer wait for this agent; also editable in the settings panel |
 | `egress` | open | Host patterns the cells may reach besides the runtime's and connectors' hosts, e.g. `[registry.npmjs.org, '*.pypi.org']` |
-| `workspaces` | `[]` | `{path, mode?, name?}` under `~/AnchiWorkspaces`; `mode` is `ro` (default) or `rw` |
 | `skills` | `[]` | Installed skill ids (`anchi skills`); a missing one fails the task when it starts |
 | `delegates` | `[]` | Existing agents this one may hand tasks to (not itself) |
 | `maxTasks` | `3` | How many of its tasks run at once (1–10); more wait in its queue |
@@ -69,8 +68,6 @@ A developer on a local checkout, with a model served by OpenRouter:
 name: Hermes dev
 runtime: hermes
 model: nousresearch/hermes-4-405b    # optional; the endpoint's default otherwise
-workspaces:
-  - { path: projects/api, mode: rw }   # ~/AnchiWorkspaces/projects/api
 skills: [test-driven-development]  # installed with `anchi skills add`
 egress: [registry.npmjs.org]
 ```
@@ -88,7 +85,7 @@ approvals: { notion: ask }
 ### Notes
 
 - **Egress.** Without `egress` an agent reaches any public host. With it, only the listed hosts plus its runtime's and connectors' hosts; refused hosts are noted in the task, and `anchi agents allow-host <agent> <host>` adds one. Package registries a developer agent may need: `registry.npmjs.org`, `pypi.org` and `files.pythonhosted.org`, `proxy.golang.org` and `sum.golang.org`, `index.crates.io` and `static.crates.io`.
-- **Workspaces.** `rw` lets the agent change files that later run on the user's computer. Anchi masks git hooks, git config and editor configuration read-only and audits each turn for new hooks, executables and symlinks out, but `package.json` scripts and `Makefile`s remain the user's to review.
+- **Files.** A cell has only the agent's persistent home (`/home/agent/work`), nothing of the user's computer; an agent clones or fetches what it works on through the proxy and hands results back as pushes, pull requests or replies.
 - **High-risk ids:** `github-merge`, `github-repo-delete`, `github-repo-settings`, `github-repo-transfer`, `github-protection`, `github-access`, `github-ref-delete`, `github-graphql`, `git-default-branch`, `git-ref-delete`, `aws-destroy`, `aws-s3-delete`, `aws-s3-access`, `linear-delete`, `posthog-delete`, `posthog-access`, `sentry-delete`, `sentry-access`, `figma-webhook`, `discord-delete`, `discord-members`, `discord-access`. `approvals: {<connector>: ask}` still holds writes an exemption covers.
 - **Templates.** `extends: base-dev` merges `~/.anchi/templates/base-dev.yaml` key by key; arrays and scalars in the agent replace the template's.
 

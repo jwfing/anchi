@@ -1,0 +1,99 @@
+# Host placement: Anchi without a VM
+
+The host placement is the daemon's default on your computer (`ANCHI_GUEST` unset or `host`): your own `claude` and `codex` sessions, with no VM and no agents. Agents run in task cells on a [remote server](REMOTE_SERVER.md) instead. Anchi's egress proxy, vault and approvals run on the computer as you, in one process the daemon starts on its own Node; Claude Code's and Codex's own sandboxes keep each session's commands away from the vault and the network, so that every request leaves through the proxy, with placeholders where a credential would be. The design and what was verified are in [the plan](architecture/HOST_PLACEMENT_PLAN.md) and [the TypeScript services plan](architecture/HOST_SERVICES_TS_PLAN.md).
+
+```text
+your terminal / IDE
+  claude ──(its sandbox: httpProxyPort)──┐
+  codex  ──(its proxy ⇒ HTTPS_PROXY)─────┤
+                                         ▼
+             Anchi host services  127.0.0.1:18180      ~/.anchi/host/
+               proxy ◄── vault (encrypted files, key in memory) ◄── your key in ~/.config/anchi
+               high-risk writes ──► approvals ──► desktop app, TUI, anchi approvals
+                                         ▼
+             GitHub, AWS, Linear, … (terminated, injected)   model API, everything else (tunnelled untouched)
+```
+
+What you get:
+
+- the credentials you connect (GitHub, AWS, Linear, PostHog, Sentry, Firecrawl, Figma, Discord) stay in the vault; a session's commands see `anchi-placeholder` values and the proxy injects the real ones on matching requests only;
+- `push main`, secret endpoints and the other high-risk operations wait for your decision, as for agents; a connector in the profile's `ask` list holds every write;
+- the audit log of what sessions reached, in `~/.anchi/host/audit.jsonl`;
+- no VM, no Python, no change to how you start a session.
+
+What you do not get: agents, triggers, delegation and teams, which need a cell on a remote server. A host-placement daemon refuses `tasks.create` (`HOST_PLACEMENT`). The boundary is also weaker than a remote server's cells; read [Boundary](#boundary) before relying on it.
+
+## Requirements
+
+- macOS or Linux with the `openssl` command line on `PATH` (macOS ships it; Debian and Ubuntu have the `openssl` package). The services sign the proxy's certificates with it; nothing else is needed beyond the Anchi daemon's own Node.
+- Claude Code 2.1.285 or newer, or Codex CLI 0.166 or newer, installed as you use them. Claude Code's sandbox needs `bubblewrap` and `socat` on Linux (see its `/sandbox` panel); on macOS it uses Seatbelt.
+- An Anchi checkout or release install ([Getting started](GETTING_STARTED.md)).
+
+## Set up
+
+The daemon is the host placement unless `ANCHI_GUEST=local` names a remote server's guest; nothing has to be set on your computer. Its vault lives under `~/.anchi/host` and is separate from a remote server's.
+
+```bash
+export ANCHI_GUEST=host
+anchi daemon start                 # or: ANCHI_GUEST=host anchi daemon install, for login start
+anchi setup vault init             # or vault unlock, with the key in ~/.config/anchi
+anchi connectors set github        # the connectors you want sessions to use, as usual
+anchi host enable                  # writes the sandbox settings and the shims, after confirmation
+export PATH="$HOME/.anchi/host/bin:$PATH"   # in your shell profile, so claude and codex find the shims
+anchi host status
+```
+
+The daemon starts the services process when it starts (and again if it exits), so there is nothing to install: `anchi setup install` and `anchi setup prepare --runtime codex` only unlock the vault here, and the runtime a prepare names is not built, since sessions use your own installs. In the desktop app, **Settings → Security & recovery** shows the card **This computer, no secure room** with **Check & repair** and **Enable**, which asks in a system dialog before writing.
+
+What `anchi host enable` writes, each recorded in `~/.anchi/host/managed.json` so that `anchi host disable` restores it:
+
+| File | Keys | Refused when |
+|---|---|---|
+| `~/.claude/settings.json` | `sandbox.enabled`, `sandbox.allowUnsandboxedCommands: false`, `sandbox.autoAllowBashIfSandboxed`, `sandbox.network.httpProxyPort`, `sandbox.filesystem.denyRead`, and `env.SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `REQUESTS_CA_BUNDLE`, `AWS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` for the proxy's CA | the file has a `sandbox` block Anchi did not write |
+| `~/.codex/config.toml` | `default_permissions = "anchi"` at the top, and a marked block at the end: `[features.network_proxy]`, `[permissions.anchi]` (`extends = ":workspace"`, the same `deny` paths, network enabled without SOCKS, chained to the upstream proxy with `allow_local_binding` since that upstream is Anchi's proxy on loopback, and a global `"*" = "allow"` domain rule, since Codex's own proxy allows nothing until a rule exists and Anchi's proxy applies the egress list and refuses private addresses) | `default_permissions`, a `permissions.anchi` profile or `network_proxy` is already configured |
+| `~/.anchi/host/bin/claude`, `codex` | Shims that set `HTTPS_PROXY`, the CA variables and the placeholder variables (`GH_TOKEN`, `AWS_ACCESS_KEY_ID`, `LINEAR_API_KEY`, …) and run the real command found later on `PATH` | — |
+
+The denied paths are `~/.anchi/host/state` (the vault, the CA key and the control token), `~/.config/anchi`, `~/.ssh`, `~/.aws`, `~/.config/gh` and `~/.netrc`; the rest of `~/.anchi/host` (the trust bundle, the shims, the profile and the audit log) stays readable, since the sandboxed tools verify the proxy's certificates with the bundle. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` in the daemon's environment move the two files.
+
+`~/.anchi/host/profile.json` holds the choices: `port` (default 18180), `ask` (connectors whose every write waits for approval) and `egress` (hosts sessions may reach, or null for any public host). Restart the daemon after changing it, or connect a connector, which registers the sessions again.
+
+Under `~/.anchi/host`: `state/auth` (the encrypted credential files, 0600 in a 0700 directory), `state/ca` (the proxy's CA and its key, 0600), `state/run` (the control socket and its token, for the daemon only), `state/egress/settings.json`, `audit.jsonl` and `ca-bundle.pem` (the system roots plus the proxy's CA, what the sessions' tools are told to trust). The vault key is read from `~/.config/anchi/vault.key` by `scripts/vault.mjs` and sent to the services over the control socket; while unlocked it exists in that process's memory only.
+
+## Use
+
+Type `claude` or `codex` as before. Inside a session:
+
+- `curl https://api.github.com/user -H "Authorization: Bearer $GH_TOKEN"` works, with the vault's token injected by the proxy; `echo $GH_TOKEN` prints `anchi-placeholder-github`;
+- `git push` to a protected branch, a secrets endpoint or another high-risk operation waits for your decision in the desktop app's **Needs you**, the TUI's Approvals view or `anchi approvals`; unanswered, it is refused after the configured timeout. A chunked push (git streams pushes above 1 MiB) cannot wait: a high-risk one is rejected at once with git's own `remote rejected` report;
+- `cat ~/.ssh/id_ed25519`, a raw socket or a `curl --noproxy` fail: the sandbox denies them;
+- `git` over SSH fails: SSH does not pass through the proxy; use HTTPS remotes.
+
+Only the hosts of connectors you connected are terminated and inspected (`api.github.com` and `github.com` for GitHub, `*.amazonaws.com` for AWS, and so on). Every other CONNECT, your runtime's own model API included, is a tunnel the proxy does not look into, still subject to the egress list and refused for private and link-local addresses. Claude Code's own `allowedDomains` does not apply once `httpProxyPort` is set; the profile's `egress` is what limits destinations. Codex's own domain rules stay in front of the proxy.
+
+`anchi host status` says whether the services run and the settings are in place, and whether the shim directory comes first on `PATH`. Tools that bundle their own `claude` binary (some IDE extensions) do not pick the shim up; their commands still go through the sandbox proxy, but their model traffic and placeholders are not set.
+
+## Boundary
+
+What holds, with the sandbox on and the settings written:
+
+- A command the runtime runs cannot read the vault, the key or the denied paths, cannot open a direct connection or resolve a name, cannot reach a Unix socket, and cannot write outside the working directory and temporary directories.
+- Every request such a command makes to a connected connector's host passes the proxy's egress rules, credential injection, high-risk approvals and audit; the command and the model see a placeholder, never the credential. Every other destination passes the egress list and the address check.
+- The daemon never holds a credential or the vault key: the services process does, and only the daemon can reach its control socket (a 0600 socket in a 0700 directory, with a token in a 0600 file beside it).
+
+What does not hold, stated also in [SECURITY.md](../SECURITY.md):
+
+- The runtime process and its built-in tools run outside the sandbox: Claude Code's Read, Edit, WebFetch and WebSearch, its MCP servers, hooks and `!` commands; Codex's web search, MCP servers, apps, browser and computer use. A prompt-injected WebFetch can send what the Read tool read.
+- You can turn the sandbox off, exclude commands (`sandbox.excludedCommands`, reported by `anchi host status`) or approve Codex's escalation to run unsandboxed. Anchi's settings turn Claude Code's unsandboxed retry off.
+- Both sandboxes are user-space: no separate user, a shared kernel, and no protection from software you run outside them. The proxy's loopback port is reachable by every process of yours, which is the model: your processes are trusted, the sandboxed commands are not.
+- TLS trust is per tool on the terminated hosts: tools that ignore the CA variables fail to verify (Apple's bundled Python among them; pass `cafile` explicitly), and Go tools under Seatbelt need Claude Code's `enableWeakerNetworkIsolation`, which widens the boundary. Tools that pin a connector host's certificate fail there.
+- The computer's swap is not disabled, so the key in the services' memory can reach the disk through it.
+
+## Remove
+
+```bash
+anchi host disable            # restores the two settings files and removes the shims
+anchi daemon stop
+rm -rf ~/.anchi/host          # the proxy's CA, the audit log and the vault of this placement
+```
+
+The daemon keeps running as the host placement with nothing enabled; to run agents, set up a [remote server](REMOTE_SERVER.md).

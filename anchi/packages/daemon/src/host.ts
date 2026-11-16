@@ -1,10 +1,10 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { cpus as hostCpus, homedir, totalmem } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { SetupAction, VmSize } from '@anchi/protocol';
+import type { SetupAction } from '@anchi/protocol';
 
 /** Both release bundles live in <root>/lib; source modules live in the workspace. */
 export const REPO_ROOT = resolve(
@@ -36,68 +36,8 @@ export function installKind(root = REPO_ROOT): 'release' | 'source' {
     : 'source';
 }
 
-export const WORKSPACE_MOUNT = '/mnt/anchi-host';
-
-/** The Lima VM (`secure-vm` before 0.3; scripts/vm-name.sh renames it). */
-export const VM_NAME = 'anchi-vm';
-
-/** The vault's master key on this computer; scripts/vault.mjs sends it to the VM over stdin. */
+/** The vault's master key on this computer; scripts/vault.mjs sends it to the vault over stdin. */
 export const VAULT_KEY = join(homedir(), '.config/anchi/vault.key');
-
-/**
- * How ~/AnchiWorkspaces reaches the VM. macOS: virtiofs at the mount itself, where files show as
- * owned by their reader. Linux: 9p, where the guest checks the host owner's uid, at a raw share
- * only root reaches; the guest's anchi-workspaces.service maps it onto the mount for the cell
- * agent with bindfs, and installing the guest pieces brings that service and starts it.
- */
-export function workspaceSteps(platform: NodeJS.Platform = process.platform): string[][] {
-  const linux = platform === 'linux';
-  const mountPoint = linux ? '/mnt/anchi-host-raw/share' : WORKSPACE_MOUNT;
-  return [
-    ['mkdir', '-p', join(homedir(), 'AnchiWorkspaces')],
-    ['limactl', 'stop', VM_NAME],
-    [
-      'limactl',
-      'edit',
-      VM_NAME,
-      '--tty=false',
-      '--set',
-      `.mounts=[{"location":"~/AnchiWorkspaces","mountPoint":"${mountPoint}","writable":true}]`,
-      '--set',
-      `.mountType="${linux ? '9p' : 'virtiofs'}"`,
-    ],
-    ['limactl', 'start', '--tty=false', VM_NAME],
-    ...(linux ? [['bash', 'scripts/install-anchi.sh']] : []),
-    VAULT_UNLOCK,
-  ];
-}
-
-/** This computer's logical CPUs and memory in whole GiB, as scripts/vm-size.sh counts them. */
-export function hostResources(): VmSize {
-  return { cpus: hostCpus().length, memoryGiB: Math.floor(totalmem() / 2 ** 30) };
-}
-
-/** Half of the host, at least 1 CPU and 2 GiB: the size a new VM gets unless the user picks. */
-export function defaultVmSize(host: VmSize): VmSize {
-  return {
-    cpus: Math.max(1, Math.floor(host.cpus / 2)),
-    memoryGiB: Math.max(2, Math.floor(host.memoryGiB / 2)),
-  };
-}
-
-/** The environment that sizes a new VM in scripts/up.sh; refuses a size the host cannot give. */
-export function vmSizeEnv(size: VmSize, host: VmSize): Record<string, string> {
-  const { cpus, memoryGiB } = size;
-  if (!Number.isInteger(cpus) || cpus < 1 || cpus > host.cpus) {
-    throw new Error(`BAD_VM_SIZE: CPUs must be a whole number from 1 to ${host.cpus}`);
-  }
-  if (!Number.isInteger(memoryGiB) || memoryGiB < 2 || memoryGiB > host.memoryGiB) {
-    throw new Error(
-      `BAD_VM_SIZE: memory must be a whole number of GiB from 2 to ${host.memoryGiB}`,
-    );
-  }
-  return { ANCHI_VM_CPUS: String(cpus), ANCHI_VM_MEMORY_GIB: String(memoryGiB) };
-}
 
 /**
  * scripts/vault.mjs in its own short process with this daemon's Node, so the master key is never
@@ -115,25 +55,10 @@ function vaultStep(action: 'init' | 'unlock'): string[] {
 }
 const VAULT_UNLOCK = vaultStep('unlock');
 
-/** Fixed host commands per setup step, run from the checkout in order. */
-export const SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
-  // Mounts ~/AnchiWorkspaces into the VM once; restarts the VM, which locks the vault, so it is
-  // unlocked again at the end.
-  workspaces: workspaceSteps(),
-  'vm-start': [['limactl', 'start', '--tty=false', VM_NAME]],
-  install: [
-    ['bash', 'scripts/up.sh'],
-    ['bash', 'scripts/install-anchi.sh'],
-    ['limactl', 'shell', VM_NAME, '--', 'sudo', '-n', 'anchi-image', 'build', 'codex', 'base'],
-  ],
-  // vault.mjs reads the master key from ~/.config/anchi and sends it to the VM over stdin.
-  'vault-init': [vaultStep('init')],
-  'vault-unlock': [VAULT_UNLOCK],
-};
-
 /**
- * The steps of a daemon that runs inside the guest (`ANCHI_GUEST=local`, a remote server): the
- * scripts install onto this machine, which is always running and has no VM to mount into.
+ * The steps of a daemon that runs inside the guest (`ANCHI_GUEST=local`, a remote server), fixed
+ * host commands run from the checkout in order: the scripts install onto this machine, which is
+ * always running, so there is nothing to start.
  */
 export const IN_GUEST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
   install: [
@@ -146,93 +71,36 @@ export const IN_GUEST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
 };
 
 /**
- * `setup.reset`: deletes the VM and everything in it (the vault's encrypted files included).
- * Lima ignores an instance that does not exist. The vault key and Anchi home are the CLI's.
+ * The steps of a daemon without a guest (`ANCHI_GUEST=host`, the default): nothing to install
+ * or start as a command (the daemon starts its services process itself after these steps), and
+ * the vault steps run on this computer (vault.mjs, against that process).
  */
-export const RESET_STEPS: string[][] = [['limactl', 'delete', '--force', VM_NAME]];
+export const HOST_SETUP_STEPS: Partial<Record<SetupAction, string[][]>> = {
+  'vm-start': [],
+  install: [],
+  'vault-init': [vaultStep('init')],
+  'vault-unlock': [VAULT_UNLOCK],
+};
 
 const STEP_TIMEOUT_MS = 45 * 60_000;
 
-const MIGRATION_TIMEOUT_MS = 15 * 60_000;
-
-/**
- * Renames a VM created as `secure-vm` to `anchi-vm` and moves the vault key to ~/.config/anchi
- * (`scripts/vm-name.sh migrate`), restarting and unlocking a running VM. Nothing happens when
- * there is nothing to move, and the script's lock keeps it from running next to the migration of
- * `scripts/up.sh` or vault.py. Its messages go to `log`; it never throws. Resolves `false` when
- * the migration failed, so a VM created as `secure-vm` may still be there under its old name.
- */
-export function migrateLegacyVm(log: (line: string) => void, cwd = REPO_ROOT): Promise<boolean> {
-  return new Promise((done) => {
-    // Its own process group: the timeout has to reach limactl, which does the work while bash
-    // only waits for it.
-    const child = spawn('bash', ['scripts/vm-name.sh', 'migrate'], {
-      cwd,
-      stdio: ['ignore', 'ignore', 'pipe'],
-      env: { ...process.env, ANCHI_NODE: process.execPath },
-      detached: true,
-    });
-    const timer = setTimeout(() => {
-      log('vm migration: no answer for 15 minutes; stopping it');
-      try {
-        process.kill(-child.pid!, 'SIGTERM');
-      } catch {
-        child.kill('SIGTERM');
-      }
-    }, MIGRATION_TIMEOUT_MS);
-    createInterface({ input: child.stderr }).on('line', (line) => log(`vm migration: ${line}`));
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      log(`vm migration skipped: ${err.message}`);
-      done(false);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code) log(`vm migration failed (exit ${code}); scripts/anchi setup install retries it`);
-      done(!code);
-    });
-  });
-}
-
 /** Runs one setup step at a time, streaming its output lines. */
 export class SetupRunner {
-  running: SetupAction | 'reset' | undefined;
+  running: SetupAction | undefined;
 
   constructor(
-    private steps: Partial<Record<SetupAction, string[][]>> = SETUP_STEPS,
+    private steps: Partial<Record<SetupAction, string[][]>> = HOST_SETUP_STEPS,
     private cwd = REPO_ROOT,
-    /** Null when this guest cannot be reset from here (a remote server). */
-    private resetSteps: string[][] | null = RESET_STEPS,
     /** How long one command may run (tests shorten it). */
     private stepTimeoutMs = STEP_TIMEOUT_MS,
-    /** Runs before the commands of a step, with its output going to the same lines. */
-    private before?: (
-      action: SetupAction | 'reset',
-      onLine: (line: string) => void,
-    ) => Promise<void>,
   ) {}
 
-  /** `env` is added to the steps' environment (the size of a VM `install` creates). */
-  async run(
-    action: SetupAction | 'reset',
-    onLine: (line: string) => void,
-    env: Record<string, string> = {},
-  ): Promise<void> {
+  async run(action: SetupAction, onLine: (line: string) => void): Promise<void> {
     if (this.running) throw new Error(`setup step "${this.running}" is already running`);
-    if (action === 'workspaces' && process.platform !== 'darwin' && process.platform !== 'linux') {
-      throw new Error('workspaces are available on macOS and Linux hosts only');
-    }
-    const steps = action === 'reset' ? this.resetSteps : this.steps[action];
-    if (!steps) {
-      throw new Error(
-        action === 'reset'
-          ? 'this guest is a remote server: delete or recreate its machine instead'
-          : `setup step "${action}" does not apply to a remote server`,
-      );
-    }
+    const steps = this.steps[action];
+    if (!steps) throw new Error(`setup step "${action}" does not apply to a remote server`);
     this.running = action;
     try {
-      await this.before?.(action, onLine);
       for (const [cmd, ...args] of steps) {
         onLine(`$ ${[cmd, ...args].join(' ')}`);
         const { code, last, timedOut } = await runLines(
@@ -240,7 +108,6 @@ export class SetupRunner {
           args,
           this.cwd,
           onLine,
-          env,
           this.stepTimeoutMs,
         );
         if (timedOut) {
@@ -267,15 +134,13 @@ function runLines(
   args: string[],
   cwd: string,
   onLine: (line: string) => void,
-  env: Record<string, string> = {},
   timeoutMs = STEP_TIMEOUT_MS,
 ): Promise<{ code: number; last: string; timedOut: boolean }> {
   return new Promise((done) => {
     const child = spawn(cmd, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // vm-name.sh unlocks the vault after a migration with the same Node as vaultStep.
-      env: { ...process.env, ANCHI_NODE: process.execPath, ...env },
+      env: { ...process.env, ANCHI_NODE: process.execPath },
     });
     let last = '';
     let timedOut = false;
