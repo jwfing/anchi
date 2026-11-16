@@ -161,8 +161,8 @@ directly on that node still resolves delegates locally. `team add` copies only t
 profile's delegates that already exist in the coordinator team; it does not modify the
 execution profile. Add further grants with Agent builder or by editing the files.
 
-The node profile determines the runtime, prompt, image, skills, connectors, workspaces,
-accounts, egress and approval policy. The coordinator member determines its display name,
+The node profile determines the runtime, prompt, image, skills, connectors, accounts,
+egress and approval policy. The coordinator member determines its display name,
 description, allowed team delegates, triggers and concurrency; the node's concurrency limit
 also applies. Local access fields in the coordinator wrapper do not change node permissions.
 Configure scheduled work on the coordinator; existing triggers on a node remain independent.
@@ -185,7 +185,7 @@ Operational behavior:
 - Tasks keep their original execution binding, and a dispatched task pins the resolved
   transport and node identity. Changing a member affects new tasks. A replaced node database
   fails existing tasks; source history should not be cloned to create a different node.
-- Task results and URLs are shared; files and workspaces are not synchronized. Pass a Git
+- Task results and URLs are shared; files are not synchronized. Pass a Git
   commit, repository URL or another shared artifact reference for collaboration on files.
 - Each node keeps its vault, sessions and local audit log. The coordinator mirrors retained
   events, results and usage. It reports a gap if remote events expired while disconnected;
@@ -295,7 +295,7 @@ Use **Revoke…** or `anchi team revoke <node-id>` to remove a member. Revocatio
 members reconnect; it cannot instantly reach an isolated machine and does not cancel cells
 already running there. A revoked identity cannot rejoin. Revocation takes precedence over old
 directory snapshots. Directory data contains metadata only; vault contents, runtime logins,
-sessions, workspaces and raw audit logs remain on their owning machines.
+sessions and raw audit logs remain on their owning machines.
 
 Peer networking and task recovery are exercised by real loopback TLS connections between test
 daemons with simulated cells. Production VPN routing and model-driven collaboration with real

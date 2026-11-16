@@ -22,7 +22,7 @@ stage=/tmp/anchi-bootstrap
 guest_root rm -rf "$stage"
 guest_sh mkdir -p "$stage/anchi-cell"
 guest_copy "$stage" guest/cell.env guest/arch.sh guest/install-gmail.sh guest/install-anchi.sh \
-  guest/anchi_cell.py guest/anchi_prebuilt.py guest/bootstrap.sh guest/anchi-build-base.sh guest/anchi-build-runtime-*.sh guest/anchi-workspaces.sh guest/check-anchi.py guest/check-cell.py guest/check-gmail.py guest/gmail-cli.py \
+  guest/anchi_cell.py guest/anchi_prebuilt.py guest/bootstrap.sh guest/anchi-build-base.sh guest/anchi-build-runtime-*.sh guest/check-anchi.py guest/check-cell.py guest/check-gmail.py guest/gmail-cli.py \
   guest/check-security.py guest/check-connectors.py services systemd
 guest_copy "$stage/anchi-cell" "$runner/runner.mjs" "$runner/forward.mjs" "$runner/mcp.mjs"
 if [[ -f guest/prebuilt.json ]]; then

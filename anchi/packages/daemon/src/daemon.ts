@@ -16,7 +16,6 @@ import {
   watch,
   type FSWatcher,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createServer, type Server } from 'node:net';
 import {
@@ -89,12 +88,7 @@ import {
   writeHostConnectors,
 } from './host.ts';
 import { CELL_CEILING, DEFAULT_MAX_CELLS, Hub } from './hub.ts';
-import {
-  agentSummary,
-  type BuilderAgentInfo,
-  builderInventoryText,
-  listWorkspaceDirs,
-} from './inventory.ts';
+import { agentSummary, type BuilderAgentInfo, builderInventoryText } from './inventory.ts';
 import { tryConnect } from './launch.ts';
 import { desktopNotify } from './notify.ts';
 import { Peer } from './rpc.ts';
@@ -169,8 +163,6 @@ export interface DaemonOptions {
   codexSignIn?: CodexSignIn;
   /** The Claude Code that signs in to Claude; the pinned download by default (tests: a fake). */
   claudeBinary?: () => Promise<string>;
-  /** ~/AnchiWorkspaces by default; tests point it elsewhere. */
-  workspaceRoot?: string;
   /** Where GitHub skills are fetched from; tests replace it. */
   skillRemote?: SkillRemote;
   /** Opens a URL for the user (Google sign-in); tests replace it. */
@@ -242,7 +234,6 @@ export class Daemon {
   private quotaAlerts: QuotaAlerts;
   readonly triggers: TriggerRunner;
   readonly skills: SkillStore;
-  readonly workspaceRoot: string;
   /** The last inventory, so proposals can be checked without asking the guest again. */
   private lastInventory: Inventory | undefined;
   readonly services: ServiceSetup;
@@ -658,12 +649,8 @@ export class Daemon {
     });
     this.guest = opts.guest ?? new Guest(this.vm);
     this.store = new Store(opts.layout.dbFile);
-    this.workspaceRoot = opts.workspaceRoot ?? join(homedir(), 'AnchiWorkspaces');
     this.skills = new SkillStore(join(opts.layout.root, 'skills'), opts.skillRemote);
-    this.proposals = new Proposals(opts.layout, () => ({
-      inventory: this.quickInventory(),
-      workspaceRoot: this.workspaceRoot,
-    }));
+    this.proposals = new Proposals(opts.layout, () => ({ inventory: this.quickInventory() }));
     const inGuest = this.vm.placement === 'local';
     const onHost = this.vm.placement === 'host';
     if (this.vm instanceof HostTransport) {
@@ -731,7 +718,6 @@ export class Daemon {
       maxCells: () => this.maxCells(),
       turnTimeoutMs: opts.turnTimeoutMs,
       skills: this.skills,
-      workspaceRoot: this.workspaceRoot,
       // The builder starts each turn knowing what exists (skills, connectors, directories,
       // agents, with the files of those the message names).
       turnInput: async (agent, text) =>
@@ -839,7 +825,7 @@ export class Daemon {
 
   /**
    * What agents can be given: installed skills, connectors (asked from the guest; null when it
-   * cannot answer), directories under ~/AnchiWorkspaces, agents and images.
+   * cannot answer), agents and images.
    */
   /** The subscription limits the egress proxy last saw, by runtime. */
   private async quota(): Promise<QuotaInfo[]> {
@@ -902,10 +888,6 @@ export class Daemon {
         { id: 'claude-code', connected: known ? status.claude.connected : null },
         { id: 'hermes', connected: known ? (status.hermes?.connected ?? false) : null },
       ],
-      workspaces: {
-        shared: status?.vm === 'running' ? status.workspaces : null,
-        dirs: listWorkspaceDirs(this.workspaceRoot),
-      },
       agents: [...this.hub.summaries(), ...this.peerTasks.agents()]
         .map((a) => a.id)
         .filter((id) => id !== BUILDER_ID),
@@ -1050,7 +1032,7 @@ export class Daemon {
     try {
       agent = resolveAgent(id, this.opts.layout);
     } catch {
-      // A broken file can be deleted too; it just has no triggers or workspaces to list.
+      // A broken file can be deleted too; it just has no triggers to list.
     }
     return {
       agentId: id,
@@ -1061,7 +1043,6 @@ export class Daemon {
       delegatedBy: delegatorsOf(this.opts.layout, id),
       delegatedByTemplates: templateDelegatorsOf(this.opts.layout, id),
       triggers: agent?.triggers.length ?? 0,
-      workspaces: agent?.workspaces.map((w) => w.path) ?? [],
     };
   }
 
@@ -1190,7 +1171,6 @@ export class Daemon {
       if (id === BUILDER_ID) throw new Error('the builder is built in; its settings are fixed');
       const result = allowEgressHost(this.opts.layout, id, str(host, 'host', 260), {
         inventory: await this.inventory(),
-        workspaceRoot: this.workspaceRoot,
       });
       this.log(`${host} added to the egress list of ${id}`);
       this.hub.reload();
@@ -1203,7 +1183,6 @@ export class Daemon {
         apply: apply === true,
         base: typeof base === 'string' ? base : undefined,
         inventory: await this.inventory(),
-        workspaceRoot: this.workspaceRoot,
       });
       if (result.applied) {
         this.log(`settings of ${id} changed from the TUI`);

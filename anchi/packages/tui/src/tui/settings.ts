@@ -1,12 +1,6 @@
 import { highRiskConnector, MODEL_ID } from '@anchi/core';
 import { CONNECTOR_IDS } from '@anchi/protocol';
-import type {
-  AgentPatch,
-  AgentSettings,
-  AgentSettingValues,
-  Effort,
-  WorkspaceSetting,
-} from '@anchi/protocol';
+import type { AgentPatch, AgentSettings, AgentSettingValues, Effort } from '@anchi/protocol';
 
 /** Connectors in the order the panel shows them, also when the guest could not be asked. */
 const CONNECTORS = [...CONNECTOR_IDS, 'gmail', 'drive', 'notion', 'slack', 'x', 'reddit'];
@@ -25,7 +19,6 @@ export interface SettingsState {
   skills: string[];
   connectors: string[];
   delegates: string[];
-  workspaces: WorkspaceSetting[];
   /** High-risk ids this agent does without approval. */
   highRisk: string[];
 }
@@ -43,7 +36,7 @@ export const MODEL = new RegExp(`^$|${MODEL_ID.source}`);
 export type SettingsRow =
   | { kind: 'header'; text: string }
   | {
-      kind: 'field' | 'skill' | 'connector' | 'delegate' | 'workspace' | 'highRisk';
+      kind: 'field' | 'skill' | 'connector' | 'delegate' | 'highRisk';
       id: string;
       label: string;
       mark: string;
@@ -61,7 +54,6 @@ export const initialSettings = (data: AgentSettings): SettingsState => ({
   skills: [...data.current.skills],
   connectors: [...data.current.connectors],
   delegates: [...(data.current.delegates ?? data.fixed.delegates)],
-  workspaces: data.current.workspaces.map((w) => ({ ...w })),
   highRisk: [...data.current.highRisk.disable],
 });
 
@@ -120,7 +112,7 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
       },
       {
         kind: 'header',
-        text: 'Manage runtime, prompt, access, skills and workspaces on that node.',
+        text: 'Manage runtime, prompt, access and skills on that node.',
       },
       {
         kind: 'header',
@@ -223,29 +215,6 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
       note: connected === true ? 'connected' : connected === false ? 'not connected' : '',
     });
   }
-  rows.push({
-    kind: 'header',
-    text: `WORKSPACES (~/AnchiWorkspaces; Space: off → ro → rw)${inv.workspaces.shared === false ? ' · not shared with the guest yet: Runtimes, W' : ''}`,
-  });
-  const dirs = [
-    ...inv.workspaces.dirs,
-    ...state.workspaces.map((w) => w.path).filter((p) => !inv.workspaces.dirs.includes(p)),
-  ];
-  if (!dirs.length) rows.push({ kind: 'header', text: '  no directories yet' });
-  for (const path of dirs) {
-    const w = state.workspaces.find((x) => x.path === path);
-    rows.push({
-      kind: 'workspace',
-      id: path,
-      label: path,
-      mark: w ? (w.mode === 'rw' ? '[rw]' : '[ro]') : '[  ]',
-      note: !inv.workspaces.dirs.includes(path)
-        ? 'missing'
-        : w?.mode === 'rw'
-          ? 'writes go straight to your computer'
-          : '',
-    });
-  }
   const f = data.fixed;
   // The high-risk operations of the agent's connectors, and any exemption it already has.
   const risky = inv.highRisk.filter(
@@ -310,9 +279,8 @@ export function settingsRows(data: AgentSettings, state: SettingsState): Setting
 }
 
 /**
- * Space on a row: skills, connectors and high-risk exemptions switch on and off; workspaces go
- * off → ro → rw → off; runtime, effort and prompt mode go to their next value. Text fields are
- * typed in the panel.
+ * Space on a row: skills, connectors, delegates and high-risk exemptions switch on and off;
+ * runtime, effort and prompt mode go to their next value. Text fields are typed in the panel.
  */
 export function toggleSetting(state: SettingsState, row: SettingsRow): SettingsState {
   if (row.kind === 'header') return state;
@@ -330,16 +298,7 @@ export function toggleSetting(state: SettingsState, row: SettingsRow): SettingsS
   if (row.kind === 'skill') return { ...state, skills: flip(state.skills) };
   if (row.kind === 'connector') return { ...state, connectors: flip(state.connectors) };
   if (row.kind === 'delegate') return { ...state, delegates: flip(state.delegates) };
-  if (row.kind === 'highRisk') return { ...state, highRisk: flip(state.highRisk) };
-  const w = state.workspaces.find((x) => x.path === row.id);
-  if (!w) return { ...state, workspaces: [...state.workspaces, { path: row.id, mode: 'ro' }] };
-  if (w.mode === 'ro') {
-    return {
-      ...state,
-      workspaces: state.workspaces.map((x) => (x.path === row.id ? { ...x, mode: 'rw' } : x)),
-    };
-  }
-  return { ...state, workspaces: state.workspaces.filter((x) => x.path !== row.id) };
+  return { ...state, highRisk: flip(state.highRisk) };
 }
 
 /** Only the fields that changed, so untouched parts of the file keep their formatting. */
@@ -367,7 +326,6 @@ export function settingsPatch(data: AgentSettings, state: SettingsState): AgentP
   if (!same(sorted(state.connectors), sorted(data.current.connectors))) {
     patch.connectors = CONNECTORS.filter((c) => state.connectors.includes(c));
   }
-  if (!same(state.workspaces, data.current.workspaces)) patch.workspaces = state.workspaces;
   if (!same(sorted(state.highRisk), sorted(cur.highRisk.disable))) {
     patch.highRisk = {
       disable: data.inventory.highRisk.filter((id) => state.highRisk.includes(id)),

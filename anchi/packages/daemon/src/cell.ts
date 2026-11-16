@@ -30,8 +30,6 @@ const START_HINTS: Record<string, string> = {
   EGRESS_UNAVAILABLE: 'the egress proxy is not running; run `anchi setup install`',
   AGENT_HOME_LINK:
     "a link, file or directory is in the way of a file Anchi writes in the agent's home in the guest (the path after the colon); remove it there (see Troubleshooting) or delete the agent",
-  WORKSPACE_TOO_MANY_MASKS:
-    'the writable folder (named after the colon) has more git repositories and editor folders than Anchi masks; share a smaller folder',
   DISK_FULL:
     "the guest disk that holds /var/lib/anchi has under 512 MB free; free space there (agents' homes under /var/lib/anchi/agents, image layers under /var/lib/anchi/layers), or give it more: a remote server can keep that data on a larger disk with scripts/remote.sh <server> --data-dir <path> (see docs/REMOTE_SERVER.md), and a Lima VM is recreated with a larger disk",
 };
@@ -127,7 +125,7 @@ export class CellSession extends EventEmitter<{ exit: [string] }> {
       !('type' in value)
     ) {
       const code = String((value as { error: unknown }).error);
-      // Some codes carry a detail after a colon (`WORKSPACE_NOT_A_DIRECTORY:<name>`).
+      // Some codes carry a detail after a colon (`AGENT_HOME_LINK:<path>`).
       const hint = START_HINTS[code.split(':', 1)[0] ?? code];
       return this.fail(`cell start failed: ${code}${hint ? ` — ${hint}` : ''}`);
     }

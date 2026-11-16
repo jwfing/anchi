@@ -78,7 +78,7 @@ class StartCommandTests(unittest.TestCase):
         from unittest.mock import patch
 
         seen = []
-        args = ['anchi-cell', 'start', 't-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', '-']
+        args = ['anchi-cell', 'start', 't-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-']
         with (
             patch.object(anchi_cell.os, 'getuid', lambda: 0),
             patch.object(anchi_cell, 'cell_start', lambda *a: seen.append(a)),
@@ -88,11 +88,11 @@ class StartCommandTests(unittest.TestCase):
             anchi_cell.main([*args, '-', 'x'])
             with self.assertRaises(anchi_cell.Failure):
                 anchi_cell.main([*args, 'github-merge', 'x', 'extra'])
-        self.assertEqual([len(a) for a in seen], [11, 12, 13])
+        self.assertEqual([len(a) for a in seen], [10, 11, 12])
         self.assertEqual(seen[1][-1], 'github-merge')
         self.assertEqual(seen[2][-1], 'x')
         with self.assertRaises(anchi_cell.Failure) as refused:
-            anchi_cell.cell_start('t-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', '-', 'a b')
+            anchi_cell.cell_start('t-1', 'dev', 'codex', 'base', 'github', 'cell', 'codex', '-', '-', '-', 'a b')
         self.assertEqual(str(refused.exception), 'BAD_HIGH_RISK')
 
     def test_auto_names_only_x_or_reddit_of_the_agent_that_do_not_ask(self):
@@ -106,7 +106,7 @@ class StartCommandTests(unittest.TestCase):
         ):
             with self.subTest(auto=auto), self.assertRaises(anchi_cell.Failure) as refused:
                 anchi_cell.cell_start(
-                    't-1', 'dev', 'codex', 'base', connectors, 'cell', 'codex', ask, '-', '-', '-', '-', auto
+                    't-1', 'dev', 'codex', 'base', connectors, 'cell', 'codex', ask, '-', '-', '-', auto
                 )
             self.assertEqual(str(refused.exception), 'BAD_APPROVALS')
 
@@ -313,20 +313,6 @@ class LiveCheckOverlayTests(unittest.TestCase):
         self.assertIn(f'"$src/anchi_cell.py" {self.check.MANAGER}', install)
 
 
-class WorkspaceShareTests(unittest.TestCase):
-    def test_linux_share_is_multithreaded_and_remounted_on_install(self):
-        root = Path(__file__).parents[1]
-        script = (root / 'guest/anchi-workspaces.sh').read_text()
-        # Single-threaded bindfs served every cell's file operations one at a time.
-        self.assertRegex(script, r'bindfs -o [^\n]*--multithreaded')
-        install = (root / 'guest/install-anchi.sh').read_text()
-        # An earlier single-threaded mount is replaced, on Linux hosts only (macOS mounts virtiofs).
-        self.assertIn("mountpoint -q /mnt/anchi-host-raw/share && mountpoint -q /mnt/anchi-host &&", install)
-        self.assertIn("! pgrep -f -- '^bindfs .*--multithreaded.* /mnt/anchi-host$'", install)
-        unit = (root / 'systemd/anchi-workspaces.service').read_text()
-        self.assertIn('ExecStop=-/usr/bin/umount -l /mnt/anchi-host', unit)
-
-
 class InstalledVersionTests(unittest.TestCase):
     """`anchi-cell version` tells the daemon which Anchi installed the guest, so it can ask for
     `anchi setup install` after an update instead of failing tasks against an older guest."""
@@ -417,93 +403,9 @@ class AgentHomeWriteTests(unittest.TestCase):
         self.assertTrue((self.home / '.codex/auth.json').is_dir())
 
 
-class WorkspaceMaskTests(unittest.TestCase):
-    """The paths of a writable workspace that a cell must not change are found by descriptor
-    from the workspace's own descriptor, never through a link, so what gets mounted read-only
-    is what was found and nothing the names could be made to point at."""
-
-    def setUp(self):
-        import tempfile
-
-        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-ws-'))
-        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
-        self.ws = self.tmp / 'ws'
-        self.ws.mkdir()
-
-    def masks(self):
-        import os
-
-        found = {}
-
-        def take(rel, fd):
-            found[rel] = os.fstat(fd).st_ino
-            os.close(fd)
-
-        fd = os.open(self.ws, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            count = anchi_cell.workspace_masks(fd, take)
-        finally:
-            os.close(fd)
-        return found, count
-
-    def test_finds_git_and_editor_configuration_near_the_top(self):
-        for d in (
-            'repo/.git/hooks',
-            'repo/.git/info',
-            'repo/.vscode',
-            'a/b/c/d/e/.git/hooks',  # deeper than MAX_REPO_DEPTH
-            'repo/node_modules/x/.git/hooks',
-            'repo/.hidden/.git/hooks',
-        ):
-            (self.ws / d).mkdir(parents=True)
-        (self.ws / 'repo/.git/config').write_text('[core]\n')
-        (self.ws / 'repo/.gitattributes').write_text('')
-        (self.ws / 'a/b/c/.envrc').write_text('')
-        found, count = self.masks()
-        self.assertEqual(
-            sorted(found),
-            [
-                'a/b/c/.envrc',
-                'repo/.git/config',
-                'repo/.git/hooks',
-                'repo/.git/info',
-                'repo/.gitattributes',
-                'repo/.vscode',
-            ],
-        )
-        self.assertEqual(count, 6)
-        for rel, ino in found.items():
-            self.assertEqual(ino, (self.ws / rel).lstat().st_ino, rel)
-
-    def test_links_and_special_files_are_never_followed(self):
-        import os
-
-        outside = self.tmp / 'outside'
-        (outside / '.git/hooks').mkdir(parents=True)
-        (outside / 'hooks').mkdir()
-        (self.ws / 'repo/.git').mkdir(parents=True)
-        (self.ws / 'linked').symlink_to(outside)  # a linked directory is not walked
-        (self.ws / 'repo/.git/hooks').symlink_to(outside / 'hooks')  # a linked mask is skipped
-        (self.ws / 'repo/.git/config').symlink_to(outside / 'config')  # dangling too
-        (self.ws / 'repo2').mkdir()
-        (self.ws / 'repo2/.git').symlink_to(outside / '.git')  # a linked .git is skipped
-        os.mkfifo(self.ws / 'repo/.envrc')
-        found, count = self.masks()
-        self.assertEqual((found, count), ({}, 0))
-
-    def test_stops_at_the_limit(self):
-        from unittest.mock import patch
-
-        for i in range(4):
-            (self.ws / f'r{i}/.git/hooks').mkdir(parents=True)
-        with patch.object(anchi_cell, 'MAX_MASKS', 2):
-            found, count = self.masks()
-        self.assertEqual((sorted(found), count), (['r0/.git/hooks', 'r1/.git/hooks'], 2))
-
-
 class CellCleanupTests(unittest.TestCase):
-    """A cell's work directory holds the staged workspace binds; removing it while one is still
-    mounted would remove the Mac's files through it."""
+    """A cell's work directory holds its mounts; removing it while one is still mounted would
+    remove files through it."""
 
     def setUp(self):
         import tempfile
@@ -599,7 +501,6 @@ class ScanTests(unittest.TestCase):
         for relative, text in (
             ('etc/app.conf', 'token=abc'),
             ('home/agent/work/notes.txt', 'hello'),
-            ('home/agent/workspaces/repo/.env', 'the Mac side'),
             ('opt/claude/bin/claude', 'toolchain'),
             ('usr/local/go/bin/go', 'toolchain'),
             ('proc/1/environ', 'kernel'),
@@ -614,7 +515,7 @@ class ScanTests(unittest.TestCase):
         result = anchi_cell.scan_files(self.root, lambda blob, where: seen.append((where, blob)), **kw)
         return sorted(w for w, _ in seen), result
 
-    def test_reads_the_writable_tree_but_not_toolchains_workspaces_or_links(self):
+    def test_reads_the_writable_tree_but_not_toolchains_or_links(self):
         where, result = self.scan()
         self.assertEqual(where, ['/etc/app.conf', '/home/agent/work/notes.txt'])
         self.assertEqual(result, {'files': 2, 'bytes': 14, 'unchanged': 0, 'partial': False})
@@ -683,49 +584,3 @@ class ReapTests(unittest.TestCase):
         self.assertEqual(
             out, [{'reaped': ['build-done', 't-old', 't-registered-only'], 'unmounted': [f'{cells}/t-gone/root']}]
         )
-
-
-class WorkspaceNameTests(unittest.TestCase):
-    """nspawn splits a bind argument on `:` and unescapes `\\`. Masks are mounted by descriptor,
-    so no name inside a workspace reaches an argument: only the validated workspace name and
-    the staging path do."""
-
-    def setUp(self):
-        import tempfile
-
-        self.tmp = Path(tempfile.mkdtemp(prefix='anchi-ws-'))
-        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
-
-    def test_masks_under_names_with_colons_and_backslashes_are_found_by_descriptor(self):
-        import os
-
-        ws = self.tmp / 'ws'
-        (ws / 'a:b/.git/hooks').mkdir(parents=True)
-        (ws / 'c\\d/.git').mkdir(parents=True)
-        (ws / 'c\\d/.git/config').write_text('[core]\n')
-        found = []
-        fd = os.open(ws, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            anchi_cell.workspace_masks(fd, lambda rel, f: (found.append(rel), os.close(f)))
-        finally:
-            os.close(fd)
-        self.assertEqual(sorted(found), ['a:b/.git/hooks', 'c\\d/.git/config'])
-
-    def test_the_bind_argument_names_only_the_staging_path_and_the_workspace(self):
-        import os
-        from unittest.mock import patch
-
-        share = self.tmp / 'share'
-        (share / 'proj/a:b/.git/hooks').mkdir(parents=True)
-        cells = self.tmp / 'cells'
-        attached = []
-        with patch.multiple(
-            anchi_cell,
-            CELLS=cells,
-            WORKSPACE_ROOT=share,
-            bind_tree=lambda fd, read_only: os.open(os.devnull, os.O_RDONLY),
-            attach=lambda tree, target: attached.append(target),
-        ):
-            binds = anchi_cell.stage_workspaces('t1', [('rw', share / 'proj', 'rw')])
-        self.assertEqual(binds, [f'--bind={cells}/t1/ws/rw:/home/agent/workspaces/rw'])
-        self.assertEqual(len(attached), 1)  # the workspace itself; its masks go by descriptor

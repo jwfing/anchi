@@ -1,6 +1,6 @@
 # Agent team phase 1 implementation plan
 
-*Historical. The Lima VM placement this plan describes was removed on 2026-11-16; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
+*Historical. The Lima VM placement this plan describes was removed on 2026-11-16, and the workspaces feature (directories of the user's computer mounted into cells) was removed with it; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
 
 **Status: implemented; live acceptance in progress** (see [Status](#status)). This plan implements phase 1 of the [agent team design](AGENT_TEAM_DESIGN.md). The technical unknowns were retired by the [PoC](../../poc/README.md); this plan builds on those results.
 

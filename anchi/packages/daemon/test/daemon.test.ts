@@ -347,12 +347,10 @@ class FakeVm implements VmTransport {
 async function start(
   idleMs = 60_000,
   turnTimeoutMs?: number,
-  workspaceRoot?: string,
   extra: Partial<ConstructorParameters<typeof Daemon>[0]> = {},
 ) {
   const layout = homeLayout(root);
   const d = new Daemon({
-    workspaceRoot: workspaceRoot ?? join(root, 'no-workspaces'),
     turnTimeoutMs,
     // Tests drive triggers with their own clock through daemon.triggers.tick().
     triggers: false,
@@ -412,7 +410,7 @@ describe('vault after a restart', () => {
     const marker = join(root, 'unlock-ran');
     const keyFile = join(root, 'vault.key');
     writeFileSync(keyFile, 'k');
-    await start(60_000, undefined, undefined, {
+    await start(60_000, undefined, {
       vaultKeyFile: keyFile,
       setupSteps: {
         ...SETUP_STEPS,
@@ -565,7 +563,6 @@ describe('daemon tasks', () => {
       '-',
       '-',
       '-',
-      '-',
     ]);
     const events = await client.call('tasks.events', { taskId: task.id });
     expect(events.map((e) => e.event.type)).toEqual([
@@ -618,7 +615,6 @@ describe('daemon tasks', () => {
       'gmail',
       'cell',
       'codex',
-      '-',
       '-',
       '-',
       'gmail=work',
@@ -1266,7 +1262,7 @@ describe('daemon tasks', () => {
     const notify = async (title: string, message: string) => void shown.push([title, message]);
     transport.approvalLines = [held('a'.repeat(16))];
     // `start` connects a client, as an open TUI would.
-    const { client } = await start(60_000, undefined, undefined, { quiet: false, notify });
+    const { client } = await start(60_000, undefined, { quiet: false, notify });
     await new Promise((r) => setTimeout(r, 300));
     expect(await client.call('approvals.list')).toHaveLength(1);
     expect(shown).toEqual([
@@ -1279,7 +1275,7 @@ describe('daemon tasks', () => {
     await daemon!.stop();
     write('settings.yaml', 'desktopNotifications: false\n');
     transport.approvalLines = [held('b'.repeat(16))];
-    await start(60_000, undefined, undefined, { quiet: false, notify });
+    await start(60_000, undefined, { quiet: false, notify });
     await new Promise((r) => setTimeout(r, 300));
     expect(shown).toHaveLength(1);
   });
@@ -1443,49 +1439,6 @@ describe('daemon tasks', () => {
     });
   });
 
-  it('binds workspaces and reports code-running paths a turn adds to writable ones', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
-    mkdirSync(join(ws, 'app', '.git', 'hooks'), { recursive: true });
-    mkdirSync(join(ws, 'docs'));
-    write(
-      'agents/coder.yaml',
-      'runtime: codex\nworkspaces: [{ path: app, mode: rw }, { path: docs }]\n',
-    );
-    const { client } = await start(60_000, undefined, ws);
-    const t = await client.call('tasks.create', {
-      agentId: 'coder',
-      text: `write ${join(ws, 'app', '.git', 'hooks', 'post-checkout')}`,
-    });
-    await client.call('tasks.wait', { taskId: t.id });
-    const arg = transport.starts.at(-1)!.at(-3)!;
-    expect(JSON.parse(Buffer.from(arg, 'base64url').toString())).toEqual([
-      { name: 'app', path: 'app', mode: 'rw' },
-      { name: 'docs', path: 'docs', mode: 'ro' },
-    ]);
-    const notices = (await client.call('tasks.events', { taskId: t.id }))
-      .filter((e) => e.event.type === 'notice')
-      .map((e) => (e.event as { text: string }).text);
-    expect(notices).toEqual([
-      `⚠ workspace app: ${join('.git', 'hooks', 'post-checkout')}: git hook added or changed`,
-    ]);
-  });
-
-  it('runs the turn when an rw workspace holds a file the daemon cannot read', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'anchi-ws-'));
-    mkdirSync(join(ws, 'app'));
-    writeFileSync(join(ws, 'app', 'built-tool'), 'binary');
-    // Executable but unreadable, like a root-owned 0700 file left by a Docker bind mount.
-    chmodSync(join(ws, 'app', 'built-tool'), 0o311);
-    write('agents/coder.yaml', 'runtime: codex\nworkspaces: [{ path: app, mode: rw }]\n');
-    const { client } = await start(60_000, undefined, ws);
-    const t = await client.call('tasks.create', { agentId: 'coder', text: 'go' });
-    const done = await client.call('tasks.wait', { taskId: t.id });
-    expect(done.status).toBe('done');
-    // The audit after the turn reports nothing: the unreadable file was already there.
-    const events = (await client.call('tasks.events', { taskId: t.id })).map((e) => e.event);
-    expect(events.filter((e) => e.type === 'notice' || e.type === 'error')).toEqual([]);
-  });
-
   it("passes an agent's high-risk exceptions to its cells, and nothing extra otherwise", async () => {
     write(
       'agents/merger.yaml',
@@ -1497,7 +1450,7 @@ describe('daemon tasks', () => {
     expect(transport.starts.at(-1)!.slice(-2)).toEqual(['-', 'github-merge']);
     const plain = await client.call('tasks.create', { agentId: 'dev', text: 'hi' });
     await client.call('tasks.wait', { taskId: plain.id });
-    expect(transport.starts.at(-1)).toHaveLength(13);
+    expect(transport.starts.at(-1)).toHaveLength(12);
   });
 
   it("makes an agent's X and Reddit posts automatic only where its approvals say auto", async () => {
@@ -1515,7 +1468,7 @@ describe('daemon tasks', () => {
     expect(started.slice(-2)).toEqual(['-', 'x']);
     const plain = await client.call('tasks.create', { agentId: 'asker', text: 'draft it' });
     await client.call('tasks.wait', { taskId: plain.id });
-    expect(transport.starts.at(-1)).toHaveLength(13);
+    expect(transport.starts.at(-1)).toHaveLength(12);
   });
 
   it('scans every cell before closing it and reports findings', async () => {
@@ -1611,7 +1564,7 @@ describe('daemon tasks', () => {
       binary: async () => fake.binary,
     });
     write('settings.yaml', 'codexAutoImport: false\n');
-    const { daemon, client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const { daemon, client } = await start(60_000, undefined, { codexSignIn });
     const ended = new Promise((resolve) => client.on('codexSignIn', resolve));
     expect(await client.call('setup.codexSignIn')).toEqual({
       verificationUrl: 'https://auth.openai.com/codex/device',
@@ -1634,7 +1587,7 @@ describe('daemon tasks', () => {
       log: () => {},
       binary: async () => fake.binary,
     });
-    const { client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const { client } = await start(60_000, undefined, { codexSignIn });
     const heard: unknown[] = [];
     client.on('codexSignIn', (n) => heard.push(n));
     await client.call('setup.codexSignIn');
@@ -1648,7 +1601,7 @@ describe('daemon tasks', () => {
   it('signs in to Claude only into an unlocked vault, and stores the token it printed', async () => {
     const fake = fakeClaude('auto');
     // A daemon on the user's own computer (the host placement): the browser is here.
-    const { client } = await start(60_000, undefined, undefined, {
+    const { client } = await start(60_000, undefined, {
       claudeBinary: async () => fake.binary,
       vm: new FakeVm('host'),
     });
@@ -1680,7 +1633,7 @@ describe('daemon tasks', () => {
       log: () => {},
       binary: async () => fake.binary,
     });
-    const { client } = await start(60_000, undefined, undefined, { codexSignIn });
+    const { client } = await start(60_000, undefined, { codexSignIn });
     const ended = new Promise((resolve) => client.on('codexSignIn', resolve));
     await client.call('setup.codexSignIn');
     expect(await ended).toEqual({
@@ -1753,7 +1706,7 @@ describe('daemon tasks', () => {
         }),
       );
     local();
-    const { daemon, client } = await start(60_000, undefined, undefined, { hostLoginSync: true });
+    const { daemon, client } = await start(60_000, undefined, { hostLoginSync: true });
     expect((await client.call('setup.status')).claude.connected).toBe(true);
     expect(transport.claudeImports).toHaveLength(1);
     expires += 3_600_000;
@@ -1864,7 +1817,6 @@ describe('builder', () => {
       expect(agents.find((a) => a.id === agentId)).toMatchObject({ runtime, connectors: [] });
       const yaml = readFileSync(file, 'utf8');
       expect(yaml).toContain('connectors: []');
-      expect(yaml).toContain('workspaces: []');
       // No egress list (an empty one would cut the agent off from every host but its
       // runtime's) and no maxTasks: both stay at their defaults.
       expect(yaml).not.toMatch(/egress|maxTasks|highRisk|delegates|triggers/);
@@ -2535,14 +2487,9 @@ describe('deleting agents', () => {
 
   it('deletes an agent with its task trees, cancelling running work, and edits its delegators', async () => {
     write('agents/lead.yaml', '# the lead\nruntime: codex\ndelegates: [dev, qa] # team\n');
-    write(
-      'agents/dev.yaml',
-      'runtime: codex\ndelegates: [qa]\nworkspaces: [{ path: projects/web, mode: rw }]\n',
-    );
+    write('agents/dev.yaml', 'runtime: codex\ndelegates: [qa]\n');
     write('agents/qa.yaml', 'runtime: codex\n');
-    mkdirSync(join(root, 'ws/projects/web'), { recursive: true });
-    writeFileSync(join(root, 'ws/projects/web/keep.txt'), 'mine');
-    const { client } = await start(60_000, undefined, join(root, 'ws'));
+    const { client } = await start();
     const turn = async (agentId: string, text: string) => {
       const task = await client.call('tasks.create', { agentId, text });
       return client.call('tasks.wait', { taskId: task.id });
@@ -2565,7 +2512,6 @@ describe('deleting agents', () => {
       delegatedBy: ['lead'],
       delegatedByTemplates: [],
       triggers: 0,
-      workspaces: ['projects/web'],
     });
     await expect(client.call('agents.delete', { agentId: 'dev', confirm: 'yes' })).rejects.toThrow(
       /type the agent id "dev"/,
@@ -2600,8 +2546,6 @@ describe('deleting agents', () => {
     expect(transport.execs.some((e) => e.args.join(' ') === 'anchi-cell purge-agent dev')).toBe(
       true,
     );
-    // The Mac's directory was only ever bound into cells; it is left as it was.
-    expect(readFileSync(join(root, 'ws/projects/web/keep.txt'), 'utf8')).toBe('mine');
   });
 
   it('finishes the guest part on a later run when the guest is down, and refuses the builder', async () => {
@@ -2629,12 +2573,8 @@ describe('deleting agents', () => {
 });
 
 describe('agent settings', () => {
-  function workspaceTree() {
-    const ws = join(root, 'ws');
-    for (const d of ['projects/webapp/src', 'docs', '.hidden'])
-      mkdirSync(join(ws, d), { recursive: true });
+  function withSkill() {
     write('skills/review/SKILL.md', '---\nname: review\ndescription: Reviews pull requests\n---\n');
-    return ws;
   }
 
   it("adds a refused host to an agent's egress list, and nothing else", async () => {
@@ -2774,7 +2714,8 @@ describe('agent settings', () => {
 
   it('shows settings and what exists, previews a patch and applies only the reviewed one', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex\nconnectors: [github] # pushes\n');
-    const { client } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client } = await start();
     const settings = await client.call('agents.settings', { agentId: 'dev' });
     expect(settings.current).toEqual({
       name: 'dev',
@@ -2785,7 +2726,6 @@ describe('agent settings', () => {
       prompt: { mode: 'append', text: '' },
       skills: [],
       connectors: ['github'],
-      workspaces: [],
       highRisk: { disable: [] },
       delegates: [],
       approvals: {},
@@ -2794,13 +2734,9 @@ describe('agent settings', () => {
     });
     expect(settings).toMatchObject({ inherited: [], fixed: { image: 'codex', egress: null } });
     expect(settings.inventory.skills.map((s) => s.id)).toEqual(['review']);
-    expect(settings.inventory.workspaces.dirs).toEqual(['docs', 'projects', 'projects/webapp']);
     expect(settings.inventory.agents).toEqual(['dev']);
 
-    const patch = {
-      skills: ['review'],
-      workspaces: [{ path: 'projects/webapp', mode: 'rw' as const }],
-    };
+    const patch = { skills: ['review'] };
     const preview = await client.call('agents.update', { agentId: 'dev', patch });
     expect(preview).toMatchObject({ applied: false, errors: [] });
     expect(preview.diff).toMatch(/^\+ skills: \[review\]$/m);
@@ -2817,7 +2753,6 @@ describe('agent settings', () => {
     expect(text).toMatch(/^# my developer/);
     expect(text).toMatch(/connectors: \[github\] # pushes/);
     const agents = await client.call('agents.list');
-    expect(agents.find((a) => a.id === 'dev')?.workspaces).toEqual(['webapp (rw)']);
     // The diff was made against the old file: applying it again is refused.
     await expect(
       client.call('agents.update', { agentId: 'dev', patch, apply: true, base: preview.base }),
@@ -2977,15 +2912,13 @@ describe('agent settings', () => {
   });
 
   it('blocks references to what does not exist and refuses invalid patches', async () => {
-    const { client } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client } = await start();
     const bad = await client.call('agents.update', {
       agentId: 'dev',
-      patch: { skills: ['missing'], workspaces: [{ path: 'nowhere', mode: 'ro' }] },
+      patch: { skills: ['missing'] },
     });
-    expect(bad.errors).toEqual([
-      'skill "missing" is not installed',
-      'workspace "nowhere" is not a directory under ~/AnchiWorkspaces',
-    ]);
+    expect(bad.errors).toEqual(['skill "missing" is not installed']);
     await expect(
       client.call('agents.update', {
         agentId: 'dev',
@@ -3009,7 +2942,8 @@ describe('agent settings', () => {
   });
 
   it('gives the builder the inventory each turn and checks and revises its proposals', async () => {
-    const { client, daemon } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client, daemon } = await start();
     const task = await client.call('tasks.create', { agentId: 'builder', text: 'hello' });
     await client.call('tasks.wait', { taskId: task.id });
     const events = await client.call('tasks.events', { taskId: task.id });
@@ -3018,7 +2952,6 @@ describe('agent settings', () => {
     const said = events.find((e) => e.event.type === 'message')?.event as { text: string };
     expect(said.text).toContain('<anchi-inventory>');
     expect(said.text).toContain('- review: Reviews pull requests');
-    expect(said.text).toContain('projects/webapp');
     expect(said.text).toMatch(/Runtimes \(runtime: \.\.\.\): codex \(\w[\w ]*\), claude-code \(/);
 
     const missing = daemon.proposals.add(
@@ -3156,7 +3089,8 @@ describe('agent settings', () => {
 
   it('shows the builder agent files the user names and turns its patches into update proposals', async () => {
     write('agents/dev.yaml', '# my developer\nruntime: codex # rt\nconnectors: [github]\n');
-    const { client, daemon } = await start(60_000, undefined, workspaceTree());
+    withSkill();
+    const { client, daemon } = await start();
     const said = async (text: string) => {
       const task = await client.call('tasks.create', { agentId: 'builder', text });
       await client.call('tasks.wait', { taskId: task.id });
@@ -3604,7 +3538,7 @@ describe('host placement', () => {
   };
 
   it('reports its placement, refuses tasks and asks for the install before enabling', async () => {
-    const { client } = await start(60_000, undefined, undefined, onHost());
+    const { client } = await start(60_000, undefined, onHost());
     const status = await client.call('setup.status');
     expect(status.placement).toBe('host');
     expect(status.vm).toBe('stopped');

@@ -244,8 +244,6 @@ export function Security({ status, onChange }: { status: SetupStatus; onChange: 
             app {status.appVersion ?? '?'} · secure room {status.guestVersion ?? '?'}
             {status.guestOutdated ? ' · needs an update: use Check & repair' : ''}
           </dd>
-          <dt>Shared folders</dt>
-          <dd>{status.workspaces ? 'available' : 'not available on this machine'}</dd>
         </dl>
         <div className="row gap">
           <button

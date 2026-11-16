@@ -1,8 +1,8 @@
 # Agent team phase 3 plan
 
-*Historical. The Lima VM placement this plan describes was removed on 2026-11-16; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
+*Historical. The Lima VM placement this plan describes was removed on 2026-11-16, and the workspaces feature (directories of the user's computer mounted into cells) was removed with it; the placements now are the [remote server](../REMOTE_SERVER.md) and the [host placement](../HOST_PLACEMENT.md).*
 
-**Status: implemented except P7 (Linux workspaces) and P9 (live acceptance with real accounts); see [Status](#status).** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status), [host directories](HOST_DIRECTORIES_PLAN.md)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
+**Status: implemented except P7 (Linux workspaces) and P9 (live acceptance with real accounts); see [Status](#status).** Phases 1 and 2 are implemented ([phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status)). Phase 3 closes the gaps they left: the security controls that were deferred or simplified, operational rough edges, and the live acceptance still owed.
 
 ## Goal and scope
 

@@ -1249,7 +1249,6 @@ describe('agent settings panel', () => {
       prompt: { mode: 'append', text: '' },
       skills: [],
       connectors: ['github'],
-      workspaces: [],
       highRisk: { disable: [] },
       ...over,
     },
@@ -1268,7 +1267,6 @@ describe('agent settings panel', () => {
         { id: 'github', connected: true },
         { id: 'notion', connected: false },
       ],
-      workspaces: { shared: true, dirs: ['projects/webapp'] },
       runtimes: [],
       agents: ['dev'],
       images: [],
@@ -1283,7 +1281,7 @@ describe('agent settings panel', () => {
     applied: false,
   };
 
-  it('selects skills, connectors and workspaces, shows the change and saves only after y', async () => {
+  it('selects skills and connectors, shows the change and saves only after y', async () => {
     const { client, calls } = fakeClient(
       {},
       {
@@ -1303,13 +1301,9 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write(' '); // the first skill: review
     await tick();
-    for (let i = 0; i < 15; i++) ui.stdin.write('j'); // down to the workspace
+    for (let i = 0; i < 14; i++) ui.stdin.write('j'); // down to the last connector
     await tick();
-    ui.stdin.write(' ');
-    await tick();
-    ui.stdin.write(' '); // ro → rw
-    frame = await frameWith(ui, '[rw]');
-    expect(frame).toContain('writes go straight to your computer');
+    frame = await frameWith(ui, '[x]  review');
     expect(frame).toMatch(/\[ \] +notion +not connected/); // scrolled into view
     ui.stdin.write('\r');
     frame = await frameWith(ui, 'save these settings?');
@@ -1319,7 +1313,7 @@ describe('agent settings panel', () => {
         'agents.update',
         {
           agentId: 'dev',
-          patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+          patch: { skills: ['review'] },
         },
       ],
     ]);
@@ -1329,7 +1323,7 @@ describe('agent settings panel', () => {
       'agents.update',
       {
         agentId: 'dev',
-        patch: { skills: ['review'], workspaces: [{ path: 'projects/webapp', mode: 'rw' }] },
+        patch: { skills: ['review'] },
         apply: true,
         base: 'b1',
       },
@@ -1359,8 +1353,8 @@ describe('agent settings panel', () => {
     await tick();
     ui.stdin.write('s');
     await frameWith(ui, 'Reviews pull requests');
-    // Past 7 fields, 1 skill, 14 connectors and 1 workspace: github's, not aws's.
-    for (let i = 0; i < 23; i++) ui.stdin.write('j');
+    // Past 7 fields, 1 skill and 14 connectors: github's, not aws's.
+    for (let i = 0; i < 22; i++) ui.stdin.write('j');
     await tick();
     ui.stdin.write(' ');
     const frame = await frameWith(ui, '[x]  github-merge');
@@ -1672,7 +1666,6 @@ describe('deleting agents', () => {
     delegatedBy: ['lead'],
     delegatedByTemplates: [],
     triggers: 0,
-    workspaces: ['projects/web'],
   };
   const answers = {
     'agents.deletePreview': () => preview,
@@ -1699,7 +1692,7 @@ describe('deleting agents', () => {
     expect(frame).toContain('3 tasks and their transcripts, with 1 task other agents did for them');
     expect(frame).toContain('1 running or queued: cancelled first');
     expect(frame).toContain('Changed: removed from the delegates of @lead');
-    expect(frame).toContain('Kept: ~/AnchiWorkspaces/projects/web (workspaces are never touched)');
+    expect(frame).toContain('Kept: the audit logs.');
     ui.stdin.write('\r'); // nothing typed yet
     await tick();
     ui.stdin.write('de');
@@ -1737,7 +1730,6 @@ describe('deleting agents', () => {
             prompt: { mode: 'append', text: '' },
             skills: [],
             connectors: [],
-            workspaces: [],
             highRisk: { disable: [] },
           },
           inherited: [],
@@ -1752,7 +1744,6 @@ describe('deleting agents', () => {
           inventory: {
             skills: [],
             connectors: [],
-            workspaces: { shared: true, dirs: [] },
             runtimes: [],
             agents: [],
             images: [],
@@ -2637,7 +2628,7 @@ describe('onboarding and team state', () => {
       id: 'p-quick',
       agentId: 'dev',
       kind: 'create',
-      agentYaml: 'runtime: codex\nconnectors: []\nworkspaces: []',
+      agentYaml: 'runtime: codex\nconnectors: []',
       agentDiff: '+ runtime: codex',
       imageYaml: null,
       imageDiff: '',

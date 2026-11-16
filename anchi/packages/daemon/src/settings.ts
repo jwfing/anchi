@@ -23,9 +23,8 @@ import {
   patchAgentYaml,
   resolveAgent,
   type Trigger,
-  workspaceSchema,
 } from '@anchi/core';
-import type { AgentSettings, AgentUpdate, TriggerSetting, WorkspaceSetting } from '@anchi/protocol';
+import type { AgentSettings, AgentUpdate, TriggerSetting } from '@anchi/protocol';
 import { z } from 'zod';
 import { checkReferences, type ReferenceInventory } from './inventory.ts';
 
@@ -48,7 +47,6 @@ const patchSchema = z.strictObject({
   skills: field.skills,
   delegates: field.delegates,
   connectors: z.array(connectorSchema).max(connectorSchema.options.length).optional(),
-  workspaces: z.array(workspaceSchema).max(10).optional(),
   highRisk: z.strictObject({ disable: z.array(highRiskIdSchema).max(30) }).optional(),
   approvals: field.approvals,
   triggers: field.triggers,
@@ -71,13 +69,12 @@ export const BUILDER_PATCH_FIELDS = PATCH_FIELDS.filter(
 export function parsePatch(raw: unknown): AgentPatch {
   const parsed = patchSchema.safeParse(raw);
   if (!parsed.success) throw new Error(`invalid settings: ${z.prettifyError(parsed.error)}`);
-  const { skills, delegates, connectors, workspaces, highRisk } = parsed.data;
+  const { skills, delegates, connectors, highRisk } = parsed.data;
   const unique = (l?: string[]) => !l || new Set(l).size === l.length;
   if (
     !unique(skills) ||
     !unique(delegates) ||
     !unique(connectors) ||
-    !unique(workspaces?.map((w) => w.path)) ||
     !unique(highRisk?.disable) ||
     !unique(parsed.data.egress ?? undefined)
   ) {
@@ -96,7 +93,6 @@ const EDITABLE = [
   'skills',
   'delegates',
   'connectors',
-  'workspaces',
   'highRisk',
   'approvals',
   'triggers',
@@ -135,11 +131,6 @@ export function settingsView(
       skills: agent.skills ?? [],
       delegates: agent.delegates ?? [],
       connectors: agent.connectors ?? [],
-      workspaces: (agent.workspaces ?? []).map((w): WorkspaceSetting => ({
-        path: w.path,
-        mode: w.mode ?? 'ro',
-        ...(w.name ? { name: w.name } : {}),
-      })),
       highRisk: { disable: [...(agent.highRisk?.disable ?? [])] },
       approvals: { ...agent.approvals },
       triggers: (agent.triggers ?? []).map((t) => ({ ...t })) as TriggerSetting[],
@@ -226,7 +217,6 @@ export function updateAgentFile(
     base?: string;
     /** Without it, only the agent schema is checked, not what it refers to. */
     inventory?: ReferenceInventory;
-    workspaceRoot?: string;
   },
 ): AgentUpdate {
   const file = agentFile(layout, id);
@@ -283,7 +273,7 @@ export function updateAgentFile(
       if (reached.length) warnings.push(`@${id} may also reach ${reached.join(', ')} (egress)`);
     }
     if (opts.inventory) {
-      const found = checkReferences(agent, opts.inventory, opts.workspaceRoot ?? '');
+      const found = checkReferences(agent, opts.inventory);
       errors.push(...found.errors);
       warnings.push(...found.warnings);
     }
@@ -308,7 +298,7 @@ export function allowEgressHost(
   layout: HomeLayout,
   id: string,
   host: string,
-  opts: { inventory: ReferenceInventory; workspaceRoot: string },
+  opts: { inventory: ReferenceInventory },
 ): { egress: string[] } {
   const h = host.trim().toLowerCase().replace(/\.$/, '');
   if (!HOST.test(h) || h.length > 253) {

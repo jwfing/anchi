@@ -17,7 +17,7 @@ anchi agents create dev --runtime claude-code --preview
 anchi agents create dev --runtime claude-code
 ```
 
-Review the YAML and confirm. The starter grants no connectors or workspaces; it reaches any public host (no `egress`
+Review the YAML and confirm. The starter grants no connectors; it reaches any public host (no `egress`
 list) and runs up to three tasks at a time. An existing `dev` is never overwritten; choose
 another id. In the TUI, **Ctrl+X, N** selects a runtime and name, then shows the proposal;
 **y** saves, **n** discards. **Esc** closes the dialog without saving.
@@ -68,12 +68,10 @@ or private task content.
 
 After this succeeds, choose one next step:
 
-- [Share a project folder](AGENT_TEAM.md#directories-of-your-computer-workspaces). Start with
-  `ro` for review. `rw` edits real host files; review them before executing code on the host.
 - [Connect GitHub or another service](AGENT_TEAM.md#connect-accounts) and grant that connector
   to the agent. For GitHub writes requiring your review, set `approvals: {github: ask}`.
 - [Create another agent](AGENT_TEAM.md#create-agents) and explicitly configure `delegates` for
   collaboration. A name alone does not grant delegation access.
 
 Remove a trial agent with `anchi agents rm dev` after reviewing the deletion preview. It
-removes that agent's tasks and its files on the server; host workspace files are kept.
+removes that agent's tasks and its files on the server; audit logs are kept.

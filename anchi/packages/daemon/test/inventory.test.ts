@@ -8,7 +8,6 @@ const inventory = {
     { id: 'codex' as const, connected: true },
     { id: 'claude-code' as const, connected: false },
   ],
-  workspaces: { shared: true, dirs: [] },
   agents: [],
   images: [],
   highRisk: [],
@@ -40,14 +39,12 @@ describe('inventory', () => {
   });
 
   it('warns about an unconnected runtime but does not block it', () => {
-    const agent = { id: 'a', runtime: 'claude-code', skills: [], connectors: [], workspaces: [] };
-    expect(checkReferences(agent, inventory, '/nonexistent')).toEqual({
+    const agent = { id: 'a', runtime: 'claude-code', skills: [], connectors: [] };
+    expect(checkReferences(agent, inventory)).toEqual({
       errors: [],
       warnings: ['runtime claude-code is not connected yet'],
     });
-    expect(
-      checkReferences({ ...agent, runtime: 'codex' }, inventory, '/nonexistent').warnings,
-    ).toEqual([]);
+    expect(checkReferences({ ...agent, runtime: 'codex' }, inventory).warnings).toEqual([]);
   });
 
   it('lists connected Google accounts and warns about one that is not signed in', () => {
@@ -60,14 +57,11 @@ describe('inventory', () => {
       id: 'a',
       skills: [],
       connectors: ['gmail'],
-      workspaces: [],
       accounts: { gmail: 'home' },
     };
-    expect(checkReferences(agent, inv, '/nonexistent').warnings).toEqual([
+    expect(checkReferences(agent, inv).warnings).toEqual([
       'gmail account "home" is not connected yet',
     ]);
-    expect(
-      checkReferences({ ...agent, accounts: { gmail: 'work' } }, inv, '/nonexistent').warnings,
-    ).toEqual([]);
+    expect(checkReferences({ ...agent, accounts: { gmail: 'work' } }, inv).warnings).toEqual([]);
   });
 });

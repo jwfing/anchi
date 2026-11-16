@@ -20,7 +20,6 @@ const data: AgentSettings = {
     prompt: { mode: 'append', text: 'Be careful.\nTest first.\n' },
     skills: ['review', 'gone'],
     connectors: ['github'],
-    workspaces: [{ path: 'docs', mode: 'ro', name: 'notes' }],
     highRisk: { disable: [] },
   },
   inherited: ['model'],
@@ -36,7 +35,6 @@ const data: AgentSettings = {
   inventory: {
     skills: [{ id: 'review', name: 'review', description: 'Reviews' }],
     connectors: [],
-    workspaces: { shared: false, dirs: ['docs', 'web'] },
     runtimes: [
       { id: 'codex', connected: true },
       { id: 'claude-code', connected: false },
@@ -107,34 +105,19 @@ describe('settings panel', () => {
       '[ ] slack ',
       '[ ] x ',
       '[ ] reddit ',
-      '[ro] docs ',
-      '[  ] web ',
     ]);
-    expect(rows.find((r) => r.kind === 'header' && r.text.startsWith('WORKSPACES'))).toMatchObject({
-      text: expect.stringContaining('not shared with the guest yet'),
-    });
   });
 
-  it('toggles and sends only what changed, keeping workspace names', () => {
+  it('toggles and sends only what changed', () => {
     let state = initialSettings(data);
     const row = (id: string) =>
       settingsRows(data, state).find((r) => r.kind !== 'header' && r.id === id)!;
     expect(settingsPatch(data, state)).toEqual({});
     state = toggleSetting(state, row('gone'));
-    state = toggleSetting(state, row('docs')); // ro → rw
-    state = toggleSetting(state, row('web')); // off → ro
-    expect(settingsPatch(data, state)).toEqual({
-      skills: ['review'],
-      workspaces: [
-        { path: 'docs', mode: 'rw', name: 'notes' },
-        { path: 'web', mode: 'ro' },
-      ],
-    });
-    state = toggleSetting(state, row('docs')); // rw → off
+    expect(settingsPatch(data, state)).toEqual({ skills: ['review'] });
     state = toggleSetting(state, row('slack'));
     state = toggleSetting(state, row('aws'));
     expect(settingsPatch(data, state).connectors).toEqual(['github', 'aws', 'slack']);
-    expect(settingsPatch(data, state).workspaces).toEqual([{ path: 'web', mode: 'ro' }]);
   });
 
   it("offers the high-risk operations of the agent's connectors and sends the exemptions", () => {

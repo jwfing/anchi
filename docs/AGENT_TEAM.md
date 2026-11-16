@@ -124,22 +124,22 @@ Choose `codex`, `claude-code` or `hermes`; no Codex login or model call is neede
 Existing ids are refused, including a file created after preview. In the TUI, **Ctrl+X, N**
 chooses the runtime and id, then opens the same proposal review used by the builder.
 
-The starter explicitly sets `connectors: []` and `workspaces: []`. It leaves `egress` out, so the
-agent reaches any public host, and `maxTasks` at its default of 3. Add connectors and directories
-deliberately in the settings or agent file; add an `egress` list only to limit the hosts.
+The starter explicitly sets `connectors: []`. It leaves `egress` out, so the agent reaches any
+public host, and `maxTasks` at its default of 3. Add connectors deliberately in the settings or
+agent file; add an `egress` list only to limit the hosts.
 See [First task](FIRST_TASK.md) for a complete example.
 
 ### Use Agent builder
 
-Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. The builder runs on the first connected runtime (Codex, then Claude Code, then Hermes), so one connected runtime is enough; `builderRuntime: claude-code` in `~/.anchi/settings.yaml` picks one, and the builder's view shows which it uses. A builder conversation keeps the runtime it started on. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, directories under `~/AnchiWorkspaces`, agents and images. It replies with a proposal. A full-screen dialog shows:
+Open the TUI, select **Agent builder**, and describe the agent: its job, the services it needs and the tools it uses. The builder runs on the first connected runtime (Codex, then Claude Code, then Hermes), so one connected runtime is enough; `builderRuntime: claude-code` in `~/.anchi/settings.yaml` picks one, and the builder's view shows which it uses. A builder conversation keeps the runtime it started on. Each turn, the builder is told what exists: installed skills, connectors and whether they are connected, agents and images. It replies with a proposal. A full-screen dialog shows:
 
 - the agent file;
 - an image recipe, if the agent needs tools beyond the [base image](#base-image);
-- what blocks it (a skill that is not installed, a directory that does not exist, an unknown delegate) and what is worth knowing (a connector not connected yet).
+- what blocks it (a skill that is not installed, an unknown delegate) and what is worth knowing (a connector not connected yet).
 
 Press `y` to write the files, `n` to discard the proposal, or `s` to change its settings yourself in the settings panel; the proposal is checked again and shown with your changes.
 
-The builder can also change an existing agent. Each turn it gets a one-line summary of every agent, and the agent file of each agent your message names by id (`dev` or `@dev`; up to 4 KB per file). For a change it proposes a patch with only the fields to change: name, description, runtime, model, effort, prompt, skills, connectors and workspaces. The dialog shows the change as a diff of the agent file, and the rest of the file, comments included, stays as it is. If the file changes before you press `y`, the patch is refused; ask the builder again. For other fields (triggers, approvals, egress, delegates, image), the builder proposes the whole file, which replaces the old one. The builder cannot write any file itself.
+The builder can also change an existing agent. Each turn it gets a one-line summary of every agent, and the agent file of each agent your message names by id (`dev` or `@dev`; up to 4 KB per file). For a change it proposes a patch with only the fields to change: name, description, runtime, model, effort, prompt, skills and connectors. The dialog shows the change as a diff of the agent file, and the rest of the file, comments included, stays as it is. If the file changes before you press `y`, the patch is refused; ask the builder again. For other fields (triggers, approvals, egress, delegates, image), the builder proposes the whole file, which replaces the old one. The builder cannot write any file itself.
 
 ### Write an agent file
 
@@ -152,7 +152,6 @@ For a first task on a released binary, create `~/.anchi/agents/dev.yaml` in your
 name: Developer
 runtime: claude-code   # or codex / hermes; use the runtime you connected
 connectors: []
-workspaces: []
 prompt:
   text: Help with the requested task. Explain missing access instead of trying to bypass it.
 ```
@@ -216,12 +215,12 @@ edit its coordinator allowlist here; the execution profile must also allow those
 Saving reloads the allowlist without restarting the daemon. Retry a previously refused
 delegation; Anchi does not replay it automatically.
 
-**^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel. It lists the agent's name, description, runtime (marked connected or not), model, effort and prompt, then every installed skill, every connector (marked connected or not), every directory under `~/AnchiWorkspaces` and the high-risk operations of the agent's connectors. **Space** changes the selected row:
+**^X s** in an agent's chat (or **s** on it in the sidebar) opens its settings panel. It lists the agent's name, description, runtime (marked connected or not), model, effort and prompt, then every installed skill, every connector (marked connected or not), the agents it may delegate to and the high-risk operations of the agent's connectors. **Space** changes the selected row:
 
 - on name, description or model, you type the new value (an empty model means the runtime's default);
 - runtime goes through `codex`, `claude-code` and `hermes`, and effort goes through unset, `low`, `medium`, `high` and `xhigh` (only Codex uses it);
 - the prompt mode switches between `append` and `replace`, and the prompt text opens in `$EDITOR`;
-- skills, connectors and delegation recipients are selected or deselected, and a workspace goes off → `ro` → `rw`;
+- skills, connectors and delegation recipients are selected or deselected;
 - a high-risk operation marked `[x]` is one the agent does without asking you (`highRisk.disable` in its file; see the approvals section below). A row says when `~/.anchi/settings.yaml` already exempts it for every agent, or when the agent's `approvals: {<connector>: ask}` holds it anyway. The review lists each new exemption as a warning.
 
 At the bottom, the panel shows what it cannot change: template, image, sandbox, approvals, egress and triggers (the desktop app edits approvals and schedules under an agent's Access and Advanced tabs), and whether the agent's X posts and Reddit posts and comments ask, go out without approval, or follow the service's mode. Edit those in the agent file. For an agent that `extends` a template, an inherited value is marked `from template <id>`. Changing an inherited value writes an override into the agent's own file. A prompt that comes from `prompt.file` is read-only in the panel; edit that file instead.
@@ -249,7 +248,7 @@ be deleted. Deletion uses the same daemon operations as the TUI and CLI below.
 - removes it from other agents' `delegates` and from the `delegates` of templates in `~/.anchi/templates/`, keeping the rest of their files (an agent that only inherited it is not edited);
 - on the server, removes its home (work directory, Codex and Claude sessions), its skills and its policy rules.
 
-Directories of your computer in `~/AnchiWorkspaces` are not touched: they are only bound inside the agent's cells, and the cell manager refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the server cannot be asked, the rest is done and the dialog says so; deleting the agent again later finishes the server part. The builder cannot be deleted.
+The cell manager refuses the removal while the agent has a cell or anything under its home is a mount point. Audit logs are kept. If the server cannot be asked, the rest is done and the dialog says so; deleting the agent again later finishes the server part. The builder cannot be deleted.
 
 ## Teams, approvals, triggers and skills
 
@@ -294,20 +293,6 @@ highRisk: { disable: [github-merge] }  # merging does not wait for you; no appro
 - **Egress.** `egress: [registry.npmjs.org, '*.pypi.org']` limits the hosts an agent's cells reach; its runtime and connectors' hosts are always allowed (for Codex: `chatgpt.com`, `*.chatgpt.com` and OpenAI's content CDN `*.oaiusercontent.com`). Other connections fail and are audited as `egress-denied`, and the task notes each refused host once while it runs. To allow one, press **^X l** in the task's view, then **e**, choose the host and confirm (or `anchi agents allow-host <agent> <host>`): the exact host is added to the agent's `egress`, from its next cell on. Wildcards are added by editing the file. Without `egress` the agent reaches any public host. An allowed host can still receive data (a gist on `github.com`), so a list narrows exfiltration; it does not end it.
 - **Triggers.** `schedule` takes a cron expression in local time; an expression that does not parse (`0 25 * * *`, names like `MON-FRI`) or a blank `text` is an error when the agent file loads. A run missed while the Mac slept runs once on wake. `poll` checks Linear issues (by `team`, `label` or `state`) or a GitHub issue search (`query`) every `every` minutes (default 5) and starts one task per new item; items that existed when the trigger was added are skipped. `anchi triggers` lists them, with a trigger's last error where its result would be.
 - **Skills.** `anchi skills add <directory or GitHub URL> [--id x]`, or **a** on the **Skills** screen, stores a `SKILL.md` skill; a GitHub skill is pinned to the commit it was fetched at. A directory or repository without a top-level `SKILL.md` is a collection: each `<name>/SKILL.md` and `skills/<name>/SKILL.md` in it is added under `<name>` with its own tree URL (for example `anchi skills add https://github.com/addyosmani/agent-skills`), and a skill that cannot be added is skipped and reported. Give it to agents in their settings panel (**^X s**) or with `skills: [id]`; their cells get it read-only. An agent can have up to 200 skills, at most 8 MB and 2000 files together. `anchi skills update [id]`, or **u** on the Skills screen, shows what the latest commit of the URL changes (files added, changed, removed) and installs exactly that commit after you confirm. The screen lists one line per skill — its id and where it came from (`owner/repo @ commit`, or `local`) — with the skills of one repository together and local ones last; it shows how far down the list you are (`12/25`), scrolls with the cursor (**↑ ↓**, **PgUp PgDn**, **Home End**) and shows the selected skill's description below the list. Skill content is untrusted, like any other agent input.
-
-## Directories of your computer (workspaces)
-
-Give an agent directories under `~/AnchiWorkspaces`:
-
-```yaml
-workspaces:
-  - path: projects/webapp   # ~/AnchiWorkspaces/projects/webapp
-    mode: rw                # ro by default
-```
-
-They appear in the agent's cells at `/home/agent/workspaces/<name>`; a cell sees no other directory of your computer. Writes to an `rw` workspace go straight to your computer and are owned by you. Anchi tells the agent where they are and what they map to, and that its own working directory, `/home/agent/work`, stays on the server: files there are not on your computer. An agent that cloned a repository into `/home/agent/work` before it had a workspace may keep using that copy; ask it to work in the workspace, or to push its branch. A workspace is slower than `/home/agent/work` for many small files, much more so on Linux hosts (9p): agents are told to keep dependencies, virtual environments, caches and build output in `/home/agent/work`.
-
-A writable directory lets an agent leave code that your own tools later run. Anchi mounts git hooks, git configuration and info, `.gitattributes`, `.envrc`, `.vscode/` and `.idea/` read-only in the repositories near the top of an `rw` workspace. After each turn it compares the workspace with its state before the turn and notes in the task transcript any new git hook, git configuration that runs commands, symlink pointing outside the workspace, new executable file or changed editor or shell configuration. It never changes your files. Files that tools run by design, such as `package.json` scripts or a `Makefile`, cannot be masked: review an agent's changes before you run them.
 
 ## Run tasks
 

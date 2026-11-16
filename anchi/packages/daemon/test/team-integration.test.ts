@@ -80,7 +80,6 @@ async function start(
     hostLoginSync: false,
     quiet: true,
     log: () => {},
-    workspaceRoot: join(layout.root, 'workspaces'),
     teamPollMs: 10,
     ...extra,
   });

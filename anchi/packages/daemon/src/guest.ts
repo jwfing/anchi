@@ -182,8 +182,6 @@ export interface CellStart {
   ask: string[];
   /** X and Reddit, when the agent's approvals make its posts automatic. */
   auto?: string[];
-  /** Directories under ~/AnchiWorkspaces bound into the cell. */
-  workspaces: { name: string; path: string; mode: 'ro' | 'rw' }[];
   /** Allowed hosts, or undefined for open egress. */
   egress?: string[];
   /** Google account per service (gmail, drive); `default` for the others. */
@@ -247,7 +245,6 @@ export class Guest {
       c.sandbox,
       c.runtime,
       c.ask.filter((x) => c.connectors.includes(x)).join(',') || '-',
-      c.workspaces.length ? Buffer.from(JSON.stringify(c.workspaces)).toString('base64url') : '-',
       c.egress ? Buffer.from(JSON.stringify(c.egress)).toString('base64url') : '-',
       accounts,
       // Only when set, so a guest installed before high-risk exceptions per agent still starts;
@@ -286,7 +283,7 @@ export class Guest {
 
   /**
    * Removes a deleted agent's home, skills bundle and policy rules in the guest. The guest refuses
-   * while the agent has a cell, and never crosses a mount (workspaces stay untouched).
+   * while the agent has a cell, and never crosses a mount.
    */
   async purgeAgent(agent: string): Promise<{ home: boolean; skills: boolean; policy: string[] }> {
     return parse(
@@ -465,12 +462,6 @@ export class Guest {
           : ['/usr/bin/python3', `${SERVICES}/policy_admin.py`, 'deny', id],
       ),
     );
-  }
-
-  /** Whether ~/AnchiWorkspaces is mounted in the guest. */
-  async workspacesMounted(): Promise<boolean> {
-    const r = await this.transport.exec(['mountpoint', '-q', '/mnt/anchi-host']);
-    return r.code === 0;
   }
 
   async claudeStatus(): Promise<{

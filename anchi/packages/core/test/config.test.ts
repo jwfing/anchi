@@ -101,7 +101,12 @@ describe('resolveAgent', () => {
   });
 
   it('rejects removed my-bot fields and host-execution settings', () => {
-    for (const field of ['account: x', 'workspace: { cwd: /tmp }', 'tools: { mcp: [x] }']) {
+    for (const field of [
+      'account: x',
+      'workspace: { cwd: /tmp }',
+      'workspaces: [{ path: p }]',
+      'tools: { mcp: [x] }',
+    ]) {
       write('agents/old.yaml', `runtime: codex\n${field}\n`);
       expect(() => resolveAgent('old', layout())).toThrow(ConfigError);
     }
@@ -217,19 +222,12 @@ describe('patchAgentYaml', () => {
     const out = patchAgentYaml(text, {
       skills: ['review', 'test'],
       connectors: ['github', 'linear'],
-      workspaces: [
-        { path: 'projects/webapp', mode: 'rw' },
-        { path: 'docs', mode: 'ro', name: 'notes' },
-      ],
     });
     expect(out).toContain('# the developer agent');
     expect(out).toContain('connectors: [github, linear] # what it may use');
     expect(out).toContain('skills: [review, test]');
     expect(out).toContain('    Work carefully.');
     expect(out.indexOf('connectors')).toBeLessThan(out.indexOf('prompt'));
-    expect(out).toMatch(
-      /workspaces:\n  - path: projects\/webapp\n    mode: rw\n  - path: docs\n    name: notes/,
-    );
   });
 
   it('removes emptied lists, unless a template must be overridden', () => {

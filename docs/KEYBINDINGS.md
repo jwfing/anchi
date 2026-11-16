@@ -28,7 +28,7 @@ The TUI binds named actions to keys per view. Three rules keep it usable inside 
 | ^X c | Cancel the running task after confirmation |
 | ^X r | Run a failed or cancelled task again (continue its session, or start over) |
 | ^X a | Review a write waiting for approval |
-| ^X s | Agent settings: skills, connectors, workspaces |
+| ^X s | Agent settings: skills, connectors, delegation |
 | ^X D | Delete the agent with its tasks (type its id to confirm) |
 | ^X o | Reopen the pending builder proposal |
 | ^X l | External access of the task shown |

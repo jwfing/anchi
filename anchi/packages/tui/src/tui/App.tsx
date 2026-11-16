@@ -2457,8 +2457,6 @@ export function App({
     : agent
       ? `@${agent.peer?.agent ?? agent.id} · ${sanitizeLine(agent.name)}  ${agent.execution ? `on ${agent.execution.server}/@${agent.execution.agent}` : `${agent.runtime ?? ''} · ${agent.connectors.join(', ') || 'no connectors'}`}${
           agent.triggers ? ` · ⏰ ${agent.triggers}` : ''
-        }${
-          agent.workspaces?.length ? ` · 📁 ${agent.workspaces.join(', ')}` : ''
         }${agent.skills?.length ? ` · 🧩 ${agent.skills.join(', ')}` : ''}${chatMode ? (task ? ` · ${task.id} (${task.status})` : ' · new task') : ''}`
       : CONFIG_LABEL[current as ConfigItem];
   const busy = detail?.status === 'running' || detail?.status === 'queued';
@@ -3255,14 +3253,6 @@ function RuntimesView({
         )}
       </Text>
       <Text>
-        Workspaces:{' '}
-        {setup.workspaces ? (
-          <Text color="green">~/AnchiWorkspaces is shared with the guest</Text>
-        ) : (
-          <Text dimColor>not shared</Text>
-        )}
-      </Text>
-      <Text>
         Claude Code:{' '}
         {setup.claude?.connected && !runtimeReady(setup, 'claude-code') ? (
           <Text color="yellow">
@@ -3777,7 +3767,7 @@ function ModalView({
             : []),
           { text: '' },
           {
-            text: `Kept: ${p.workspaces.length ? p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') : 'directories of your computer'} (workspaces are never touched), and the audit logs.`,
+            text: 'Kept: the audit logs.',
             color: 'green',
           },
         ]

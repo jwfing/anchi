@@ -1,6 +1,6 @@
 ---
 name: anchi-security-boundary
-description: Rules and checklist for changes that touch an Anchi security boundary — credentials, the vault, task cells, the egress proxy, connector services, approvals, policy, workspaces, skills or anything the cell runner sends. Use whenever a change could let a cell see a secret, reach something new, or skip an approval.
+description: Rules and checklist for changes that touch an Anchi security boundary — credentials, the vault, task cells, the egress proxy, connector services, approvals, policy, skills or anything the cell runner sends. Use whenever a change could let a cell see a secret, reach something new, or skip an approval.
 ---
 
 # Changing a security boundary
@@ -30,4 +30,4 @@ Read `SECURITY.md` (trust zones and the agent-team section) first. The invariant
 - Passing a value from a cell into a shell command or a guest command line; guest commands take fixed arguments validated by regex in `guest/anchi_cell.py`.
 - Logging a request or an environment for debugging.
 - Making a test pass by widening an allowlist, or by mocking away the check under test.
-- Bind-mounting a new host path into cells; workspaces are checked in the daemon and again in the cell manager (no `..`, no symlinks on the way).
+- Bind-mounting a new host path into cells: a cell gets only its agent's home and skills, never a directory of the user's; the cell manager refuses to remove a home with a mount below it.

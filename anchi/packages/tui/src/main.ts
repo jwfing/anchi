@@ -824,7 +824,7 @@ agentsCmd
   );
 agentsCmd
   .command('rm <id>')
-  .description('Delete an agent with its tasks and its files in the guest (workspaces are kept)')
+  .description('Delete an agent with its tasks and its files in the guest')
   .option('-y, --yes', 'delete without typing the id')
   .action((id: string, opts: { yes?: boolean }) => deleteAgentCli(id, opts.yes === true));
 agentsCmd
@@ -869,12 +869,7 @@ async function deleteAgentCli(id: string, yes: boolean) {
       console.log(
         `It is removed from the delegates of ${[...p.delegatedBy.map((a) => `@${a}`), ...p.delegatedByTemplates.map((t) => `template ${t}`)].join(', ')}.`,
       );
-    console.log(
-      styleText(
-        'green',
-        `Kept: ${p.workspaces.map((w) => `~/AnchiWorkspaces/${w}`).join(', ') || 'directories of your computer'} and the audit logs.`,
-      ),
-    );
+    console.log(styleText('green', 'Kept: the audit logs.'));
     if (!yes && (await ask(`Type ${p.agentId} to confirm: `)).trim() !== p.agentId) {
       return console.log('not deleted');
     }
@@ -958,7 +953,6 @@ setup
                 `Local ${name}: ${login.installed ? 'installed' : 'CLI not found'} · login ${login.state}`,
             )
           : []),
-        `Workspaces: ${s.workspaces ? '~/AnchiWorkspaces is shared with the guest' : 'not shared'}`,
         `Connectors: ${s.connectors.map((c) => `${c.id} ${c.connected ? '●' : '○'}`).join('  ')}`,
         `Services: ${(s.services ?? [])
           .map(

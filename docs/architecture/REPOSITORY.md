@@ -13,7 +13,7 @@ The monorepo follows trust boundaries. Deployed script and guest paths stay stab
 | `anchi/packages/tui` | Ink TUI and CLI: key map and command palette, settings panel, security dialogs; sanitizes all agent text (trusted, host) |
 | `anchi/packages/host-services` | Host (trusted), the [host placement](../HOST_PLACEMENT.md): the egress proxy (a port of `services/egress_rules.py`, kept equal by generated fixtures), the vault, the approvals queue and the control socket, as one process the daemon starts; depends on `protocol` only |
 | `anchi/packages/cell-runner` | Inside task cells (untrusted): runner hosting the Codex and Claude Agent SDKs, the in-cell MCP server and its connector tools, the proxy forwarder |
-| `guest/anchi_cell.py` | `anchi-cell` / `anchi-image`: task cells with workspaces and bridge sockets, image layers, reaper, approvals stream, polls, skills, agent purge, live exec and credential scan (guest root) |
+| `guest/anchi_cell.py` | `anchi-cell` / `anchi-image`: task cells with bridge sockets, image layers, reaper, approvals stream, polls, skills, agent purge, live exec and credential scan (guest root) |
 | `services/egress_rules.py`, `egress_proxy.py` | Egress proxy: injection, deny, write, high-risk, egress and poll rules independent of mitmproxy (with `aws-chunked` re-signing), and the mitmproxy addon with per-cell sockets, the connector bridge, the approval queue and connector verification |
 | `services/connectors.py` | Connector service registry |
 | `services/ledger.py`, `connector_base.py` | Shared execution ledger and connector read/write flow |

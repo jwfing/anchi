@@ -224,7 +224,7 @@ export interface Confirmation {
 
 export type Read = (method: MethodName, params: object) => Promise<unknown>;
 
-/** What an agent-file patch adds to the agent's reach: connectors, directories, write access. */
+/** What an agent-file patch adds to the agent's reach: connectors, delegation, exemptions. */
 export function widening(current: AgentSettings['current'], patch: AgentPatch): string[] {
   const out: string[] = [];
   for (const id of patch.connectors ?? []) {
@@ -232,11 +232,6 @@ export function widening(current: AgentSettings['current'], patch: AgentPatch): 
   }
   for (const id of patch.delegates ?? []) {
     if (!current.delegates?.includes(id)) out.push(`delegate tasks to @${id}`);
-  }
-  for (const w of patch.workspaces ?? []) {
-    const before = current.workspaces.find((c) => c.path === w.path);
-    if (!before) out.push(`workspace ${w.path} (${w.mode === 'rw' ? 'read-write' : 'read-only'})`);
-    else if (w.mode === 'rw' && before.mode !== 'rw') out.push(`write access to ${w.path}`);
   }
   for (const id of patch.highRisk?.disable ?? []) {
     if (!current.highRisk?.disable.includes(id)) out.push(`${id} without asking you`);
@@ -327,7 +322,7 @@ export async function confirmation(
         : undefined;
     return {
       message: `Run @${proposal.agentId} on ${execution.server}?`,
-      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors, workspaces and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.${delegation ? `\n\n${delegation}` : ''}`,
+      detail: `This member uses @${execution.agent} on ${execution.server}, including that profile's runtime, connectors and security policy. Its credentials stay on that node. Tasks and approval content are returned to this team.${delegation ? `\n\n${delegation}` : ''}`,
       button: 'Use execution node',
     };
   }
@@ -507,7 +502,7 @@ export async function guardedCall(
     if (
       !(await confirm({
         message: `Delete @${p.agentId}?`,
-        detail: `Permanently delete its agent file, ${preview.tasks} tasks and ${preview.delegated} delegated tasks with their transcripts, ${preview.triggers} triggers, and its VM home, sessions, skills and policy rules.\n\n${preview.running} running or queued tasks will be cancelled.${references.length ? `\nRemove its delegation grants from: ${references.map(sanitizeLine).join(', ')}.` : ''}\n\nWorkspaces and audit logs are kept. This cannot be undone.`,
+        detail: `Permanently delete its agent file, ${preview.tasks} tasks and ${preview.delegated} delegated tasks with their transcripts, ${preview.triggers} triggers, and its home, sessions, skills and policy rules in the guest.\n\n${preview.running} running or queued tasks will be cancelled.${references.length ? `\nRemove its delegation grants from: ${references.map(sanitizeLine).join(', ')}.` : ''}\n\nAudit logs are kept. This cannot be undone.`,
         button: 'Delete agent',
       }))
     )

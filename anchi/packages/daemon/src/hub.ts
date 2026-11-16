@@ -1,6 +1,5 @@
 import type { PeerTasks } from './peer-tasks.ts';
 import { EventEmitter } from 'node:events';
-import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   agentFile,
@@ -15,12 +14,10 @@ import {
   type Runtime,
   runtimeSchema,
   SOCIAL_CONNECTORS,
-  workspaceName,
 } from '@anchi/core';
 import type { AgentStatus, AgentSummary, RuntimeEvent, TaskRow } from '@anchi/protocol';
 import { CellSession } from './cell.ts';
 import type { SkillStore } from './skills.ts';
-import { audit, snapshot, type Snapshot } from './workspace-audit.ts';
 import { ToolDispatcher } from './tools.ts';
 import type { Guest } from './guest.ts';
 import { instructions, WORKDIR } from './prompt.ts';
@@ -90,8 +87,6 @@ export interface HubOptions {
   scanOnClose?: boolean;
   /** Skills copied into an agent's cells. */
   skills?: SkillStore;
-  /** ~/AnchiWorkspaces on the Mac, where writable workspaces are audited after each turn. */
-  workspaceRoot?: string;
   /** A connector service holds a cell's write for approval (see ApprovalWatcher.addPolicy). */
   onPolicyApproval?(task: TaskRow, connector: string, id: string): Promise<void>;
   /** Longest a single turn may run before it is cancelled and the task fails. */
@@ -126,7 +121,6 @@ function cellKey(agent: ResolvedAgent, imageHash: string): string {
     imageHash,
     agent.connectors,
     agent.sandbox,
-    agent.workspaces,
     agent.egress ?? null,
   ]);
 }
@@ -249,7 +243,6 @@ export class Hub extends EventEmitter<HubEvents> {
           queued: s.queue.length,
           maxTasks: this.maxTasks(s),
           triggers: s.agent?.triggers.length ?? 0,
-          workspaces: s.agent?.workspaces.map((w) => `${workspaceName(w)} (${w.mode})`) ?? [],
           delegates: s.agent?.delegates ?? [],
           skills: s.agent?.skills ?? [],
           error: s.error,
@@ -738,7 +731,6 @@ export class Hub extends EventEmitter<HubEvents> {
     let reply = '';
     let failure: string | undefined;
     let timedOut = false;
-    let before = new Map<string, Snapshot>();
     // In line for a cell from now, before the image checks: a cell that frees up meanwhile goes
     // to whoever is first in line, not to a task that happens to check sooner.
     const queued = !this.cells.has(task.id);
@@ -748,7 +740,6 @@ export class Hub extends EventEmitter<HubEvents> {
       try {
         const hash = await this.ensureImage(agent, task);
         await this.syncSkills(agent);
-        before = this.snapshotWorkspaces(agent);
         if (signal.aborted) throw new Error('cancelled');
         cell = await this.cellFor(task, agent, hash, signal);
       } finally {
@@ -800,7 +791,6 @@ export class Hub extends EventEmitter<HubEvents> {
         }
       } finally {
         clearTimeout(timer);
-        this.auditWorkspaces(agent, task, before);
         signal.removeEventListener('abort', onAbort);
         cell.lastUsed = Date.now();
         this.armIdle(task.id);
@@ -826,29 +816,6 @@ export class Hub extends EventEmitter<HubEvents> {
   // ── images and cells ─────────────────────────────────────
 
   private skillDigests = new Map<string, string>();
-
-  private workspaceDirs(agent: ResolvedAgent): [string, string][] {
-    const root = this.opts.workspaceRoot;
-    if (!root) return [];
-    return agent.workspaces
-      .filter((w) => w.mode === 'rw')
-      .map((w) => [workspaceName(w), join(root, ...w.path.split('/'))]);
-  }
-
-  private snapshotWorkspaces(agent: ResolvedAgent): Map<string, Snapshot> {
-    return new Map(this.workspaceDirs(agent).map(([name, dir]) => [name, snapshot(dir)]));
-  }
-
-  /** Reports code-running paths a turn added to writable workspaces (see workspace-audit). */
-  private auditWorkspaces(agent: ResolvedAgent, task: TaskRow, before: Map<string, Snapshot>) {
-    for (const [name, dir] of this.workspaceDirs(agent)) {
-      const was = before.get(name);
-      if (!was) continue;
-      for (const finding of audit(dir, was, snapshot(dir)).slice(0, 20)) {
-        this.record(task, { type: 'notice', text: `⚠ workspace ${name}: ${finding}` });
-      }
-    }
-  }
 
   /** Sends the agent's skills to the guest when they changed since the last cell. */
   private async syncSkills(agent: ResolvedAgent): Promise<void> {
@@ -977,11 +944,6 @@ export class Hub extends EventEmitter<HubEvents> {
         .filter(([, mode]) => mode === 'ask')
         .map(([connector]) => connector),
       auto: SOCIAL_CONNECTORS.filter((c) => agent.approvals[c] === 'auto'),
-      workspaces: agent.workspaces.map((w) => ({
-        name: workspaceName(w),
-        path: w.path,
-        mode: w.mode,
-      })),
       egress: agent.egress,
       highRiskDisabled: agent.highRisk.disable,
       accounts: agent.accounts,

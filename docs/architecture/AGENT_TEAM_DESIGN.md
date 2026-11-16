@@ -1,8 +1,8 @@
 # Agent team design (version 2)
 
-**Status: phases 1 and 2 and most of phase 3 are implemented**; Linux workspaces and part of the live acceptance remain. See the [phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status) and [phase 3](AGENT_TEAM_PHASE3_PLAN.md#status) plans for what differs from this design, and the [backlog](BACKLOG.md) for what is recorded but not planned. Hermes Agent became a third runtime after this design (0.3.0): where it says Codex and Claude Code, read all three. The [agent team guide](../AGENT_TEAM.md), the [contracts](AGENT_TEAM_CONTRACTS.md) and the [security model](../../SECURITY.md) describe the implementation.
+**Status: phases 1 and 2 and most of phase 3 are implemented**; part of the live acceptance remains, and the workspaces (directories of the user's computer in cells) this design described were removed on 2026-11-16 with the Lima VM placement. See the [phase 1](AGENT_TEAM_PHASE1_PLAN.md#status), [phase 2](AGENT_TEAM_PHASE2_PLAN.md#status) and [phase 3](AGENT_TEAM_PHASE3_PLAN.md#status) plans for what differs from this design, and the [backlog](BACKLOG.md) for what is recorded but not planned. Hermes Agent became a third runtime after this design (0.3.0): where it says Codex and Claude Code, read all three. The [agent team guide](../AGENT_TEAM.md), the [contracts](AGENT_TEAM_CONTRACTS.md) and the [security model](../../SECURITY.md) describe the implementation.
 
-Positioning: **a secured agent team.** Anchi runs a team of Codex and Claude Code agents on the user's machine. Each task runs in a disposable cell, upstream credentials stay outside the cell, each agent gets only the connectors, hosts, directories, skills and delegates it is configured with, and writes that matter wait for the user.
+Positioning: **a secured agent team.** Anchi runs a team of Codex and Claude Code agents on the user's machine. Each task runs in a disposable cell, upstream credentials stay outside the cell, each agent gets only the connectors, hosts, skills and delegates it is configured with, and writes that matter wait for the user.
 
 ## Goals
 
@@ -115,9 +115,7 @@ The cell holds a placeholder access key pair, and the AWS CLI signs requests wit
 ## Work directories
 
 - **Default:** a persistent home inside the guest, one per agent (`/var/lib/anchi/agents/<id>/home`, mounted at `/home/agent`). Repositories are cloned there and pushed through the proxy. Dependency caches (npm, pip, Go modules) also live there, isolated per agent and never shared with the host or other agents.
-- **Directories of the host (workspaces):** one host root, `~/AnchiWorkspaces`, is mounted into the guest at `/mnt/anchi-host`; each cell bind-mounts only the subdirectories its agent lists, read-only unless `rw`. See [Host directories](HOST_DIRECTORIES_PLAN.md).
-- **Host-mount risk:** a writable directory lets the agent leave code that later runs on the host as the user. Cells mount git hooks, config and info, `.gitattributes`, `.envrc`, `.vscode/` and `.idea/` read-only, and the daemon audits each turn for new hooks, command-running git configuration, outside symlinks, new executables and editor configuration. Files run by design (`package.json` scripts, `Makefile`) remain the user's to review.
-- Deleting an agent removes its guest home but never workspace files: the binds exist only in a cell's own mount namespace.
+- **No directories of the user's computer:** a cell sees nothing of the user's files. What an agent works on it clones or fetches through the proxy, and results leave the same way (a push, a pull request, a reply). Deleting an agent removes its guest home; the cell manager refuses while anything below the home is a mount point.
 
 ## Orchestration
 
@@ -138,7 +136,7 @@ The builder is itself an agent that runs in a cell. It produces a candidate conf
 
 Images are built in a separate build cell with proxy egress and no injection rules. A generated configuration grants capabilities, so **nothing takes effect until the user confirms it**. Any change to the image requires confirmation again. The builder cannot change its own configuration or the configuration of other agents.
 
-Each builder turn starts with an inventory of what exists (installed skills, connectors and whether they are connected, directories under the workspace root, agents, images); proposals are checked against it, and missing references block them. The user can adjust a proposal's skills, connectors and workspaces in the same settings panel used for existing agents, which changes only those fields of an agent file, after showing the diff. Deleting an agent removes its file, its tasks (with what they delegated), its place in other agents' `delegates`, and its home, skills and policy rules in the guest.
+Each builder turn starts with an inventory of what exists (installed skills, connectors and whether they are connected, agents, images); proposals are checked against it, and missing references block them. The user can adjust a proposal's skills and connectors in the same settings panel used for existing agents, which changes only those fields of an agent file, after showing the diff. Deleting an agent removes its file, its tasks (with what they delegated), its place in other agents' `delegates`, and its home, skills and policy rules in the guest.
 
 ## Tasks
 
@@ -198,9 +196,9 @@ The phase 0 spikes are complete; see the [PoC summary](../../poc/README.md). Pha
 - high-risk operations always held, with the task's origin chain;
 - per-agent egress allowlists and per-agent policy for connector services (the bridge);
 - Codex login re-import; `aws-chunked` uploads; CLI parity and isolation checks in CI;
-- Linux workspaces and live acceptance with real accounts (open).
+- live acceptance with real accounts (open).
 
-**After phase 3:** directories of the host, Linux hosts, key bindings, the agent settings panel and builder inventory, deleting agents, retrying failed tasks. Open requests are in the [backlog](BACKLOG.md).
+**After phase 3:** Linux hosts, key bindings, the agent settings panel and builder inventory, deleting agents, retrying failed tasks. Open requests are in the [backlog](BACKLOG.md).
 
 **Multiple execution nodes:** a coordinator owns the logical team and complete task tree. Members may bind to an existing agent on a saved server with `execution: {server, agent}`. The coordinator dispatches idempotent turns and polls events, team calls and approvals through SSH. Execution nodes retain their profiles, cells, credentials and policy. Both sides check delegation grants; the coordinator checks child ownership, cycles and global tree limits. See [Remote server](../REMOTE_SERVER.md#one-team-multiple-execution-nodes) and the `team.*` contracts. Automatic node placement, failover to another node and filesystem synchronization are not implemented.
 

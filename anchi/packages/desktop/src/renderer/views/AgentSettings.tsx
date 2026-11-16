@@ -7,7 +7,6 @@ import type {
   Effort,
   RuntimeId,
   TriggerSetting,
-  WorkspaceSetting,
 } from '@anchi/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../App.tsx';
@@ -158,14 +157,6 @@ export function AgentSettingsView({
                       </label>
                     ))}
                   </section>
-
-                  <Workspaces
-                    value={draft.workspaces}
-                    dirs={inventory.workspaces.dirs}
-                    shared={inventory.workspaces.shared}
-                    label={from('workspaces')}
-                    onChange={(workspaces) => edit({ workspaces })}
-                  />
                 </>
               )}
 
@@ -856,73 +847,5 @@ export function DelegationChoices({
         );
       })}
     </>
-  );
-}
-
-function Workspaces({
-  value,
-  dirs,
-  shared,
-  label,
-  onChange,
-}: {
-  value: WorkspaceSetting[];
-  dirs: string[];
-  shared: boolean | null;
-  label: React.ReactNode;
-  onChange: (next: WorkspaceSetting[]) => void;
-}) {
-  const unused = dirs.filter((d) => !value.some((w) => w.path === d));
-  return (
-    <section className="card">
-      <h2>Folders on this machine{label}</h2>
-      <p className="small muted">
-        The agent sees only the folders under ~/AnchiWorkspaces that you share here. Everything else
-        stays invisible to it.
-        {shared === false ? ' The secure room does not share them yet.' : ''}
-      </p>
-      {value.map((w, i) => (
-        <div key={w.path} className="check-row">
-          <span className="mono grow ellipsis">{sanitizeLine(w.path)}</span>
-          <div className="segmented" role="group" aria-label={`${w.path} access`}>
-            {(['ro', 'rw'] as const).map((mode) => (
-              <button
-                type="button"
-                key={mode}
-                aria-pressed={w.mode === mode}
-                onClick={() => onChange(value.map((x, j) => (j === i ? { ...x, mode } : x)))}
-              >
-                {mode === 'ro' ? 'Read only' : 'Read and change'}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="btn btn-small"
-            onClick={() => onChange(value.filter((_, j) => j !== i))}
-          >
-            Remove
-          </button>
-        </div>
-      ))}
-      {unused.length > 0 && (
-        <label className="field">
-          <span className="sr-only">Share a folder</span>
-          <select
-            value=""
-            onChange={(e) =>
-              e.target.value && onChange([...value, { path: e.target.value, mode: 'ro' }])
-            }
-          >
-            <option value="">Share a folder…</option>
-            {unused.map((d) => (
-              <option key={d} value={d}>
-                {sanitizeLine(d)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-    </section>
   );
 }

@@ -353,7 +353,7 @@ Commands:
   create [options] <id>     Review and create a starter agent without a model
                             call
   rm [options] <id>         Delete an agent with its tasks and its files in the
-                            guest (workspaces are kept)
+                            guest
   allow-host <id> <host>    Add one host to an agent's egress list (a host its
                             cells were refused)
 ```
@@ -391,7 +391,7 @@ Options:
 ```text
 Usage: anchi agents rm [options] <id>
 
-Delete an agent with its tasks and its files in the guest (workspaces are kept)
+Delete an agent with its tasks and its files in the guest
 
 Options:
   -y, --yes   delete without typing the id

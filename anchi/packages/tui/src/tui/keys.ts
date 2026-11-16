@@ -94,7 +94,7 @@ export const ACTIONS = {
   },
   'sidebar:delete': { title: 'Delete the selected agent or task', contexts: ['sidebar'] },
   'agent:settings': {
-    title: 'Agent settings: skills, connectors, workspaces',
+    title: 'Agent settings: skills, connectors, delegation',
     contexts: ['global'],
   },
   'builder:proposal': { title: 'Reopen the pending builder proposal', contexts: ['global'] },

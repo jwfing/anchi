@@ -14,7 +14,7 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | [CLI reference](../skills/anchi/references/cli.md) | Every command and flag, generated from the implementation |
 | [Troubleshooting](../skills/anchi/references/troubleshooting.md) | Setup and runtime errors, recovery and limitations |
 | [Roadmap](ROADMAP.md) | Current priorities, preview status and contribution routes |
-| [Agent team](AGENT_TEAM.md) | Connect accounts; create, configure and delete agents; delegation, approvals, egress, triggers, skills, workspaces and tasks |
+| [Agent team](AGENT_TEAM.md) | Connect accounts; create, configure and delete agents; delegation, approvals, egress, triggers, skills and tasks |
 | [Key bindings](KEYBINDINGS.md) | TUI keys: the leader key, the command palette and `~/.anchi/keybindings.json` |
 | [Connectors](CONNECTORS.md) | Gmail, Drive, Notion, Slack, X and Reddit operations, scopes, and authorization |
 | [Reddit setup](REDDIT_SETUP.md) | Approved Data API client, browser OAuth, posts and comment tools |
@@ -33,7 +33,6 @@ Anchi is a secured agent team: Codex, Claude Code and Hermes agents in disposabl
 | [Agent team phase 1 plan](architecture/AGENT_TEAM_PHASE1_PLAN.md) | Phase 1 (done): daemon, cells, proxy, Codex, GitHub/AWS/Linear, builder; decisions and status |
 | [Agent team phase 2 plan](architecture/AGENT_TEAM_PHASE2_PLAN.md) | Phase 2 (done): Claude Code, delegation, triggers, approvals, connector services; decisions and status |
 | [Agent team phase 3 plan](architecture/AGENT_TEAM_PHASE3_PLAN.md) | Phase 3 (mostly done): containment, automatic checks, remaining acceptance; status |
-| [Host directories](architecture/HOST_DIRECTORIES_PLAN.md) | Workspaces of the Mac in agent cells |
 | [Host placement](architecture/HOST_PLACEMENT_PLAN.md) | Anchi's proxy, vault and approvals without a VM, with the user's own `claude` and `codex` under their sandboxes; spike results, design, status |
 | [Host services in TypeScript](architecture/HOST_SERVICES_TS_PLAN.md) | How the host placement's proxy and vault became a TypeScript process (`anchi/packages/host-services`), so no Python is needed: the steps, the parity fixtures and what deviated from the plan |
 | [Backlog](architecture/BACKLOG.md) | Open requests and known gaps (file preview plugins, audit log view, token usage and quota, large git pushes), and what was delivered from it |

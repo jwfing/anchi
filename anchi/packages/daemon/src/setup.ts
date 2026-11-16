@@ -117,7 +117,6 @@ export async function setupStatus(
     xClient: false,
     redditClient: false,
     googleClientSource: null,
-    workspaces: false,
     connectors: CONNECTOR_IDS.map((id) => ({ id, connected: false, account: null })),
     appVersion: APP_VERSION,
     guestVersion: null,
@@ -136,18 +135,16 @@ export async function setupStatus(
         failures.push(err);
         return undefined;
       });
-    const [vault, codex, claude, hermes, connectors, base, workspaces, guestVersion] =
-      await Promise.all([
-        guest.vaultStatus(),
-        credentials(codexStatus(guest)),
-        credentials(claudeStatus(guest)),
-        // A guest installed before Hermes support has no hermes_admin.py.
-        hermesStatus(guest).catch(() => empty.hermes!),
-        credentials(connectorStatuses(guest)),
-        guest.imageStatus('codex', 'base').catch(() => false),
-        guest.workspacesMounted().catch(() => false),
-        guest.version().catch(() => null),
-      ]);
+    const [vault, codex, claude, hermes, connectors, base, guestVersion] = await Promise.all([
+      guest.vaultStatus(),
+      credentials(codexStatus(guest)),
+      credentials(claudeStatus(guest)),
+      // A guest installed before Hermes support has no hermes_admin.py.
+      hermesStatus(guest).catch(() => empty.hermes!),
+      credentials(connectorStatuses(guest)),
+      guest.imageStatus('codex', 'base').catch(() => false),
+      guest.version().catch(() => null),
+    ]);
     const runtimes: RuntimeId[] = ['codex', 'claude-code', 'hermes'];
     const prepared = base
       ? await Promise.all(
@@ -162,7 +159,6 @@ export async function setupStatus(
       preparedRuntimes: prepared.filter((runtime): runtime is RuntimeId => runtime !== null),
       vm,
       installed: base,
-      workspaces,
       guestVersion,
       // Until the base image is built, installing is the next step anyway. A guest too old to
       // say its version is older than this Anchi.

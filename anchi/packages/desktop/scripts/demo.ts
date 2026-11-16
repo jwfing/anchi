@@ -200,7 +200,6 @@ const status: SetupStatus = {
   googleClient: true,
   xClient: false,
   redditClient: false,
-  workspaces: false,
 };
 const skills: SkillInfo[] = [];
 
@@ -346,7 +345,6 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
       skills: ['code-review'],
       connectors: ['github'],
       delegates: ['reviewer'],
-      workspaces: [{ path: 'shop', mode: 'ro' }],
       highRisk: { disable: [] },
       approvals: { github: 'ask' as const },
       triggers: [],
@@ -381,7 +379,6 @@ const answers: { [M in MethodName]?: (params: never) => Result<M> } = {
         { id: 'claude-code', connected: true },
         { id: 'hermes', connected: true },
       ],
-      workspaces: { dirs: ['shop', 'notes'], shared: true },
       agents: ['developer', 'reviewer', 'ops'],
       images: [],
       highRisk: ['github.merge', 'github.push-default-branch'],

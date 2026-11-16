@@ -97,8 +97,6 @@ export interface AgentSummary {
   queued: number;
   /** How many of the agent's tasks run at the same time. */
   maxTasks: number;
-  /** Directories of the Mac bound into the agent's cells, as `name (ro|rw)`. */
-  workspaces?: string[];
   /** Number of schedule and polling triggers. */
   triggers?: number;
   delegates?: string[];
@@ -261,8 +259,6 @@ export interface SetupStatus {
   redditClient?: boolean;
   /** Where that client comes from; optional for clients connected to an older daemon. */
   googleClientSource?: GoogleClientSource;
-  /** Whether ~/AnchiWorkspaces is mounted in the VM (agent `workspaces`). */
-  workspaces: boolean;
   /**
    * The guest runs but could not be asked (the message of the first guest command that failed);
    * the fields that come from the guest are then unknown, not false.
@@ -398,13 +394,6 @@ export interface BuilderProposal {
   base?: string;
 }
 
-/** A directory of ~/AnchiWorkspaces bound into an agent's cells. */
-export interface WorkspaceSetting {
-  path: string;
-  mode: 'ro' | 'rw';
-  name?: string;
-}
-
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
 
 /**
@@ -422,7 +411,6 @@ export interface AgentPatch {
   connectors?: string[];
   /** Replaces this agent's delegation allowlist; [] revokes all delegation. */
   delegates?: string[];
-  workspaces?: WorkspaceSetting[];
   /**
    * High-risk operations this agent does without approval, by id (`github-merge`), as in its
    * file. The list replaces the file's; `[]` removes it. Unknown ids are refused.
@@ -460,7 +448,6 @@ export interface AgentSettingValues {
   connectors: string[];
   /** Delegation allowlist; absent on daemons that cannot edit it through settings. */
   delegates?: string[];
-  workspaces: WorkspaceSetting[];
   /** High-risk operations this agent does without approval (`highRisk.disable`), by id. */
   highRisk: { disable: string[] };
   /** Per-connector approval modes and triggers; absent on daemons that cannot edit them. */
@@ -509,8 +496,6 @@ export interface Inventory {
   }[];
   /** Runtimes an agent can run on; `connected` is null when the VM could not be asked. */
   runtimes: { id: RuntimeId; connected: boolean | null }[];
-  /** Directories under ~/AnchiWorkspaces (two levels); `shared` once the VM mounts it. */
-  workspaces: { shared: boolean | null; dirs: string[] };
   agents: string[];
   peerAgents?: { id: string; name: string; machine: string; online: boolean }[];
   images: string[];
@@ -689,8 +674,6 @@ export interface AgentDeletionPreview {
   /** Templates in ~/.anchi/templates whose `delegates` list it; it is removed from them too. */
   delegatedByTemplates: string[];
   triggers: number;
-  /** Its workspaces: directories of the Mac, left as they are. */
-  workspaces: string[];
 }
 
 export interface AgentDeletion {
@@ -751,7 +734,7 @@ export interface Methods {
   'daemon.status': [Record<string, never>, DaemonStatus];
   'daemon.shutdown': [Record<string, never>, null];
   'agents.list': [Record<string, never>, AgentSummary[]];
-  /** Local starter with no connector or workspace; egress and maxTasks at their defaults (any public host, 3). Confirm via builder.apply. */
+  /** Local starter with no connector; egress and maxTasks at their defaults (any public host, 3). Confirm via builder.apply. */
   'agents.createPreview': [{ agentId: string; runtime: RuntimeId }, BuilderProposal];
   'agents.reload': [Record<string, never>, AgentSummary[]];
   /** Current settings and what is available, for an agent or a pending builder proposal. */
@@ -858,7 +841,7 @@ export interface Methods {
   /**
    * Deletes the agent: its file, its tasks (cancelled first) with what they delegated, its
    * trigger state, its entry in other agents' delegates, and its home, skills and policy rules
-   * in the VM. Workspaces on the Mac are not touched. `confirm` is the id the user typed.
+   * in the guest. `confirm` is the id the user typed.
    */
   'agents.delete': [{ agentId: string; confirm: string }, AgentDeletion];
   /** The proposal with a settings patch applied (checked again); replaces the old one. */

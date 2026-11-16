@@ -290,7 +290,7 @@ picks one). Teams with setup and a first task complete open on **Team overview**
    anchi tasks --agent dev
    ```
 
-   The starter has no connectors, shared folders or extra network destinations. Creation
+   The starter has no connectors or extra network destinations. Creation
    calls no model; the task does. Expect a response and a `done` status. See [First task](FIRST_TASK.md)
    for recovery and next steps. Use **Agent builder** for a custom role with any connected runtime.
 5. **Optionally start the daemon at login:** `anchi daemon install`. On macOS this is a launch
@@ -352,7 +352,7 @@ next login. A remote server is reset by deleting or recreating the machine.
 
 ## Recovery
 
-- **Installation failed (remote server):** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; workspaces and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
+- **Installation failed (remote server):** check networking and disk space, then run `anchi setup install` again. Completed steps are reused; agents and credentials are kept. A step that runs longer than 45 minutes is stopped and named in the error.
 - **Prebuilt layer download or verification failed:** retry preparation after checking the network and disk space. A checksum or compatibility failure never extracts the archive. Reinstall the matching app release if it persists; source installations use local builds.
 - **"The guest runs but could not be asked":** a guest command failed (shown with the message in Getting started, Runtimes and `anchi setup status`); the rest of the status is unknown, not reset. Press **r** to try again; if it keeps failing, `anchi setup install` reinstalls the guest components, keeping agents and credentials.
 - **Missing `openssl`:** Getting started and `anchi setup status` list it under what is missing on this computer; install it, then prepare again.

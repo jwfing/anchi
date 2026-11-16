@@ -1,6 +1,6 @@
 ---
 name: anchi
-description: Operate Anchi, a secured agent team on a remote server and a credential proxy for your own sessions on your computer — set up its guest and vault, connect runtimes (Codex, Claude Code, Hermes) and accounts, define agents in YAML, run tasks, delegation, triggers, skills, workspaces, egress limits, approvals, audit and usage, from the `anchi` CLI or TUI. Use when the user mentions Anchi or 安栖, wants to create or change an Anchi agent, give one a task, see what an agent accessed, handle a held write, or fix an Anchi setup.
+description: Operate Anchi, a secured agent team on a remote server and a credential proxy for your own sessions on your computer — set up its guest and vault, connect runtimes (Codex, Claude Code, Hermes) and accounts, define agents in YAML, run tasks, delegation, triggers, skills, egress limits, approvals, audit and usage, from the `anchi` CLI or TUI. Use when the user mentions Anchi or 安栖, wants to create or change an Anchi agent, give one a task, see what an agent accessed, handle a held write, or fix an Anchi setup.
 ---
 
 # Using Anchi
@@ -13,7 +13,7 @@ Two front ends talk to one background daemon: the full-screen TUI (`anchi`) for 
 
 1. **Never handle the user's secrets.** Tokens, API keys and Google sign-in are entered by the user: `anchi setup …` reads them without echo in a terminal, the TUI uses masked dialogs. Do not ask the user to paste a secret into the chat, and never pass one on a command line, in a file or **through a pipe**: every `anchi setup` command that takes a secret reads stdin when it is not a terminal, so `echo $KEY | anchi setup claude` or `gh auth token | anchi setup connector github` would work, and must not be done. Never `cat` anything under `~/.config/anchi/`. `anchi setup codex` and `anchi setup connector github --from-gh` copy a login from this computer into the vault (the gh token keeps all its scopes): run them only after the user agreed, and without `-y`.
 2. **Never approve or deny a held write for the user.** `anchi approve <id>` exists for the user. Show them `anchi approvals` and let them decide, unless they explicitly told you to approve that specific write.
-3. **Never loosen an agent's boundaries on your own.** Agent files, templates and `~/.anchi/settings.yaml` take effect as soon as they are saved, without a dialog. Change these only when the user asked for that change, and show them the diff before you save it: `approvals`, `highRisk` (in `settings.yaml` it exempts **every** agent), `egress`, `connectors`, `delegates`, `accounts`, `workspaces` and `sandbox`. The same goes for `anchi setup service-mode <service> auto` and `anchi agents allow-host`. Removing `approvals: ask`, setting `approvals: {x: auto}` or `{reddit: auto}`, or adding a `highRisk` exemption is approving future writes for the user; making a task work is not a reason to do it.
+3. **Never loosen an agent's boundaries on your own.** Agent files, templates and `~/.anchi/settings.yaml` take effect as soon as they are saved, without a dialog. Change these only when the user asked for that change, and show them the diff before you save it: `approvals`, `highRisk` (in `settings.yaml` it exempts **every** agent), `egress`, `connectors`, `delegates`, `accounts` and `sandbox`. The same goes for `anchi setup service-mode <service> auto` and `anchi agents allow-host`. Removing `approvals: ask`, setting `approvals: {x: auto}` or `{reddit: auto}`, or adding a `highRisk` exemption is approving future writes for the user; making a task work is not a reason to do it.
 4. **Commands that take effect at once need the user's go-ahead in the conversation**; most do not ask for confirmation, so the CLI is no safety net:
    - `anchi rm <task>`, `anchi cancel <task>`, `anchi skills rm <id>` and `anchi setup disconnect <id>` act immediately.
    - `anchi agents rm` and `anchi host enable` ask in a terminal; do not add `-y` unless the user asked for it.
@@ -79,17 +79,17 @@ prompt:
   text: Fix the GitHub issue you are given, push a branch and open a pull request.
 ```
 
-Every field, with examples, is in [references/agent-config.md](references/agent-config.md). The ones that bound what an agent can do: `connectors`, `egress`, `workspaces`, `approvals`, `delegates`, `accounts`, `highRisk`. Unknown fields are errors, which `anchi agents` shows for each file. Skills and delegates an agent names must exist: the builder and the settings panel refuse ones that do not, but an edited file only fails when a task starts (`skill "<id>" is not installed`), so check `anchi skills` and `anchi agents` first.
+Every field, with examples, is in [references/agent-config.md](references/agent-config.md). The ones that bound what an agent can do: `connectors`, `egress`, `approvals`, `delegates`, `accounts`, `highRisk`. Unknown fields are errors, which `anchi agents` shows for each file. Skills and delegates an agent names must exist: the builder and the settings panel refuse ones that do not, but an edited file only fails when a task starts (`skill "<id>" is not installed`), so check `anchi skills` and `anchi agents` first.
 
 For a minimal starter, use `anchi agents create dev --runtime claude-code --preview`
 (or `codex` / `hermes`). Review the YAML, then run without `--preview` to confirm in a terminal;
 use `--yes` non-interactively only when the user authorized creating that reviewed starter.
-No model is called and no connector or workspace is granted; egress stays open (no list). Existing ids
+No model is called and no connector is granted; egress stays open (no list). Existing ids
 are refused. **Ctrl+X, N** opens this workflow in the TUI. On an older binary, use a manual file
-with `connectors: []` and `workspaces: []`, and no `egress` line: an empty list would cut the
+with `connectors: []` and no `egress` line: an empty list would cut the
 agent off from every host but its runtime's and connectors'.
 
-People can also create agents with the **Agent builder** in the TUI (**^X b**): using a connected runtime, they describe the agent, the builder proposes a file, and a full-screen dialog shows it before anything is written. **^X s** opens an agent's settings panel (runtime, model, prompt, skills, connectors, workspaces), which also shows a diff before saving.
+People can also create agents with the **Agent builder** in the TUI (**^X b**): using a connected runtime, they describe the agent, the builder proposes a file, and a full-screen dialog shows it before anything is written. **^X s** opens an agent's settings panel (runtime, model, prompt, skills, connectors, delegation), which also shows a diff before saving.
 
 ## Tasks
 
@@ -131,12 +131,11 @@ anchi deny <id>
 
 In the TUI, a held write is announced without stealing focus. **^X a** opens review; choose **y** or **n**, then press **Enter** to confirm. An explicit connector `ask` still holds writes even when `highRisk.disable` exempts their pattern. Unanswered writes are refused after five minutes, or `approvalTimeoutMinutes` from `~/.anchi/settings.yaml` (connector services: always ten). Raising it is the user's call, like the other settings (rule 3).
 
-## Teams, triggers, skills, workspaces
+## Teams, triggers, skills, images
 
 - **Delegation:** `delegates: [reviewer]` lets an agent hand subtasks to `reviewer` through its Anchi tools (`anchi_delegate_task`, `anchi_task_status`, `anchi_send_to_task`, `anchi_list_tasks`, `anchi_list_agents`, `anchi_whoami`). The TUI's Team overview (**^X 4**) shows the tree.
 - **Triggers:** `triggers: [{schedule: '0 9 * * 1-5', text: …}]` or a poll of Linear issues / a GitHub issue search that starts one task per new item. `anchi triggers` lists them with their next run.
 - **Skills:** `anchi skills add <dir | GitHub URL>` (a repository of skills adds each one, pinned to its commit), then `skills: [id]` in the agent file. `anchi skills update` shows what changed upstream before installing it.
-- **Workspaces:** directories under `~/AnchiWorkspaces`, given to an agent with `workspaces: [{path: projects/api, mode: rw}]`; they appear at `/home/agent/workspaces/<name>` in its cells.
 - **Images:** the base image has git, gh, build tools, Python, Node/pnpm, Go and Rust. Anything else goes in a recipe, `~/.anchi/images/<id>.yaml` with `packages:` and `run:`, used with `image: <id>`.
 
 ## What happened, and what it cost

@@ -126,7 +126,6 @@ describe('desktop machine routing', () => {
       delegatedBy: [],
       delegatedByTemplates: [],
       triggers: 0,
-      workspaces: [],
     }));
     cloud.connection.read = read;
     await Promise.all([pool.connect('local'), pool.connect('instabox:newuser')]);

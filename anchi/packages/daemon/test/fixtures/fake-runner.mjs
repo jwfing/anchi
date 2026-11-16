@@ -33,7 +33,7 @@ rl.on('line', (line) => {
     return;
   }
   turns++;
-  // "write <path>": the agent changes a file (workspace audit tests).
+  // "write <path>": the agent changes a file.
   const written = /^write (\S+)$/.exec(cmd.input ?? '');
   if (written) writeFileSync(written[1], '#!/bin/sh\necho planted\n');
   const tool = /^call (\S+)(?: (.*))?$/.exec(cmd.input ?? '');

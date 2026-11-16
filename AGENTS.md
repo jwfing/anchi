@@ -36,7 +36,7 @@ pnpm --dir anchi exec vitest run packages/daemon/test/skills.test.ts   # one TS 
 ## Rules
 
 1. **Run `make check` before you say a change is done**, and report failures as they are. Do not weaken or delete a test to make it pass.
-2. **Boundary changes need a test that fails if the boundary breaks.** That covers credentials, cells, egress, approvals, policy and workspaces. Test the refusal path, not only the happy path. See the `anchi-security-boundary` skill.
+2. **Boundary changes need a test that fails if the boundary breaks.** That covers credentials, cells, egress, approvals and policy. Test the refusal path, not only the happy path. See the `anchi-security-boundary` skill.
 3. **Everything from a cell is untrusted**: runner frames, tool calls, agent text, skills, session files. Validate with a schema, bound sizes and counts, and strip control characters before display.
 4. **Secrets go to the guest on stdin only.** Never put them in arguments, environment variables of host processes, logs, test fixtures or error messages.
 5. **Pins live in `guest/cell.env`** (cell UIDs, Node, Codex, Claude Code, base-image toolchains), each with its SHA-256. Do not repeat these literals elsewhere. Dependency updates change both `package.json` and `anchi/pnpm-lock.yaml` and respect pnpm's minimum release age: pin an older version instead of adding a `minimumReleaseAgeExclude`.
