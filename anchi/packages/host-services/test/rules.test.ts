@@ -1030,6 +1030,9 @@ describe('header parsing in linear time', () => {
     expect(deny.test('POST /dashboard')).toBe(true);
     expect(deny.test('GET /v1/chat/completions')).toBe(false);
     expect(deny.test(`GET ${'/'.repeat(100_000)}x`)).toBe(false);
+    expect(hermesRule('llm.example.com', `/v1${'/'.repeat(100_000)}`).path!.test('/v1/chat')).toBe(
+      true,
+    );
     expect(Date.now() - started).toBeLessThan(500);
   });
 });

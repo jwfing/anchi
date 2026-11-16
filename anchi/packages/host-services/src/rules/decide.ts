@@ -26,15 +26,15 @@ const decision = (
   reason: string | null = null,
 ): Decision => ({ action, rule, op, reason });
 
-/** `host` without its trailing dots, by a loop: a regex here would backtrack on a long run of dots. */
-function trimDots(host: string): string {
-  let end = host.length;
-  while (end > 0 && host.charCodeAt(end - 1) === 46) end--;
-  return host.slice(0, end);
+/** `text` without trailing `char`s, by a loop: `/x+$/` backtracks on a long run of them. */
+function trimEnd(text: string, char: string): string {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === char) end--;
+  return text.slice(0, end);
 }
 
 export function hostMatches(pattern: string, host: string): boolean {
-  const h = trimDots(host.toLowerCase());
+  const h = trimEnd(host.toLowerCase(), '.');
   if (pattern.startsWith('*.')) return h.endsWith(pattern.slice(1));
   return h === pattern;
 }
@@ -54,7 +54,7 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
  * only; anything else on that host is left as the session sent it, placeholder and all.
  */
 export function hermesRule(host: string, basePath = ''): Rule {
-  const prefix = basePath.replace(/\/+$/, '');
+  const prefix = trimEnd(basePath, '/');
   return {
     name: 'hermes',
     hosts: [host],
